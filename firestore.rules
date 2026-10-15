@@ -405,6 +405,23 @@ service cloud.firestore {
         // The person who sent it can delete it (when they delete the message for everyone).
         allow delete: if canRead() && resource.data.senderId == me();
       }
+
+      // ----- "typing…" (see typing.ts) -----
+      // chats/<chatId>/typing/<uid>: only you can change yours, with the server's time,
+      // and its member list must be the chat's (it says who may see it, below).
+      match /typing/{uid} {
+        allow create, update: if signedIn() && uid == me()
+          && request.resource.data.keys().hasOnly(['members', 'at'])
+          && request.resource.data.at == request.time
+          && ((inId() && request.resource.data.members == ids())
+            || (!isDirectId() && memberBefore() && request.resource.data.members == get(chatPath()).data.members));
+      }
+    }
+
+    // Reading "typing…" in all your chats at once (a "collection group" query, Home.tsx).
+    // You see a typing document only if you're in its member list.
+    match /{path=**}/typing/{uid} {
+      allow read: if signedIn() && me() in resource.data.members;
     }
   }
 }

@@ -238,6 +238,17 @@ function RecordingBar({ recording, onDone }: { recording: Recording; onDone: (ke
     return () => clearTimeout(timer)
   }, [recording, onDone])
 
+  // Enter sends it, like pressing Send. (Not while a window like the photo viewer is on top.)
+  useEffect(() => {
+    function key(e: KeyboardEvent) {
+      if (e.key !== 'Enter' || e.repeat || document.querySelector('.modal, .viewer, .photo-sender')) return
+      e.preventDefault() // so Enter doesn't also press the bin button, if it's selected
+      onDone(true)
+    }
+    document.addEventListener('keydown', key)
+    return () => document.removeEventListener('keydown', key)
+  }, [onDone])
+
   return (
     <div className="composer recording">
       <div className="field">

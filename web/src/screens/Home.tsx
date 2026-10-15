@@ -11,7 +11,8 @@
 //   5. keeps your "online" heartbeat going (unless you hid your last seen)
 //   6. opens a group invite link, if the page was opened with one
 //   7. listens for calls to you, and shows the call screen (calls.ts, CallScreen.tsx)
-import { useCallback, useEffect, useRef, useState } from 'react'
+//   8. listens for "typing…" in all your chats (typing.ts)
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from 'firebase/auth'
 import { collection, getCountFromServer, onSnapshot, query, Timestamp, where } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -36,6 +37,7 @@ import { startHeartbeat } from '../presence'
 import type { Profile } from '../profiles'
 import { useBlocked } from '../safety'
 import { playPing } from '../sound'
+import { listenForTyping } from '../typing'
 import CallScreen from './CallScreen'
 import CallsList from './CallsList'
 import ChatList from './ChatList'
@@ -52,7 +54,8 @@ type View = 'chats' | 'archived' | 'newChat' | 'newGroup' | 'settings' | 'calls'
 
 export default function Home({ user, profile }: { user: User; profile: Profile }) {
   const { t } = useT()
-  const me: Person = { uid: user.uid, name: profile.name }
+  // (useMemo: the same object until your name changes, so screens can tell nothing changed.)
+  const me: Person = useMemo(() => ({ uid: user.uid, name: profile.name }), [user.uid, profile.name])
   const [open, setOpen] = useState<Open | null>(null)
   const [view, setView] = useState<View>('chats')
   const [chats, setChats] = useState<Chat[]>([])
@@ -79,9 +82,13 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   // 1 + 2. Listen LIVE to every chat I'm a member of, and alert on new messages.
   useEffect(() => {
     let first = true
+    let known = new Map<string, Chat>()
     const q = query(collection(db, 'chats'), where('members', 'array-contains', user.uid))
     return onSnapshot(q, (snap) => {
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }) as Chat)
+      const changed = new Set(snap.docChanges().map((c) => c.doc.id))
+      // A chat that didn't change keeps the very same object, so its row isn't drawn again (ChatList.tsx).
+      const list = snap.docs.map((d) => (!changed.has(d.id) && known.get(d.id)) || ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) } as Chat))
+      known = new Map(list.map((chat) => [chat.id, chat]))
       list.sort((a, b) => (b.updatedAt?.toMillis() ?? 0) - (a.updatedAt?.toMillis() ?? 0)) // newest first
       setChats(list)
 
@@ -106,11 +113,14 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   }, [user.uid])
 
   // 3. A new message from someone else arrived? Tell them it's delivered.
+  //    (Not for the chat on screen: ChatRoom marks that one read, which means delivered too.
+  //    One change to the chat instead of two, so the next message doesn't have to wait.)
   useEffect(() => {
     for (const chat of chats) {
       const last = chat.lastMessage
       const at = chat.updatedAt?.toMillis()
       if (!last || last.senderId === user.uid || !at) continue
+      if (chat.id === openRef.current && document.visibilityState === 'visible') continue
       const alreadyDelivered = (chat.deliveredAt?.[user.uid]?.toMillis() ?? 0) >= at
       if (alreadyDelivered || delivered.current.get(chat.id) === at) continue
       delivered.current.set(chat.id, at)
@@ -173,6 +183,9 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
       }),
     [user.uid],
   )
+
+  // 8. "typing…" in all your chats
+  useEffect(() => listenForTyping(user.uid), [user.uid])
 
   function openChat(next: Open) {
     setOpen(next)

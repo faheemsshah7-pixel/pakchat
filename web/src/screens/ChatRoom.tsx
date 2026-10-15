@@ -12,11 +12,10 @@ import {
   isGroup,
   lastRead,
   markRead,
-  markTyping,
   otherPerson,
   sendMessage,
   systemText,
-  typingText,
+  tickFor,
   type Chat,
   type Content,
   type Extras,
@@ -31,8 +30,10 @@ import { presenceText } from '../presence'
 import { rememberProfile, useProfile, type Profile } from '../profiles'
 import { block, report, unblock } from '../safety'
 import { leaveGroup } from '../groups'
+import { useStable } from '../stable'
 import { fill, type Strings } from '../strings'
-import { clock, isToday, isYesterday, useNow } from '../time'
+import { clock, dayNumber, isToday, isYesterday, useNow } from '../time'
+import { markTyping, typingText, useTypingVersion } from '../typing'
 import Avatar, { GroupAvatar, PersonAvatar } from './Avatar'
 import Composer from './Composer'
 import ContactInfo from './ContactInfo'
@@ -43,6 +44,7 @@ import Icon from './Icon'
 import Menu, { type MenuItem } from './Menu'
 import MessageBubble from './MessageBubble'
 import PhotoSender, { type PickedPhoto } from './PhotoSender'
+import PhotoViewer from './PhotoViewer'
 import Popover, { type PopoverItem } from './Popover'
 
 type Props = {
@@ -59,7 +61,7 @@ type Props = {
 }
 
 type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete'; m: Message } | { kind: 'mute' }
-const PAGE = 100 // messages loaded at a time
+const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = faster)
 
 export default function ChatRoom(props: Props) {
   const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, blocked, onBack, onOpenPerson } = props
@@ -90,6 +92,7 @@ export default function ChatRoom(props: Props) {
   const nearBottom = useRef(true)
   const restoreFrom = useRef<number | null>(null) // keeps your place when older messages load
   const loadedOnce = useRef(false)
+  const known = useRef(new Map<string, Message>()) // the messages we have, by id
   const dividerDone = useRef(false) // the unread line is worked out once
   const newest = useRef('')
   const lastTypingSent = useRef(0)
@@ -106,22 +109,29 @@ export default function ChatRoom(props: Props) {
   const hidden = prefs?.hidden
   const messages = hidden?.length ? raw.filter((m) => !hidden.includes(m.id)) : raw
 
-  // Listen LIVE to the last 100 messages (more as you scroll up), oldest at the top.
+  // Listen LIVE to the last 50 messages (more as you scroll up), oldest at the top.
   // After "Clear chat", only messages sent after that.
   useEffect(() => {
     const after = clearedAt ? [where('sentAt', '>', new Date(clearedAt))] : []
     const q = query(collection(db, 'chats', chatId, 'messages'), ...after, orderBy('sentAt'), limitToLast(limit))
     // includeMetadataChanges: also tell us when a message we sent reaches the server (🕓 -> ✓).
     return onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
-      const list = snap.docs.map(
-        (d) =>
-          ({
-            id: d.id,
-            // 'estimate': a message you JUST sent has no server time yet, so use your clock for now.
-            ...d.data({ serverTimestamps: 'estimate' }),
-            pending: d.metadata.hasPendingWrites,
-          }) as Message,
-      )
+      const changed = new Set(snap.docChanges({ includeMetadataChanges: true }).map((c) => c.doc.id))
+      // New messages slide in, except the ones there when you opened the chat, and older ones loading above.
+      const arriving = loadedOnce.current && restoreFrom.current === null
+      const list = snap.docs.map((d) => {
+        const old = known.current.get(d.id)
+        // A message that didn't change keeps the very same object, so its bubble isn't drawn again.
+        if (old && !changed.has(d.id)) return old
+        return {
+          id: d.id,
+          // 'estimate': a message you JUST sent has no server time yet, so use your clock for now.
+          ...d.data({ serverTimestamps: 'estimate' }),
+          pending: d.metadata.hasPendingWrites,
+          fresh: old ? old.fresh : arriving,
+        } as Message
+      })
+      known.current = new Map(list.map((m) => [m.id, m]))
       setRaw(list)
       setHasMore(snap.size >= limit)
       // The first time only (with fresh news from the server): where do the unread messages start?
@@ -151,7 +161,8 @@ export default function ChatRoom(props: Props) {
       else el.scrollTop = el.scrollHeight
     } else if (last.id !== newest.current) {
       // A new message arrived. Follow it if you're at the bottom (or you sent it); otherwise count it.
-      if (nearBottom.current || last.senderId === me.uid) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      // (Straight away, not a smooth glide: a glide made new messages feel late.)
+      if (nearBottom.current || last.senderId === me.uid) el.scrollTop = el.scrollHeight
       else setNewBelow((n) => n + 1)
     }
     loadedOnce.current = true
@@ -163,7 +174,7 @@ export default function ChatRoom(props: Props) {
     nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
     if (nearBottom.current !== atBottom) setAtBottom(nearBottom.current)
     if (nearBottom.current && newBelow) setNewBelow(0)
-    // Near the top, and there are older messages: load 100 more.
+    // Near the top, and there are older messages: load 50 more.
     if (el.scrollTop < 80 && hasMore && restoreFrom.current === null) {
       restoreFrom.current = el.scrollHeight - el.scrollTop
       setLimit((n) => n + PAGE)
@@ -225,7 +236,7 @@ export default function ChatRoom(props: Props) {
     // Tell the others we're typing, at most once every 3 seconds.
     if (chat && Date.now() - lastTypingSent.current > 3000) {
       lastTypingSent.current = Date.now()
-      markTyping(chatId, me.uid).catch(console.error)
+      markTyping(chat, me.uid).catch(console.error)
     }
   }
 
@@ -322,6 +333,12 @@ export default function ChatRoom(props: Props) {
     })
   }
 
+  // The same functions for every bubble, every time (see stable.ts), so memo() in MessageBubble works.
+  const openMenu = useStable((m: Message, x: number, y: number) => setMenu({ m, x, y }))
+  const showReactions = useStable((m: Message) => setDialog({ kind: 'reactions', m }))
+  const viewPhoto = useStable((m: Message, data: string) => setViewing({ m, data }))
+  const callBack = useStable((video: boolean) => call?.(video))
+
   // ----- Search: find words in the loaded messages -----
   const q = searching ? search.trim().toLowerCase() : ''
   const matches = q
@@ -333,23 +350,43 @@ export default function ChatRoom(props: Props) {
     if (foundId) jumpTo(foundId)
   }, [foundId, jumpTo])
 
+  // A photo opened full size (from the chat, or from the media in the contact or group info).
+  const viewer = viewing && (
+    <PhotoViewer
+      src={viewing.data}
+      who={viewing.m.senderId === me.uid ? t.you : (viewing.m.senderName ?? '')}
+      when={viewing.m.sentAt ? `${dayLabel(viewing.m.sentAt.toDate(), t)}, ${clock(viewing.m.sentAt.toDate(), t.locale)}` : ''}
+      caption={viewing.m.caption}
+      fileName={`PakChat photo ${viewing.m.id}.jpg`}
+      onClose={() => setViewing(null)}
+    />
+  )
+
   if (showInfo && chat && group) {
-    return <GroupInfo me={me} chat={chat} messages={messages} prefs={prefs} actions={actions} onBack={() => setShowInfo(false)} onOpenPerson={onOpenPerson} onView={(m, data) => setViewing({ m, data })} />
+    return (
+      <>
+        <GroupInfo me={me} chat={chat} messages={messages} prefs={prefs} actions={actions} onBack={() => setShowInfo(false)} onOpenPerson={onOpenPerson} onView={(m, data) => setViewing({ m, data })} />
+        {viewer}
+      </>
+    )
   }
   if (showInfo && other) {
     return (
-      <ContactInfo
-        me={me}
-        chatId={chatId}
-        person={other}
-        messages={messages}
-        muted={muted}
-        blocked={iBlockedThem}
-        actions={actions}
-        onCall={call}
-        onBack={() => setShowInfo(false)}
-        onView={(m, data) => setViewing({ m, data })}
-      />
+      <>
+        <ContactInfo
+          me={me}
+          chatId={chatId}
+          person={other}
+          messages={messages}
+          muted={muted}
+          blocked={iBlockedThem}
+          actions={actions}
+          onCall={call}
+          onBack={() => setShowInfo(false)}
+          onView={(m, data) => setViewing({ m, data })}
+        />
+        {viewer}
+      </>
     )
   }
 
@@ -438,13 +475,13 @@ export default function ChatRoom(props: Props) {
           {messages.length === 0 && <p className="say-hi">{t.sayHi}</p>}
           {messages.map((m, i) => {
             const before = messages[i - 1]
-            const day = dayLabel(m.sentAt?.toDate(), t)
-            const newDay = day !== dayLabel(before?.sentAt?.toDate(), t)
+            const day = dayNumber(m.sentAt)
+            const newDay = day !== dayNumber(before?.sentAt)
             return (
               <Fragment key={m.id}>
-                {newDay && day && (
+                {newDay && m.sentAt && (
                   <div className="day">
-                    <span>{day}</span>
+                    <span>{dayLabel(m.sentAt.toDate(), t)}</span>
                   </div>
                 )}
                 {divider?.id === m.id && (
@@ -459,18 +496,18 @@ export default function ChatRoom(props: Props) {
                 ) : (
                   <MessageBubble
                     m={m}
-                    chat={chat}
+                    tick={m.senderId === me.uid ? tickFor(chat, me.uid, m.sentAt, m.pending) : 'sent'}
                     chatId={chatId}
                     myUid={me.uid}
                     group={group}
                     // "first" = the first of several messages in a row from the same person. It gets the little tail.
                     first={newDay || !before || before.kind === 'system' || before.senderId !== m.senderId || divider?.id === m.id}
                     highlight={q}
-                    onMenu={(m, x, y) => setMenu({ m, x, y })}
-                    onReactions={(m) => setDialog({ kind: 'reactions', m })}
+                    onMenu={openMenu}
+                    onReactions={showReactions}
                     onJump={jumpTo}
-                    onView={(m, data) => setViewing({ m, data })}
-                    onCall={call}
+                    onView={viewPhoto}
+                    onCall={call ? callBack : undefined}
                   />
                 )}
               </Fragment>
@@ -610,30 +647,7 @@ export default function ChatRoom(props: Props) {
 
       {photos && <PhotoSender files={photos} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
 
-      {viewing &&
-        createPortal(
-          <div className="viewer" onClick={() => setViewing(null)}>
-            <header onClick={(e) => e.stopPropagation()}>
-              <span className="viewer-who">
-                <strong>{viewing.m.senderId === me.uid ? t.you : viewing.m.senderName}</strong>
-                <small>{viewing.m.sentAt && `${dayLabel(viewing.m.sentAt.toDate(), t)}, ${clock(viewing.m.sentAt.toDate(), t.locale)}`}</small>
-              </span>
-              <a className="icon" href={viewing.data} download={`PakChat photo ${viewing.m.id}.jpg`} aria-label={t.download} title={t.download}>
-                <Icon name="download" />
-              </a>
-              <button className="icon" aria-label={t.close} onClick={() => setViewing(null)}>
-                <Icon name="close" />
-              </button>
-            </header>
-            <img src={viewing.data} alt="" onClick={(e) => e.stopPropagation()} />
-            {viewing.m.caption && (
-              <p className="viewer-caption" dir="auto">
-                {viewing.m.caption}
-              </p>
-            )}
-          </div>,
-          document.body,
-        )}
+      {viewer}
     </div>
   )
 }
@@ -651,6 +665,7 @@ function dayLabel(date: Date | undefined, t: Strings) {
 function ChatStatus({ me, myProfile, chat, other }: { me: Person; myProfile: Profile; chat: Chat | undefined; other?: Person }) {
   const { t } = useT()
   const now = useNow(1000)
+  useTypingVersion() // re-draw as soon as someone starts typing
   const [lastSeen, setLastSeen] = useState<Timestamp | null>(null)
   const otherUid = other?.uid
   const theirs = useProfile(otherUid)

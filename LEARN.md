@@ -95,7 +95,7 @@ and the database tells it when something changes.
 ### Try this
 - Log in as two people at once: a normal window and a private window (Cmd + Shift + N).
 - Watch Firestore in the Firebase console while you chat. You'll see `chats` appear.
-- In `ChatRoom.tsx`, change `limitToLast(100)` to `limitToLast(3)`. Only the last 3 show.
+- In `ChatRoom.tsx`, change `PAGE = 50` to `PAGE = 3`. Only the last 3 show (more as you scroll up).
 
 ## Step 2b: Ticks, online, typing
 
@@ -106,7 +106,7 @@ and the database tells it when something changes.
 | ✓✓ grey | The other person's app received it. `Home.tsx` writes `deliveredAt.<their id>` in the chat. |
 | ✓✓ blue | They opened the chat. `ChatRoom.tsx` writes `readAt.<their id>`. |
 | online / last seen | `presence.ts` writes `lastSeen` into your profile once a minute while PakChat is on screen. Under 90 seconds old means "online". |
-| typing… | `ChatRoom.tsx` writes `typing.<your id>` when you type, at most every 3 seconds. Under 6 seconds old means "typing…". |
+| typing… | When you type, `typing.ts` writes the time into `chats/<id>/typing/<your id>`, at most every 3 seconds. Under 6 seconds old means "typing…" (see Step 10). |
 
 The ticks are just **comparisons of times**: a message is "read" if the other person's
 `readAt` is later than the message's `sentAt`.
@@ -277,3 +277,70 @@ minutes to build, so the Calls list may say "Something went wrong" until it's re
 ### Try this
 - Call yourself from two browsers (say Chrome and Safari), logged in as two people.
 - During a call, press the arrow at the top: the call shrinks to a green strip and you can keep chatting.
+
+## Step 10: Making it fast
+
+Messages felt slow, so we measured. A test sends messages between two
+people with the computer slowed down 4 times, like a normal phone, and with no internet delay
+at all, so only the app's own work counts. Then we fixed what it found.
+
+### What was slow, and the fix
+| Problem | Fix |
+| --- | --- |
+| Every new message re-drew all 100 messages on screen, and every chat in the list. | `memo()` in `MessageBubble.tsx` and `ChatList.tsx`: React skips a message or chat that didn't change. |
+| ...but everything looked "changed" anyway, because each update made new objects. | `ChatRoom.tsx` and `Home.tsx` keep the old object for anything that didn't change. `stable.ts` does the same for functions. |
+| Every letter you typed re-drew the whole chat list (to update drafts). | `drafts.ts` only tells the list when a draft appears or disappears. |
+| "typing…", ticks and messages all changed the same chat document. Firestore takes about one change per second per document, so in a busy chat messages waited their turn. | "typing…" has its own documents now (`typing.ts`), and the chat on screen is marked read once instead of "delivered" and then "read". |
+| Comparing dates for the "Today" labels took thousands of steps per message. | `dayNumber()` in `time.ts`: a quick number to compare. |
+| A chat loaded 100 messages. | 50 (`PAGE` in `ChatRoom.tsx`), and 50 more as you scroll up. |
+| New messages glided down slowly, and all 100 faded in when you opened a chat. | They jump into place, and only new arrivals slide in, quickly. |
+
+### "typing…" in its own documents
+`chats/<chatId>/typing/<uid>` holds `{ members, at }`. Home listens to all of them at once
+with a **collection group** query: "every `typing` document, in any chat, that lists me".
+That kind of query needs an index (in `firestore.indexes.json`); for the first few minutes
+after deploying, "typing…" won't show while Firebase builds it.
+
+### Tried, and dropped: saving messages on the device
+Firestore can keep a copy of everything on your device, so the app opens instantly. We tried
+it: opening got faster, but every new message got about 4 times slower, because each one is
+saved on the device first. So for now messages load from the server, and the app keeps what it
+loaded in memory while it's open.
+
+### Also
+- `firebase.json` tells browsers to keep the app's files (`/assets/...`) for a year. Their names
+  change whenever the code changes, so an old copy is never used by mistake.
+- `index.html` starts connecting to the database while the app is still loading.
+
+### Try this
+- Open the same chat on your Mac and your phone, and send a few quick messages back and forth.
+- In Chrome, press Cmd + Option + I, open **Performance**, record while a message arrives,
+  and look for the short yellow (code) and purple (drawing) bars.
+
+
+## Step 11: Photo zoom and the voice bar
+
+### The photo viewer (`screens/PhotoViewer.tsx`)
+A photo opens fitted inside the screen, the right shape, with room for the bar on top and the
+caption below. To see details:
+- the **+** and **−** buttons, or the + and − keys (0 fits it again)
+- the mouse wheel, or pinching on a Mac trackpad
+- double-clicking (or double-tapping) a spot: it zooms in there; do it again to zoom out
+- two fingers on a phone
+
+Zoomed in, drag to look around; it stops at the photo's edges. The trick: zooming only
+changes the photo's CSS `transform` (`translate(...) scale(...)`), which the browser can draw
+without laying out the page again, so it stays smooth.
+
+It also fixed a bug: a photo opened from **Contact info** or **Group info** didn't show,
+because ChatRoom.tsx returned those screens before it got to the viewer.
+
+### The voice recording bar
+The bin, red dot, timer and wave were at different heights. The composer lines things up at
+the **bottom** (`align-items: flex-end`), so the text box can grow taller while the buttons
+stay down. Recording has no text box, so `.composer.recording` lines them up in the
+**middle** instead (in `index.css`). And now **Enter** sends the voice note, like Send.
+
+### Try this
+- Open a photo and pinch on your trackpad, then double-click a face.
+- In `PhotoViewer.tsx`, change `MAX = 5` to `MAX = 10` to zoom further.

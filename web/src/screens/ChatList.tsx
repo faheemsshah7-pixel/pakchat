@@ -3,7 +3,8 @@
 // All / Unread / Groups filter the list. Archived chats wait in their own list.
 // Right-click a chat (or use its little arrow) to pin, mute, archive, mark unread or delete it.
 // The chats themselves come from Home.tsx, which listens to the database.
-import { useState } from 'react'
+// Each row is drawn again only when something in it changed (memo, at the bottom).
+import { memo, useState } from 'react'
 import { signOut } from 'firebase/auth'
 import { auth } from '../firebase'
 import { alertsState, turnOnAlerts } from '../alerts'
@@ -17,7 +18,6 @@ import {
   otherPerson,
   previewText,
   tickFor,
-  typingText,
   type Chat,
   type Person,
 } from '../chats'
@@ -28,7 +28,9 @@ import { contactKey } from '../phone'
 import { deleteChat, isHidden, isMuted, MAX_PINNED, setPrefs, type ChatPrefs } from '../prefs'
 import type { Profile } from '../profiles'
 import { install, useCanInstall } from '../pwa'
+import { useStable } from '../stable'
 import { formatTime, useNow } from '../time'
+import { typingText, useTypingVersion } from '../typing'
 import { ChatAvatar } from './Avatar'
 import { MuteDialog } from './Dialogs'
 import type { Open } from './Home'
@@ -69,7 +71,8 @@ export default function ChatList(props: Props) {
   const [rowMenu, setRowMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
   const [muting, setMuting] = useState<string | null>(null) // chat id for the "Mute" window
   const canInstall = useCanInstall()
-  useDraftsVersion() // re-draw when a draft changes
+  useDraftsVersion() // re-draw when a draft appears or goes
+  useTypingVersion() // re-draw when someone starts typing
   const now = useNow(2000) // re-check "typing…" every 2 seconds
 
   const q = search.trim().toLowerCase()
@@ -129,6 +132,10 @@ export default function ChatList(props: Props) {
     ['unread', t.filterUnread],
     ['groups', t.filterGroups],
   ]
+
+  // The same two functions for every row, every time (see stable.ts), so memo() works.
+  const openRow = useStable((chat: Chat) => onOpen(isGroup(chat) ? { chatId: chat.id } : { chatId: chat.id, other: otherPerson(chat, me.uid) }))
+  const rowMenuAt = useStable((chat: Chat, x: number, y: number) => setRowMenu({ chat, x, y }))
 
   // The menu on one chat.
   function rowItems(chat: Chat): PopoverItem[] {
@@ -253,9 +260,11 @@ export default function ChatList(props: Props) {
             prefs={prefs.get(chat.id)}
             count={counts.get(chat.id) ?? 0}
             active={chat.id === activeId}
-            now={now}
-            onOpen={() => onOpen(isGroup(chat) ? { chatId: chat.id } : { chatId: chat.id, other: otherPerson(chat, me.uid) })}
-            onMenu={(x, y) => setRowMenu({ chat, x, y })}
+            typing={typingText(chat, me.uid, now, t)}
+            draft={chat.id === activeId ? '' : getDraft(chat.id)} // (no "Draft:" for the chat you're typing in)
+            muted={isMuted(prefs.get(chat.id), now)}
+            onOpen={openRow}
+            onMenu={rowMenuAt}
           />
         ))}
         {archived && <p className="hint center">{t.archivedHint}</p>}
@@ -274,20 +283,20 @@ type RowProps = {
   prefs: ChatPrefs | undefined
   count: number
   active: boolean
-  now: number
-  onOpen: () => void
-  onMenu: (x: number, y: number) => void
+  typing: string // "typing…", or ''
+  draft: string
+  muted: boolean
+  onOpen: (chat: Chat) => void
+  onMenu: (chat: Chat, x: number, y: number) => void
 }
 
-function ChatRow({ chat, me, prefs, count, active, now, onOpen, onMenu }: RowProps) {
+// memo: only drawn again when one of its props changed (a new message in THIS chat, say).
+const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, draft, muted, onOpen, onMenu }: RowProps) {
   const { t } = useT()
   const title = chatTitle(chat, me.uid)
   const last = chat.lastMessage
   const mine = last?.senderId === me.uid && last.kind !== 'system' && !last.deleted
-  const typing = typingText(chat, me.uid, now, t)
-  const draft = active ? '' : getDraft(chat.id) // (no "Draft:" for the chat you're typing in)
   const unread = isUnread(chat, me.uid, prefs)
-  const muted = isMuted(prefs, now)
   const classes = ['row', 'chat-row', unread && 'unread', active && 'active', muted && 'muted'].filter(Boolean).join(' ')
 
   return (
@@ -295,11 +304,11 @@ function ChatRow({ chat, me, prefs, count, active, now, onOpen, onMenu }: RowPro
       className={classes}
       role="button"
       tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen())}
+      onClick={() => onOpen(chat)}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen(chat))}
       onContextMenu={(e) => {
         e.preventDefault()
-        onMenu(e.clientX, e.clientY)
+        onMenu(chat, e.clientX, e.clientY)
       }}
     >
       <ChatAvatar chat={chat} myUid={me.uid} />
@@ -330,7 +339,7 @@ function ChatRow({ chat, me, prefs, count, active, now, onOpen, onMenu }: RowPro
             onClick={(e) => {
               e.stopPropagation()
               const r = e.currentTarget.getBoundingClientRect()
-              onMenu(r.left, r.bottom + 4)
+              onMenu(chat, r.left, r.bottom + 4)
             }}
           >
             <Icon name="chevronDown" size={18} />
@@ -339,4 +348,4 @@ function ChatRow({ chat, me, prefs, count, active, now, onOpen, onMenu }: RowPro
       </span>
     </div>
   )
-}
+})

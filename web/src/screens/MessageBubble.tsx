@@ -1,8 +1,10 @@
 // MessageBubble.tsx: one message in a chat: who sent it (in groups), what it answers,
 // the words / photo / voice note / call, the time and ticks, and any emoji reactions under it.
 // Right-click it (or hold your finger on it on a phone, or use the little arrow) for its menu.
-import { useRef } from 'react'
-import { callTitle, tickFor, type Chat, type Message } from '../chats'
+// memo (at the bottom): a bubble is only drawn again when ITS message changed. A chat shows
+// 50 messages, and drawing all of them for every new one made sending feel slow on phones.
+import { memo, useRef } from 'react'
+import { callTitle, type Message, type Tick } from '../chats'
 import { nameColour } from '../colours'
 import { isJumboEmoji } from '../emoji'
 import { useT } from '../lang'
@@ -14,7 +16,7 @@ import Ticks from './Ticks'
 
 type Props = {
   m: Message
-  chat: Chat | undefined
+  tick: Tick // the clock / ✓ / ✓✓ (worked out in ChatRoom.tsx, so this bubble doesn't need the whole chat)
   chatId: string
   myUid: string
   group: boolean
@@ -27,14 +29,14 @@ type Props = {
   onCall?: (video: boolean) => void // tapping a call in the chat calls them back
 }
 
-export default function MessageBubble(props: Props) {
-  const { m, chat, chatId, myUid, group, first, highlight, onMenu, onReactions, onJump, onView, onCall } = props
+export default memo(function MessageBubble(props: Props) {
+  const { m, tick, chatId, myUid, group, first, highlight, onMenu, onReactions, onJump, onView, onCall } = props
   const { t } = useT()
   const mine = m.senderId === myUid
   const kind = m.kind ?? 'text'
   const text = kind === 'photo' ? m.caption : m.text
   const jumbo = kind === 'text' && !m.deleted && !m.replyTo && isJumboEmoji(m.text ?? '')
-  const classes = ['bubble', mine && 'mine', first && 'first', kind === 'photo' && !m.deleted && 'has-photo', jumbo && 'jumbo', kind === 'call' && 'is-call']
+  const classes = ['bubble', mine && 'mine', first && 'first', kind === 'photo' && !m.deleted && 'has-photo', jumbo && 'jumbo', kind === 'call' && 'is-call', m.fresh && 'fresh']
 
   // Holding a finger on the message opens its menu (phones don't have right-click).
   const press = useRef<{ timer: number; opened: number }>({ timer: 0, opened: 0 })
@@ -51,7 +53,7 @@ export default function MessageBubble(props: Props) {
     <time>
       {m.editedAt && !m.deleted && <span className="edited">{t.edited}</span>}
       {m.sentAt && clock(m.sentAt.toDate(), t.locale)}
-      {mine && !m.deleted && <Ticks tick={tickFor(chat, myUid, m.sentAt, m.pending)} />}
+      {mine && !m.deleted && <Ticks tick={tick} />}
     </time>
   )
 
@@ -137,7 +139,7 @@ export default function MessageBubble(props: Props) {
       )}
     </div>
   )
-}
+})
 
 // The little pill under a message: the emojis people reacted with, and how many.
 function Reactions({ reactions, myUid, onClick }: { reactions: Record<string, string>; myUid: string; onClick: () => void }) {

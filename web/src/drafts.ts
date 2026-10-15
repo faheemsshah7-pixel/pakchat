@@ -15,13 +15,18 @@ export function getDraft(chatId: string) {
 }
 
 export function saveDraft(chatId: string, text: string) {
-  if (text === getDraft(chatId)) return
+  const before = getDraft(chatId)
+  if (text === before) return
   try {
     if (text.trim()) localStorage.setItem('draft:' + chatId, text)
     else localStorage.removeItem('draft:' + chatId)
   } catch {
     return
   }
+  // Only tell the screens when a draft appears or disappears, not on every letter:
+  // the chat you're typing in doesn't show its draft, and re-drawing the whole chat list
+  // on every key press made typing slow on phones. (The list reads the words again when you leave the chat.)
+  if (!before.trim() === !text.trim()) return
   version++
   listeners.forEach((listener) => listener())
 }

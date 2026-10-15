@@ -15,6 +15,14 @@
         { "fieldPath": "to", "order": "ASCENDING" },
         { "fieldPath": "startedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "typing",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "members", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "at", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

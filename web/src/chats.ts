@@ -9,7 +9,6 @@
 //     updatedAt:   time of the last message (newest chats go on top)
 //     deliveredAt: { uidA: time }   when each person's app last RECEIVED messages
 //     readAt:      { uidA: time }   when each person last OPENED the chat
-//     typing:      { uidA: time }   when each person last pressed a key
 //   Groups also have (see groups.ts):
 //     title, description, photoId    the group's name, about text and photo
 //     admin:   who made the group      admins: [uid, ...] anyone else they made admin
@@ -21,6 +20,7 @@
 //     reactions: { uidA: '👍' }
 //     editedAt, deleted, forwarded
 //   chats/<chatId>/media/<id>       the photo or voice note itself (see media.ts)
+//   chats/<chatId>/typing/<uid>     when each person last pressed a key (see typing.ts)
 //
 // Direct chat ids are the two people's ids sorted and joined: "uidA_uidB".
 // Group chat ids are random, picked by Firestore.
@@ -45,7 +45,7 @@ import { fill, type Strings } from './strings'
 
 export type Person = { uid: string; name: string }
 
-type Times = Record<string, Timestamp | null>
+export type Times = Record<string, Timestamp | null>
 
 export type SystemEvent =
   | 'created'
@@ -87,7 +87,6 @@ export type Chat = {
   updatedAt?: Timestamp | null
   deliveredAt?: Times
   readAt?: Times
-  typing?: Times
 }
 
 // A small copy of the message you're answering, so the reply can show it.
@@ -101,6 +100,7 @@ export type Message = {
   senderName?: string
   sentAt: Timestamp | null
   pending: boolean // true = still on its way to the server
+  fresh?: boolean // arrived while the chat was open, so it slides in (not saved, just for the screen)
   mediaId?: string
   width?: number // photos
   height?: number
@@ -223,7 +223,7 @@ export function addMessage(batch: WriteBatch, target: Target, message: Record<st
   // merge: true = create the chat if it's new, otherwise just update these fields.
   batch.set(
     chatRef,
-    { ...chatFields, ...read, lastMessage, updatedAt: serverTimestamp(), typing: { [me.uid]: null } },
+    { ...chatFields, ...read, lastMessage, updatedAt: serverTimestamp() },
     { merge: true },
   )
 }
@@ -330,23 +330,4 @@ export function isUnread(chat: Chat, myUid: string, prefs?: ChatPrefs) {
   const last = chat.lastMessage
   if (!last || last.senderId === myUid || !chat.updatedAt) return false
   return lastRead(chat, myUid, prefs) < chat.updatedAt.toMillis()
-}
-
-// ---------- Typing ----------
-
-export function markTyping(chatId: string, uid: string) {
-  return updateDoc(doc(db, 'chats', chatId), { [`typing.${uid}`]: serverTimestamp() })
-}
-
-// Who is typing right now? (pressed a key in the last 6 seconds)
-export function whoIsTyping(chat: Chat | undefined, myUid: string, now: number) {
-  return Object.entries(chat?.typing ?? {})
-    .filter(([uid, at]) => uid !== myUid && at && now - at.toMillis() < 6000)
-    .map(([uid]) => uid)
-}
-
-export function typingText(chat: Chat | undefined, myUid: string, now: number, t: Strings) {
-  const typing = whoIsTyping(chat, myUid, now)
-  if (typing.length === 0 || !chat) return ''
-  return isGroup(chat) ? fill(t.nameTyping, { name: chat.names[typing[0]] ?? '' }) : t.typing
 }

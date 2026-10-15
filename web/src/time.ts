@@ -1,6 +1,7 @@
 // time.ts: small helpers for showing times, and a clock that ticks.
 // `locale` says how to write dates: [] = your computer's default, ['ur-PK'] = Urdu.
 import { useEffect, useState } from 'react'
+import type { Timestamp } from 'firebase/firestore'
 
 // Today: "1:43 PM". Older: "12 Oct".
 export function formatTime(date: Date | undefined, locale: string[]) {
@@ -18,6 +19,14 @@ export function shortDate(date: Date, locale: string[]) {
 
 export function isToday(date: Date) {
   return date.toDateString() === new Date().toDateString()
+}
+
+// Which day a time falls on (by this device's calendar), as a plain number, quick to compare.
+// A chat compares every message with the one before it, so this needs to be fast.
+export function dayNumber(time: Timestamp | null | undefined) {
+  if (!time) return undefined
+  const ms = time.toMillis()
+  return Math.floor((ms - new Date(ms).getTimezoneOffset() * 60_000) / 86_400_000)
 }
 
 export function isYesterday(date: Date) {

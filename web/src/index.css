@@ -1013,7 +1013,10 @@ label.row:hover {
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  animation: bubble-in 0.18s ease-out;
+}
+/* Only messages that arrive while you're looking slide in (not the 100 already there when a chat opens). */
+.bubble.fresh {
+  animation: bubble-in 0.12s ease-out;
 }
 .bubble.mine {
   align-self: flex-end;
@@ -1145,24 +1148,51 @@ label.row:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* Full-size photo */
+/* Full-size photo (PhotoViewer.tsx). The photo sits in the middle "stage", fitted inside it
+   the right shape. Zooming and dragging only change its transform, which is fast to draw. */
 .viewer {
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(0 0 0 / 0.88);
+  background: rgb(0 0 0 / 0.9);
   backdrop-filter: blur(8px);
-  cursor: zoom-out;
   animation: fade-in 0.15s;
 }
-.viewer img {
+.viewer:focus {
+  outline: none;
+}
+.viewer-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 24px 32px; /* room for the bar on top */
+  overflow: hidden;
+  touch-action: none; /* fingers zoom the photo, not the page */
+}
+.viewer.has-caption .viewer-stage {
+  padding-bottom: 96px; /* room for the caption */
+}
+.viewer-stage img {
   max-width: 100%;
   max-height: 100%;
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+  cursor: zoom-in;
+  user-select: none;
+  -webkit-user-drag: none;
+  will-change: transform;
+}
+.viewer-stage img.smooth {
+  transition: transform 0.2s ease-out;
+}
+.viewer.zoomed .viewer-stage img {
+  cursor: grab;
+  border-radius: 0;
+}
+.viewer.zoomed .viewer-stage img:active {
+  cursor: grabbing;
 }
 
 /* The bar where you type */
@@ -1901,6 +1931,16 @@ mark {
 .composer .field button.icon {
   margin-bottom: 5px;
 }
+/* While recording a voice note there's no text box growing taller, so the trash button,
+   red dot, timer and wave all sit on one line in the middle (the rules above would push
+   them to the bottom, each at a different height). */
+.composer.recording,
+.composer.recording .field {
+  align-items: center;
+}
+.composer.recording .field button.icon {
+  margin-bottom: 0;
+}
 /* The emoji panel */
 .emoji-picker {
   position: absolute;
@@ -2122,6 +2162,7 @@ mark {
 /* The full-size photo viewer, with a bar on top */
 .viewer header {
   position: absolute;
+  z-index: 1;
   top: 0;
   left: 0;
   right: 0;
@@ -2136,6 +2177,11 @@ mark {
 .viewer header .icon:hover {
   background: rgb(255 255 255 / 0.14);
 }
+.viewer header .icon:disabled {
+  opacity: 0.35;
+  background: none;
+  cursor: default;
+}
 .viewer-who {
   flex: 1;
   display: flex;
@@ -2145,12 +2191,9 @@ mark {
 .viewer-who small {
   opacity: 0.75;
 }
-.viewer img {
-  max-height: calc(100% - 110px);
-  cursor: default;
-}
 .viewer-caption {
   position: absolute;
+  z-index: 1;
   bottom: 22px;
   left: 50%;
   max-width: min(680px, 90%);
