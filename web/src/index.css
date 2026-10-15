@@ -657,6 +657,13 @@ input.code {
   .app:not(.has-chat) > .main {
     display: none;
   }
+  /* Fill only the part of the screen you can see, so the keyboard doesn't cover the
+     message box or push the top bar away (screen.ts sets these). */
+  .app {
+    top: var(--screen-top, 0px);
+    bottom: auto;
+    height: var(--screen-height, 100%);
+  }
 }
 /* Computer: a floating window with the list on the left and the chat on the right. */
 @media (min-width: 900px) {
@@ -2936,6 +2943,12 @@ button.setting:disabled {
   .composer {
     padding: 8px 8px 10px;
     gap: 8px;
+  }
+  /* iPhones zoom the whole page in when you tap a box whose text is smaller than 16px,
+     and it stays zoomed. 16px stops that. */
+  .composer .field textarea,
+  .inline-edit textarea {
+    font-size: 16px;
   }
 }
 

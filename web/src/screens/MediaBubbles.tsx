@@ -1,6 +1,6 @@
 // MediaBubbles.tsx: how photos and voice notes look inside a chat bubble.
 // Each one downloads its file only when it appears on screen (see media.ts).
-import { useRef, useState } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import { useMedia } from '../media'
 import { duration } from '../time'
 import Icon from './Icon'
@@ -21,24 +21,53 @@ const SPEEDS = [1, 1.5, 2]
 // pressing play on another one pauses this one first.
 let nowPlaying: HTMLAudioElement | null = null
 
+// The speed is ONE setting for all voice notes, like WhatsApp: pick 1.5× on one, and the next
+// one plays at 1.5× too. It's saved on this device, so it's still 1.5× tomorrow.
+let speed = loadSpeed()
+const speedListeners = new Set<() => void>()
+
+function loadSpeed() {
+  try {
+    const saved = Number(localStorage.getItem('voiceSpeed'))
+    return SPEEDS.includes(saved) ? saved : 1
+  } catch {
+    return 1 // private windows can block storage
+  }
+}
+
+// 1× -> 1.5× -> 2× -> 1×
+function nextSpeed() {
+  speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]
+  try {
+    localStorage.setItem('voiceSpeed', String(speed))
+  } catch {
+    // not saved, but it still works until you close the app
+  }
+  if (nowPlaying) nowPlaying.playbackRate = speed // the one playing speeds up straight away
+  speedListeners.forEach((listener) => listener())
+}
+
+function useSpeed() {
+  return useSyncExternalStore(
+    (listener) => {
+      speedListeners.add(listener)
+      return () => speedListeners.delete(listener)
+    },
+    () => speed,
+  )
+}
+
 export function VoiceBubble({ chatId, mediaId, seconds = 0 }: { chatId: string; mediaId?: string; seconds?: number }) {
   const data = useMedia(chatId, mediaId)
   const audio = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [position, setPosition] = useState(0)
-  const [speed, setSpeed] = useState(1)
+  const speed = useSpeed()
 
   function toggle() {
     if (!audio.current) return
     if (playing) audio.current.pause()
     else audio.current.play().catch(console.error)
-  }
-
-  // 1× -> 1.5× -> 2× -> 1×, like WhatsApp.
-  function nextSpeed() {
-    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]
-    setSpeed(next)
-    if (audio.current) audio.current.playbackRate = next
   }
 
   // Click on the line to jump to that part of the voice note.

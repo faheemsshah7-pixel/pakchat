@@ -169,6 +169,18 @@ export default function ChatRoom(props: Props) {
     newest.current = last.id
   }, [messages, me.uid])
 
+  // When the messages get less room (the phone's keyboard opens, or a reply bar appears),
+  // stay at the bottom if you were there, so the newest messages don't hide behind it.
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const watch = new ResizeObserver(() => {
+      if (nearBottom.current) el.scrollTop = el.scrollHeight
+    })
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [showInfo])
+
   function onScroll() {
     const el = scroller.current!
     nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120

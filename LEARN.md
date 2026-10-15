@@ -346,6 +346,21 @@ Pressing play on a voice note pauses the one already playing, like WhatsApp. `Me
 remembers the playing one in `nowPlaying`, a variable outside the component, so every voice
 note on the page shares it.
 
+The speed (1×, 1.5×, 2×) is one setting for all voice notes, also like WhatsApp: set 1.5× on
+one and the next one plays at 1.5× too. It's saved on the device (`localStorage`), and every
+speed button reads it with `useSyncExternalStore`, so they all change together.
+
+### Typing on a phone (`screen.ts`)
+When you tap the message box, two things went wrong on phones:
+1. **iPhones zoom in** on any text box whose writing is smaller than 16px. The message box was
+   15.5px, so the whole page zoomed and looked cut in half. On phones it's 16px now.
+2. **The keyboard covers half the screen.** Android can shrink the page to fit above it
+   (`interactive-widget=resizes-content` in `index.html`). iPhones can't: they slide the page
+   up instead. So `screen.ts` watches the *visual viewport* (the part of the screen you can
+   actually see) and sets `--screen-height` and `--screen-top`, and on phones `.app` uses them.
+
+`ChatRoom.tsx` also keeps you at the newest message when the chat gets less room.
+
 ### Try this
 - Open a photo and pinch on your trackpad, then double-click a face.
 - In `PhotoViewer.tsx`, change `MAX = 5` to `MAX = 10` to zoom further.
