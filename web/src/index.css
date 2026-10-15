@@ -1213,7 +1213,8 @@ label.row:hover {
   transform: scale(0.94);
 }
 [dir='rtl'] .round-btn .ico,
-[dir='rtl'] .back .ico {
+[dir='rtl'] .back .ico,
+[dir='rtl'] .back-always .ico {
   transform: scaleX(-1);
 }
 .error.toast {
@@ -1560,6 +1561,1320 @@ label.row:hover {
 }
 .info-hero p {
   color: var(--muted);
+}
+
+/* ================= 8b. Messages: menus, replies, reactions, edits ================= */
+/* The chat's name and photo at the top: click for info. */
+.bar-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: start;
+  border-radius: 14px;
+}
+.bar-who:disabled {
+  opacity: 1;
+}
+.bar-muted {
+  display: grid;
+  color: var(--bar-muted);
+}
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  background: var(--composer-bg);
+  border-bottom: 1px solid var(--border);
+  animation: fade-in 0.15s;
+}
+.search-count {
+  flex-shrink: 0;
+  padding-inline-end: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.loading-older {
+  align-self: center;
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+/* "3 unread messages" */
+.unread-line {
+  display: flex;
+  justify-content: center;
+  margin: 10px calc(-1 * clamp(14px, 6%, 72px)) 4px;
+  padding: 5px 0;
+  background: color-mix(in srgb, var(--day-bg) 70%, transparent);
+}
+.unread-line span {
+  padding: 4px 14px;
+  border-radius: 10px;
+  background: var(--day-bg);
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+/* The little arrow that opens a message's menu: shows when you point at the message. */
+.bubble-menu {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 3px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  border-radius: 8px;
+  color: var(--meta);
+  background: radial-gradient(circle at 70% 40%, var(--bubble) 55%, transparent 80%);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.bubble.mine .bubble-menu {
+  color: var(--mine-meta);
+  background: radial-gradient(circle at 70% 40%, var(--mine) 55%, transparent 80%);
+}
+.bubble:hover .bubble-menu,
+.bubble-menu:focus-visible {
+  opacity: 1;
+}
+.bubble.has-photo .bubble-menu {
+  top: 8px;
+  inset-inline-end: 8px;
+  color: #ffffff;
+  background: rgb(0 0 0 / 0.35);
+}
+.bubble .text {
+  display: inline;
+}
+.bubble a {
+  color: var(--tick-read);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.bubble.mine a {
+  color: var(--mine-tick-read);
+}
+.bubble code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.bubble code.mono {
+  padding: 0;
+  background: none;
+}
+mark {
+  border-radius: 3px;
+  background: #ffd54f;
+  color: #111b21;
+}
+.edited {
+  margin-inline-end: 4px;
+  font-style: italic;
+}
+.forwarded {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  color: var(--meta);
+  font-size: 12.5px;
+  font-style: italic;
+}
+.bubble.mine .forwarded {
+  color: var(--mine-meta);
+}
+.deleted-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--meta);
+  font-style: italic;
+}
+.bubble.mine .deleted-text {
+  color: var(--mine-meta);
+}
+/* The quoted message above a reply (and above the box while you write one). */
+.quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border-inline-start: 4px solid var(--accent);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  text-align: start;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: normal;
+}
+.quote strong {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.quote span {
+  color: var(--meta);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bubble.mine .quote span {
+  color: var(--mine-meta);
+}
+.bubble.has-photo .quote,
+.bubble.has-photo .forwarded {
+  margin: 2px 2px 6px;
+  width: auto;
+}
+.bubble.has-photo .text {
+  display: block;
+  padding: 6px 6px 0;
+}
+/* Only 1 to 3 emojis: big, with no bubble around them (like WhatsApp). */
+.bubble.jumbo {
+  background: transparent;
+  box-shadow: none;
+  font-size: 40px;
+  line-height: 1.15;
+  padding: 0 4px;
+}
+.bubble.jumbo::before {
+  display: none;
+}
+.bubble.jumbo time {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--day-bg);
+}
+/* Emoji reactions under a message */
+.bubble:has(.reactions) {
+  margin-bottom: 16px;
+}
+.reactions {
+  position: absolute;
+  bottom: -18px;
+  inset-inline-start: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.12);
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text);
+}
+.bubble.mine .reactions {
+  inset-inline-start: auto;
+  inset-inline-end: 8px;
+}
+.reactions small {
+  margin-inline-start: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.reactions.mine {
+  border-color: var(--accent);
+}
+/* A message you jumped to glows for a moment. */
+.flash {
+  animation: flash 1.6s ease-out;
+}
+@keyframes flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+}
+/* The round "go down" button, with a count of new messages */
+.jump-down {
+  position: absolute;
+  bottom: 14px;
+  inset-inline-end: 18px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--elevated);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+  animation: rise 0.15s ease-out;
+}
+.jump-down .badge {
+  position: absolute;
+  top: -6px;
+  inset-inline-end: -4px;
+}
+.toast {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border-radius: 12px;
+  background: var(--elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.35);
+  font-size: 14px;
+  white-space: nowrap;
+  animation: rise 0.2s ease-out;
+}
+.drop-here {
+  position: absolute;
+  inset: 12px;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  border: 3px dashed var(--accent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--chat-bg) 85%, transparent);
+  color: var(--accent-ink);
+  font-weight: 650;
+  pointer-events: none;
+}
+.blocked-bar.center {
+  justify-content: center;
+  gap: 8px;
+}
+/* The strip above the box: replying to, or editing, a message */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 0;
+  color: var(--accent-ink);
+  animation: rise 0.15s ease-out;
+}
+.reply-bar .quote {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+}
+.reply-bar.editing .quote {
+  border-color: var(--tick-read);
+}
+.composer .field textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 150px;
+  padding: 13px 6px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 15.5px;
+  line-height: 1.4;
+}
+.composer .field textarea::placeholder {
+  color: var(--muted);
+}
+.composer {
+  position: relative;
+  align-items: flex-end;
+}
+.composer .field {
+  align-items: flex-end;
+}
+.composer .field button.icon {
+  margin-bottom: 5px;
+}
+/* The emoji panel */
+.emoji-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  inset-inline-start: 14px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  width: min(352px, calc(100vw - 28px));
+  height: 320px;
+  border-radius: 18px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.4);
+  overflow: hidden;
+  animation: menu-in 0.14s ease-out;
+}
+.emoji-picker.floating {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  bottom: auto;
+  z-index: 72;
+  transform: translate(-50%, -50%);
+  animation: fade-in 0.14s;
+}
+.emoji-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.emoji-tabs button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 19px;
+  filter: grayscale(0.7);
+  opacity: 0.7;
+}
+.emoji-tabs button.on {
+  background: var(--accent-soft);
+  filter: none;
+  opacity: 1;
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  align-content: start;
+  padding: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.emoji-grid button {
+  height: 38px;
+  border-radius: 10px;
+  font-size: 23px;
+  line-height: 1;
+}
+.emoji-grid button:hover {
+  background: var(--hover);
+}
+/* A menu that opens where you clicked (Popover.tsx) */
+.menu-backdrop.top {
+  z-index: 70;
+}
+.popover {
+  position: fixed;
+  top: auto;
+  inset-inline-end: auto;
+  z-index: 71;
+  min-width: 210px;
+  transform-origin: top left;
+}
+.quick-reactions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.menu-items .quick-reactions button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 22px;
+  transition: transform 0.12s;
+}
+.menu-items .quick-reactions button:hover {
+  transform: scale(1.2);
+  background: var(--hover);
+}
+.menu-items .quick-reactions button.on {
+  background: var(--accent-soft);
+}
+.menu-items .quick-reactions .more {
+  color: var(--muted);
+  background: var(--soft);
+}
+/* Before sending photos */
+.photo-sender {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: flex;
+  flex-direction: column;
+  background: rgb(10 12 16 / 0.96);
+  color: #ffffff;
+  animation: fade-in 0.15s;
+}
+.photo-sender header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+.photo-sender button.icon:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+.photo-sender .stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 10px 20px;
+}
+.photo-sender .stage img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+  object-fit: contain;
+}
+.caption-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 10px 16px 18px;
+}
+.caption-row input:not([type='checkbox']) {
+  grid-column: 1 / -1;
+  background: rgb(255 255 255 / 0.1);
+  border-color: transparent;
+  color: #ffffff;
+}
+.thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+}
+.thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  overflow: hidden;
+}
+.thumb.on {
+  border-color: var(--accent);
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+}
+.thumb button {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.6);
+  color: #ffffff;
+}
+.thumb.add {
+  display: grid;
+  place-items: center;
+  border: 2px dashed rgb(255 255 255 / 0.4);
+  color: rgb(255 255 255 / 0.8);
+}
+.round-btn {
+  position: relative;
+}
+.badge {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--unread);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.round-btn .badge {
+  position: absolute;
+  top: -4px;
+  inset-inline-end: -4px;
+}
+/* The full-size photo viewer, with a bar on top */
+.viewer header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  color: #ffffff;
+  cursor: default;
+  background: linear-gradient(rgb(0 0 0 / 0.5), transparent);
+}
+.viewer header .icon:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+.viewer-who {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.viewer-who small {
+  opacity: 0.75;
+}
+.viewer img {
+  max-height: calc(100% - 110px);
+  cursor: default;
+}
+.viewer-caption {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  max-width: min(680px, 90%);
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.5);
+  color: #ffffff;
+  text-align: center;
+}
+a.icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: inherit;
+}
+/* Voice notes: speed button, and click the line to jump */
+.voice progress {
+  cursor: pointer;
+}
+.voice .speed {
+  flex-shrink: 0;
+  min-width: 36px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ================= 8c. Chat list extras ================= */
+.chat-row {
+  cursor: pointer;
+}
+.chat-row:hover {
+  background: var(--hover);
+}
+.chat-row .row-bottom > .ico {
+  color: var(--muted);
+}
+.row-menu {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 0;
+  height: 22px;
+  overflow: hidden;
+  color: var(--muted);
+  transition: width 0.12s;
+}
+.chat-row:hover .row-menu,
+.row-menu:focus-visible {
+  width: 22px;
+}
+@media (pointer: coarse) {
+  .bubble-menu {
+    display: none; /* on phones, hold a finger on the message instead */
+  }
+}
+.chat-row.muted .badge {
+  background: var(--muted);
+}
+.draft {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.row-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  color: var(--accent-ink);
+}
+.archived-row .row-main {
+  font-weight: 600;
+}
+.archived-row .badge {
+  background: var(--muted);
+}
+.row small,
+small.muted,
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+.row-main small {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row:disabled {
+  opacity: 1;
+  cursor: default;
+}
+img.avatar {
+  object-fit: cover;
+  background: var(--soft);
+}
+.icon.small {
+  width: 30px;
+  height: 30px;
+}
+.newchat .field .icon.small {
+  color: var(--muted);
+}
+.hint {
+  padding: 4px 2px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.center {
+  text-align: center;
+}
+
+/* ================= 8d. Info panels, settings and windows ================= */
+.info-pane .list {
+  padding-bottom: 24px;
+}
+.info-section {
+  margin: 8px 6px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+}
+.info-section .section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 10px 6px;
+}
+.info-section .section-title .muted {
+  margin-inline-start: auto;
+  letter-spacing: 0;
+}
+.info-section > button.link {
+  margin: 8px 6px;
+}
+.about-text {
+  padding: 0 10px 8px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.info-hero p[dir='ltr'] {
+  margin-top: 2px;
+}
+.hero-photo {
+  position: relative;
+}
+.photo-edit {
+  position: absolute;
+  bottom: 2px;
+  inset-inline-end: 2px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  color: var(--on-accent);
+  border: 3px solid var(--panel);
+  box-shadow: 0 6px 14px -6px rgb(0 0 0 / 0.4);
+}
+.info-hero h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.info-hero .link {
+  margin-top: 6px;
+}
+.inline-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 360px;
+  margin: 12px auto 4px;
+  padding: 0 10px;
+}
+.inline-edit.column {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: none;
+}
+.inline-edit textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  background: var(--field-bg);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+  outline: none;
+}
+.inline-edit.column .btn {
+  align-self: flex-end;
+}
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0 8px 8px;
+}
+.thumb-box {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--soft);
+}
+.thumb-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s;
+}
+.thumb-box:hover img {
+  transform: scale(1.05);
+}
+.thumb-box.loading {
+  animation: shimmer 1.2s linear infinite;
+  background: linear-gradient(90deg, var(--soft), var(--hover), var(--soft));
+  background-size: 200% 100%;
+}
+.row.action {
+  gap: 18px;
+  padding: 13px 14px;
+  color: var(--text);
+}
+.row.action .ico {
+  color: var(--muted);
+}
+.row.action.danger .ico {
+  color: var(--danger);
+}
+.invite {
+  padding: 0 10px 8px;
+}
+.invite-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--accent-ink);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.invite-link .ico {
+  flex-shrink: 0;
+}
+.invite-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+/* Settings rows */
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: var(--text);
+  text-align: start;
+}
+button.setting:hover:not(:disabled) {
+  background: var(--hover);
+}
+button.setting:disabled {
+  opacity: 0.6;
+}
+.setting > .ico {
+  color: var(--muted);
+}
+.setting.static {
+  cursor: default;
+}
+.setting-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 15px;
+}
+.setting-text small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  transition: background 0.18s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  transition: transform 0.18s;
+}
+.switch.on {
+  background: var(--accent);
+}
+.switch.on::after {
+  transform: translateX(18px);
+}
+[dir='rtl'] .switch.on::after {
+  transform: translateX(-18px);
+}
+.segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--soft);
+}
+.segmented button {
+  padding: 6px 12px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.segmented button.on {
+  background: var(--elevated);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+}
+.settings .info-hero {
+  padding-bottom: 6px;
+}
+.blocked-list {
+  padding: 0 4px 6px;
+}
+/* Windows (Modal.tsx) */
+.modal.narrow {
+  max-width: 440px;
+}
+.modal .field {
+  margin-bottom: 8px;
+}
+.pick-list {
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  margin: 0 -8px;
+  scrollbar-width: thin;
+}
+.info-quote {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--mine);
+  color: var(--mine-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.modal .section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 4px 4px;
+}
+.big-emoji {
+  font-size: 24px;
+}
+.dialog-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dialog-buttons .btn {
+  margin: 0;
+}
+.btn.danger-btn {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  box-shadow: 0 10px 22px -10px #ef4444;
+}
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 8px;
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+.choice:hover {
+  background: var(--hover);
+}
+.choice input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+/* Text size (Settings > Chats) */
+[data-text-size='small'] .bubble {
+  font-size: 13.5px;
+}
+[data-text-size='large'] .bubble {
+  font-size: 17.5px;
+}
+[data-text-size='small'] .bubble.jumbo,
+[data-text-size='large'] .bubble.jumbo {
+  font-size: 40px;
+}
+
+/* ================= 8e. Calls ================= */
+/* The call screen: always dark, like WhatsApp's, whatever look you picked. */
+.call-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  background: radial-gradient(900px 600px at 50% 0%, #1d3b2c 0, transparent 70%), #0b141a;
+  color: #e9edef;
+  animation: fade-in 0.2s ease-out;
+}
+.call-screen video {
+  background: #000;
+}
+.remote-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Your own camera, as in a mirror */
+.local-video {
+  position: absolute;
+  z-index: 2;
+  inset-inline-end: 16px;
+  bottom: 130px;
+  width: min(30vw, 200px);
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
+  transform: scaleX(-1);
+}
+.local-video.full {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  opacity: 0.55; /* dimmed, so the name on top is easy to read */
+  box-shadow: none;
+}
+.call-top {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 56px 20px 0;
+  text-align: center;
+}
+.call-screen.has-video .call-top {
+  padding-top: 24px;
+  background: linear-gradient(rgb(0 0 0 / 0.5), transparent);
+  padding-bottom: 40px;
+}
+.call-min {
+  position: absolute;
+  top: 14px;
+  inset-inline-start: 14px;
+  color: #e9edef;
+}
+.call-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 22px;
+  color: rgb(233 237 239 / 0.7);
+  font-size: 13px;
+}
+.call-screen.has-video .call-kind {
+  margin-bottom: 4px;
+}
+.call-top h2 {
+  margin: 16px 0 4px;
+  font-size: 28px;
+  font-weight: 700;
+}
+.call-screen.has-video .call-top h2 {
+  margin-top: 0;
+  font-size: 22px;
+}
+.call-status {
+  margin: 0;
+  max-width: 420px;
+  color: rgb(233 237 239 / 0.8);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.call-status.problem {
+  color: #ffb4a8;
+}
+.call-controls {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  width: 100%;
+  padding: 28px 16px calc(36px + env(safe-area-inset-bottom));
+}
+.call-screen.has-video .call-controls {
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.55));
+}
+.call-btn-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 64px;
+}
+.call-btn-wrap small {
+  color: rgb(233 237 239 / 0.85);
+  font-size: 12.5px;
+}
+.call-btn {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.16);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.12s, background 0.12s;
+}
+.call-btn:hover {
+  background: rgb(255 255 255 / 0.26);
+}
+.call-btn:active {
+  transform: scale(0.94);
+}
+.call-btn.on {
+  background: #fff;
+  color: #0b141a;
+}
+.call-btn.end {
+  background: #ea0038;
+}
+.call-btn.end .ico {
+  transform: rotate(135deg); /* the phone "put down" */
+}
+.call-btn.accept {
+  background: #1fae5b;
+  animation: call-pulse 1.4s ease-out infinite;
+}
+@keyframes call-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(31 174 91 / 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgb(31 174 91 / 0);
+  }
+}
+/* "Back to chats" during a call: a green strip across the top of the app, like WhatsApp's.
+   The app gets an extra row for it, so it never covers anything. Tap it to go back to the call. */
+.app:has(> .call-bar) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.app:has(> .call-bar) > .side,
+.app:has(> .call-bar) > .main {
+  grid-row: 2;
+}
+.call-bar {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 16px;
+  border: 0;
+  background: #1fae5b;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.call-bar:hover {
+  background: #1b9d52;
+}
+.call-bar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.call-bar small {
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+/* A call in the chat: "Voice call 2:13" / "Missed voice call" */
+.call-bubble {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 210px;
+  padding: 4px 2px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.call-bubble:disabled {
+  cursor: default;
+}
+.call-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.call-bubble.missed .call-icon {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.call-words {
+  display: flex;
+  flex-direction: column;
+}
+.call-words strong {
+  font-weight: 600;
+}
+.call-words small {
+  color: var(--meta);
+  font-size: 12.5px;
+}
+.bubble.is-call {
+  white-space: normal;
+}
+
+/* Contact info: the Voice call / Video call buttons under the name */
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+.hero-actions button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 104px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--accent-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hero-actions button:hover {
+  background: var(--hover);
+}
+
+/* The Calls list */
+.call-row .row-main small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.call-row .row-main small .ico {
+  color: var(--accent);
+}
+.call-row.missed strong,
+.call-row.missed .row-main small .ico {
+  color: var(--danger);
+}
+.call-row > .icon {
+  color: var(--accent);
+}
+
+/* On small phones there's no room for search in a chat's top bar (it's in the ⋮ menu too). */
+@media (max-width: 420px) {
+  .hide-narrow {
+    display: none;
+  }
 }
 
 /* ================= 9. Phones ================= */

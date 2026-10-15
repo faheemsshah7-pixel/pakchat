@@ -1,15 +1,21 @@
 // media.ts: photos and voice notes.
 //
-// We're on Firebase's free plan, which has no file storage. So we shrink each
-// photo or voice note and save it as text (a "data URL", like "data:image/jpeg;base64,/9j/4AAQ...")
-// in its own Firestore document: chats/<chatId>/media/<id>.
-// One document can hold up to 1 MB, so we keep each file under about 0.9 MB.
+// We're on Firebase's free plan, which has no file storage. So we save each photo or
+// voice note as text (a "data URL", like "data:image/jpeg;base64,/9j/4AAQ...")
+// in Firestore documents: chats/<chatId>/media/<id>.
+// One document can hold up to 1 MB. A photo is shrunk to fit in one.
+// A voice note is recorded in good quality, so a long one is cut into parts:
+//   media/<id> (the first part, and how many parts there are), media/<id>_2, media/<id>_3 ...
 // Later, on the paid plan, this file is the only one that changes to use real file storage.
-import { doc, getDoc } from 'firebase/firestore'
+import { useEffect, useState } from 'react'
+import { collection, doc, getDoc, type DocumentReference, type WriteBatch } from 'firebase/firestore'
 import { db } from './firebase'
 
-export const MAX_MEDIA = 900_000 // characters
-export const MAX_VOICE_SECONDS = 120
+export const MAX_MEDIA = 900_000 // characters in one document
+export const MAX_PARTS = 8 // documents for one voice note (a 5-minute note needs about 4)
+export const MAX_VOICE_SECONDS = 300 // 5 minutes
+export const MAX_PHOTOS = 10 // photos you can send at once
+export const VOICE_QUALITY = 64_000 // bits per second: very clear speech at a sensible size (WhatsApp uses about 16,000-24,000)
 
 // ---------- Photos ----------
 
@@ -34,14 +40,32 @@ export async function shrinkPhoto(file: File) {
   throw new Error('too-big')
 }
 
+// A profile or group photo: a square cut from the middle, small enough to load fast.
+export async function shrinkAvatar(file: File) {
+  const image = await createImageBitmap(file)
+  const side = Math.min(image.width, image.height)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 320
+  canvas.getContext('2d')!.drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, 320, 320)
+  return canvas.toDataURL('image/jpeg', 0.8)
+}
+
 // ---------- Voice notes ----------
 
 // Starts recording from the microphone. Call stop() to get the recording back.
 export async function startRecording() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1, // one voice, so mono
+      sampleRate: 48_000, // the highest the voice format uses (CD quality is 44,100)
+      echoCancellation: false, // nothing is playing while you record, so nothing to cancel
+      noiseSuppression: true, // quieter background (traffic, fans)
+      autoGainControl: true, // evens out loud and soft speech
+    },
+  })
   // Chrome records "webm", Safari records "mp4". Pick whatever this browser can do.
   const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m))
-  const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 24_000 }) // low quality = small file
+  const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: VOICE_QUALITY })
   const chunks: Blob[] = []
   recorder.ondataavailable = (e) => chunks.push(e.data)
   const started = Date.now()
@@ -63,7 +87,7 @@ export async function startRecording() {
     async stop() {
       const blob = await finish()
       const data = await blobToDataUrl(blob)
-      if (data.length >= MAX_MEDIA) throw new Error('too-long')
+      if (data.length > MAX_MEDIA * MAX_PARTS) throw new Error('too-long')
       return { data, seconds: (Date.now() - started) / 1000 }
     },
     // Stop and throw it away.
@@ -84,20 +108,63 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
-// ---------- Loading ----------
+// ---------- Saving and loading ----------
 
 // Media we've already loaded (or just sent), so we don't download it twice.
 const loaded = new Map<string, string>()
 
-export function rememberMedia(mediaId: string, data: string) {
-  loaded.set(mediaId, data)
+// The document for part 1, 2, 3 ... of a file.
+function partRef(chatId: string, mediaId: string, part: number) {
+  return doc(db, 'chats', chatId, 'media', part === 1 ? mediaId : `${mediaId}_${part}`)
+}
+
+// Adds a photo or voice note to a batch of writes, cut into parts if needed. Returns its id.
+export function saveMedia(batch: WriteBatch, chatRef: DocumentReference, data: string, senderId: string) {
+  const mediaId = doc(collection(chatRef, 'media')).id // a new random id
+  const parts = Math.ceil(data.length / MAX_MEDIA)
+  for (let part = 1; part <= parts; part++) {
+    const piece = data.slice((part - 1) * MAX_MEDIA, part * MAX_MEDIA)
+    batch.set(partRef(chatRef.id, mediaId, part), part === 1 && parts > 1 ? { data: piece, senderId, parts } : { data: piece, senderId })
+  }
+  loaded.set(mediaId, data) // so YOUR bubble shows it straight away
+  return mediaId
+}
+
+// Adds deleting a photo or voice note (all its parts) to a batch of writes.
+export async function deleteMedia(batch: WriteBatch, chatId: string, mediaId: string) {
+  const known = loaded.get(mediaId)
+  const parts = known ? Math.ceil(known.length / MAX_MEDIA) : (((await getDoc(partRef(chatId, mediaId, 1))).get('parts') as number) ?? 1)
+  for (let part = 1; part <= parts; part++) batch.delete(partRef(chatId, mediaId, part))
+  loaded.delete(mediaId)
 }
 
 export async function loadMedia(chatId: string, mediaId: string) {
   const known = loaded.get(mediaId)
   if (known) return known
-  const snap = await getDoc(doc(db, 'chats', chatId, 'media', mediaId))
-  const data = snap.get('data') as string
+  const first = await getDoc(partRef(chatId, mediaId, 1))
+  let data = first.get('data') as string
+  const parts = (first.get('parts') as number) ?? 1
+  if (parts > 1) {
+    const rest = await Promise.all(Array.from({ length: parts - 1 }, (_, i) => getDoc(partRef(chatId, mediaId, i + 2))))
+    data += rest.map((snap) => snap.get('data') as string).join('')
+  }
   loaded.set(mediaId, data)
   return data
+}
+
+// A photo or voice note for a screen: null while it's loading.
+export function useMedia(chatId: string, mediaId: string | undefined) {
+  const [data, setData] = useState<{ id: string; data: string } | null>(null)
+  useEffect(() => {
+    if (!mediaId) return
+    let stillHere = true
+    loadMedia(chatId, mediaId)
+      .then((loaded) => stillHere && setData({ id: mediaId, data: loaded }))
+      .catch(console.error)
+    return () => {
+      stillHere = false
+    }
+  }, [chatId, mediaId])
+  // (If the photo changed, don't show the old one while the new one loads.)
+  return mediaId && data?.id === mediaId ? data.data : null
 }

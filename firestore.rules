@@ -7,6 +7,16 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
+    function me() {
+      return request.auth.uid;
+    }
+    function isGroupChat(c) {
+      return c.get('type', 'direct') == 'group';
+    }
+    // Group admins: whoever made the group ("admin"), plus anyone they made admin ("admins").
+    function adminIn(c, uid) {
+      return isGroupChat(c) && (uid == c.get('admin', '') || uid in c.get('admins', []));
+    }
 
     // users/<uid>: anyone logged in can see profiles (to find friends),
     // but you can only create or change YOUR OWN profile,
@@ -14,22 +24,126 @@ service cloud.firestore {
     // (SMS login gives you a phone_number; Google login gives you an email.)
     match /users/{userId} {
       allow read: if signedIn();
-      allow write: if signedIn() && request.auth.uid == userId
+      allow create, update: if signedIn() && me() == userId
+        && request.resource.data.keys().hasOnly(['name', 'phone', 'email', 'createdAt', 'lastSeen', 'about', 'photo', 'hideLastSeen', 'readReceipts'])
         && request.resource.data.get('phone', null) == request.auth.token.get('phone_number', null)
         && request.resource.data.get('email', null) == request.auth.token.get('email', null)
         && request.resource.data.name is string
-        && request.resource.data.name.size() <= 40;
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.get('about', '') is string
+        && request.resource.data.get('about', '').size() <= 140
+        && request.resource.data.get('photo', 0) is number // which version of your photo (see avatars below)
+        && request.resource.data.get('hideLastSeen', false) is bool
+        && request.resource.data.get('readReceipts', true) is bool;
 
       // users/<uid>/blocked/<their uid>: only you can see or change who you blocked.
       match /blocked/{blockedId} {
-        allow read, write: if signedIn() && request.auth.uid == userId;
+        allow read, write: if signedIn() && me() == userId;
       }
+      // users/<uid>/prefs/<chatId>: YOUR settings for a chat (pinned, muted, archived...).
+      // Private: the other people in the chat can't see them.
+      match /prefs/{chatId} {
+        allow read, write: if signedIn() && me() == userId;
+      }
+    }
+
+    // avatars/<uid>: your profile photo, kept small. Anyone logged in can see it.
+    match /avatars/{userId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && me() == userId
+        && request.resource.data.keys().hasOnly(['data'])
+        && request.resource.data.data is string
+        && request.resource.data.data.size() < 200000;
+      allow delete: if signedIn() && me() == userId;
     }
 
     // reports/<id>: anyone can send a report as themselves. Nobody can read them
     // from the app: you read them in the Firebase console.
     match /reports/{reportId} {
-      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.reporterId == me();
+    }
+
+    // invites/<code>: a group's invite link. The code is long and random, so only people
+    // who were sent the link can find it. Nobody can list them all.
+    match /invites/{code} {
+      function chatOf(id) {
+        return /databases/$(database)/documents/chats/$(id);
+      }
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && code.size() >= 16
+        && request.resource.data.keys().hasOnly(['chatId', 'title', 'by'])
+        && request.resource.data.by == me()
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 50
+        && adminIn(get(chatOf(request.resource.data.chatId)).data, me())
+        && getAfter(chatOf(request.resource.data.chatId)).data.get('inviteCode', '') == code;
+      allow delete: if signedIn() && adminIn(get(chatOf(resource.data.chatId)).data, me());
+    }
+
+    // calls/<id>: voice and video calls (see calls.ts). Only the two people in a call can see it.
+    // It holds each side's connection details while the call is being set up; they're wiped when it ends.
+    match /calls/{callId} {
+      function call() {
+        return resource.data;
+      }
+      function next() {
+        return request.resource.data;
+      }
+      function changes() {
+        return next().diff(call()).affectedKeys();
+      }
+      // A connection description ("offer" or "answer"): plain text, not too long.
+      function sdpOk(x) {
+        return x is map && x.keys().hasOnly(['type', 'sdp']) && x.type is string && x.sdp is string && x.sdp.size() < 30000;
+      }
+      function blockedEitherWay(a, b) {
+        return exists(/databases/$(database)/documents/users/$(a)/blocked/$(b))
+          || exists(/databases/$(database)/documents/users/$(b)/blocked/$(a));
+      }
+      allow read: if signedIn() && (call().from == me() || call().to == me());
+      // Calling someone: as yourself, with your real name, in your chat with them, and not if either blocked the other.
+      allow create: if signedIn()
+        && next().keys().hasOnly(['chatId', 'from', 'fromName', 'to', 'toName', 'video', 'state', 'offer', 'startedAt'])
+        && next().from == me()
+        && next().fromName == get(/databases/$(database)/documents/users/$(me())).data.name
+        && next().to is string && next().to != me()
+        && next().toName is string && next().toName.size() <= 40
+        && next().chatId == (me() < next().to ? me() + '_' + next().to : next().to + '_' + me())
+        && next().video is bool
+        && next().state == 'ringing'
+        && next().startedAt == request.time
+        && sdpOk(next().offer)
+        && !blockedEitherWay(me(), next().to);
+      allow update: if signedIn() && (answering() || refusing() || ending());
+      // The person called picks up: their connection details go in "answer".
+      function answering() {
+        return call().to == me() && call().state == 'ringing'
+          && changes().hasOnly(['state', 'answer', 'answeredAt'])
+          && next().state == 'accepted'
+          && next().answeredAt == request.time
+          && sdpOk(next().answer);
+      }
+      // Before anyone picks up. The person called: "declined", "busy", or "missed" (tidying an old one).
+      // The caller: "cancelled" (gave up) or "missed" (nobody answered).
+      function refusing() {
+        return call().state == 'ringing'
+          && changes().hasOnly(['state', 'endedAt', 'offer'])
+          && !('offer' in next())
+          && next().endedAt == request.time
+          && ((call().to == me() && next().state in ['declined', 'busy', 'missed'])
+            || (call().from == me() && next().state in ['cancelled', 'missed']));
+      }
+      // Either of them hangs up. The connection details are wiped.
+      function ending() {
+        return call().state == 'accepted'
+          && (call().from == me() || call().to == me())
+          && changes().hasOnly(['state', 'endedAt', 'offer', 'answer'])
+          && next().state == 'ended'
+          && next().endedAt == request.time
+          && !('offer' in next()) && !('answer' in next());
+      }
     }
 
     match /chats/{chatId} {
@@ -41,7 +155,7 @@ service cloud.firestore {
         return ids().size() == 2;
       }
       function inId() {
-        return isDirectId() && request.auth.uid in ids();
+        return isDirectId() && me() in ids();
       }
       function chatPath() {
         return /databases/$(database)/documents/chats/$(chatId);
@@ -49,120 +163,247 @@ service cloud.firestore {
       // In the chat before this write (get) or after it (getAfter).
       // "After" matters when a new chat and its first message are saved together.
       function memberBefore() {
-        return exists(chatPath()) && request.auth.uid in get(chatPath()).data.members;
+        return exists(chatPath()) && me() in get(chatPath()).data.members;
       }
       function memberAfter() {
-        return existsAfter(chatPath()) && request.auth.uid in getAfter(chatPath()).data.members;
+        return existsAfter(chatPath()) && me() in getAfter(chatPath()).data.members;
       }
       function canRead() {
         return signedIn() && (inId() || memberBefore());
       }
       // The other person in a direct chat
       function otherId() {
-        return ids()[0] == request.auth.uid ? ids()[1] : ids()[0];
+        return ids()[0] == me() ? ids()[1] : ids()[0];
       }
       // Did the other person block me?
       function blockedByOther() {
-        return isDirectId() && exists(/databases/$(database)/documents/users/$(otherId())/blocked/$(request.auth.uid));
+        return isDirectId() && exists(/databases/$(database)/documents/users/$(otherId())/blocked/$(me()));
       }
       function canPost() {
         return signedIn() && (inId() || memberBefore() || memberAfter()) && !blockedByOther();
       }
       // My name, from my profile. Messages must carry my real name, so nobody can pretend to be someone else.
       function myName() {
-        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name;
+        return get(/databases/$(database)/documents/users/$(me())).data.name;
+      }
+
+      // ----- helpers for changing the chat document -----
+      // (resource = the chat before the change, request.resource = after it)
+      function before() {
+        return resource.data;
+      }
+      function after() {
+        return request.resource.data;
       }
       // The "last message" in the chat list must be mine, with my real name.
       function lastMessageIsMine() {
-        return request.resource.data.lastMessage.senderId == request.auth.uid
-          && request.resource.data.lastMessage.senderName == myName();
+        return after().lastMessage.senderId == me()
+          && after().lastMessage.senderName == myName();
       }
       function lastMessageOk() {
-        return request.resource.data.get('lastMessage', null) == resource.data.get('lastMessage', null)
+        return after().get('lastMessage', null) == before().get('lastMessage', null)
           || lastMessageIsMine();
       }
-      // You can only change your own name in the chat, plus the names of people the admin adds.
+      // You can only change your own name in the chat, plus the names of people being added.
       function namesOk() {
-        let changed = request.resource.data.get('names', {}).diff(resource.data.get('names', {})).affectedKeys();
-        let added = request.resource.data.members.removeAll(resource.data.members);
-        return changed.hasOnly(added.concat([request.auth.uid]));
+        let changed = after().get('names', {}).diff(before().get('names', {})).affectedKeys();
+        let added = after().members.removeAll(before().members);
+        return changed.hasOnly(added.concat([me()]));
+      }
+      // Group name, description, photo and settings: only admins can change these.
+      function infoChanged() {
+        return after().diff(before()).affectedKeys().hasAny(['title', 'description', 'photoId', 'onlyAdmins', 'inviteCode']);
+      }
+      function infoOk() {
+        return after().get('title', '') is string
+          && after().get('title', '').size() <= 50
+          && (!isGroupChat(after()) || after().title.size() > 0)
+          && after().get('description', '') is string
+          && after().get('description', '').size() <= 500
+          && after().get('photoId', '') is string
+          && after().get('onlyAdmins', false) is bool;
+      }
+      function sameMembers() {
+        return after().members == before().members;
+      }
+      function sameOwner() {
+        return after().get('admin', '') == before().get('admin', '');
+      }
+      function sameAdmins() {
+        return after().get('admins', []) == before().get('admins', []);
+      }
+      function wasAdmin() {
+        return adminIn(before(), me());
+      }
+      // Who an admin is taking out of the group (a list of one person).
+      function removed() {
+        return before().members.removeAll(after().members);
       }
 
       // ----- the chat document -----
-      allow get: if signedIn() && (inId() || request.auth.uid in resource.data.members);
+      allow get: if signedIn() && (inId() || me() in resource.data.members);
       // Listing ("show me my chats") only works if the query asks for chats you're in.
-      allow list: if signedIn() && request.auth.uid in resource.data.members;
+      allow list: if signedIn() && me() in resource.data.members;
 
-      allow create: if signedIn() && lastMessageIsMine() && (
+      allow create: if signedIn() && lastMessageIsMine() && infoOk() && (
         // A direct chat: you must be one of the two, and nobody else can be in it.
         (inId()
-          && request.resource.data.members == ids()
-          && request.resource.data.get('type', 'direct') == 'direct')
+          && after().members == ids()
+          && after().get('type', 'direct') == 'direct')
         ||
-        // A group: you're the admin, you're in it, it has a name and 2 to 50 people.
+        // A group: you made it (so you're its admin), it has a name and 2 to 256 people.
         (!isDirectId()
-          && request.resource.data.type == 'group'
-          && request.resource.data.admin == request.auth.uid
-          && request.auth.uid in request.resource.data.members
-          && request.resource.data.members.size() >= 2
-          && request.resource.data.members.size() <= 50
-          && request.resource.data.title is string
-          && request.resource.data.title.size() > 0
-          && request.resource.data.title.size() <= 50)
+          && after().type == 'group'
+          && after().admin == me()
+          && after().get('admins', []).size() == 0
+          && me() in after().members
+          && after().members.size() >= 2
+          && after().members.size() <= 256)
       );
 
       allow update: if signedIn()
-        && (inId() || request.auth.uid in resource.data.members)
         && lastMessageOk()
         && namesOk()
+        && infoOk()
         // a direct chat can't turn into a group, or the other way round
-        && request.resource.data.get('type', 'direct') == resource.data.get('type', 'direct')
+        && after().get('type', 'direct') == before().get('type', 'direct')
         && (
-          // Normal updates (new message, ticks, typing): nobody joins or leaves.
-          (request.resource.data.members == resource.data.members
-            && request.resource.data.get('admin', '') == resource.data.get('admin', ''))
+          // 1. Normal updates by someone in the chat (new message, ticks, typing): nobody joins or leaves.
+          //    Admins can also change the group's info and who else is admin.
+          ((inId() || me() in before().members)
+            && sameMembers()
+            && sameOwner()
+            && ((!infoChanged() && sameAdmins())
+              || (wasAdmin() && after().members.hasAll(after().get('admins', [])))))
           ||
-          // The group admin adds people (up to 50).
-          (resource.data.get('type', 'direct') == 'group'
-            && request.auth.uid == resource.data.admin
-            && request.resource.data.admin == resource.data.admin
-            && request.resource.data.members.hasAll(resource.data.members)
-            && request.resource.data.members.size() > resource.data.members.size()
-            && request.resource.data.members.size() <= 50)
+          // 2. An admin adds people (up to 256).
+          (wasAdmin()
+            && sameOwner() && sameAdmins() && !infoChanged()
+            && after().members.hasAll(before().members)
+            && after().members.size() > before().members.size()
+            && after().members.size() <= 256)
           ||
-          // Anyone leaves a group: only they disappear. An admin who leaves
-          // hands "admin" to someone still in the group.
-          (resource.data.get('type', 'direct') == 'group'
-            && request.resource.data.members == resource.data.members.removeAll([request.auth.uid])
-            && (request.resource.data.admin == resource.data.admin
-              || (request.auth.uid == resource.data.admin
-                && request.resource.data.admin in request.resource.data.members)))
+          // 3. Anyone leaves a group: only they disappear. If the person who made the group
+          //    leaves, someone still in the group takes over.
+          (isGroupChat(before())
+            && me() in before().members
+            && after().members == before().members.removeAll([me()])
+            && after().get('admins', []) == before().get('admins', []).removeAll([me()])
+            && !infoChanged()
+            && (sameOwner() || (me() == before().admin && after().admin in after().members)))
+          ||
+          // 4. An admin removes one person. Nobody can remove the person who made the group.
+          (wasAdmin()
+            && sameOwner() && !infoChanged()
+            && before().members.hasAll(after().members)
+            && removed().size() == 1
+            && !(before().admin in removed())
+            && !(me() in removed())
+            && after().get('admins', []) == before().get('admins', []).removeAll(removed()))
+          ||
+          // 5. Joining with an invite link: you must know the group's current invite code.
+          (isGroupChat(before())
+            && !(me() in before().members)
+            && before().get('inviteCode', '') != ''
+            && after().get('joinCode', '') == before().inviteCode
+            && after().members == before().members.concat([me()])
+            && after().members.size() <= 256
+            && sameOwner() && sameAdmins() && !infoChanged())
         );
 
       // ----- messages -----
       match /messages/{messageId} {
         allow read: if canRead();
         // Send only as yourself, with the server's time, and a real message.
-        // Nobody can edit or delete messages (yet).
         allow create: if canPost()
-          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderId == me()
           && request.resource.data.senderName == myName()
           && request.resource.data.sentAt == request.time
-          && validMessage(request.resource.data);
+          && newMessageOk(request.resource.data)
+          && mayTalk(request.resource.data);
+        // Changing a message: a reaction, an edit, or "delete for everyone".
+        allow update: if canPost() && (reacting() || editing() || unsending());
       }
 
-      function validMessage(m) {
-        return (m.kind == 'text' && m.text is string && m.text.size() > 0 && m.text.size() <= 2000)
-          || (m.kind in ['photo', 'voice'] && m.mediaId is string)
-          || (m.kind == 'system' && m.event in ['created', 'added', 'left']);
+      // Only these fields, so nobody can sneak in a fake "edited" or "deleted" mark.
+      function newMessageOk(m) {
+        return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed'])
+          && m.get('forwarded', false) is bool
+          && (!('replyTo' in m)
+            || (m.replyTo is map
+              && m.replyTo.keys().hasOnly(['id', 'senderId', 'senderName', 'kind', 'text'])
+              && m.replyTo.get('text', '') is string
+              && m.replyTo.get('text', '').size() <= 200))
+          && contentOk(m);
+      }
+      function textOk(text) {
+        return text is string && text.size() > 0 && text.size() <= 4000;
+      }
+      function captionOk(m) {
+        return m.get('caption', '') is string && m.get('caption', '').size() <= 1024;
+      }
+      function contentOk(m) {
+        return (m.kind == 'text' && textOk(m.text))
+          || (m.kind == 'photo' && m.mediaId is string && captionOk(m))
+          || (m.kind == 'voice' && m.mediaId is string)
+          // "Voice call 2:13" or "Missed voice call": only in chats with one person
+          || (m.kind == 'call' && isDirectId()
+            && m.video is bool && m.missed is bool
+            && m.seconds is number && m.seconds >= 0 && m.seconds < 86400)
+          || (m.kind == 'system'
+            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone']);
+      }
+      // In a group set to "only admins can send", only admins can post.
+      // Anyone can still leave or join (those add a small grey note).
+      function mayTalk(m) {
+        let c = getAfter(chatPath()).data;
+        return isDirectId()
+          || (m.kind == 'system' && m.event in ['left', 'joined'])
+          || adminIn(c, me())
+          || (m.kind != 'system' && !c.get('onlyAdmins', false));
+      }
+
+      // Reactions: { uid: '👍' }. You can only set or remove YOUR OWN reaction.
+      function reacting() {
+        let old = resource.data.get('reactions', {});
+        let now = request.resource.data.get('reactions', {});
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+          && now.diff(old).affectedKeys().hasOnly([me()])
+          && (!(me() in now) || (now[me()] is string && now[me()].size() <= 16));
+      }
+      // Edit your own message, up to 15 minutes after sending it.
+      function editing() {
+        return resource.data.senderId == me()
+          && !resource.data.get('deleted', false)
+          && request.time < resource.data.sentAt + duration.value(15, 'm')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'caption', 'editedAt'])
+          && request.resource.data.editedAt == request.time
+          && ((resource.data.get('kind', 'text') == 'text' && textOk(request.resource.data.text))
+            || (resource.data.get('kind', 'text') == 'photo' && captionOk(request.resource.data)));
+      }
+      // Delete for everyone: your own message, up to 60 hours after sending it.
+      // What it said is wiped. Only "this message was deleted" stays.
+      function unsending() {
+        return resource.data.senderId == me()
+          && !(resource.data.get('kind', 'text') in ['system', 'call'])
+          && request.time < resource.data.sentAt + duration.value(60, 'h')
+          && request.resource.data.deleted == true
+          && request.resource.data.keys().hasOnly(['kind', 'senderId', 'senderName', 'sentAt', 'deleted']);
       }
 
       // ----- photos and voice notes (see media.ts) -----
+      // A long voice note is cut into parts; the first one says how many (at most 8).
       match /media/{mediaId} {
         allow read: if canRead();
         allow create: if canPost()
-          && request.resource.data.senderId == request.auth.uid
-          && request.resource.data.data is string;
+          && request.resource.data.keys().hasOnly(['data', 'senderId', 'parts'])
+          && request.resource.data.senderId == me()
+          && request.resource.data.data is string
+          && request.resource.data.get('parts', 2) is int
+          && request.resource.data.get('parts', 2) >= 2
+          && request.resource.data.get('parts', 2) <= 8;
+        // The person who sent it can delete it (when they delete the message for everyone).
+        allow delete: if canRead() && resource.data.senderId == me();
       }
     }
   }

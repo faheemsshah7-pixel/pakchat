@@ -121,8 +121,10 @@ messages too, with `kind: 'system'`.
 ### Photos and voice notes (`media.ts`, `Composer.tsx`, `MediaBubbles.tsx`)
 We're on Firebase's free plan, which has no file storage. So:
 1. A photo is shrunk with a `<canvas>` until it's under 0.9 MB. A voice note is recorded
-   at low quality (`MediaRecorder`), up to 2 minutes.
+   with `MediaRecorder` (since Step 8: clear sound at 64 kbit/s, up to 5 minutes).
 2. It's turned into text (a "data URL") and saved in `chats/<id>/media/<id>`.
+   One document holds at most 1 MB, so a long voice note is cut into parts:
+   `<id>`, `<id>_2`, `<id>_3`… The first part says how many there are (`parts`).
 3. The message only points at it (`mediaId`), so the chat loads fast.
    Each bubble downloads its own photo or voice note when it's shown.
 
@@ -201,3 +203,77 @@ Emerald, Midnight, Sunset, Ocean) is just a list of those variables at the top o
 - Make your own look: copy the Ocean block in `index.css`, rename it `[data-theme='mine']`,
   change the colours, then add `'mine'` to `THEMES` in `theme.ts` and a name in `strings.ts`.
 - Press Esc in a chat on a computer: it closes the chat, like WhatsApp Web.
+
+## Step 8: The WhatsApp features
+
+### Where each one lives
+| What | Files |
+| --- | --- |
+| Reply, react, forward, copy, edit, delete, message info | `messages.ts`, `MessageBubble.tsx`, `Dialogs.tsx` |
+| Emojis, big emojis, **bold** and _italic_, links | `emoji.ts`, `EmojiPicker.tsx`, `RichText.tsx` |
+| The menu on a message or chat (right-click, or hold on a phone) | `Popover.tsx` |
+| Pin, mute, archive, mark unread, clear, delete chat | `prefs.ts`, `ChatList.tsx` |
+| Unread numbers and the "3 unread messages" line | `Home.tsx`, `ChatRoom.tsx` |
+| Drafts | `drafts.ts` |
+| Profile photo, about line, privacy | `profiles.ts`, `Settings.tsx` |
+| Sounds, text size, the Enter key | `settings.ts`, `sound.ts` |
+| Group photo, description, admins, invite links | `groups.ts`, `invites.ts`, `GroupInfo.tsx`, `JoinGroup.tsx` |
+| Several photos at once, captions, paste, drag and drop | `PhotoSender.tsx`, `Composer.tsx` |
+| Install as an app | `pwa.ts`, `public/manifest.webmanifest`, `public/sw.js` |
+
+### Your private settings for a chat
+Pinned, muted, archived and "unread" are **yours only**, so they're not in the chat document
+(everyone in the chat can read that). They live in `users/<you>/prefs/<chatId>`, and the rules
+let only you read or write there.
+
+### Counting unread messages cheaply
+Downloading every new message just to count them would use up the free plan's reads.
+`getCountFromServer` asks the server "how many messages are newer than when I last read?"
+and it costs one read, however many there are.
+
+### Install as an app
+`manifest.webmanifest` gives the app its name, icon and colours. `sw.js` (a "service worker")
+is a small script the browser keeps; it makes the app open fast and lets Chrome offer
+**Install**. It's the same website, just in its own window with its own icon.
+
+## Step 9: Voice and video calls
+
+The sound and picture go **straight between the two browsers**, using a browser feature
+called **WebRTC**. They never pass through Firebase, so calls don't use up your free plan.
+Firestore is only the "telephone exchange" that makes the other phone ring (`calls.ts`):
+
+1. Asad presses the phone. His browser writes `calls/<id>` with `state: 'ringing'` and an
+   **offer**: plain text describing his connection (what sound and video it can send, and his
+   internet address).
+2. Bushra's app is always listening for calls to her, so it rings (`sound.ts` makes the ringtone).
+3. She presses Accept. Her browser writes an **answer** (her connection details): `state: 'accepted'`.
+4. The two browsers connect to each other. **STUN** servers (free, from Google and Cloudflare)
+   help each browser find its own internet address.
+5. Someone hangs up: `state: 'ended'`, and the addresses are wiped. Asad's app writes
+   "Video call 2:13" (or "Missed voice call") into the chat.
+
+### Sound quality
+The offer and answer are text, so `tune()` in `calls.ts` edits two lines before saving them:
+`maxaveragebitrate=64000` asks for sound at 64 kbit/s (about 3 times WhatsApp), and `b=AS:450`
+caps the video. **Use less data for calls** in Settings lowers the video to 150.
+
+### The rules
+Only the two people in a call can read it. You can only call as yourself, in your own chat with
+that person, and not if either of you blocked the other. Only the person called can answer,
+only the caller can cancel, and anyone can hang up once it's answered.
+
+### Calls list
+`CallsList.tsx` loads your last calls once when you open it. It asks for calls "from me, newest
+first", which needs an **index** (a sorted list the database keeps ready).
+`firestore.indexes.json` describes it, and `deploy` creates it. The first time, it takes a few
+minutes to build, so the Calls list may say "Something went wrong" until it's ready.
+
+### Good to know
+- Calls are for chats with one person. Group calls need a server in the middle, which costs money.
+- On a few mobile networks two phones can't reach each other directly. A paid **TURN** relay
+  server fixes that; it would go in `ICE_SERVERS` in `calls.ts`.
+- The browser asks for the microphone (and camera) the first time.
+
+### Try this
+- Call yourself from two browsers (say Chrome and Safari), logged in as two people.
+- During a call, press the arrow at the top: the call shrinks to a green strip and you can keep chatting.

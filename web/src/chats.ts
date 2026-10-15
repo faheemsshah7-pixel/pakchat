@@ -5,14 +5,21 @@
 //     type:        'direct' (two people) or 'group'
 //     members:     [uidA, uidB, ...]    who is in it
 //     names:       { uidA: 'Ali', ... } their names, for showing
-//     title, admin                      groups only: the group name, and who made it
 //     lastMessage: { kind, text, senderId, senderName }   shown in the chat list
 //     updatedAt:   time of the last message (newest chats go on top)
 //     deliveredAt: { uidA: time }   when each person's app last RECEIVED messages
 //     readAt:      { uidA: time }   when each person last OPENED the chat
 //     typing:      { uidA: time }   when each person last pressed a key
+//   Groups also have (see groups.ts):
+//     title, description, photoId    the group's name, about text and photo
+//     admin:   who made the group      admins: [uid, ...] anyone else they made admin
+//     onlyAdmins: true = only admins can send messages
+//     inviteCode: the code in the group's invite link (see invites.ts)
 //   chats/<chatId>/messages/<id>    one document per message
 //     kind: 'text' | 'photo' | 'voice' | 'system', senderId, sentAt, and the content
+//     replyTo:   a small copy of the message it answers
+//     reactions: { uidA: '👍' }
+//     editedAt, deleted, forwarded
 //   chats/<chatId>/media/<id>       the photo or voice note itself (see media.ts)
 //
 // Direct chat ids are the two people's ids sorted and joined: "uidA_uidB".
@@ -31,23 +38,37 @@ import {
   type WriteBatch,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import { rememberMedia } from './media'
+import { saveMedia } from './media'
 import { contactKey } from './phone'
+import type { ChatPrefs } from './prefs'
 import { fill, type Strings } from './strings'
 
 export type Person = { uid: string; name: string }
 
 type Times = Record<string, Timestamp | null>
 
-export type SystemEvent = 'created' | 'added' | 'left'
+export type SystemEvent =
+  | 'created'
+  | 'added'
+  | 'left'
+  | 'removed'
+  | 'joined'
+  | 'renamed'
+  | 'photo'
+  | 'description'
+  | 'onlyAdmins'
+  | 'everyone'
 
 export type LastMessage = {
   kind?: Message['kind']
   text?: string
+  video?: boolean // calls
+  missed?: boolean
   senderId: string
   senderName?: string
   event?: SystemEvent
   targetName?: string
+  deleted?: boolean
 }
 
 export type Chat = {
@@ -56,7 +77,12 @@ export type Chat = {
   members: string[]
   names: Record<string, string>
   title?: string
+  description?: string
+  photoId?: string
   admin?: string
+  admins?: string[]
+  onlyAdmins?: boolean
+  inviteCode?: string
   lastMessage?: LastMessage
   updatedAt?: Timestamp | null
   deliveredAt?: Times
@@ -64,9 +90,12 @@ export type Chat = {
   typing?: Times
 }
 
+// A small copy of the message you're answering, so the reply can show it.
+export type ReplyTo = { id: string; senderId: string; senderName: string; kind: string; text: string }
+
 export type Message = {
   id: string
-  kind?: 'text' | 'photo' | 'voice' | 'system' // step 2 messages have no kind: they're text
+  kind?: 'text' | 'photo' | 'voice' | 'call' | 'system' // step 2 messages have no kind: they're text
   text?: string
   senderId: string
   senderName?: string
@@ -75,20 +104,37 @@ export type Message = {
   mediaId?: string
   width?: number // photos
   height?: number
-  seconds?: number // voice notes
+  caption?: string
+  seconds?: number // voice notes, and how long a call lasted
+  video?: boolean // calls: a video call (or else a voice call)
+  missed?: boolean // calls: nobody picked up
   event?: SystemEvent // system messages: "Ali added Sara"
   targetName?: string
+  replyTo?: ReplyTo
+  forwarded?: boolean
+  reactions?: Record<string, string>
+  editedAt?: Timestamp | null
+  deleted?: boolean
 }
 
 // What you can send. Photos and voice notes arrive as text ("data URLs"), see media.ts.
 export type Content =
   | { kind: 'text'; text: string }
-  | { kind: 'photo'; data: string; width: number; height: number }
+  | { kind: 'photo'; data: string; width: number; height: number; caption?: string }
   | { kind: 'voice'; data: string; seconds: number }
+  | { kind: 'call'; video: boolean; seconds: number; missed: boolean } // written by calls.ts when a call ends
+
+// Extra things a message can carry.
+export type Extras = { replyTo?: ReplyTo; forwarded?: boolean }
 
 // Which chat to send to. `other` is set for direct chats, so a new chat can be created.
 // isNew: the chat doesn't exist yet, so this message creates it.
 export type Target = { chatId: string; other?: Person; isNew?: boolean }
+
+// Your "read receipts" setting (Settings > Privacy). Home.tsx keeps it up to date.
+// Off = the other person doesn't see blue ticks from you, and you don't see theirs.
+// (Groups always show them, like WhatsApp.)
+export const myPrivacy = { readReceipts: true }
 
 // Two people always get the SAME chat id, no matter who starts it.
 export function chatIdFor(a: string, b: string) {
@@ -96,6 +142,12 @@ export function chatIdFor(a: string, b: string) {
 }
 
 export const isGroup = (chat: Chat | undefined) => chat?.type === 'group'
+const isDirectId = (chatId: string) => chatId.split('_').length === 2
+
+// Group admins: whoever made it, plus anyone they made admin.
+export function isAdmin(chat: Chat | undefined, uid: string) {
+  return isGroup(chat) && (chat?.admin === uid || !!chat?.admins?.includes(uid))
+}
 
 // The other person in a direct chat.
 export function otherPerson(chat: Chat, myUid: string): Person {
@@ -120,21 +172,24 @@ export async function findUser(input: string): Promise<Person | null> {
 // Send one message. A "batch" saves several things together: the message,
 // the photo or voice note (if any), and the chat's "last message" for the chat list.
 // Either all of them are saved or none are.
-export async function sendMessage(me: Person, target: Target, content: Content) {
+export async function sendMessage(me: Person, target: Target, content: Content, extras: Extras = {}) {
   const chatRef = doc(db, 'chats', target.chatId)
   const batch = writeBatch(db)
   const message: Record<string, unknown> = { kind: content.kind, senderId: me.uid, senderName: me.name }
+  if (extras.replyTo) message.replyTo = extras.replyTo
+  if (extras.forwarded) message.forwarded = true
 
   if (content.kind === 'text') {
     message.text = content.text
+  } else if (content.kind === 'call') {
+    Object.assign(message, { video: content.video, seconds: content.seconds, missed: content.missed })
   } else {
-    // The photo or voice note goes in its own document, so the message list stays small.
-    const mediaRef = doc(collection(chatRef, 'media'))
-    batch.set(mediaRef, { data: content.data, senderId: me.uid })
-    rememberMedia(mediaRef.id, content.data) // so YOUR bubble shows it straight away
-    message.mediaId = mediaRef.id
-    if (content.kind === 'photo') Object.assign(message, { width: content.width, height: content.height })
-    else message.seconds = content.seconds
+    // The photo or voice note goes in its own document(s), so the message list stays small.
+    message.mediaId = saveMedia(batch, chatRef, content.data, me.uid)
+    if (content.kind === 'photo') {
+      Object.assign(message, { width: content.width, height: content.height })
+      if (content.caption) message.caption = content.caption
+    } else message.seconds = content.seconds
   }
 
   addMessage(batch, target, message, me, target.other ? directChatFields(me, target.other, !!target.isNew) : {})
@@ -155,14 +210,20 @@ function directChatFields(me: Person, other: Person, isNew: boolean) {
 export function addMessage(batch: WriteBatch, target: Target, message: Record<string, unknown>, me: Person, chatFields: object) {
   const chatRef = doc(db, 'chats', target.chatId)
   batch.set(doc(collection(chatRef, 'messages')), { ...message, sentAt: serverTimestamp() }) // the server's clock
-  const { kind, text, senderId, senderName, event, targetName } = message
+  const { kind, senderId, senderName, event, targetName, video, missed } = message
+  // The chat list shows a photo's caption as its text.
+  const text = message.text ?? message.caption
   const lastMessage = Object.fromEntries(
-    Object.entries({ kind, text, senderId, senderName, event, targetName }).filter(([, v]) => v !== undefined),
+    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed }).filter(([, v]) => v !== undefined),
   )
+  // Sending a message means you've read the chat, so it isn't "unread" for you.
+  const receipts = myPrivacy.readReceipts || !isDirectId(target.chatId)
+  const read = receipts ? { readAt: { [me.uid]: serverTimestamp() } } : {}
+  if (!receipts) batch.set(doc(db, 'users', me.uid, 'prefs', target.chatId), { readAt: serverTimestamp() }, { merge: true })
   // merge: true = create the chat if it's new, otherwise just update these fields.
   batch.set(
     chatRef,
-    { ...chatFields, lastMessage, updatedAt: serverTimestamp(), typing: { [me.uid]: null } },
+    { ...chatFields, ...read, lastMessage, updatedAt: serverTimestamp(), typing: { [me.uid]: null } },
     { merge: true },
   )
 }
@@ -170,9 +231,39 @@ export function addMessage(batch: WriteBatch, target: Target, message: Record<st
 // "Ali added Sara", "You left", ... in the chosen language.
 export function systemText(m: { event?: SystemEvent; senderId: string; senderName?: string; targetName?: string }, myUid: string, t: Strings) {
   const name = m.senderId === myUid ? t.you : (m.senderName ?? '')
-  if (m.event === 'created') return fill(t.created, { name })
-  if (m.event === 'added') return fill(t.added, { name, other: m.targetName ?? '' })
-  return fill(t.left, { name })
+  const values = { name, other: m.targetName ?? '' }
+  const templates: Record<SystemEvent, string> = {
+    created: t.created,
+    added: t.added,
+    left: t.left,
+    removed: t.removed,
+    joined: t.joined,
+    renamed: t.renamed,
+    photo: t.changedPhoto,
+    description: t.changedDescription,
+    onlyAdmins: t.setOnlyAdmins,
+    everyone: t.setEveryone,
+  }
+  return fill(templates[m.event ?? 'left'] ?? '', values)
+}
+
+// What a message says, in one short line (for the chat list, replies and alerts).
+export function shortText(
+  m: { kind?: string; text?: string; caption?: string; deleted?: boolean; senderId: string; video?: boolean; missed?: boolean },
+  myUid: string,
+  t: Strings,
+) {
+  if (m.deleted) return m.senderId === myUid ? t.youDeleted : t.wasDeleted
+  if (m.kind === 'call') return (m.video ? '📹 ' : '📞 ') + callTitle(m, myUid, t)
+  if (m.kind === 'photo') return m.caption || m.text ? `📷 ${m.caption ?? m.text}` : t.photo
+  if (m.kind === 'voice') return t.voice
+  return m.text ?? ''
+}
+
+// "Voice call", "Video call", or (for the person who was called) "Missed voice call".
+export function callTitle(m: { senderId: string; video?: boolean; missed?: boolean }, myUid: string, t: Strings) {
+  if (m.missed && m.senderId !== myUid) return m.video ? t.missedVideoCall : t.missedVoiceCall
+  return m.video ? t.videoCall : t.voiceCall
 }
 
 // The grey line under a chat's name in the chat list.
@@ -180,9 +271,9 @@ export function previewText(chat: Chat, myUid: string, t: Strings) {
   const last = chat.lastMessage
   if (!last) return ''
   if (last.kind === 'system') return systemText(last, myUid, t)
-  const body = last.kind === 'photo' ? t.photo : last.kind === 'voice' ? t.voice : (last.text ?? '')
+  const body = shortText(last, myUid, t)
   // In groups, say who sent it: "Ali: salam"
-  if (isGroup(chat) && last.senderId !== myUid && last.senderName) return last.senderName + ': ' + body
+  if (isGroup(chat) && last.senderId !== myUid && last.senderName && !last.deleted) return last.senderName + ': ' + body
   return body
 }
 
@@ -200,8 +291,10 @@ export function tickFor(chat: Chat | undefined, myUid: string, sentAt: Timestamp
   if (others.length === 0) return 'sent'
   const sent = sentAt.toMillis()
   const everyone = (times?: Times) => others.every((uid) => (times?.[uid]?.toMillis() ?? 0) >= sent)
-  if (everyone(chat?.readAt)) return 'read'
-  if (everyone(chat?.deliveredAt)) return 'delivered'
+  // Read receipts off: you don't see blue ticks either (except in groups).
+  const canSeeRead = myPrivacy.readReceipts || isGroup(chat)
+  if (canSeeRead && everyone(chat?.readAt)) return 'read'
+  if (everyone(chat?.deliveredAt) || everyone(chat?.readAt)) return 'delivered'
   return 'sent'
 }
 
@@ -210,18 +303,33 @@ export function markDelivered(chatId: string, uid: string) {
   return updateDoc(doc(db, 'chats', chatId), { [`deliveredAt.${uid}`]: serverTimestamp() })
 }
 
-export function markRead(chatId: string, uid: string) {
-  return updateDoc(doc(db, 'chats', chatId), {
-    [`readAt.${uid}`]: serverTimestamp(),
+// You opened the chat. With read receipts on, everyone sees blue ticks.
+// With them off, only YOUR private prefs remember it (so the chat stops being "unread").
+// clearUnread: you had marked the chat "unread" yourself, so take that off too.
+export function markRead(chatId: string, uid: string, clearUnread = false) {
+  const batch = writeBatch(db)
+  const receipts = myPrivacy.readReceipts || !isDirectId(chatId)
+  batch.update(doc(db, 'chats', chatId), {
+    ...(receipts ? { [`readAt.${uid}`]: serverTimestamp() } : {}),
     [`deliveredAt.${uid}`]: serverTimestamp(), // read means delivered too
   })
+  if (!receipts || clearUnread) {
+    batch.set(doc(db, 'users', uid, 'prefs', chatId), { readAt: serverTimestamp(), unread: false }, { merge: true })
+  }
+  return batch.commit()
 }
 
-// Unread = the last message is from someone else, and I haven't opened the chat since.
-export function isUnread(chat: Chat, myUid: string) {
+// When did I last read this chat? (The later of the shared time and my private one.)
+export function lastRead(chat: Chat, myUid: string, prefs?: ChatPrefs) {
+  return Math.max(chat.readAt?.[myUid]?.toMillis() ?? 0, prefs?.readAt?.toMillis() ?? 0)
+}
+
+// Unread = you marked it unread, or the last message is from someone else and you haven't opened the chat since.
+export function isUnread(chat: Chat, myUid: string, prefs?: ChatPrefs) {
+  if (prefs?.unread) return true
   const last = chat.lastMessage
   if (!last || last.senderId === myUid || !chat.updatedAt) return false
-  return (chat.readAt?.[myUid]?.toMillis() ?? 0) < chat.updatedAt.toMillis()
+  return lastRead(chat, myUid, prefs) < chat.updatedAt.toMillis()
 }
 
 // ---------- Typing ----------

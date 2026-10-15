@@ -4,6 +4,7 @@ A WhatsApp-style chat app for Pakistan, on the web: https://pakchat-f89d8.web.ap
 
 - `web/`: the web app (React + TypeScript + Vite)
 - `firestore.rules`: who can read and write what in the database
+- `firestore.indexes.json`: sorted lists the database keeps ready (for the Calls list)
 - `firebase.json`, `.firebaserc`: settings for putting the app online
 - `LEARN.md`: notes on how everything works, step by step
 
@@ -24,5 +25,5 @@ npm --prefix web run build
 npx firebase-tools deploy
 ```
 
-This uploads the app to https://pakchat-f89d8.web.app and the security rules to Firestore.
+This uploads the app to https://pakchat-f89d8.web.app, and the security rules and indexes to Firestore.
 The first time, run `npx firebase-tools login` before that.

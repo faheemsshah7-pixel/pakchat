@@ -5,15 +5,14 @@
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
+import { myPrivacy } from './chats'
 import { auth, db } from './firebase'
 import { useT } from './lang'
+import { rememberProfile, type Profile } from './profiles'
 import Login from './screens/Login'
 import Logo from './screens/Logo'
 import ProfileSetup from './screens/ProfileSetup'
 import Home from './screens/Home'
-
-// phone is set if you logged in by SMS, email if you logged in with Google.
-export type Profile = { name: string; phone?: string | null; email?: string | null }
 
 export default function App() {
   const { t } = useT()
@@ -30,7 +29,10 @@ export default function App() {
   useEffect(() => {
     if (!user) return
     return onSnapshot(doc(db, 'users', user.uid), (snap) => {
-      setLoaded({ uid: user.uid, profile: snap.exists() ? (snap.data() as Profile) : null })
+      const profile = snap.exists() ? (snap.data() as Profile) : null
+      if (profile) rememberProfile(user.uid, profile) // so your own photo shows everywhere
+      myPrivacy.readReceipts = profile?.readReceipts !== false // chats.ts uses it for blue ticks
+      setLoaded({ uid: user.uid, profile })
     })
   }, [user])
 
