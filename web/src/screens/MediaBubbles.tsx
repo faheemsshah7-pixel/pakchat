@@ -17,6 +17,10 @@ export function PhotoBubble({ chatId, mediaId, width = 4, height = 3, onView }: 
 
 const SPEEDS = [1, 1.5, 2]
 
+// The voice note playing right now, in any chat. Only one plays at a time, like WhatsApp:
+// pressing play on another one pauses this one first.
+let nowPlaying: HTMLAudioElement | null = null
+
 export function VoiceBubble({ chatId, mediaId, seconds = 0 }: { chatId: string; mediaId?: string; seconds?: number }) {
   const data = useMedia(chatId, mediaId)
   const audio = useRef<HTMLAudioElement>(null)
@@ -61,11 +65,17 @@ export function VoiceBubble({ chatId, mediaId, seconds = 0 }: { chatId: string; 
           ref={audio}
           src={data}
           onPlay={(e) => {
+            if (nowPlaying && nowPlaying !== e.currentTarget) nowPlaying.pause()
+            nowPlaying = e.currentTarget
             e.currentTarget.playbackRate = speed
             setPlaying(true)
           }}
-          onPause={() => setPlaying(false)}
-          onEnded={() => {
+          onPause={(e) => {
+            if (nowPlaying === e.currentTarget) nowPlaying = null
+            setPlaying(false)
+          }}
+          onEnded={(e) => {
+            if (nowPlaying === e.currentTarget) nowPlaying = null
             setPlaying(false)
             setPosition(0)
           }}

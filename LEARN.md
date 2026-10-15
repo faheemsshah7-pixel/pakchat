@@ -341,6 +341,11 @@ the **bottom** (`align-items: flex-end`), so the text box can grow taller while 
 stay down. Recording has no text box, so `.composer.recording` lines them up in the
 **middle** instead (in `index.css`). And now **Enter** sends the voice note, like Send.
 
+### One voice note at a time
+Pressing play on a voice note pauses the one already playing, like WhatsApp. `MediaBubbles.tsx`
+remembers the playing one in `nowPlaying`, a variable outside the component, so every voice
+note on the page shares it.
+
 ### Try this
 - Open a photo and pinch on your trackpad, then double-click a face.
 - In `PhotoViewer.tsx`, change `MAX = 5` to `MAX = 10` to zoom further.
