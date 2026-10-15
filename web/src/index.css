@@ -11,7 +11,7 @@
   background: var(--bg);
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px; }
 .card { width: 100%; max-width: 380px; background: var(--card); border-radius: 16px; padding: 28px; box-shadow: 0 4px 24px rgb(0 0 0 / 0.08); }
 h1 { margin: 0 0 20px; color: var(--green); }
 label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
@@ -50,3 +50,75 @@ button.secondary { background: transparent; color: var(--green); border: 1px sol
 .composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e3e8e5; }
 .composer input { font-size: 16px; padding: 10px 14px; border-radius: 20px; }
 .composer button { border-radius: 20px; padding: 10px 18px; }
+
+/* ---------- Step 2b: ticks, typing ---------- */
+.tick { margin: 0 4px; font-size: 12px; letter-spacing: -3px; color: var(--muted); }
+.tick.pending { letter-spacing: 0; font-size: 10px; }
+.bubble .tick { margin: 0 0 0 4px; }
+.tick.read { color: #1e9be9; }
+.typing { color: var(--green-light); font-style: italic; }
+.bar .typing { color: #a8f0c4; }
+.bar .typing, .bar small { min-height: 1em; }
+
+/* ---------- Step 3 and 4: groups, photos, voice, menus, Urdu ---------- */
+.card { position: relative; }
+button.link { width: auto; margin: 0; padding: 4px 8px; background: none; color: var(--green-light); font-weight: 600; }
+.lang-switch { position: absolute; top: 16px; inset-inline-end: 16px; }
+.danger { color: #b3261e !important; }
+button.secondary.danger { border-color: #b3261e; }
+.clickable { cursor: pointer; }
+.stack { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; }
+.stack label { margin: 0; }
+.bottom { padding-bottom: 16px; }
+.bottom button { margin-top: 8px; }
+.tag { font-size: 12px; color: var(--green-light); border: 1px solid currentColor; border-radius: 6px; padding: 1px 6px; }
+
+/* Round icon buttons: 📷 🎤 ▶ ⋮ */
+button.icon { width: auto; margin: 0; padding: 6px 10px; background: none; color: inherit; font-size: 20px; line-height: 1; }
+button.icon.round { border-radius: 50%; width: 42px; height: 42px; padding: 0; background: #eef3ef; flex-shrink: 0; }
+.bar button.icon { border: 0; color: white; font-size: 22px; }
+
+/* Avatars */
+.avatar { width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; color: white; font-weight: 700; font-size: 18px; }
+.bar .avatar { width: 34px; height: 34px; font-size: 15px; }
+
+/* Chat list extras */
+.row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #25a55f; }
+.row.unread strong, .row.unread time { color: #1a8a4c; font-weight: 700; }
+.row.pick { cursor: pointer; }
+.row.pick input { width: 18px; height: 18px; accent-color: var(--green); }
+
+/* The ⋮ menu */
+.menu { position: relative; }
+.menu-backdrop { position: fixed; inset: 0; z-index: 10; }
+.menu-items { position: absolute; inset-inline-end: 0; top: 100%; z-index: 11; min-width: 190px; background: white; border-radius: 10px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.18); overflow: hidden; }
+.menu-items button { display: block; width: 100%; margin: 0; padding: 12px 16px; border: 0 !important; border-radius: 0; background: none; color: var(--text); font-weight: 500; text-align: start; font-size: 15px; }
+.menu-items button:hover { background: #f2f5f3; }
+
+/* Messages extras */
+.sender { display: block; font-size: 13px; font-weight: 700; color: var(--green-light); margin-bottom: 2px; }
+.system { align-self: center; margin: 4px 0; padding: 4px 12px; border-radius: 8px; background: #fff7d6; color: #5c5333; font-size: 13px; text-align: center; }
+.photo { display: block; width: 240px; max-width: 100%; border-radius: 8px; cursor: zoom-in; object-fit: cover; }
+.photo.loading { background: #dfe7e1; }
+.voice { display: flex; align-items: center; gap: 8px; min-width: 210px; }
+.voice progress { flex: 1; height: 6px; accent-color: var(--green-light); }
+.voice-time { font-size: 12px; color: var(--muted); min-width: 32px; }
+.viewer { position: fixed; inset: 0; z-index: 20; background: rgb(0 0 0 / 0.85); display: grid; place-items: center; cursor: zoom-out; padding: 16px; }
+.viewer img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+
+/* Composer extras */
+.composer { align-items: center; }
+.composer.recording { gap: 10px; padding: 10px 14px; }
+.composer.recording button { width: auto; margin: 0; padding: 8px 14px; border-radius: 20px; }
+.rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #e53935; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0.2; } }
+.blocked-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-top: 1px solid #e3e8e5; color: var(--muted); }
+.blocked-bar button { width: auto; margin: 0; padding: 8px 14px; }
+
+/* Urdu: right-to-left, with a proper Urdu (Nastaliq) font */
+[dir='rtl'] body, [dir='rtl'] button, [dir='rtl'] input { font-family: 'Noto Nastaliq Urdu', system-ui, sans-serif; }
+[dir='rtl'] { line-height: 1.9; }
+[dir='rtl'] .back { transform: scaleX(-1); }
+.phone, .newchat input, [dir='rtl'] time { direction: ltr; }
+[dir='rtl'] .newchat input { text-align: right; }

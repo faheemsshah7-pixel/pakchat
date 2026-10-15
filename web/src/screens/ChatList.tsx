@@ -1,51 +1,74 @@
-// ChatList.tsx: your chats, newest on top, plus a box to start a new chat.
-import { useEffect, useState } from 'react'
+// ChatList.tsx: your chats, newest on top, plus boxes to start a chat or a group.
+// The chats themselves come from Home.tsx, which listens to the database.
+import { useState } from 'react'
 import { signOut } from 'firebase/auth'
-import { collection, onSnapshot, query, where } from 'firebase/firestore'
-import { auth, db } from '../firebase'
+import { auth } from '../firebase'
 import type { Profile } from '../App'
-import { findUserByPhone, type Chat, type Person } from '../chats'
+import { alertsState, turnOnAlerts } from '../alerts'
+import {
+  chatIdFor,
+  chatTitle,
+  findUserByPhone,
+  isGroup,
+  isUnread,
+  otherPerson,
+  previewText,
+  tickFor,
+  typingText,
+  type Chat,
+  type Person,
+} from '../chats'
+import { useT } from '../lang'
 import { toInternational } from '../phone'
+import { formatTime, useNow } from '../time'
+import Avatar from './Avatar'
+import type { Open } from './Home'
+import Menu, { type MenuItem } from './Menu'
+import Ticks from './Ticks'
 
-type Props = { me: Person; profile: Profile; onOpen: (other: Person) => void }
+type Props = {
+  me: Person
+  profile: Profile
+  chats: Chat[]
+  onOpen: (open: Open) => void
+  onNewGroup: () => void
+}
 
-export default function ChatList({ me, profile, onOpen }: Props) {
-  const [chats, setChats] = useState<Chat[]>([])
+export default function ChatList({ me, profile, chats, onOpen, onNewGroup }: Props) {
+  const { t, lang, setLang } = useT()
   const [number, setNumber] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-
-  // Listen LIVE to every chat I'm a member of. When anyone sends me a message,
-  // that chat's lastMessage changes and this list updates by itself.
-  useEffect(() => {
-    const q = query(collection(db, 'chats'), where('members', 'array-contains', me.uid))
-    return onSnapshot(q, (snap) => {
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }) as Chat)
-      // Newest first
-      list.sort((a, b) => (b.updatedAt?.toMillis() ?? 0) - (a.updatedAt?.toMillis() ?? 0))
-      setChats(list)
-    })
-  }, [me.uid])
+  const [alerts, setAlerts] = useState(alertsState)
+  const now = useNow(2000) // re-check "typing…" every 2 seconds
 
   async function startChat(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     const phone = toInternational(number)
     if (phone === profile.phone) {
-      setError("That's your own number.")
+      setError(t.ownNumber)
       return
     }
     setBusy(true)
     try {
       const person = await findUserByPhone(phone)
-      if (person) onOpen(person)
-      else setError('Nobody on PakChat has that number yet.')
+      if (person) onOpen({ chatId: chatIdFor(me.uid, person.uid), other: person })
+      else setError(t.notOnPakChat)
     } catch (err) {
-      setError('Something went wrong. Try again.')
+      setError(t.somethingWrong)
       console.error(err)
     } finally {
       setBusy(false)
     }
+  }
+
+  const menu: MenuItem[] = [
+    { label: t.switchLanguage, onClick: () => setLang(lang === 'en' ? 'ur' : 'en') },
+    { label: t.logOut, onClick: () => signOut(auth), danger: true },
+  ]
+  if (alerts === 'off') {
+    menu.unshift({ label: '🔔 ' + t.alertsOn, onClick: () => turnOnAlerts().then(() => setAlerts(alertsState())) })
   }
 
   return (
@@ -55,48 +78,56 @@ export default function ChatList({ me, profile, onOpen }: Props) {
           PakChat
           <small>{profile.name}</small>
         </h2>
-        <button onClick={() => signOut(auth)}>Log out</button>
+        <Menu label={t.menu} items={menu} />
       </header>
 
       <form className="newchat" onSubmit={startChat}>
         <input
           inputMode="tel"
-          placeholder="Friend's number"
+          dir="ltr"
+          placeholder={t.friendsNumber}
           value={number}
           onChange={(e) => setNumber(e.target.value)}
         />
-        <button disabled={busy || number.length < 10}>New chat</button>
+        <button disabled={busy || number.length < 10}>{t.newChat}</button>
       </form>
       {error && <p className="error pad">{error}</p>}
 
       <div className="list">
-        {chats.length === 0 && <p className="muted center pad">No chats yet. Type a number above to start one.</p>}
+        <button className="row" onClick={onNewGroup}>
+          <Avatar name="" group />
+          <strong className="row-main">{t.newGroup}</strong>
+        </button>
+        {chats.length === 0 && <p className="muted center pad">{t.noChats}</p>}
         {chats.map((chat) => {
-          const otherUid = chat.members.find((uid) => uid !== me.uid)!
-          const otherName = chat.names[otherUid] ?? 'Unknown'
+          const title = chatTitle(chat, me.uid)
           const last = chat.lastMessage
+          const mine = last?.senderId === me.uid && last.kind !== 'system'
+          const typing = typingText(chat, me.uid, now, t)
+          const unread = isUnread(chat, me.uid)
+          const open = isGroup(chat) ? { chatId: chat.id } : { chatId: chat.id, other: otherPerson(chat, me.uid) }
           return (
-            <button key={chat.id} className="row" onClick={() => onOpen({ uid: otherUid, name: otherName })}>
+            <button key={chat.id} className={unread ? 'row unread' : 'row'} onClick={() => onOpen(open)}>
+              <Avatar name={title} group={isGroup(chat)} />
               <span className="row-main">
-                <strong>{otherName}</strong>
-                <span className="muted">
-                  {last && (last.senderId === me.uid ? 'You: ' : '') + last.text}
-                </span>
+                <strong dir="auto">{title}</strong>
+                {typing ? (
+                  <span className="typing">{typing}</span>
+                ) : (
+                  <span className="muted" dir="auto">
+                    {mine && <Ticks tick={tickFor(chat, me.uid, chat.updatedAt)} />}
+                    {previewText(chat, me.uid, t)}
+                  </span>
+                )}
               </span>
-              <time className="muted">{formatTime(chat.updatedAt?.toDate())}</time>
+              <span className="row-side">
+                <time className="muted">{formatTime(chat.updatedAt?.toDate(), t.locale)}</time>
+                {unread && <span className="dot" />}
+              </span>
             </button>
           )
         })}
       </div>
     </div>
   )
-}
-
-// Today: "14:05". Older: "12 Oct".
-function formatTime(date?: Date) {
-  if (!date) return ''
-  const today = new Date().toDateString() === date.toDateString()
-  return today
-    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString([], { day: 'numeric', month: 'short' })
 }

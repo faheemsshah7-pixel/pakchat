@@ -8,9 +8,11 @@ import {
   type ConfirmationResult,
 } from 'firebase/auth'
 import { auth } from '../firebase'
+import { useT } from '../lang'
 import { toInternational } from '../phone'
 
 export default function Login() {
+  const { t, lang, setLang } = useT()
   const [number, setNumber] = useState('')
   const [code, setCode] = useState('')
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null)
@@ -28,7 +30,7 @@ export default function Login() {
       const result = await signInWithPhoneNumber(auth, toInternational(number), recaptcha.current)
       setConfirmation(result)
     } catch (err) {
-      setError('Could not send the code. Check the number and try again.')
+      setError(t.sendCodeError)
       console.error(err)
       // Throw away the used robot check, so the next try gets a fresh one.
       recaptcha.current?.clear()
@@ -47,7 +49,7 @@ export default function Login() {
       // If the code is right, Firebase logs us in and App.tsx moves us on automatically.
       await confirmation.confirm(code)
     } catch (err) {
-      setError('That code is not right. Try again.')
+      setError(t.wrongCode)
       console.error(err)
       setBusy(false)
     }
@@ -55,10 +57,13 @@ export default function Login() {
 
   return (
     <div className="card">
+      <button className="link lang-switch" onClick={() => setLang(lang === 'en' ? 'ur' : 'en')}>
+        {t.switchLanguage}
+      </button>
       <h1>PakChat</h1>
       {!confirmation ? (
         <form onSubmit={sendCode}>
-          <label>Your phone number</label>
+          <label>{t.phoneLabel}</label>
           <div className="phone">
             <span>+92</span>
             <input
@@ -69,20 +74,21 @@ export default function Login() {
               autoFocus
             />
           </div>
-          <button disabled={busy || number.length < 10}>{busy ? 'Sending…' : 'Send code'}</button>
+          <button disabled={busy || number.length < 10}>{busy ? t.sending : t.sendCode}</button>
         </form>
       ) : (
         <form onSubmit={checkCode}>
-          <label>Enter the 6-digit code we sent you</label>
+          <label>{t.codeLabel}</label>
           <input
             inputMode="numeric"
+            dir="ltr"
             maxLength={6}
             placeholder="123456"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             autoFocus
           />
-          <button disabled={busy || code.length !== 6}>{busy ? 'Checking…' : 'Log in'}</button>
+          <button disabled={busy || code.length !== 6}>{busy ? t.checking : t.logIn}</button>
         </form>
       )}
       {error && <p className="error">{error}</p>}

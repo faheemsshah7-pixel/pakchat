@@ -1,0 +1,44 @@
+// time.ts: small helpers for showing times, and a clock that ticks.
+// `locale` says how to write dates: [] = your computer's default, ['ur-PK'] = Urdu.
+import { useEffect, useState } from 'react'
+
+// Today: "1:43 PM". Older: "12 Oct".
+export function formatTime(date: Date | undefined, locale: string[]) {
+  if (!date) return ''
+  return isToday(date) ? clock(date, locale) : shortDate(date, locale)
+}
+
+export function clock(date: Date, locale: string[]) {
+  return date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
+}
+
+export function shortDate(date: Date, locale: string[]) {
+  return date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
+}
+
+export function isToday(date: Date) {
+  return date.toDateString() === new Date().toDateString()
+}
+
+export function isYesterday(date: Date) {
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  return date.toDateString() === yesterday.toDateString()
+}
+
+// 75 seconds -> "1:15"
+export function duration(seconds: number) {
+  const s = Math.max(0, Math.round(seconds))
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0')
+}
+
+// The current time, updated every `everyMs` milliseconds.
+// Screens use it so "typing…" and "online" disappear by themselves when they get old.
+export function useNow(everyMs: number) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), everyMs)
+    return () => clearInterval(timer)
+  }, [everyMs])
+  return now
+}

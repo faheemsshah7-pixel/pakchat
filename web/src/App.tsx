@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { auth, db } from './firebase'
+import { useT } from './lang'
 import Login from './screens/Login'
 import ProfileSetup from './screens/ProfileSetup'
 import Home from './screens/Home'
@@ -13,6 +14,7 @@ import Home from './screens/Home'
 export type Profile = { name: string; phone: string }
 
 export default function App() {
+  const { t } = useT()
   // undefined = still checking, null = nobody logged in
   const [user, setUser] = useState<User | null | undefined>(undefined)
   // The profile we loaded, and whose it is (so we never show the last user's profile).
@@ -34,7 +36,7 @@ export default function App() {
   const profile = user && loaded?.uid === user.uid ? loaded.profile : undefined
 
   if (user === undefined || (user && profile === undefined)) {
-    return <div className="center muted">Loading…</div>
+    return <div className="center muted">{t.loading}</div>
   }
   if (!user) return <Login />
   if (!profile) return <ProfileSetup user={user} />

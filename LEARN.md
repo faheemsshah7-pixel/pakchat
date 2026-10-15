@@ -96,3 +96,66 @@ and the database tells it when something changes.
 - Log in as two people at once: a normal window and a private window (Cmd + Shift + N).
 - Watch Firestore in the Firebase console while you chat. You'll see `chats` appear.
 - In `ChatRoom.tsx`, change `limitToLast(100)` to `limitToLast(3)`. Only the last 3 show.
+
+## Step 2b: Ticks, online, typing
+
+| You see | How it works |
+| --- | --- |
+| 🕓 | Your message is still on its way. Firestore marks it as a "pending write". |
+| ✓ | The server has it. |
+| ✓✓ grey | The other person's app received it. `Home.tsx` writes `deliveredAt.<their id>` in the chat. |
+| ✓✓ blue | They opened the chat. `ChatRoom.tsx` writes `readAt.<their id>`. |
+| online / last seen | `presence.ts` writes `lastSeen` into your profile once a minute while PakChat is on screen. Under 90 seconds old means "online". |
+| typing… | `ChatRoom.tsx` writes `typing.<your id>` when you type, at most every 3 seconds. Under 6 seconds old means "typing…". |
+
+The ticks are just **comparisons of times**: a message is "read" if the other person's
+`readAt` is later than the message's `sentAt`.
+
+## Step 3: Groups, photos, voice notes
+
+### Groups (`groups.ts`, `NewGroup.tsx`, `GroupInfo.tsx`)
+A group is a chat with `type: 'group'`, a `title`, and an `admin`. Its id is random,
+so the rules check its `members` list instead of the id. "Bilal added Sara" lines are
+messages too, with `kind: 'system'`.
+
+### Photos and voice notes (`media.ts`, `Composer.tsx`, `MediaBubbles.tsx`)
+We're on Firebase's free plan, which has no file storage. So:
+1. A photo is shrunk with a `<canvas>` until it's under 0.9 MB. A voice note is recorded
+   at low quality (`MediaRecorder`), up to 2 minutes.
+2. It's turned into text (a "data URL") and saved in `chats/<id>/media/<id>`.
+3. The message only points at it (`mediaId`), so the chat loads fast.
+   Each bubble downloads its own photo or voice note when it's shown.
+
+When we move to the paid plan, only `media.ts` changes, to use Firebase Storage.
+
+## Step 4: Alerts, Urdu, block and report
+
+- **Alerts** (`alerts.ts`): the browser's pop-up notifications. Turn them on from the ⋮ menu.
+  On the free plan they only work while PakChat is open in a tab. The tab title also shows
+  unread chats: "(2) PakChat".
+- **Urdu** (`strings.ts`, `lang.ts`, `LangProvider.tsx`): every word lives in `strings.ts`,
+  in English and Urdu. Screens call `useT()` to get the words. Urdu also flips the page
+  to right-to-left (`dir="rtl"`) and uses the Noto Nastaliq Urdu font.
+- **Block** (`safety.ts`): saves `users/<you>/blocked/<them>`. The **rules** check it, so a
+  blocked person really can't message you, even with a hacked app.
+- **Report**: saves the last 5 messages in `reports/`. Nobody can read reports from the app.
+  You read them in the Firebase console: Firestore, then `reports`.
+
+### The rules got stricter
+Open `firestore.rules`. Every part has a comment. The main ideas:
+- You can only read a chat you're in.
+- Messages must carry your real id, your real name and the server's time.
+- Only the group admin can add people. Anyone can leave, but can't remove others.
+- Your profile's phone number must be the one you logged in with.
+
+## Step 5: Putting it online
+
+`npm --prefix web run build` makes the finished app in `web/dist`: plain HTML, CSS and
+JavaScript files. `npx firebase-tools deploy` uploads them to **Firebase Hosting**, and uploads
+`firestore.rules` too, so you never paste rules by hand again.
+`firebase.json` says what to upload, and `.firebaserc` says which project.
+
+### Try this
+- Change a word in `strings.ts`, build, deploy, and see it on the live site.
+- In the Firebase console, open **Hosting** to see every version you've uploaded.
+  You can roll back to an older one with one click.
