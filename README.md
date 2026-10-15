@@ -1,6 +1,6 @@
 # PakChat
 
-A WhatsApp-style chat app for Pakistan. Web app first, Android next.
+A WhatsApp-style chat app for Pakistan, on the web: https://pakchat-f89d8.web.app
 
 - `web/`: the web app (React + TypeScript + Vite)
 - `firestore.rules`: who can read and write what in the database

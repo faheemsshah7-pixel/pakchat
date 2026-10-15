@@ -32,6 +32,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { rememberMedia } from './media'
+import { contactKey } from './phone'
 import { fill, type Strings } from './strings'
 
 export type Person = { uid: string; name: string }
@@ -106,9 +107,10 @@ export function chatTitle(chat: Chat, myUid: string) {
   return isGroup(chat) ? (chat.title ?? '') : otherPerson(chat, myUid).name
 }
 
-// Look up a PakChat user by phone number. Returns null if nobody has it.
-export async function findUserByPhone(phone: string): Promise<Person | null> {
-  const q = query(collection(db, 'users'), where('phone', '==', phone), limit(1))
+// Look up a PakChat user by phone number or Gmail. Returns null if nobody has it.
+export async function findUser(input: string): Promise<Person | null> {
+  const { field, value } = contactKey(input)
+  const q = query(collection(db, 'users'), where(field, '==', value), limit(1))
   const snap = await getDocs(q)
   if (snap.empty) return null
   const found = snap.docs[0]

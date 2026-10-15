@@ -1,13 +1,13 @@
-// Avatar.tsx: a coloured circle with the first letter of a name.
+// Avatar.tsx: a coloured circle with the first letter of a name (or a group icon).
 // The colour comes from the name, so each person always gets the same one.
-const COLOURS = ['#0b6b35', '#1e6fa8', '#8a4fbf', '#c0582b', '#b0306a', '#2c8c8c', '#6b7d1d']
+import { avatarBackground } from '../colours'
+import Icon from './Icon'
 
-export default function Avatar({ name, group = false }: { name: string; group?: boolean }) {
-  let sum = 0
-  for (const ch of name) sum += ch.codePointAt(0) ?? 0
+export default function Avatar({ name, group = false, size = 48 }: { name: string; group?: boolean; size?: number }) {
+  const style = { background: avatarBackground(name), width: size, height: size, fontSize: size * 0.42 }
   return (
-    <span className="avatar" style={{ background: COLOURS[sum % COLOURS.length] }} aria-hidden>
-      {group ? '👥' : (name.trim()[0] ?? '?').toUpperCase()}
+    <span className="avatar" style={style} aria-hidden>
+      {group ? <Icon name="users" size={size * 0.48} /> : (name.trim()[0] ?? '?').toUpperCase()}
     </span>
   )
 }

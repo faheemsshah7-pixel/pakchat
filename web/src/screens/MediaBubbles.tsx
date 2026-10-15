@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { loadMedia } from '../media'
 import { duration } from '../time'
+import Icon from './Icon'
 
 function useMedia(chatId: string, mediaId: string | undefined) {
   const [data, setData] = useState<string | null>(null)
@@ -43,8 +44,8 @@ export function VoiceBubble({ chatId, mediaId, seconds = 0 }: { chatId: string; 
 
   return (
     <div className="voice">
-      <button type="button" className="icon round" disabled={!data} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-        {playing ? '⏸' : '▶'}
+      <button type="button" className="play" disabled={!data} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
+        <Icon name={playing ? 'pause' : 'play'} size={18} />
       </button>
       <progress max={seconds || 1} value={position} />
       <span className="voice-time">{duration(playing ? position : seconds)}</span>

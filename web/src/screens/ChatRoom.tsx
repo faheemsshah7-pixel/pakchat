@@ -1,6 +1,7 @@
 // ChatRoom.tsx: one conversation (with one person, or a group).
 // Messages appear live, for everyone in it.
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query, type Timestamp } from 'firebase/firestore'
 import { db } from '../firebase'
 import {
@@ -20,11 +21,13 @@ import {
 import { useT } from '../lang'
 import { presenceText } from '../presence'
 import { block, report, unblock } from '../safety'
-import { fill } from '../strings'
-import { clock, useNow } from '../time'
+import { nameColour } from '../colours'
+import { fill, type Strings } from '../strings'
+import { clock, isToday, isYesterday, useNow } from '../time'
 import Avatar from './Avatar'
 import Composer from './Composer'
 import GroupInfo from './GroupInfo'
+import Icon from './Icon'
 import { PhotoBubble, VoiceBubble } from './MediaBubbles'
 import Menu, { type MenuItem } from './Menu'
 import Ticks from './Ticks'
@@ -72,6 +75,17 @@ export default function ChatRoom({ me, chatId, chat, other: otherProp, blocked, 
     bottom.current?.scrollIntoView()
   }, [messages])
 
+  // Esc closes the photo you're looking at, or else the chat (like WhatsApp Web).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape' || document.querySelector('.modal')) return // a window on top handles its own Esc
+      if (viewing) setViewing(null)
+      else if (!showInfo) onBack()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [viewing, showInfo, onBack])
+
   // New message from someone else while this chat is on screen? Mark it read (blue ✓✓).
   useEffect(() => {
     const newest = messages.findLast((m) => m.senderId !== me.uid)
@@ -108,29 +122,30 @@ export default function ChatRoom({ me, chatId, chat, other: otherProp, blocked, 
 
   const menu: MenuItem[] = []
   if (group) {
-    menu.push({ label: t.groupInfo, onClick: () => setShowInfo(true) })
+    menu.push({ label: t.groupInfo, icon: 'info', onClick: () => setShowInfo(true) })
   } else if (other) {
     menu.push(
       iBlockedThem
-        ? { label: t.unblock, onClick: () => unblock(me.uid, other.uid) }
+        ? { label: t.unblock, icon: 'block', onClick: () => unblock(me.uid, other.uid) }
         : {
             label: t.block,
+            icon: 'block',
             danger: true,
             onClick: () => confirm(fill(t.confirmBlock, { name: other.name })) && block(me.uid, other.uid),
           },
     )
   }
-  if (messages.length > 0) menu.push({ label: t.report, onClick: reportChat, danger: true })
+  if (messages.length > 0) menu.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
 
   if (showInfo && chat) return <GroupInfo me={me} chat={chat} onBack={() => setShowInfo(false)} />
 
   return (
-    <div className="app">
+    <div className="pane">
       <header className="bar">
-        <button className="back" onClick={onBack} aria-label={t.back}>
-          ←
+        <button className="icon back" onClick={onBack} aria-label={t.back}>
+          <Icon name="back" />
         </button>
-        <Avatar name={title} group={group} />
+        <Avatar name={title} group={group} size={42} />
         <h2 dir="auto" className={group ? 'clickable' : ''} onClick={() => group && setShowInfo(true)}>
           {title}
           <small>
@@ -140,39 +155,60 @@ export default function ChatRoom({ me, chatId, chat, other: otherProp, blocked, 
         {menu.length > 0 && <Menu label={t.menu} items={menu} />}
       </header>
 
-      <div className="messages">
-        {messages.length === 0 && <p className="muted center">{t.sayHi}</p>}
-        {messages.map((m) => {
-          if (m.kind === 'system') {
-            return (
-              <p key={m.id} className="system">
-                {systemText(m, me.uid, t)}
-              </p>
+      {/* The wall is the patterned background. The messages scroll on top of it. */}
+      <div className="wall">
+        <div className="messages">
+          {messages.length === 0 && <p className="say-hi">{t.sayHi}</p>}
+          {messages.map((m, i) => {
+            const before = messages[i - 1]
+            const day = dayLabel(m.sentAt?.toDate(), t)
+            const newDay = day !== dayLabel(before?.sentAt?.toDate(), t)
+            const dayDivider = newDay && day && (
+              <div className="day">
+                <span>{day}</span>
+              </div>
             )
-          }
-          const mine = m.senderId === me.uid
-          return (
-            <div key={m.id} className={mine ? 'bubble mine' : 'bubble'}>
-              {group && !mine && <span className="sender">{m.senderName}</span>}
-              {m.kind === 'photo' && (
-                <PhotoBubble chatId={chatId} mediaId={m.mediaId} width={m.width} height={m.height} onView={setViewing} />
-              )}
-              {m.kind === 'voice' && <VoiceBubble chatId={chatId} mediaId={m.mediaId} seconds={m.seconds} />}
-              {(m.kind ?? 'text') === 'text' && <span dir="auto">{m.text}</span>}
-              <time>
-                {m.sentAt && clock(m.sentAt.toDate(), t.locale)}
-                {mine && <Ticks tick={tickFor(chat, me.uid, m.sentAt, m.pending)} />}
-              </time>
-            </div>
-          )
-        })}
-        <div ref={bottom} />
+            if (m.kind === 'system') {
+              return (
+                <Fragment key={m.id}>
+                  {dayDivider}
+                  <p className="system">{systemText(m, me.uid, t)}</p>
+                </Fragment>
+              )
+            }
+            const mine = m.senderId === me.uid
+            // "first" = the first of several messages in a row from the same person. It gets the little tail.
+            const first = newDay || !before || before.kind === 'system' || before.senderId !== m.senderId
+            return (
+              <Fragment key={m.id}>
+                {dayDivider}
+                <div className={['bubble', mine && 'mine', first && 'first', m.kind === 'photo' && 'has-photo'].filter(Boolean).join(' ')}>
+                  {group && !mine && first && (
+                    <span className="sender" style={{ color: nameColour(m.senderName ?? '') }}>
+                      {m.senderName}
+                    </span>
+                  )}
+                  {m.kind === 'photo' && (
+                    <PhotoBubble chatId={chatId} mediaId={m.mediaId} width={m.width} height={m.height} onView={setViewing} />
+                  )}
+                  {m.kind === 'voice' && <VoiceBubble chatId={chatId} mediaId={m.mediaId} seconds={m.seconds} />}
+                  {(m.kind ?? 'text') === 'text' && <span dir="auto">{m.text}</span>}
+                  <time>
+                    {m.sentAt && clock(m.sentAt.toDate(), t.locale)}
+                    {mine && <Ticks tick={tickFor(chat, me.uid, m.sentAt, m.pending)} />}
+                  </time>
+                </div>
+              </Fragment>
+            )
+          })}
+          <div ref={bottom} />
+        </div>
       </div>
 
       {iBlockedThem && other ? (
         <div className="blocked-bar">
           <span>{fill(t.youBlocked, { name: other.name })}</span>
-          <button className="secondary" onClick={() => unblock(me.uid, other.uid)}>
+          <button className="btn small secondary" onClick={() => unblock(me.uid, other.uid)}>
             {t.unblock}
           </button>
         </div>
@@ -180,13 +216,23 @@ export default function ChatRoom({ me, chatId, chat, other: otherProp, blocked, 
         <Composer onSend={send} onTyping={onTyping} />
       )}
 
-      {viewing && (
-        <div className="viewer" onClick={() => setViewing(null)}>
-          <img src={viewing} alt="" />
-        </div>
-      )}
+      {viewing &&
+        createPortal(
+          <div className="viewer" onClick={() => setViewing(null)}>
+            <img src={viewing} alt="" />
+          </div>,
+          document.body,
+        )}
     </div>
   )
+}
+
+// "Today", "Yesterday", or a date like "12 October 2026", for the labels between days.
+function dayLabel(date: Date | undefined, t: Strings) {
+  if (!date) return ''
+  if (isToday(date)) return t.today
+  if (isYesterday(date)) return t.yesterday
+  return date.toLocaleDateString(t.locale, { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
 // The small line under the name: "typing…", "online", "last seen…", or the group's members.

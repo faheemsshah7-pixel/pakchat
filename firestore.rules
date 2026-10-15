@@ -10,11 +10,13 @@ service cloud.firestore {
 
     // users/<uid>: anyone logged in can see profiles (to find friends),
     // but you can only create or change YOUR OWN profile,
-    // and the phone number must be the one you really logged in with.
+    // and the phone number or Gmail must be the one you really logged in with.
+    // (SMS login gives you a phone_number; Google login gives you an email.)
     match /users/{userId} {
       allow read: if signedIn();
       allow write: if signedIn() && request.auth.uid == userId
-        && request.resource.data.phone == request.auth.token.phone_number
+        && request.resource.data.get('phone', null) == request.auth.token.get('phone_number', null)
+        && request.resource.data.get('email', null) == request.auth.token.get('email', null)
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 40;
 

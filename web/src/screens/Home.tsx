@@ -1,5 +1,8 @@
-// Home.tsx: the main screen after login. It shows one of:
-//   the chat list, the "new group" screen, or one open chat.
+// Home.tsx: the main screen after login.
+// On a computer it's two panels side by side, like WhatsApp Web:
+//   left:  your chats (or the "new group" screen)
+//   right: the open chat (or a welcome message when none is open)
+// On a phone there's only room for one, so index.css hides the other.
 // It also does some jobs in the background while you're logged in:
 //   1. listens to all your chats
 //   2. pops up an alert when a message arrives and you're not looking
@@ -19,6 +22,7 @@ import { useBlocked } from '../safety'
 import ChatList from './ChatList'
 import ChatRoom from './ChatRoom'
 import NewGroup from './NewGroup'
+import Welcome from './Welcome'
 
 // Which chat is open. `other` is set for direct chats (the chat may not exist yet).
 export type Open = { chatId: string; other?: Person }
@@ -95,31 +99,49 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   useEffect(() => startHeartbeat(user.uid), [user.uid])
 
   const openChat = open ? chats.find((c) => c.id === open.chatId) : undefined
-  // (If you just left a group, it's gone from your chats, so we fall back to the list.)
-  if (open && (open.other || openChat)) {
-    return (
-      <ChatRoom
-        me={me}
-        chatId={open.chatId}
-        chat={openChat}
-        other={open.other}
-        blocked={blocked}
-        onBack={() => setOpen(null)}
-      />
-    )
-  }
-  if (newGroup) {
-    return (
-      <NewGroup
-        me={me}
-        chats={chats}
-        onCancel={() => setNewGroup(false)}
-        onCreated={(chatId) => {
-          setNewGroup(false)
-          setOpen({ chatId })
-        }}
-      />
-    )
-  }
-  return <ChatList me={me} profile={profile} chats={chats} onOpen={setOpen} onNewGroup={() => setNewGroup(true)} />
+  // (If you just left a group, it's gone from your chats, so nothing is open any more.)
+  const showing = open && (open.other || openChat) ? open : null
+
+  return (
+    <div className={showing ? 'app has-chat' : 'app'}>
+      <aside className="side">
+        {newGroup ? (
+          <NewGroup
+            me={me}
+            chats={chats}
+            onCancel={() => setNewGroup(false)}
+            onCreated={(chatId) => {
+              setNewGroup(false)
+              setOpen({ chatId })
+            }}
+          />
+        ) : (
+          <ChatList
+            me={me}
+            profile={profile}
+            chats={chats}
+            activeId={showing?.chatId}
+            onOpen={setOpen}
+            onNewGroup={() => setNewGroup(true)}
+          />
+        )}
+      </aside>
+      <main className="main">
+        {showing ? (
+          // key: a different chat gets a fresh ChatRoom, so nothing carries over from the last one.
+          <ChatRoom
+            key={showing.chatId}
+            me={me}
+            chatId={showing.chatId}
+            chat={openChat}
+            other={showing.other}
+            blocked={blocked}
+            onBack={() => setOpen(null)}
+          />
+        ) : (
+          <Welcome />
+        )}
+      </main>
+    </div>
+  )
 }

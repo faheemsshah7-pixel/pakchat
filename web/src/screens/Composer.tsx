@@ -1,10 +1,11 @@
 // Composer.tsx: the bar at the bottom of a chat.
-//   📷  pick a photo       🎤  record a voice note       Send  send what you typed
+//   camera: pick a photo     microphone: record a voice note     paper plane: send what you typed
 import { useEffect, useRef, useState } from 'react'
 import type { Content } from '../chats'
 import { useT } from '../lang'
 import { MAX_VOICE_SECONDS, shrinkPhoto, startRecording, type Recording } from '../media'
 import { duration, useNow } from '../time'
+import Icon from './Icon'
 
 type Props = { onSend: (content: Content) => Promise<void>; onTyping: () => void }
 
@@ -72,41 +73,46 @@ export default function Composer({ onSend, onTyping }: Props) {
   }
 
   return (
-    <>
-      {error && <p className="error pad">{error}</p>}
+    <div className="composer-area">
+      {error && <p className="error toast">{error}</p>}
       {recording ? (
         <RecordingBar recording={recording} onDone={finishVoice} />
       ) : (
         <form className="composer" onSubmit={sendText}>
-          <button type="button" className="icon round" aria-label={t.sendPhoto} title={t.sendPhoto} onClick={() => photoInput.current?.click()}>
-            📷
-          </button>
-          <input ref={photoInput} type="file" accept="image/*" hidden onChange={pickPhoto} />
-          <input
-            dir="auto"
-            placeholder={t.message}
-            value={text}
-            maxLength={2000}
-            onChange={(e) => {
-              setText(e.target.value)
-              if (e.target.value) onTyping()
-            }}
-            autoFocus
-          />
+          <div className="field">
+            <button type="button" className="icon" aria-label={t.sendPhoto} title={t.sendPhoto} onClick={() => photoInput.current?.click()}>
+              <Icon name="camera" />
+            </button>
+            <input ref={photoInput} type="file" accept="image/*" hidden onChange={pickPhoto} />
+            <input
+              dir="auto"
+              placeholder={t.message}
+              value={text}
+              maxLength={2000}
+              onChange={(e) => {
+                setText(e.target.value)
+                if (e.target.value) onTyping()
+              }}
+              autoFocus
+            />
+          </div>
+          {/* One round button: Send when there's text, the microphone when there isn't. */}
           {text.trim() ? (
-            <button>{t.send}</button>
+            <button className="round-btn" aria-label={t.send} title={t.send}>
+              <Icon name="send" />
+            </button>
           ) : (
-            <button type="button" className="icon round" aria-label={t.recordVoice} title={t.recordVoice} onClick={startVoice}>
-              🎤
+            <button type="button" className="round-btn" aria-label={t.recordVoice} title={t.recordVoice} onClick={startVoice}>
+              <Icon name="mic" />
             </button>
           )}
         </form>
       )}
-    </>
+    </div>
   )
 }
 
-// While recording: a red dot, the time so far, and Cancel / Send.
+// While recording: a bin to cancel, a red dot, the time so far, a moving sound wave, and Send.
 function RecordingBar({ recording, onDone }: { recording: Recording; onDone: (keep: boolean) => void }) {
   const { t } = useT()
   const now = useNow(250)
@@ -120,15 +126,22 @@ function RecordingBar({ recording, onDone }: { recording: Recording; onDone: (ke
 
   return (
     <div className="composer recording">
-      <span className="rec-dot" />
-      <span className="row-main">
-        {t.recording} {duration(seconds)} / {duration(MAX_VOICE_SECONDS)}
-      </span>
-      <button type="button" className="secondary" onClick={() => onDone(false)}>
-        {t.cancel}
-      </button>
-      <button type="button" onClick={() => onDone(true)}>
-        {t.send}
+      <div className="field">
+        <button type="button" className="icon danger" aria-label={t.cancel} title={t.cancel} onClick={() => onDone(false)}>
+          <Icon name="trash" />
+        </button>
+        <span className="rec-dot" />
+        <span className="rec-time">
+          {duration(seconds)} <small>/ {duration(MAX_VOICE_SECONDS)}</small>
+        </span>
+        <span className="wave" aria-label={t.recording}>
+          {Array.from({ length: 18 }, (_, i) => (
+            <i key={i} style={{ animationDelay: `${(i % 6) * 0.12}s` }} />
+          ))}
+        </span>
+      </div>
+      <button type="button" className="round-btn" aria-label={t.send} title={t.send} onClick={() => onDone(true)}>
+        <Icon name="send" />
       </button>
     </div>
   )

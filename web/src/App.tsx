@@ -8,10 +8,12 @@ import { doc, onSnapshot } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import { useT } from './lang'
 import Login from './screens/Login'
+import Logo from './screens/Logo'
 import ProfileSetup from './screens/ProfileSetup'
 import Home from './screens/Home'
 
-export type Profile = { name: string; phone: string }
+// phone is set if you logged in by SMS, email if you logged in with Google.
+export type Profile = { name: string; phone?: string | null; email?: string | null }
 
 export default function App() {
   const { t } = useT()
@@ -36,7 +38,11 @@ export default function App() {
   const profile = user && loaded?.uid === user.uid ? loaded.profile : undefined
 
   if (user === undefined || (user && profile === undefined)) {
-    return <div className="center muted">{t.loading}</div>
+    return (
+      <div className="splash" aria-label={t.loading}>
+        <Logo size={72} />
+      </div>
+    )
   }
   if (!user) return <Login />
   if (!profile) return <ProfileSetup user={user} />

@@ -159,3 +159,45 @@ JavaScript files. `npx firebase-tools deploy` uploads them to **Firebase Hosting
 - Change a word in `strings.ts`, build, deploy, and see it on the live site.
 - In the Firebase console, open **Hosting** to see every version you've uploaded.
   You can roll back to an older one with one click.
+
+## Step 6: Sign in with Google, and finding friends by Gmail
+
+Real SMS codes need Firebase's paid plan, so PakChat also lets you log in with Google.
+- `Login.tsx` calls `signInWithPopup(auth, new GoogleAuthProvider())`. Google opens a small
+  window, you pick your account, and Firebase logs you in. Test phone numbers still work too.
+- `ProfileSetup.tsx` fills in your name from Google, and saves your Gmail in `users/<you>`.
+- `phone.ts` has `contactKey()`: if what you typed has an `@`, it's a Gmail (made lower-case),
+  otherwise it's a phone number. `findUser()` in `chats.ts` searches the right field, so the
+  "Friend's number or Gmail" box works for both.
+- The rules check that the Gmail in your profile is the one you logged in with, just like the phone number.
+
+## Step 7: The new design and the five looks
+
+### Two panels
+On a computer, `Home.tsx` shows your chats on the left and the open chat on the right,
+like WhatsApp Web. On a phone there's only room for one, so `index.css` hides the other
+(look for `@media (max-width: 899px)`). `@media` means "only on screens this size".
+
+### Looks (themes)
+Every colour in `index.css` is a **variable**, like `var(--accent)`. Each look (Aurora,
+Emerald, Midnight, Sunset, Ocean) is just a list of those variables at the top of the file.
+- `theme.ts` puts `data-theme="aurora"` on the page, and the matching list wins.
+- Your pick is saved in the browser (`localStorage`), so it's still there tomorrow.
+- Aurora is the default. The login screens always use Aurora (`useFixedTheme`).
+- The little previews in `ThemePicker.tsx` use the same trick: each one has its own
+  `data-theme`, so it's drawn in that look's colours.
+
+### The new pieces
+| File | What it is |
+| --- | --- |
+| `Icon.tsx` | Line drawings (SVG) instead of emojis, so icons look the same everywhere |
+| `Logo.tsx` | The logo: a chat bubble with the crescent and star |
+| `doodles.svg` | The little drawings on the chat background (chai, a kite, a crescent…) |
+| `colours.ts` | Gives each person their own colour, from their name |
+| `Welcome.tsx` | What the right panel shows when no chat is open |
+| `ThemePicker.tsx` | The "Choose a look" window |
+
+### Try this
+- Make your own look: copy the Ocean block in `index.css`, rename it `[data-theme='mine']`,
+  change the colours, then add `'mine'` to `THEMES` in `theme.ts` and a name in `strings.ts`.
+- Press Esc in a chat on a computer: it closes the chat, like WhatsApp Web.
