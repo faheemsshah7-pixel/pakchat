@@ -25,3 +25,28 @@ button.secondary { background: transparent; color: var(--green); border: 1px sol
 .error { color: #b3261e; margin: 12px 0 0; }
 .muted { color: var(--muted); }
 .center { text-align: center; }
+
+/* ---------- Step 2: chat list and chat screen ---------- */
+.app { width: 480px; max-width: 100%; height: min(720px, calc(100vh - 32px)); display: flex; flex-direction: column; background: var(--card); border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgb(0 0 0 / 0.08); }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--green); color: white; }
+.bar h2 { flex: 1; margin: 0; font-size: 18px; }
+.bar small { display: block; font-size: 13px; font-weight: 400; opacity: 0.8; }
+.bar button { width: auto; margin: 0; padding: 6px 12px; font-size: 14px; background: transparent; border: 1px solid rgb(255 255 255 / 0.5); }
+.bar button.back { border: 0; font-size: 22px; padding: 2px 6px; }
+.pad { padding: 0 16px; }
+.newchat { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e3e8e5; }
+.newchat input { font-size: 16px; padding: 10px; }
+.newchat button, .composer button { width: auto; margin: 0; white-space: nowrap; }
+.list { flex: 1; overflow-y: auto; }
+.row { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 14px 16px; border-radius: 0; border-bottom: 1px solid #eef1ef; background: none; color: var(--text); font-weight: 400; text-align: left; }
+.row:hover { background: #f5f8f6; }
+.row-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.row-main span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row time { font-size: 12px; }
+.messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 16px; background: #e8efe9; }
+.bubble { align-self: flex-start; max-width: 75%; padding: 8px 12px; border-radius: 12px; background: white; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: 0 1px 1px rgb(0 0 0 / 0.06); }
+.bubble.mine { align-self: flex-end; background: #d4f3da; }
+.bubble time { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); text-align: right; }
+.composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e3e8e5; }
+.composer input { font-size: 16px; padding: 10px 14px; border-radius: 20px; }
+.composer button { border-radius: 20px; padding: 10px 18px; }

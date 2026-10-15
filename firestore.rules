@@ -3,11 +3,41 @@ rules_version = '2';
 // They are what stops someone from reading chats that aren't theirs.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
     // users/<uid>: anyone logged in can see profiles (to find friends),
     // but you can only create or change YOUR OWN profile.
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == userId;
+    }
+
+    // chats/<uidA_uidB>: the chat id is made of the two people's ids,
+    // so we can tell who is in a chat just by looking at its id.
+    match /chats/{chatId} {
+      function isMember() {
+        return signedIn() && request.auth.uid in chatId.split('_');
+      }
+
+      // Open one chat: only if you're in it.
+      allow get: if isMember();
+      // List chats: only a list of chats you're in ("members contains me").
+      allow list: if signedIn() && request.auth.uid in resource.data.members;
+      // Create or update: only if you're in it, and nobody can change who's in it.
+      allow create, update: if isMember() && request.resource.data.members == chatId.split('_');
+
+      match /messages/{messageId} {
+        allow read: if isMember();
+        // Send: only as yourself, with real text of up to 2000 letters.
+        // Nobody can edit or delete messages (yet).
+        allow create: if isMember()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+      }
     }
   }
 }

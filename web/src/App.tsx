@@ -1,7 +1,7 @@
 // App.tsx: the "traffic controller". It decides which screen to show:
 //   not logged in      -> Login
 //   logged in, no name -> ProfileSetup
-//   logged in + name   -> Home
+//   logged in + name   -> Home (your chats)
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
@@ -38,5 +38,5 @@ export default function App() {
   }
   if (!user) return <Login />
   if (!profile) return <ProfileSetup user={user} />
-  return <Home profile={profile} />
+  return <Home user={user} profile={profile} />
 }

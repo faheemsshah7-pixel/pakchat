@@ -8,6 +8,7 @@ import {
   type ConfirmationResult,
 } from 'firebase/auth'
 import { auth } from '../firebase'
+import { toInternational } from '../phone'
 
 export default function Login() {
   const [number, setNumber] = useState('')
@@ -17,12 +18,6 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   // reCAPTCHA is an invisible "are you a robot?" check Google requires before sending an SMS.
   const recaptcha = useRef<RecaptchaVerifier | null>(null)
-
-  // "0300 1234567" or "3001234567" -> "+923001234567"
-  function toInternational(input: string) {
-    const digits = input.replace(/\D/g, '').replace(/^92/, '').replace(/^0/, '')
-    return '+92' + digits
-  }
 
   async function sendCode(e: React.FormEvent) {
     e.preventDefault()
@@ -35,6 +30,9 @@ export default function Login() {
     } catch (err) {
       setError('Could not send the code. Check the number and try again.')
       console.error(err)
+      // Throw away the used robot check, so the next try gets a fresh one.
+      recaptcha.current?.clear()
+      recaptcha.current = null
     } finally {
       setBusy(false)
     }
