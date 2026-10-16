@@ -447,8 +447,8 @@ service cloud.firestore {
           && newMessageOk(request.resource.data)
           && mayTalk(request.resource.data);
         // Changing a message: a reaction, an edit, "delete for everyone", a live location moving,
-        // or cancelling a call you scheduled.
-        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall());
+        // cancelling a call you scheduled, or voting in a poll.
+        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall() || voting());
         // Disappearing messages: once a message's time is up, anyone in the chat can delete it for good.
         allow delete: if canRead() && expired(resource.data);
       }
@@ -464,15 +464,43 @@ service cloud.firestore {
       // Only these fields, so nobody can sneak in a fake "edited" or "deleted" mark.
       function newMessageOk(m) {
         return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt',
-            'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact', 'startsAt', 'callId'])
+            'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact', 'startsAt', 'callId',
+            'options', 'multi', 'sticker', 'mentions'])
           && m.get('forwarded', false) is bool
           && expiryOk(m)
+          && mentionsOk(m)
           && (!('replyTo' in m)
             || (m.replyTo is map
-              && m.replyTo.keys().hasOnly(['id', 'senderId', 'senderName', 'kind', 'text'])
+              && m.replyTo.keys().hasOnly(['id', 'senderId', 'senderName', 'kind', 'text', 'from'])
               && m.replyTo.get('text', '') is string
-              && m.replyTo.get('text', '').size() <= 200))
+              && m.replyTo.get('text', '').size() <= 200
+              // "Reply privately": the message you answer is in a group, and this is its name
+              && m.replyTo.get('from', '') is string
+              && m.replyTo.get('from', '').size() <= 50))
           && contentOk(m);
+      }
+      // @mentions: the ids of the people a message names (at most 50).
+      function mentionsOk(m) {
+        return !('mentions' in m) || (m.mentions is list && m.mentions.size() <= 50);
+      }
+      // A poll's answer number i (if there is one): some words, up to 100 letters.
+      function optionOk(options, i) {
+        return options.size() <= i || (options[i] is string && options[i].size() > 0 && options[i].size() <= 100);
+      }
+      // A poll: a question (in text) and 2 to 12 answers. multi = people may pick more than one.
+      // Nobody has voted yet when it's sent (so there's no "votes" field).
+      function pollOk(m) {
+        return m.text is string && m.text.size() > 0 && m.text.size() <= 255
+          && m.options is list && m.options.size() >= 2 && m.options.size() <= 12
+          && optionOk(m.options, 0) && optionOk(m.options, 1) && optionOk(m.options, 2) && optionOk(m.options, 3)
+          && optionOk(m.options, 4) && optionOk(m.options, 5) && optionOk(m.options, 6) && optionOk(m.options, 7)
+          && optionOk(m.options, 8) && optionOk(m.options, 9) && optionOk(m.options, 10) && optionOk(m.options, 11)
+          && m.get('multi', false) is bool;
+      }
+      // A sticker: one that comes with PakChat (its name, like "pk:salam"), or one you made from a photo (mediaId).
+      function stickerOk(m) {
+        return (m.get('sticker', '') is string && m.get('sticker', '').size() > 0 && m.get('sticker', '').size() <= 40 && !('mediaId' in m))
+          || (m.get('mediaId', null) is string && !('sticker' in m));
       }
       function textOk(text) {
         return text is string && text.size() > 0 && text.size() <= 4000;
@@ -497,6 +525,8 @@ service cloud.firestore {
             && (!m.get('live', false)
               || (m.liveUntil is timestamp && m.liveUntil > request.time && m.liveUntil < request.time + duration.value(481, 'm'))))
           // A contact card: a name, and a phone number, Gmail or PakChat id
+          || (m.kind == 'poll' && pollOk(m))
+          || (m.kind == 'sticker' && stickerOk(m))
           || (m.kind == 'contact' && m.contact is map
             && m.contact.keys().hasOnly(['name', 'phone', 'email', 'uid'])
             && m.contact.name is string && m.contact.name.size() > 0 && m.contact.name.size() <= 60
@@ -558,6 +588,25 @@ service cloud.firestore {
           && (now.get('movedAt', null) == was.get('movedAt', null) || now.movedAt == request.time)
           && (now.liveUntil == was.liveUntil || now.liveUntil == request.time);
       }
+      // Voting in a poll: votes = { uid: [answer numbers] }. You can only change YOUR OWN vote.
+      // One answer, or (if the poll allows it) several different ones. No vote = your id isn't there.
+      function voting() {
+        let was = resource.data;
+        let old = was.get('votes', {});
+        let now = request.resource.data.get('votes', {});
+        return was.get('kind', 'text') == 'poll'
+          && !was.get('deleted', false)
+          && request.resource.data.diff(was).affectedKeys().hasOnly(['votes'])
+          && now is map
+          && now.diff(old).affectedKeys().hasOnly([me()])
+          && (!(me() in now) || choiceOk(now[me()], was));
+      }
+      function choiceOk(picked, poll) {
+        return picked is list
+          && picked.size() <= (poll.get('multi', false) ? poll.options.size() : 1)
+          && picked.hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11][0:poll.options.size()])
+          && picked.toSet().size() == picked.size();
+      }
       // Cancel a call you scheduled: the card in the chat then says "Cancelled".
       function cancellingCall() {
         return resource.data.senderId == me()
@@ -566,12 +615,14 @@ service cloud.firestore {
           && request.resource.data.cancelled == true;
       }
       // Edit your own message (or a photo's, video's or document's caption), up to 15 minutes after sending it.
+      // (Its @mentions change with the words.)
       function editing() {
         return resource.data.senderId == me()
           && !resource.data.get('deleted', false)
           && request.time < resource.data.sentAt + duration.value(15, 'm')
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'caption', 'editedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'caption', 'editedAt', 'mentions'])
           && request.resource.data.editedAt == request.time
+          && mentionsOk(request.resource.data)
           && ((resource.data.get('kind', 'text') == 'text' && textOk(request.resource.data.text))
             || (resource.data.get('kind', 'text') in ['photo', 'video', 'file'] && captionOk(request.resource.data)));
       }

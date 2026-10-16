@@ -1,10 +1,12 @@
 // ContactInfo.tsx: about the person you're chatting with: photo, name, number or Gmail,
 // their "about" line, photos you shared, starred messages, disappearing messages,
 // and buttons to call, mute, clear, block, report or delete.
+// In "Message yourself" it's about you, without calls, block or report.
 import type { Message, Person } from '../chats'
 import { timerLabel } from '../disappearing'
 import { useT } from '../lang'
 import { useProfile } from '../profiles'
+import { fill } from '../strings'
 import { PersonAvatar } from './Avatar'
 import Icon, { type IconName } from './Icon'
 import MediaGrid from './MediaGrid'
@@ -23,6 +25,7 @@ export type ChatActions = {
 type Props = {
   me: Person
   chatId: string
+  self?: boolean // "Message yourself"
   person: Person
   messages: Message[]
   muted: boolean
@@ -35,7 +38,7 @@ type Props = {
   onView: (m: Message, data: string) => void
 }
 
-export default function ContactInfo({ chatId, person, messages, muted, blocked, starred, timer, actions, onCall, onBack, onView }: Props) {
+export default function ContactInfo({ chatId, self, person, messages, muted, blocked, starred, timer, actions, onCall, onBack, onView }: Props) {
   const { t } = useT()
   const profile = useProfile(person.uid)
   return (
@@ -49,7 +52,7 @@ export default function ContactInfo({ chatId, person, messages, muted, blocked, 
       <div className="list">
         <div className="info-hero">
           <PersonAvatar uid={person.uid} name={person.name} size={120} />
-          <h3 dir="auto">{person.name}</h3>
+          <h3 dir="auto">{self ? fill(t.youName, { name: person.name }) : person.name}</h3>
           <p dir="ltr">{profile?.phone ?? profile?.email ?? ''}</p>
           {onCall && (
             <div className="hero-actions">
@@ -75,8 +78,12 @@ export default function ContactInfo({ chatId, person, messages, muted, blocked, 
         <section className="info-section actions">
           <ActionRow icon={muted ? 'bell' : 'bellOff'} label={muted ? t.unmute : t.muteNotifications} onClick={actions.mute} />
           <ActionRow icon="eraser" label={t.clearChat} onClick={actions.clear} />
-          <ActionRow icon="block" label={blocked ? `${t.unblock} ${person.name}` : `${t.block} ${person.name}`} onClick={actions.block} danger={!blocked} />
-          <ActionRow icon="flag" label={`${t.report} ${person.name}`} onClick={actions.report} danger />
+          {!self && (
+            <>
+              <ActionRow icon="block" label={blocked ? `${t.unblock} ${person.name}` : `${t.block} ${person.name}`} onClick={actions.block} danger={!blocked} />
+              <ActionRow icon="flag" label={`${t.report} ${person.name}`} onClick={actions.report} danger />
+            </>
+          )}
           <ActionRow icon="trash" label={t.deleteChat} onClick={actions.remove} danger />
         </section>
       </div>

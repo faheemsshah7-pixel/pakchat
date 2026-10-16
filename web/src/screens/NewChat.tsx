@@ -1,10 +1,11 @@
 // NewChat.tsx: start a chat. Type a friend's number or Gmail, or pick someone you already
-// know (from your chats and groups). "New group" is here too.
+// know (from your chats and groups). "New group" and "Message yourself" are here too.
 import { useState } from 'react'
 import { chatIdFor, findUser, isGroup, type Chat, type Person } from '../chats'
 import { useT } from '../lang'
 import { contactKey } from '../phone'
 import type { Profile } from '../profiles'
+import { fill } from '../strings'
 import { PersonAvatar } from './Avatar'
 import type { Open } from './Home'
 import Icon from './Icon'
@@ -26,12 +27,14 @@ export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup
   const q = number.trim().toLowerCase()
   const shown = q ? known.filter((p) => p.name.toLowerCase().includes(q)) : known
   const direct = new Set(chats.filter((c) => !isGroup(c)).flatMap((c) => c.members))
+  // "Message yourself": notes, links and photos you want to keep (a chat with you twice: uid_uid).
+  const self = { chatId: chatIdFor(me.uid, me.uid), other: me }
 
   async function start(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     const { field, value } = contactKey(number)
-    if (profile[field] === value) return setError(t.ownNumber)
+    if (profile[field] === value) return onOpen(self) // your own number: your chat with yourself
     setBusy(true)
     try {
       const person = await findUser(number)
@@ -71,6 +74,13 @@ export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup
             <Icon name="users" />
           </span>
           <strong className="row-main">{t.newGroup}</strong>
+        </button>
+        <button className="row" onClick={() => onOpen(self)}>
+          <PersonAvatar uid={me.uid} name={me.name} size={44} />
+          <span className="row-main">
+            <strong dir="auto">{fill(t.youName, { name: me.name })}</strong>
+            <small className="muted">{t.messageYourself}</small>
+          </span>
         </button>
         {shown.length > 0 && <p className="section-title">{t.peopleYouKnow}</p>}
         {shown.map((p) => (

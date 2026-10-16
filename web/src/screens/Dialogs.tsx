@@ -40,7 +40,7 @@ export function ForwardDialog(props: { me: Person; chats: Chat[]; fromChatId: st
   const [picked, setPicked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const shown = chats.filter((c) => chatTitle(c, me.uid).toLowerCase().includes(search.trim().toLowerCase()))
+  const shown = chats.filter((c) => chatTitle(c, me.uid, t).toLowerCase().includes(search.trim().toLowerCase()))
 
   function toggle(id: string) {
     if (picked.includes(id)) setPicked(picked.filter((p) => p !== id))
@@ -77,7 +77,7 @@ export function ForwardDialog(props: { me: Person; chats: Chat[]; fromChatId: st
           <label key={c.id} className="row pick">
             <ChatAvatar chat={c} myUid={me.uid} size={42} />
             <strong className="row-main" dir="auto">
-              {chatTitle(c, me.uid)}
+              {chatTitle(c, me.uid, t)}
             </strong>
             <input type="checkbox" checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
           </label>

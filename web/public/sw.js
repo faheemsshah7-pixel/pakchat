@@ -25,13 +25,18 @@ self.addEventListener('fetch', (event) => {
     )
   } else if (url.pathname.startsWith('/assets/')) {
     // Built files have a fingerprint in their name (like index-BqJLAJMK.js), so a saved copy is never out of date.
+    // (A file from an old version that's gone comes back as the page instead. That isn't kept:
+    // PakChat then reloads itself into the new version, see src/screens/lazy.ts.)
     event.respondWith(
       caches.match(request).then(
         (saved) =>
           saved ||
           fetch(request).then((response) => {
-            const copy = response.clone()
-            caches.open(CACHE).then((cache) => cache.put(request, copy))
+            const isPage = (response.headers.get('content-type') ?? '').includes('text/html')
+            if (response.ok && !isPage) {
+              const copy = response.clone()
+              caches.open(CACHE).then((cache) => cache.put(request, copy))
+            }
             return response
           }),
       ),

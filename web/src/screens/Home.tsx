@@ -19,7 +19,8 @@
 //  10. counts the calls you missed since you last opened Calls (callExtras.ts)
 //  11. listens for your scheduled calls, and reminds you when one starts
 //  12. listens for status updates: other people's, and your own (status.ts)
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// Settings, Status, the call screen and the call windows load when first needed (lazy.ts).
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from 'firebase/auth'
 import { collection, getCountFromServer, onSnapshot, query, Timestamp, where } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -49,6 +50,7 @@ import {
   sendMessage,
   type Chat,
   type Person,
+  type ReplyTo,
 } from '../chats'
 import { codeFromAddress } from '../invites'
 import { useT } from '../lang'
@@ -76,29 +78,27 @@ import {
 import { fill } from '../strings'
 import { useNow } from '../time'
 import { listenForTyping } from '../typing'
-import { CallLinkDialog, CallReminder, DialDialog, JoinCallDialog, ScheduleDialog, StartCallDialog } from './CallDialogs'
 import { CallInfo, CallsHome } from './CallsMain'
-import CallScreen from './CallScreen'
 import CallsList, { type CallAction } from './CallsList'
 import ChatList from './ChatList'
 import ChatRoom from './ChatRoom'
 import { PeopleDialog } from './Dialogs'
 import JoinGroup from './JoinGroup'
+import { CallLinkDialog, CallReminder, CallScreen, DialDialog, JoinCallDialog, ScheduleDialog, Settings, StartCallDialog, StatusComposer, StatusViewer, warmUp } from './lazy'
 import MyStatus from './MyStatus'
 import NewChat from './NewChat'
 import NewGroup from './NewGroup'
 import PhotoSender, { type PickedPhoto } from './PhotoSender'
 import Rail, { type Tab } from './Rail'
-import Settings, { type Section } from './Settings'
+import type { Section } from './Settings'
 import StarredList from './StarredList'
-import StatusComposer from './StatusComposer'
 import StatusList, { StatusPrivacyDialog } from './StatusList'
-import StatusViewer from './StatusViewer'
 import Welcome from './Welcome'
 
 // Which chat is open. `other` is set for direct chats (the chat may not exist yet).
 // focus: go to this message when it opens (from "Starred messages").
-export type Open = { chatId: string; other?: Person; focus?: { id: string } }
+// reply: start answering this message (from "Reply privately" in a group).
+export type Open = { chatId: string; other?: Person; focus?: { id: string }; reply?: ReplyTo }
 type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'calls' | 'status'
 const CHAT_VIEWS: View[] = ['chats', 'archived', 'starred', 'newChat', 'newGroup'] // (the open chat shows next to these)
 
@@ -173,9 +173,11 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         }
         alerted.current.set(chat.id, at)
         const looking = document.visibilityState === 'visible' && openRef.current === chat.id
-        if (looking || isMuted(prefsRef.current.get(chat.id))) continue // muted chats stay quiet
+        // Muted chats stay quiet, unless someone @mentions you (like WhatsApp).
+        const mentioned = !!chat.lastMessage?.mentions?.includes(user.uid)
+        if (looking || (isMuted(prefsRef.current.get(chat.id)) && !mentioned)) continue
         playPing()
-        showAlert(chatTitle(chat, user.uid), previewText(chat, user.uid, tRef.current), chat.id, () =>
+        showAlert(chatTitle(chat, user.uid, tRef.current), previewText(chat, user.uid, tRef.current), chat.id, () =>
           setOpen(isGroup(chat) ? { chatId: chat.id } : { chatId: chat.id, other: otherPerson(chat, user.uid) }),
         )
       }
@@ -271,6 +273,9 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
 
   // 8. "typing…" in all your chats
   useEffect(() => listenForTyping(user.uid), [user.uid])
+
+  // Fetch the screens that load later (lazy.ts), once there's a free moment.
+  useEffect(warmUp, [])
 
   // 9. A live location you were sharing before you reloaded PakChat: carry on (until its time is up).
   useEffect(() => resumeSharing(user.uid), [user.uid])
@@ -536,14 +541,18 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             blocked={blocked}
             onBack={() => setOpen(null)}
             onOpenPerson={(person) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person })}
+            onReplyPrivately={(person, reply) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person, reply })}
             focus={showing.focus}
+            reply={showing.reply}
           />
         ) : (
           <Welcome />
         )}
       </main>
 
-      {/* Windows and full-screen things, on top of everything */}
+      {/* Windows and full-screen things, on top of everything. (Suspense: shows nothing for the moment
+          one of them is still loading, see lazy.ts.) */}
+      <Suspense fallback={null}>
       {settingsAt && (
         <Settings
           me={me}
@@ -615,6 +624,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
 
       {joinCode && <JoinGroup me={me} code={joinCode} onClose={closeJoin} onJoined={joined} />}
       {call && <CallScreen key={call.id} call={call} />}
+      </Suspense>
     </div>
   )
 }

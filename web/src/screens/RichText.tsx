@@ -3,21 +3,31 @@
 // and makes web addresses clickable. It builds React pieces, never raw HTML,
 // so nobody can sneak code into the page with a message.
 // `highlight`: words to mark in yellow (when you search a chat).
+// `mentions`: the people the message @mentions (mentions.ts). Their "@Name" shows in colour,
+// and tapping it opens your chat with them.
 import type { ReactNode } from 'react'
+
+export type Tagged = { uid: string; name: string }
+// What every piece needs to know (passed down as one thing, so the functions below stay short).
+type Ctx = { highlight: string; key: { n: number }; tags: Tagged[]; onMention?: (uid: string) => void }
 
 const LINK = /\b(?:https?:\/\/|www\.)[^\s<]+/gi
 const STYLE = /```([\s\S]+?)```|`([^`\n]+)`|\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~/g
 // Formatting only counts at the edge of a word: "*hi*" is bold, but "2*3*4" isn't.
 const EDGE = /[\s\p{P}\p{S}]/u
 
-export default function RichText({ text, highlight = '' }: { text: string; highlight?: string }) {
-  const key = { n: 0 } // React needs a different "key" for each piece
+type Props = { text: string; highlight?: string; mentions?: Tagged[]; onMention?: (uid: string) => void }
+export default function RichText({ text, highlight = '', mentions = [], onMention }: Props) {
+  // key: React needs a different "key" for each piece. Longer names first, so "@Ali Khan" wins over "@Ali".
+  const tags = mentions.filter((m) => m.name).sort((a, b) => b.name.length - a.name.length)
+  const ctx: Ctx = { highlight, key: { n: 0 }, tags, onMention }
+  const key = ctx.key
   const pieces: ReactNode[] = []
   let last = 0
   for (const match of text.matchAll(LINK)) {
     // Leave full stops and brackets at the end of a link out of it.
     const address = match[0].replace(/[.,!?;:)\]'"]+$/, '')
-    pieces.push(...format(text.slice(last, match.index), highlight, key))
+    pieces.push(...format(text.slice(last, match.index), ctx))
     const href = address.toLowerCase().startsWith('www.') ? 'https://' + address : address
     pieces.push(
       <a key={key.n++} href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
@@ -26,11 +36,12 @@ export default function RichText({ text, highlight = '' }: { text: string; highl
     )
     last = match.index + address.length
   }
-  pieces.push(...format(text.slice(last), highlight, key))
+  pieces.push(...format(text.slice(last), ctx))
   return <>{pieces}</>
 }
 
-function format(text: string, highlight: string, key: { n: number }): ReactNode[] {
+function format(text: string, ctx: Ctx): ReactNode[] {
+  const { key } = ctx
   const pieces: ReactNode[] = []
   let last = 0
   const style = new RegExp(STYLE) // a fresh copy, because format() also runs inside itself (*_bold italic_*)
@@ -46,16 +57,55 @@ function format(text: string, highlight: string, key: { n: number }): ReactNode[
       style.lastIndex = start + 1 // not formatting after all: look again from the next letter
       continue
     }
-    pieces.push(...mark(text.slice(last, start), highlight, key))
+    pieces.push(...tagged(text.slice(last, start), ctx))
     const k = key.n++
     if (match[1] !== undefined) pieces.push(<code key={k} className="mono">{inner}</code>)
     else if (match[2] !== undefined) pieces.push(<code key={k}>{inner}</code>)
-    else if (match[3] !== undefined) pieces.push(<strong key={k}>{format(inner, highlight, key)}</strong>)
-    else if (match[4] !== undefined) pieces.push(<em key={k}>{format(inner, highlight, key)}</em>)
-    else pieces.push(<s key={k}>{format(inner, highlight, key)}</s>)
+    else if (match[3] !== undefined) pieces.push(<strong key={k}>{format(inner, ctx)}</strong>)
+    else if (match[4] !== undefined) pieces.push(<em key={k}>{format(inner, ctx)}</em>)
+    else pieces.push(<s key={k}>{format(inner, ctx)}</s>)
     last = end
   }
-  pieces.push(...mark(text.slice(last), highlight, key))
+  pieces.push(...tagged(text.slice(last), ctx))
+  return pieces
+}
+
+// Find each "@Name" of someone the message mentions, and make it a coloured button.
+function tagged(text: string, ctx: Ctx): ReactNode[] {
+  const { highlight, key, tags, onMention } = ctx
+  if (!text || tags.length === 0) return mark(text, highlight, key)
+  const pieces: ReactNode[] = []
+  let rest = text
+  while (rest) {
+    // The earliest "@Name" in what's left (the longest name, if two start at the same place).
+    let at = -1
+    let who: Tagged | undefined
+    for (const tag of tags) {
+      const i = rest.indexOf('@' + tag.name)
+      if (i !== -1 && (at === -1 || i < at)) {
+        at = i
+        who = tag
+      }
+    }
+    if (!who) break
+    pieces.push(...mark(rest.slice(0, at), highlight, key))
+    const uid = who.uid
+    pieces.push(
+      <button
+        key={key.n++}
+        type="button"
+        className="mention"
+        onClick={(e) => {
+          e.stopPropagation()
+          onMention?.(uid)
+        }}
+      >
+        {mark('@' + who.name, highlight, key)}
+      </button>,
+    )
+    rest = rest.slice(at + who.name.length + 1)
+  }
+  pieces.push(...mark(rest, highlight, key))
   return pieces
 }
 

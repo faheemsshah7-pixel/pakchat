@@ -1,5 +1,5 @@
-// Menu.tsx: the ⋮ button that opens a small list of actions.
-import { useState } from 'react'
+// Menu.tsx: the ⋮ button that opens a small list of actions. Esc or a click outside closes it.
+import { useEffect, useState } from 'react'
 import { LEVEL, useBack } from '../back'
 import Icon, { type IconName } from './Icon'
 
@@ -8,6 +8,12 @@ export type MenuItem = { label: string; onClick: () => void; icon?: IconName; da
 export default function Menu({ label, items }: { label: string; items: MenuItem[] }) {
   const [open, setOpen] = useState(false)
   useBack(open, LEVEL.menu, () => setOpen(false))
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
   return (
     <div className="menu">
       <button className="icon" aria-label={label} title={label} onClick={() => setOpen(!open)}>

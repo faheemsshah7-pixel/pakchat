@@ -86,7 +86,11 @@ export default function ChatList(props: Props) {
     if (!looksLikeContact) return
     setError('')
     const { field, value } = contactKey(search)
-    if (profile[field] === value) return setError(t.ownNumber)
+    if (profile[field] === value) {
+      // Your own number: "Message yourself"
+      onOpen({ chatId: chatIdFor(me.uid, me.uid), other: me })
+      return setSearch('')
+    }
     setBusy(true)
     try {
       const person = await findUser(search)
@@ -123,7 +127,7 @@ export default function ChatList(props: Props) {
     if (filter === 'unread' && !isUnread(chat, me.uid, prefs.get(chat.id))) return false
     if (filter === 'groups' && !isGroup(chat)) return false
     if (!q) return true
-    return chatTitle(chat, me.uid).toLowerCase().includes(q) || previewText(chat, me.uid, t).toLowerCase().includes(q)
+    return chatTitle(chat, me.uid, t).toLowerCase().includes(q) || previewText(chat, me.uid, t).toLowerCase().includes(q)
   })
   const archivedChats = chats.filter((c) => prefs.get(c.id)?.archived && !isHidden(c, prefs.get(c.id)))
   const archivedUnread = archivedChats.filter((c) => isUnread(c, me.uid, prefs.get(c.id))).length
@@ -294,7 +298,7 @@ type RowProps = {
 // memo: only drawn again when one of its props changed (a new message in THIS chat, say).
 const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, draft, muted, gone, onOpen, onMenu }: RowProps) {
   const { t } = useT()
-  const title = chatTitle(chat, me.uid)
+  const title = chatTitle(chat, me.uid, t)
   const last = chat.lastMessage
   const mine = last?.senderId === me.uid && last.kind !== 'system' && !last.deleted && !gone
   const unread = isUnread(chat, me.uid, prefs)
@@ -333,6 +337,12 @@ const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, 
           )}
           {muted && <Icon name="bellOff" size={16} />}
           {prefs?.pinnedAt && !prefs.archived && <Icon name="pin" size={16} />}
+          {/* "@": the newest message mentions you, and you haven't read it yet */}
+          {unread && last?.mentions?.includes(me.uid) && (
+            <span className="at-badge" title={t.mentionedYou} aria-label={t.mentionedYou}>
+              @
+            </span>
+          )}
           {unread && (count > 0 && !prefs?.unread ? <span className="badge">{count > 99 ? '99+' : count}</span> : <span className="dot" />)}
           <button
             className="row-menu"

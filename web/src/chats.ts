@@ -18,16 +18,19 @@
 //     pins:  { messageId: a small copy of the message }   pinned messages, up to 3 (see pins.ts)
 //     timer: seconds before new messages disappear (0 = off) (see disappearing.ts)
 //   chats/<chatId>/messages/<id>    one document per message
-//     kind: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'call' | 'system',
+//     kind: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'poll' | 'sticker' | 'call' | 'system',
 //     senderId, sentAt, and the content
 //     replyTo:   a small copy of the message it answers
+//     mentions:  [uid, ...] the people it @mentions (groups)
 //     reactions: { uidA: '👍' }
+//     votes:     { uidA: [0, 2] } polls: which answers each person picked (see polls.ts)
 //     editedAt, deleted, forwarded
 //     expireAt:  when it disappears (only in chats with disappearing messages on)
 //   chats/<chatId>/media/<id>       the photo, video, voice note or document itself (see media.ts)
 //   chats/<chatId>/typing/<uid>     when each person last pressed a key (see typing.ts)
 //
 // Direct chat ids are the two people's ids sorted and joined: "uidA_uidB".
+// "Message yourself" is a direct chat with you twice: "uidA_uidA".
 // Group chat ids are random, picked by Firestore.
 import {
   collection,
@@ -81,6 +84,7 @@ export type LastMessage = {
   expireAt?: Timestamp | null
   fileName?: string
   live?: boolean
+  mentions?: string[] // who it @mentions, so the chat list can show "@"
 }
 
 export type Chat = {
@@ -108,14 +112,15 @@ export type Chat = {
 export type Pin = { senderId: string; senderName: string; kind: string; text: string; at: number; until: number }
 
 // A small copy of the message you're answering, so the reply can show it.
-export type ReplyTo = { id: string; senderId: string; senderName: string; kind: string; text: string }
+// from: "Reply privately" answers a group's message in a chat with its sender; this is the group's name.
+export type ReplyTo = { id: string; senderId: string; senderName: string; kind: string; text: string; from?: string }
 
 // A contact card someone shared: a PakChat user (uid), or anyone with a phone number.
 export type SharedContact = { name: string; uid?: string; phone?: string; email?: string }
 
 export type Message = {
   id: string
-  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'call' | 'scheduledCall' | 'system' // step 2 messages have no kind: they're text
+  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'poll' | 'sticker' | 'call' | 'scheduledCall' | 'system' // step 2 messages have no kind: they're text
   text?: string
   senderId: string
   senderName?: string
@@ -138,6 +143,11 @@ export type Message = {
   liveUntil?: Timestamp | null
   movedAt?: Timestamp | null // when a live location last moved
   contact?: SharedContact
+  options?: string[] // polls: the answers (the question is in text)
+  multi?: boolean // polls: people may pick more than one answer
+  votes?: Record<string, number[]> // polls: { uid: [answer numbers] }
+  sticker?: string // stickers that come with PakChat, like "pk:salam" (stickers you make have a mediaId)
+  mentions?: string[] // the people it @mentions
   video?: boolean // calls: a video call (or else a voice call)
   missed?: boolean // calls: nobody picked up
   startsAt?: Timestamp | null // a scheduled call: when (its name is in text)
@@ -162,11 +172,13 @@ export type Content =
   | { kind: 'file'; data: string; fileName: string; fileSize: number; mime: string; caption?: string }
   | { kind: 'location'; lat: number; lng: number; accuracy: number; liveMinutes?: number } // see location.ts
   | { kind: 'contact'; contact: SharedContact }
+  | { kind: 'poll'; question: string; options: string[]; multi: boolean } // polls.ts
+  | { kind: 'sticker'; sticker?: string; data?: string } // a PakChat sticker by name, or one you made (a picture)
   | { kind: 'call'; video: boolean; seconds: number; missed: boolean } // written by calls.ts when a call ends
   | { kind: 'scheduledCall'; title: string; startsAt: Date; video: boolean; callId: string } // callExtras.ts
 
 // Extra things a message can carry.
-export type Extras = { replyTo?: ReplyTo; forwarded?: boolean }
+export type Extras = { replyTo?: ReplyTo; forwarded?: boolean; mentions?: string[] }
 
 // Which chat to send to. `other` is set for direct chats, so a new chat can be created.
 // isNew: the chat doesn't exist yet, so this message creates it.
@@ -186,6 +198,9 @@ export function chatIdFor(a: string, b: string) {
 export const isGroup = (chat: Chat | undefined) => chat?.type === 'group'
 const isDirectId = (chatId: string) => chatId.split('_').length === 2
 
+// "Message yourself": a chat where both members are you. For notes, links and photos you want to keep.
+export const isSelfChat = (chat: Chat | undefined) => !!chat && !isGroup(chat) && chat.members.length > 0 && chat.members.every((m) => m === chat.members[0])
+
 // Group admins: whoever made it, plus anyone they made admin.
 export function isAdmin(chat: Chat | undefined, uid: string) {
   return isGroup(chat) && (chat?.admin === uid || !!chat?.admins?.includes(uid))
@@ -197,11 +212,13 @@ export function otherPerson(chat: Chat, myUid: string): Person {
   return { uid, name: chat.names[uid] ?? '?' }
 }
 
-export function chatTitle(chat: Chat, myUid: string) {
-  return isGroup(chat) ? (chat.title ?? '') : otherPerson(chat, myUid).name
+export function chatTitle(chat: Chat, myUid: string, t?: Strings) {
+  if (isGroup(chat)) return chat.title ?? ''
+  const name = otherPerson(chat, myUid).name
+  return t && isSelfChat(chat) ? fill(t.youName, { name }) : name // "Sheharyar (You)"
 }
 
-// Everyone you know: the people in your chats and groups, A to Z.
+// Everyone you know: the people in your chats and groups, A to Z. (Not you: "Message yourself" has its own row.)
 // direct: you have a chat with just them (not only a group together).
 export function peopleYouKnow(chats: Chat[], myUid: string): (Person & { direct: boolean })[] {
   const people = new Map<string, Person & { direct: boolean }>()
@@ -235,6 +252,7 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
   const message: Record<string, unknown> = { kind: content.kind, senderId: me.uid, senderName: me.name }
   if (extras.replyTo) message.replyTo = extras.replyTo
   if (extras.forwarded) message.forwarded = true
+  if (extras.mentions?.length) message.mentions = extras.mentions
   // Disappearing messages: it says when it goes. (Your clock, which is close enough.)
   const expireAt = target.timer && content.kind !== 'call' ? Timestamp.fromMillis(Date.now() + target.timer * 1000) : undefined
   if (expireAt) message.expireAt = expireAt
@@ -250,6 +268,12 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
     message.contact = content.contact
   } else if (content.kind === 'scheduledCall') {
     Object.assign(message, { text: content.title, startsAt: Timestamp.fromDate(content.startsAt), video: content.video, callId: content.callId })
+  } else if (content.kind === 'poll') {
+    Object.assign(message, { text: content.question, options: content.options, multi: content.multi })
+  } else if (content.kind === 'sticker' && content.sticker) {
+    message.sticker = content.sticker
+  } else if (content.kind === 'sticker') {
+    message.mediaId = saveMedia(batch, chatRef, content.data ?? '', me.uid, expireAt) // a sticker you made: a small picture
   } else {
     // The photo, video, voice note or document goes in its own document(s), so the message list stays small.
     message.mediaId = saveMedia(batch, chatRef, content.data, me.uid, expireAt)
@@ -284,12 +308,12 @@ export function addMessage(batch: WriteBatch, target: Target, message: Record<st
   const chatRef = doc(db, 'chats', target.chatId)
   const messageRef = doc(collection(chatRef, 'messages')) // a new random id
   batch.set(messageRef, { ...message, sentAt: serverTimestamp() }) // the server's clock
-  const { kind, senderId, senderName, event, targetName, video, missed, expireAt, fileName, live } = message
+  const { kind, senderId, senderName, event, targetName, video, missed, expireAt, fileName, live, mentions } = message
   // The chat list shows a photo's caption as its text, and a contact card's name.
   const text = message.text ?? message.caption ?? (message.contact as SharedContact | undefined)?.name
   const seconds = kind === 'system' ? message.seconds : undefined // "turned on disappearing messages for 7 days"
   const lastMessage = Object.fromEntries(
-    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live }).filter(([, v]) => v !== undefined),
+    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live, mentions }).filter(([, v]) => v !== undefined),
   )
   // Sending a message means you've read the chat, so it isn't "unread" for you.
   const receipts = myPrivacy.readReceipts || !isDirectId(target.chatId)
@@ -358,6 +382,10 @@ export function shortText(m: Short, myUid: string, t: Strings) {
       return `👤 ${m.contact?.name ?? m.text ?? ''}`
     case 'scheduledCall':
       return `📅 ${m.text ?? ''}`
+    case 'poll':
+      return `📊 ${m.text ?? ''}`
+    case 'sticker':
+      return t.stickerLabel
     case 'status': // a reply to someone's status (status.ts)
       return `${t.statusWord} · ${words ?? ''}`
   }
@@ -366,7 +394,7 @@ export function shortText(m: Short, myUid: string, t: Strings) {
 
 // All the words in a message, for searching: its text, caption, file name or contact's name.
 export function searchText(m: Message) {
-  return [m.text, m.caption, m.fileName, m.contact?.name].filter(Boolean).join(' ')
+  return [m.text, m.caption, m.fileName, m.contact?.name, ...(m.options ?? [])].filter(Boolean).join(' ')
 }
 
 // "Voice call", "Video call", or (for the person who was called) "Missed voice call".
@@ -397,6 +425,7 @@ export type Tick = 'pending' | 'sent' | 'delivered' | 'read'
 export function tickFor(chat: Chat | undefined, myUid: string, sentAt: Timestamp | null | undefined, pending = false): Tick {
   if (pending || !sentAt) return 'pending'
   const others = (chat?.members ?? []).filter((uid) => uid !== myUid)
+  if (isSelfChat(chat)) return 'read' // you've read your own notes (WhatsApp shows blue ticks too)
   if (others.length === 0) return 'sent'
   const sent = sentAt.toMillis()
   const everyone = (times?: Times) => others.every((uid) => (times?.[uid]?.toMillis() ?? 0) >= sent)

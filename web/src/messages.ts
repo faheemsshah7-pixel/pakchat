@@ -51,14 +51,16 @@ export function canUnsend(m: Message, myUid: string) {
 }
 
 // isLast: it's the newest message, so the chat list's preview changes too.
+// mentions: in a group, who the new words @mention (undefined = not a group, leave them alone).
 // (A pinned message's copy in the pin bar is kept up to date in ChatRoom.tsx, from the message itself.)
-export async function editMessage(chatId: string, me: Person, m: Message, text: string, isLast: boolean) {
+export async function editMessage(chatId: string, me: Person, m: Message, text: string, isLast: boolean, mentions?: string[]) {
   const batch = writeBatch(db)
   const field = captionKind(m) ? 'caption' : 'text'
-  batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp() })
+  const tags = mentions === undefined ? {} : { mentions: mentions.length ? mentions : deleteField() }
+  batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp(), ...tags })
   if (isLast) {
     batch.update(doc(db, 'chats', chatId), {
-      lastMessage: { kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name, ...expiry(m) },
+      lastMessage: { kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name, ...expiry(m), ...(mentions?.length ? { mentions } : {}) },
     })
   }
   await batch.commit()
@@ -72,6 +74,7 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
     [
       ...['text', 'caption', 'mediaId', 'posterId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'],
       ...['fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'movedAt', 'contact'],
+      ...['options', 'multi', 'votes', 'sticker', 'mentions'],
     ].map((key) => [
       key,
       deleteField(),
@@ -87,8 +90,8 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
   await batch.commit()
 }
 
-// Forward a message to other chats. Photos, videos, voice notes and documents are copied into each chat.
-// (A live location is forwarded as a plain location: where it was.)
+// Forward a message to other chats. Photos, videos, voice notes, documents and stickers are copied into each chat.
+// (A live location is forwarded as a plain location: where it was. Polls aren't forwarded.)
 export async function forwardMessage(me: Person, fromChatId: string, m: Message, targets: Target[]) {
   const content = await contentOf(fromChatId, m)
   // One chat at a time, so a problem with one doesn't stop the others.
@@ -126,6 +129,8 @@ async function contentOf(chatId: string, m: Message): Promise<Content> {
       return { kind: 'location', lat: m.lat ?? 0, lng: m.lng ?? 0, accuracy: m.accuracy ?? 0 }
     case 'contact':
       return { kind: 'contact', contact: m.contact ?? { name: '?' } }
+    case 'sticker':
+      return m.sticker ? { kind: 'sticker', sticker: m.sticker } : { kind: 'sticker', data: await media() }
   }
   return { kind: 'text', text: m.text ?? '' }
 }

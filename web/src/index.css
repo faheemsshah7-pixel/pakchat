@@ -4662,6 +4662,432 @@ button.setting:disabled {
   }
 }
 
+/* ================= 8i. Polls, stickers, @mentions, reply privately ================= */
+/* A poll in the chat: the question, then each answer with a box, its votes and a bar.
+   (display: contents lets the time sit above "View votes", like WhatsApp.) */
+.bubble.is-poll {
+  display: flex;
+  flex-direction: column;
+  width: min(340px, 100%);
+  white-space: normal;
+}
+.poll {
+  display: contents;
+}
+.poll-question {
+  margin: 2px 2px 2px;
+  font-size: 15px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.poll-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 2px 6px;
+  color: var(--meta);
+  font-size: 12.5px;
+}
+.bubble.mine .poll-hint,
+.bubble.mine .poll-count {
+  color: var(--mine-meta);
+}
+.poll-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 4px;
+  border-radius: 10px;
+  text-align: start;
+}
+.poll-option:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+.poll-option:disabled {
+  opacity: 1;
+}
+.poll-box {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 2px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 6px;
+  color: var(--on-accent);
+}
+.poll-box.round {
+  border-radius: 50%;
+}
+.poll-option.on .poll-box {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.poll-main {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+}
+.poll-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.poll-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.poll-faces {
+  display: flex;
+  padding-inline-start: 6px;
+}
+.poll-faces > * {
+  margin-inline-start: -6px;
+  box-shadow: 0 0 0 2px var(--bubble);
+}
+.bubble.mine .poll-faces > * {
+  box-shadow: none; /* (your bubble can be a gradient, which a shadow can't copy) */
+}
+.poll-count {
+  min-width: 1ch;
+  color: var(--meta);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+.poll-bar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  overflow: hidden;
+}
+.poll-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.3s ease-out;
+}
+.bubble.is-poll .error {
+  margin: 2px 4px;
+  font-size: 12.5px;
+}
+.bubble.is-poll time {
+  order: 1;
+  align-self: flex-end;
+  float: none;
+  margin: 4px 0 6px;
+}
+.poll-votes {
+  order: 2;
+  width: 100%;
+  padding: 9px 0 3px;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-align: center;
+}
+.poll-votes:disabled {
+  color: var(--meta);
+  font-weight: 500;
+  opacity: 1;
+}
+/* In the looks where your own bubble is a strong colour, the ticked boxes, bars and "View votes"
+   use the bubble's (white) text colour, so they stand out. (Emerald's light green bubble is fine as it is.) */
+[data-theme]:not([data-theme='emerald']) .bubble.mine .poll-option.on .poll-box {
+  border-color: var(--mine-text);
+  background: var(--mine-text);
+  color: var(--accent);
+}
+[data-theme]:not([data-theme='emerald']) .bubble.mine .poll-bar span {
+  background: var(--mine-text);
+}
+[data-theme]:not([data-theme='emerald']) .bubble.mine .poll-votes {
+  color: var(--mine-text);
+}
+.bubble.mine .poll-votes:disabled {
+  color: var(--mine-meta);
+}
+/* Making a poll */
+.poll-label {
+  margin: 6px 2px 6px;
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.poll-edit {
+  max-height: min(40vh, 360px);
+  overflow-y: auto;
+}
+.poll-edit .field {
+  margin-bottom: 6px;
+}
+.poll-dialog .setting {
+  margin: 4px 0 10px;
+  padding-inline: 4px;
+}
+/* Who voted */
+.info-quote strong,
+.info-quote small {
+  display: block;
+}
+.info-quote small {
+  margin-top: 2px;
+  opacity: 0.8;
+  font-size: 12.5px;
+}
+.vote-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Stickers: no bubble around them, and the time in a small pill under them */
+.bubble.is-sticker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.3;
+}
+.bubble.mine.is-sticker {
+  align-items: flex-end;
+}
+.bubble.is-sticker time {
+  float: none;
+  top: 0;
+  margin: 2px 0 0;
+}
+.bubble.is-sticker .quote,
+.bubble.is-sticker .forwarded,
+.bubble.is-sticker .sender {
+  max-width: 220px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: var(--bubble);
+}
+.bubble.mine.is-sticker .quote,
+.bubble.mine.is-sticker .forwarded {
+  background: var(--mine);
+}
+.pack-sticker {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.15em;
+  text-align: center;
+  user-select: none;
+}
+.pack-emoji {
+  font-size: 4em;
+  line-height: 1;
+  filter: drop-shadow(0 3px 4px rgb(0 0 0 / 0.25));
+}
+.pack-words {
+  max-width: 100%;
+  color: var(--sticker);
+  font-size: 1.3em;
+  font-weight: 900;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+  rotate: -4deg;
+  /* A thick white edge around the words, then a soft shadow (works in every browser). */
+  text-shadow:
+    0.09em 0.09em 0 #fff,
+    -0.09em 0.09em 0 #fff,
+    0.09em -0.09em 0 #fff,
+    -0.09em -0.09em 0 #fff,
+    0 0.12em 0 #fff,
+    0 -0.12em 0 #fff,
+    0.12em 0 0 #fff,
+    -0.12em 0 0 #fff,
+    0 0.25em 0.35em rgb(0 0 0 / 0.3);
+}
+.sticker-img {
+  width: 150px;
+  height: 150px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.2));
+}
+.sticker-img.loading {
+  display: block;
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  filter: none;
+}
+.sticker-missing {
+  font-size: 64px;
+}
+/* The Stickers tab of the smiley panel */
+.emoji-picker:has(.picker-modes) {
+  height: min(400px, 60vh);
+}
+.sticker-panel {
+  flex: 1;
+  min-height: 0;
+  padding: 2px 8px 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.sticker-panel .section-title {
+  margin: 10px 4px 6px;
+}
+.sticker-panel .error {
+  margin: 6px 4px 0;
+  font-size: 13px;
+}
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 4px;
+}
+.sticker-cell,
+.sticker-add {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 100px;
+  border-radius: 14px;
+}
+.sticker-cell:hover {
+  background: var(--hover);
+}
+.sticker-cell > button:first-child {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+}
+.sticker-cell img {
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+}
+.sticker-add {
+  align-content: center;
+  gap: 2px;
+  border: 2px dashed var(--border);
+  color: var(--accent-ink);
+}
+.sticker-add small {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.sticker-remove {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+  color: #ffffff;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sticker-cell:hover .sticker-remove,
+.sticker-remove:focus-visible {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .sticker-remove {
+    opacity: 1;
+  }
+}
+/* Emoji | Stickers at the bottom of the panel */
+.picker-modes {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 5px;
+  border-top: 1px solid var(--border);
+}
+.picker-modes button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.picker-modes button.on {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* @mentions: the list of people while you type "@", and the coloured names in messages */
+.mention-list {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  inset-inline-start: 14px;
+  z-index: 12;
+  width: min(320px, calc(100% - 28px));
+  max-height: 290px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.4);
+  overflow-y: auto;
+  animation: menu-in 0.14s ease-out;
+}
+.mention-list .row {
+  width: 100%;
+  min-height: 46px;
+  padding: 6px 8px;
+  gap: 10px;
+  border-radius: 10px;
+}
+.mention-list .row.on {
+  background: var(--accent-soft);
+}
+.mention {
+  display: inline;
+  color: var(--accent-ink);
+  font-weight: 600;
+  white-space: pre-wrap;
+}
+.mention:hover {
+  text-decoration: underline;
+}
+.at-badge {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--unread);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* "Reply privately": the group's name next to who wrote the message */
+.quote .quote-from {
+  display: inline;
+  color: var(--meta);
+  font-weight: 500;
+}
+.bubble.mine .quote .quote-from {
+  color: var(--mine-meta);
+}
+
 /* ================= 9. Phones ================= */
 @media (max-width: 899px) {
   .bar {

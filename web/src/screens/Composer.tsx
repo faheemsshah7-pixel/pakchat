@@ -1,19 +1,21 @@
 // Composer.tsx: the bar at the bottom of a chat.
-//   smiley: emojis    paperclip: photos & videos, camera, document, location, contact
+//   smiley: emojis and stickers    paperclip: photos & videos, camera, document, location, contact, poll
 //   microphone: voice note    paper plane: send
+// In a group, typing @ shows the people in it: pick one to mention them (mentions.ts).
 // Enter sends and Shift+Enter starts a new line (you can switch this in Settings).
 // What you type is kept as a draft if you leave the chat before sending (drafts.ts).
 // Above it, a strip shows the message you're replying to, or editing.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { shortText, type Content, type Extras, type Message } from '../chats'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { shortText, type Content, type Extras, type Message, type Person, type ReplyTo } from '../chats'
 import { getDraft, saveDraft } from '../drafts'
 import { useT } from '../lang'
 import { isPhotoOrVideo, MAX_VOICE_SECONDS, startRecording, type Recording } from '../media'
-import { replySnapshot } from '../messages'
+import { findMentions, mentionQuery } from '../mentions'
 import { useSettings } from '../settings'
 import { duration, useNow } from '../time'
-import EmojiPicker from './EmojiPicker'
+import { PersonAvatar } from './Avatar'
 import Icon from './Icon'
+import { EmojiPicker } from './lazy' // (the emoji and sticker panel loads the first time you open it)
 import Popover, { type PopoverItem } from './Popover'
 
 type Props = {
@@ -25,18 +27,23 @@ type Props = {
   onDocuments: (files: File[]) => void // documents picked or pasted
   onLocation: () => void // "Location" in the paperclip menu
   onContact: () => void // "Contact" in the paperclip menu
-  replyTo: Message | null
+  onPoll: () => void // "Poll" in the paperclip menu
+  people?: Person[] // a group's other members, to @mention (missing in chats with one person)
+  replyTo: ReplyTo | null
   onCancelReply: () => void
   editing: Message | null
   onCancelEdit: () => void
   onSaveEdit: (text: string) => Promise<void>
 }
 
+// A few people at a time in the @ list.
+const MAX_SHOWN = 8
+
 // Phones and tablets have no Shift key handy, so there Enter always makes a new line.
 const touchScreen = window.matchMedia('(pointer: coarse)').matches
 
 export default function Composer(props: Props) {
-  const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
+  const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, onPoll, people, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
   const { t } = useT()
   const { enterSends } = useSettings()
   const [text, setText] = useState(() => getDraft(chatId))
@@ -44,10 +51,14 @@ export default function Composer(props: Props) {
   const [recording, setRecording] = useState<Recording | null>(null)
   const [emojis, setEmojis] = useState(false)
   const [attach, setAttach] = useState<{ x: number; y: number } | null>(null) // the paperclip menu
+  const [caret, setCaret] = useState(0) // where the cursor is (for @mentions)
+  const [tagIndex, setTagIndex] = useState(0) // which person in the @ list is picked
+  const [tagClosed, setTagClosed] = useState(-1) // Esc closed the @ list that starts here
   const photoInput = useRef<HTMLInputElement>(null)
   const cameraInput = useRef<HTMLInputElement>(null)
   const docInput = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLTextAreaElement>(null)
+  const moveCaret = useRef<number | null>(null) // put the cursor here once the new words are in the box
 
   // Start editing: put the message's words in the box. Stop: bring the draft back.
   // (React's way to change state when a prop changes: compare with the last one, during drawing.)
@@ -66,22 +77,46 @@ export default function Composer(props: Props) {
   }, [replyTo])
 
   // The box grows with what you type, up to about 6 lines.
+  // (And after picking someone to @mention, the cursor goes after their name, before you type on.)
   useLayoutEffect(() => {
     const el = box.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 150) + 'px'
+    if (moveCaret.current !== null) {
+      el.focus()
+      el.setSelectionRange(moveCaret.current, moveCaret.current)
+      moveCaret.current = null
+    }
   }, [text])
 
-  function change(value: string) {
+  function change(value: string, cursor = value.length) {
     setText(value)
+    setCaret(cursor)
+    setTagIndex(0)
     if (!editing) saveDraft(chatId, value)
     if (value) onTyping()
   }
 
-  async function send(content: Content, restore = '') {
+  // ----- @mentions: the list of people while you type "@al…" -----
+  const tag = people?.length ? mentionQuery(text, caret) : null
+  const tagShown =
+    tag && tag.start !== tagClosed
+      ? people!.filter((p) => p.name.toLowerCase().includes(tag.query.toLowerCase())).slice(0, MAX_SHOWN)
+      : []
+  const tagPicked = Math.min(tagIndex, tagShown.length - 1)
+  // Put "@Name " in place of "@al", and the cursor after it.
+  function pickMention(person: Person) {
+    if (!tag) return
+    const before = text.slice(0, tag.start) + '@' + person.name + ' '
+    moveCaret.current = before.length
+    change(before + text.slice(caret), before.length)
+  }
+
+  async function send(content: Content, restore = '', mentions: string[] = []) {
     setError('')
-    const extras = replyTo ? { replyTo: replySnapshot(replyTo) } : {}
+    const extras: Extras = replyTo ? { replyTo } : {}
+    if (mentions.length) extras.mentions = mentions
     onCancelReply()
     try {
       await onSend(content, extras)
@@ -107,10 +142,26 @@ export default function Composer(props: Props) {
     }
     if (!clean) return
     change('') // clear the box straight away, like WhatsApp
-    send({ kind: 'text', text: clean }, clean)
+    send({ kind: 'text', text: clean }, clean, people ? findMentions(clean, people) : [])
   }
 
   function keyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // The @ list is open: arrows move, Enter or Tab picks, Esc closes it.
+    if (tagShown.length > 0 && tag && !e.nativeEvent.isComposing) {
+      const keys: Record<string, () => void> = {
+        ArrowDown: () => setTagIndex((tagPicked + 1) % tagShown.length),
+        ArrowUp: () => setTagIndex((tagPicked - 1 + tagShown.length) % tagShown.length),
+        Enter: () => pickMention(tagShown[tagPicked]),
+        Tab: () => pickMention(tagShown[tagPicked]),
+        Escape: () => setTagClosed(tag.start),
+      }
+      const action = keys[e.key]
+      if (action && !(e.key === 'Enter' && e.shiftKey)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return action()
+      }
+    }
     // isComposing: typing in a language that builds letters in steps (Enter picks the letter).
     if (e.key === 'Enter' && !e.shiftKey && enterSends && !touchScreen && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -147,6 +198,7 @@ export default function Composer(props: Props) {
     { label: t.document, icon: 'file', onClick: () => docInput.current?.click() },
     { label: t.location, icon: 'mapPin', onClick: onLocation },
     { label: t.contact, icon: 'contact', onClick: onContact },
+    { label: t.poll, icon: 'poll', onClick: onPoll },
   ]
 
   // Put an emoji where the cursor is.
@@ -188,11 +240,34 @@ export default function Composer(props: Props) {
   return (
     <div className="composer-area">
       {error && <p className="error toast">{error}</p>}
+      {tagShown.length > 0 && (
+        <div className="mention-list" role="listbox" aria-label={t.mentionSomeone}>
+          {tagShown.map((p, i) => (
+            <button
+              key={p.uid}
+              type="button"
+              role="option"
+              aria-selected={i === tagPicked}
+              className={i === tagPicked ? 'row on' : 'row'}
+              onMouseDown={(e) => e.preventDefault()} // (keeps the cursor in the box)
+              onClick={() => pickMention(p)}
+            >
+              <PersonAvatar uid={p.uid} name={p.name} size={32} />
+              <strong className="row-main" dir="auto">
+                {p.name}
+              </strong>
+            </button>
+          ))}
+        </div>
+      )}
       {strip && (
         <div className={editing ? 'reply-bar editing' : 'reply-bar'}>
           <Icon name={editing ? 'edit' : 'reply'} size={18} />
           <div className="quote">
-            <strong>{editing ? t.editMessage : strip.senderId === myUid ? t.you : strip.senderName}</strong>
+            <strong>
+              {editing ? t.editMessage : strip.senderId === myUid ? t.you : strip.senderName}
+              {!editing && replyTo?.from && <span className="quote-from"> · {replyTo.from}</span>}
+            </strong>
             <span dir="auto">{shortText(strip, myUid, t)}</span>
           </div>
           <button className="icon" aria-label={t.cancel} onClick={editing ? onCancelEdit : onCancelReply}>
@@ -233,7 +308,8 @@ export default function Composer(props: Props) {
               aria-label={t.message}
               value={text}
               maxLength={4000}
-              onChange={(e) => change(e.target.value)}
+              onChange={(e) => change(e.target.value, e.target.selectionStart)}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
               onKeyDown={keyDown}
               onPaste={paste}
               autoFocus
@@ -249,7 +325,23 @@ export default function Composer(props: Props) {
               <Icon name="mic" />
             </button>
           )}
-          {emojis && <EmojiPicker className="above-composer" onPick={addEmoji} onClose={() => setEmojis(false)} />}
+          {emojis && (
+            <Suspense fallback={null}>
+              <EmojiPicker
+                className="above-composer"
+                onPick={addEmoji}
+                onClose={() => setEmojis(false)}
+                onSticker={
+                  editing
+                    ? undefined
+                    : (picked) => {
+                        setEmojis(false)
+                        send({ kind: 'sticker', ...picked })
+                      }
+                }
+              />
+            </Suspense>
+          )}
         </form>
       )}
       {attach && <Popover x={attach.x} y={attach.y} items={attachItems} onClose={() => setAttach(null)} />}

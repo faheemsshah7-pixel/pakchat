@@ -3,8 +3,9 @@
 // Each message has a menu (MessageBubble.tsx): react, reply, copy, forward, pin, star, edit, info, delete.
 // Pinned messages show in a bar under the top (pins.ts). Disappearing messages vanish on time (disappearing.ts).
 // In a chat with one person, the phone and camera at the top start a call (calls.ts).
-// The paperclip sends photos, videos, documents, your location (location.ts) or a contact card.
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+// The paperclip sends photos, videos, documents, your location (location.ts), a contact card or a poll (polls.ts).
+// In groups, @mentions (mentions.ts) and "Reply privately". A chat with yourself is "Message yourself".
+import { Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query, where, type Timestamp } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -14,6 +15,7 @@ import {
   findUser,
   isAdmin,
   isGroup,
+  isSelfChat,
   lastRead,
   markRead,
   otherPerson,
@@ -27,12 +29,14 @@ import {
   type Extras,
   type Message,
   type Person,
+  type ReplyTo,
   type SharedContact,
 } from '../chats'
 import { deleteExpired, isExpired, setTimer, useClockAt } from '../disappearing'
 import { useT } from '../lang'
 import { startSharing, type Spot } from '../location'
-import { blobToDataUrl, isPhotoOrVideo, prepareVideo, shrinkPhoto, videoExtension, warmUpSound } from '../media'
+import { blobToDataUrl, isPhotoOrVideo, loadMedia, prepareVideo, shrinkPhoto, videoExtension, warmUpSound } from '../media'
+import { findMentions } from '../mentions'
 import { canEdit, captionKind, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
 import { activePins, pinMessage, unpinMessage } from '../pins'
 import { clearChat, deleteChat, hideMessage, isMuted, setPrefs, starMessage, type ChatPrefs } from '../prefs'
@@ -41,6 +45,7 @@ import { rememberProfile, useProfile, type Profile } from '../profiles'
 import { block, report, unblock } from '../safety'
 import { leaveGroup } from '../groups'
 import { useStable } from '../stable'
+import { keepSticker } from '../stickers'
 import { fill, type Strings } from '../strings'
 import { clock, dayNumber, isToday, isYesterday, useNow } from '../time'
 import { markTyping, typingText, useTypingVersion } from '../typing'
@@ -59,16 +64,16 @@ import {
   ReactionsDialog,
   TimerDialog,
 } from './Dialogs'
-import EmojiPicker from './EmojiPicker'
 import GroupInfo from './GroupInfo'
 import Icon from './Icon'
+// These load the first time they're needed, so opening PakChat is quicker (lazy.ts).
+import { EmojiPicker, PhotoViewer, VideoViewer } from './lazy'
 import Menu, { type MenuItem } from './Menu'
 import MessageBubble from './MessageBubble'
 import PhotoSender, { type PickedPhoto } from './PhotoSender'
-import PhotoViewer from './PhotoViewer'
+import { PollDialog, VotesDialog } from './Polls'
 import Popover, { type PopoverItem } from './Popover'
 import StarredList from './StarredList'
-import VideoViewer from './VideoViewer'
 
 type Props = {
   me: Person
@@ -81,15 +86,17 @@ type Props = {
   blocked: Set<string> // people I blocked
   onBack: () => void
   onOpenPerson: (person: Person) => void // "Message" someone from the group's member list
+  onReplyPrivately: (person: Person, reply: ReplyTo) => void // answer a group's message in your chat with its sender
   focus?: { id: string } // go to this message (from "Starred messages")
+  reply?: ReplyTo // start with this reply ready (from "Reply privately")
 }
 
-type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin'; m: Message } | { kind: 'mute' | 'timer' | 'location' | 'contact' }
+type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin' | 'votes'; m: Message } | { kind: 'mute' | 'timer' | 'location' | 'contact' | 'poll' }
 const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = faster)
 const LOOK_BACK = 1000 // going to an old message loads at most this many
 
 export default function ChatRoom(props: Props) {
-  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, blocked, onBack, onOpenPerson, focus: focusProp } = props
+  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, blocked, onBack, onOpenPerson, onReplyPrivately, focus: focusProp } = props
   const { t } = useT()
   const [limit, setLimit] = useState(PAGE)
   const [raw, setRaw] = useState<Message[]>([]) // what the database sent
@@ -100,7 +107,7 @@ export default function ChatRoom(props: Props) {
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number } | null>(null)
   const [reactingTo, setReactingTo] = useState<Message | null>(null) // the full emoji picker, for a reaction
   const [dialog, setDialog] = useState<Dialog | null>(null)
-  const [replyTo, setReplyTo] = useState<Message | null>(null)
+  const [replyTo, setReplyTo] = useState<ReplyTo | null>(props.reply ?? null)
   const [editing, setEditing] = useState<Message | null>(null)
   const [photos, setPhotos] = useState<File[] | null>(null) // photos and videos picked, to add captions to
   const [documents, setDocuments] = useState<File[] | null>(null) // documents picked
@@ -142,11 +149,26 @@ export default function ChatRoom(props: Props) {
 
   const group = isGroup(chat)
   const other = group ? undefined : (otherProp ?? (chat && otherPerson(chat, me.uid)))
-  const title = group ? (chat?.title ?? '') : (other?.name ?? '')
+  // "Message yourself": your own notes. No calls, typing, blocking or reporting there.
+  const self = isSelfChat(chat) || (!chat && other?.uid === me.uid)
+  const title = group ? (chat?.title ?? '') : self ? fill(t.youName, { name: me.name }) : (other?.name ?? '')
   const iBlockedThem = !!other && blocked.has(other.uid)
   const canTalk = !group || !chat?.onlyAdmins || isAdmin(chat, me.uid)
   // Calls are for chats with one person (not groups), and not with someone you blocked.
-  const call = other && !iBlockedThem ? (video: boolean) => startCall(me, other, video) : undefined
+  const call = other && !iBlockedThem && !self ? (video: boolean) => startCall(me, other, video) : undefined
+  // A group's other members, A to Z, for @mentions.
+  const members = chat?.members
+  const names = chat?.names
+  const people = useMemo(
+    () =>
+      group && members && names
+        ? members
+            .filter((uid) => uid !== me.uid)
+            .map((uid) => ({ uid, name: names[uid] ?? '?' }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : undefined,
+    [group, members, names, me.uid],
+  )
   const clearedAt = prefs?.clearedAt?.toMillis() ?? 0
   const hidden = prefs?.hidden
   // Disappearing messages and pins run out at set times. `now` moves on right when one does.
@@ -292,7 +314,7 @@ export default function ChatRoom(props: Props) {
   // Esc closes the photo you're looking at, the search, or else the chat (like WhatsApp Web).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .emoji-picker, .photo-sender, .settings-window, .call-screen')) return
+      if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .menu-items, .emoji-picker, .photo-sender, .settings-window, .call-screen')) return
       if (viewing) setViewing(null)
       else if (searching) setSearching(false)
       else if (!showInfo && !replyTo && !editing) onBack()
@@ -326,8 +348,8 @@ export default function ChatRoom(props: Props) {
   }, [toast])
 
   function onTyping() {
-    // Tell the others we're typing, at most once every 3 seconds.
-    if (chat && Date.now() - lastTypingSent.current > 3000) {
+    // Tell the others we're typing, at most once every 3 seconds. (Nobody to tell in "Message yourself".)
+    if (chat && !self && Date.now() - lastTypingSent.current > 3000) {
       lastTypingSent.current = Date.now()
       markTyping(chat, me.uid).catch(console.error)
     }
@@ -353,9 +375,14 @@ export default function ChatRoom(props: Props) {
 
   // The message you're replying to (if any), for the next thing you send. The reply bar closes.
   function takeReply(): Extras {
-    const extras = replyTo ? { replyTo: replySnapshot(replyTo) } : {}
+    const extras = replyTo ? { replyTo } : {}
     setReplyTo(null)
     return extras
+  }
+
+  // A poll (polls.ts).
+  function sendPoll(question: string, options: string[], multi: boolean) {
+    send({ kind: 'poll', question, options, multi }, takeReply()).catch(oops)
   }
 
   // Photos and videos picked, pasted or dropped: shrink and send them one by one.
@@ -429,7 +456,8 @@ export default function ChatRoom(props: Props) {
   async function saveEdit(text: string) {
     if (!editing) return
     const isLast = messages[messages.length - 1]?.id === editing.id
-    await editMessage(chatId, me, editing, text, isLast)
+    // In a group, who the words @mention may have changed too.
+    await editMessage(chatId, me, editing, text, isLast, people ? findMentions(text, people) : undefined)
     setEditing(null)
   }
 
@@ -468,8 +496,8 @@ export default function ChatRoom(props: Props) {
   if (chat) menuItems.push({ label: t.disappearing, icon: 'timer', onClick: actions.timer })
   if (starredIds.size > 0) menuItems.push({ label: t.starredMessages, icon: 'star', onClick: actions.starred })
   if (messages.length > 0) menuItems.push({ label: t.clearChat, icon: 'eraser', onClick: actions.clear })
-  if (other) menuItems.push({ label: iBlockedThem ? t.unblock : t.block, icon: 'block', onClick: actions.block, danger: !iBlockedThem })
-  if (messages.length > 0) menuItems.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
+  if (other && !self) menuItems.push({ label: iBlockedThem ? t.unblock : t.block, icon: 'block', onClick: actions.block, danger: !iBlockedThem })
+  if (messages.length > 0 && !self) menuItems.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
   if (group) menuItems.push({ label: t.leaveGroup, icon: 'logout', onClick: actions.leave, danger: true })
   else if (chat) menuItems.push({ label: t.deleteChat, icon: 'trash', onClick: actions.remove, danger: true })
 
@@ -478,7 +506,13 @@ export default function ChatRoom(props: Props) {
     const items: PopoverItem[] = []
     const text = (captionKind(m) ? m.caption : m.text) ?? ''
     if (m.deleted || m.kind === 'call') return [{ label: t.delete, icon: 'trash', danger: true, onClick: () => setDialog({ kind: 'delete', m }) }]
-    if (canTalk && !iBlockedThem) items.push({ label: t.reply, icon: 'reply', onClick: () => (setEditing(null), setReplyTo(m)) })
+    if (canTalk && !iBlockedThem) items.push({ label: t.reply, icon: 'reply', onClick: () => (setEditing(null), setReplyTo(replySnapshot(m))) })
+    // "Reply privately": in a group, answer someone's message in your chat with just them.
+    if (group && m.senderId !== me.uid) {
+      const sender = { uid: m.senderId, name: m.senderName ?? '?' }
+      const reply = { ...replySnapshot(m), from: (chat?.title ?? '').slice(0, 50) }
+      items.push({ label: t.replyPrivately, icon: 'reply', onClick: () => onReplyPrivately(sender, reply) })
+    }
     if (text) {
       items.push({
         label: t.copy,
@@ -486,7 +520,19 @@ export default function ChatRoom(props: Props) {
         onClick: () => navigator.clipboard.writeText(text).then(() => setToast(t.copied), console.error),
       })
     }
-    items.push({ label: t.forward, icon: 'forward', onClick: () => setDialog({ kind: 'forward', m }) })
+    if (m.kind !== 'poll') items.push({ label: t.forward, icon: 'forward', onClick: () => setDialog({ kind: 'forward', m }) })
+    // A sticker someone made: keep it in your stickers (on this device).
+    if (m.kind === 'sticker' && m.mediaId) {
+      const mediaId = m.mediaId
+      items.push({
+        label: t.saveSticker,
+        icon: 'sticker',
+        onClick: () =>
+          loadMedia(chatId, mediaId)
+            .then((data) => (keepSticker(data), setToast(t.stickerSaved)))
+            .catch(oops),
+      })
+    }
     // Pin for everyone (if you can send messages here), and star just for you.
     if (chat && canTalk && !iBlockedThem) {
       items.push(
@@ -498,7 +544,7 @@ export default function ChatRoom(props: Props) {
     const starred = starredIds.has(m.id)
     items.push({ label: starred ? t.unstar : t.star, icon: starred ? 'starOff' : 'star', onClick: () => starMessage(me.uid, chatId, m.id, !starred).catch(oops) })
     if (canEdit(m, me.uid)) items.push({ label: t.edit, icon: 'edit', onClick: () => (setReplyTo(null), setEditing(m)) })
-    if (m.senderId === me.uid && chat) items.push({ label: t.info, icon: 'info', onClick: () => setDialog({ kind: 'info', m }) })
+    if (m.senderId === me.uid && chat && !self) items.push({ label: t.info, icon: 'info', onClick: () => setDialog({ kind: 'info', m }) })
     items.push({ label: t.delete, icon: 'trash', danger: true, onClick: () => setDialog({ kind: 'delete', m }) })
     return items
   }
@@ -523,6 +569,12 @@ export default function ChatRoom(props: Props) {
     else if (person.uid !== me.uid) onOpenPerson(person)
   })
   const callBack = useStable((video: boolean) => call?.(video))
+  // Someone's name in this chat (for @mentions and poll votes).
+  const nameOf = useStable((uid: string) => (uid === me.uid ? me.name : (chat?.names[uid] ?? '?')))
+  const showVotes = useStable((m: Message) => setDialog({ kind: 'votes', m }))
+  // Tapping an @mention opens your chat with them.
+  const openMention = useStable((uid: string) => uid !== me.uid && onOpenPerson({ uid, name: nameOf(uid) }))
+  const canVote = canTalk && !iBlockedThem
 
   // ----- Search: find words in the loaded messages -----
   const q = searching ? search.trim().toLowerCase() : ''
@@ -543,13 +595,15 @@ export default function ChatRoom(props: Props) {
     caption: viewing.m.caption,
     onClose: () => setViewing(null),
   }
-  const viewer =
-    seen &&
-    (viewing.m.kind === 'video' ? (
-      <VideoViewer {...seen} fileName={`PakChat video ${viewing.m.id}.${videoExtension(seen.src)}`} />
-    ) : (
-      <PhotoViewer {...seen} fileName={`PakChat photo ${viewing.m.id}.jpg`} />
-    ))
+  const viewer = seen && (
+    <Suspense fallback={null}>
+      {viewing.m.kind === 'video' ? (
+        <VideoViewer {...seen} fileName={`PakChat video ${viewing.m.id}.${videoExtension(seen.src)}`} />
+      ) : (
+        <PhotoViewer {...seen} fileName={`PakChat photo ${viewing.m.id}.jpg`} />
+      )}
+    </Suspense>
+  )
 
   // Windows about the whole chat. They can open from the chat's menu or its info panel.
   const chatDialogs = (
@@ -610,6 +664,7 @@ export default function ChatRoom(props: Props) {
         <ContactInfo
           me={me}
           chatId={chatId}
+          self={self}
           person={other}
           messages={messages}
           muted={muted}
@@ -658,9 +713,7 @@ export default function ChatRoom(props: Props) {
           </TimerBadge>
           <h2 dir="auto">
             {title}
-            <small>
-              <ChatStatus me={me} myProfile={myProfile} chat={chat} other={other} />
-            </small>
+            <small>{self ? t.messageYourselfHint : <ChatStatus me={me} myProfile={myProfile} chat={chat} other={other} />}</small>
           </h2>
         </button>
         {muted && (
@@ -787,6 +840,10 @@ export default function ChatRoom(props: Props) {
                     onView={viewPhoto}
                     onContact={openContact}
                     onCall={call ? callBack : undefined}
+                    canVote={canVote}
+                    nameOf={nameOf}
+                    onVotes={showVotes}
+                    onMention={openMention}
                   />
                 )}
               </Fragment>
@@ -829,6 +886,8 @@ export default function ChatRoom(props: Props) {
           onDocuments={setDocuments}
           onLocation={() => setDialog({ kind: 'location' })}
           onContact={() => setDialog({ kind: 'contact' })}
+          onPoll={() => setDialog({ kind: 'poll' })}
+          people={people}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           editing={editing}
@@ -876,14 +935,16 @@ export default function ChatRoom(props: Props) {
       )}
       {reactingTo &&
         createPortal(
-          <EmojiPicker
-            className="floating"
-            onClose={() => setReactingTo(null)}
-            onPick={(emoji) => {
-              toggleReaction(reactingTo, emoji)
-              setReactingTo(null)
-            }}
-          />,
+          <Suspense fallback={null}>
+            <EmojiPicker
+              className="floating"
+              onClose={() => setReactingTo(null)}
+              onPick={(emoji) => {
+                toggleReaction(reactingTo, emoji)
+                setReactingTo(null)
+              }}
+            />
+          </Suspense>,
           document.body,
         )}
 
@@ -931,6 +992,11 @@ export default function ChatRoom(props: Props) {
       )}
       {dialog?.kind === 'location' && <LocationDialog onClose={() => setDialog(null)} onSend={shareLocation} />}
       {dialog?.kind === 'contact' && <ContactDialog me={me} chats={chats} onClose={() => setDialog(null)} onSend={shareContacts} />}
+      {dialog?.kind === 'poll' && <PollDialog onClose={() => setDialog(null)} onSend={sendPoll} />}
+      {dialog?.kind === 'votes' && (
+        // (the poll as it is now: votes keep coming in while you look)
+        <VotesDialog m={messages.find((m) => m.id === dialog.m.id) ?? dialog.m} myUid={me.uid} nameOf={nameOf} onClose={() => setDialog(null)} />
+      )}
       {chatDialogs}
 
       {photos && <PhotoSender files={photos} onClose={() => setPhotos(null)} onSend={sendPhotos} />}

@@ -545,3 +545,75 @@ Status may say it can't load for those first minutes.
 ### Try this
 - In `status.ts`, add a colour to `STATUS_COLOURS` (a gradient works too).
 - In `callExtras.ts`, change `MAX_FAVOURITES` from 20 to 30.
+
+## Step 16: Polls, stickers, @mentions, reply privately, message yourself
+
+Five WhatsApp features, plus a faster first load.
+
+| Feature | Files | Saved as |
+|---|---|---|
+| Polls | `polls.ts`, `Polls.tsx` | a message with `kind: 'poll'`, `options` and `votes` |
+| Stickers | `stickers.ts`, `Stickers.tsx`, `EmojiPicker.tsx` | a message with `kind: 'sticker'` |
+| @mentions | `mentions.ts`, `Composer.tsx`, `RichText.tsx` | `mentions: [uid, ...]` on the message (and on `lastMessage`) |
+| Reply privately | `ChatRoom.tsx`, `Home.tsx` | `replyTo.from`: the group's name |
+| Message yourself | `chats.ts`, `NewChat.tsx` | a chat with you twice: `chats/<you>_<you>` |
+| Faster first load | `screens/lazy.ts`, `vite.config.ts` | (nothing saved) |
+
+### Polls
+Paperclip > **Poll**: a question and 2 to 12 answers (a new empty box appears as you fill
+the last one), and **Allow multiple answers**. Everyone taps answers to vote; tap again to
+take a vote back. **View votes** shows who picked what.
+
+The votes live on the poll message as `votes: { uid: [answer numbers] }`. Each person writes
+only `votes.<their uid>`, so two people voting at the same moment never undo each other. The
+**rules** (`voting()` in `firestore.rules`) check that you change only your own vote, only real
+answer numbers, no answer twice, and just one answer when the poll allows one.
+
+### Stickers
+Smiley > **Stickers** at the bottom. PakChat's own pack is an emoji with a few bold words,
+drawn by the browser (`PACK` in `stickers.ts`), so sending one only sends its name, like
+`pk:salam`. **Create** turns a photo into a sticker: a square from the middle with round
+corners and a white edge (`makeSticker`), sent like a small photo. Your stickers ("My
+stickers", and ones you save from a chat with **Save sticker**) are kept on this device only.
+
+### @mentions (groups)
+Type **@** in a group and its people show up; arrows and Enter (or a tap) pick one, and
+"@Ali " goes into the message. When you send, `findMentions` looks for each "@Name" in the
+words and saves who was mentioned. Then:
+- the names show in colour, and tapping one opens your chat with them;
+- the person's chat list shows **@** on the group until they open it;
+- a group you muted still alerts you when someone mentions you (like WhatsApp).
+
+### Reply privately (groups)
+In a group, a message's menu has **Reply privately**. It opens your chat with the person
+who wrote it, ready to answer that message. The quote says which group it came from
+("Ali · Cousins"), and tapping it doesn't jump, because the message is in the group.
+
+### Message yourself
+**New chat > Message yourself** (or type your own number). It's a normal chat whose two
+members are both you, so the rules already allowed it: `chats/<you>_<you>`. It's for notes,
+links and photos you want to keep. No calls, typing, blocking or reporting there, and the
+ticks are always blue.
+
+### A faster first load (code splitting)
+Before, the browser downloaded all of PakChat (about 1 MB) before showing anything, and the
+build printed a yellow warning about it. Now:
+- **Firebase and React have files of their own** (`vite.config.ts`). They only change when we
+  update them, so after a new PakChat version your browser keeps them and downloads just our
+  own code (about a quarter of the total).
+- **Screens you don't need straight away load when first used** (`screens/lazy.ts`): Settings,
+  Status, the call screen and call windows, the emoji panel and the photo viewer. React's
+  `lazy()` and `<Suspense>` do this. A moment after PakChat opens, `warmUp()` fetches them
+  quietly, so they're ready before you tap.
+- When a new version goes online, the old files are gone. If PakChat was already open and
+  can't find one, it reloads itself once into the new version (`reloadOnce()`).
+
+### New rules
+`firestore.rules` now accepts polls, stickers, `mentions` and `replyTo.from`, and has the new
+`voting()` rule. That's why this update deploys the rules too, not just the website.
+
+### Try this
+- In `stickers.ts`, add your own sticker to `PACK`: an id like `pk:shabash`, an emoji, the
+  words, and a colour.
+- In `polls.ts`, change `MAX_OPTIONS` from 12 to 6 (the rules still allow up to 12).
+- Send a poll in a group, vote from two devices at once, and watch the bars move.

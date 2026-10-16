@@ -477,6 +477,31 @@ const PATHS = {
     </>
   ),
   chevronLeft: <path d="m15 18-6-6 6-6" />,
+  poll: (
+    <>
+      <path d="M18 20V10" />
+      <path d="M12 20V4" />
+      <path d="M6 20v-6" />
+    </>
+  ),
+  sticker: (
+    <>
+      <path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
+      <path d="M14 3v4a2 2 0 0 0 2 2h4" />
+      <path d="M8 13h.01" />
+      <path d="M16 13h.01" />
+      <path d="M10 16s.8 1 2 1c1.3 0 2-1 2-1" />
+    </>
+  ),
+  note: (
+    <>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M10 13H8" />
+      <path d="M16 17H8" />
+      <path d="M16 13h-2" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS
