@@ -17,6 +17,14 @@
       ]
     },
     {
+      "collectionGroup": "statuses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "audience", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "postedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "typing",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

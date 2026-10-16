@@ -402,6 +402,81 @@ const PATHS = {
       <path d="M15 13h3" />
     </>
   ),
+  // The left bar (Rail.tsx): chats, status
+  chat: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
+  status: (
+    <>
+      <path d="M10.1 2.2a10 10 0 0 1 3.8 0" />
+      <path d="M17.6 3.7a10 10 0 0 1 2.7 2.7" />
+      <path d="M21.8 10.1a10 10 0 0 1 0 3.8" />
+      <path d="M20.3 17.6a10 10 0 0 1-2.7 2.7" />
+      <path d="M13.9 21.8a10 10 0 0 1-3.8 0" />
+      <path d="M6.4 20.3a10 10 0 0 1-2.7-2.7" />
+      <path d="M2.2 13.9a10 10 0 0 1 0-3.8" />
+      <path d="M3.7 6.4a10 10 0 0 1 2.7-2.7" />
+      <circle cx="12" cy="12" r="4.5" />
+    </>
+  ),
+  // Calls
+  dialpad: (
+    <>
+      <circle cx="6" cy="5" r="1.4" />
+      <circle cx="12" cy="5" r="1.4" />
+      <circle cx="18" cy="5" r="1.4" />
+      <circle cx="6" cy="11" r="1.4" />
+      <circle cx="12" cy="11" r="1.4" />
+      <circle cx="18" cy="11" r="1.4" />
+      <circle cx="6" cy="17" r="1.4" />
+      <circle cx="12" cy="17" r="1.4" />
+      <circle cx="18" cy="17" r="1.4" />
+      <circle cx="12" cy="22" r="0.6" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4" />
+      <path d="M8 2v4" />
+      <path d="M3 10h18" />
+      <path d="M12 14v4" />
+      <path d="M10 16h4" />
+    </>
+  ),
+  videoLink: (
+    <>
+      <path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 10.5" />
+      <rect x="2" y="6" width="14" height="12" rx="2" />
+      <path d="M8.5 13.5 10 12" />
+      <path d="M7.4 11.1 6.6 12a1.5 1.5 0 0 0 2.1 2.1l.8-.8" />
+      <path d="m11.1 12.9.8-.8a1.5 1.5 0 0 0-2.1-2.1l-.8.8" />
+    </>
+  ),
+  backspace: (
+    <>
+      <path d="M10 5a2 2 0 0 0-1.3.5l-6.2 6a1 1 0 0 0 0 1.4l6.2 6A2 2 0 0 0 10 19h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z" />
+      <path d="m12 9 6 6" />
+      <path d="m18 9-6 6" />
+    </>
+  ),
+  // Status
+  heart: <path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z" />,
+  heartFilled: (
+    <path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z" fill="currentColor" />
+  ),
+  eye: (
+    <>
+      <path d="M2.1 12.3a1 1 0 0 1 0-.7 10.8 10.8 0 0 1 19.8 0 1 1 0 0 1 0 .7 10.8 10.8 0 0 1-19.8 0" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  font: (
+    <>
+      <path d="M4 7V4h16v3" />
+      <path d="M9 20h6" />
+      <path d="M12 4v16" />
+    </>
+  ),
+  chevronLeft: <path d="m15 18-6-6 6-6" />,
 }
 
 export type IconName = keyof typeof PATHS

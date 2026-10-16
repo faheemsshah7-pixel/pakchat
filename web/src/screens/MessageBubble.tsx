@@ -1,5 +1,5 @@
 // MessageBubble.tsx: one message in a chat: who sent it (in groups), what it answers,
-// the words / photo / video / voice note / document / location / contact / call,
+// the words / photo / video / voice note / document / location / contact / call / scheduled call,
 // the time and ticks, and any emoji reactions under it.
 // Right-click it (or hold your finger on it on a phone, or use the little arrow) for its menu.
 // memo (at the bottom): a bubble is only drawn again when ITS message changed. A chat shows
@@ -11,7 +11,7 @@ import { isJumboEmoji } from '../emoji'
 import { useT } from '../lang'
 import { clock, duration } from '../time'
 import Icon from './Icon'
-import { ContactBubble, LocationBubble } from './CardBubbles'
+import { ContactBubble, LocationBubble, ScheduledCallBubble } from './CardBubbles'
 import { FileBubble, PhotoBubble, VideoBubble, VoiceBubble } from './MediaBubbles'
 import RichText from './RichText'
 import Ticks from './Ticks'
@@ -97,7 +97,8 @@ export default memo(function MessageBubble(props: Props) {
             </span>
           )}
           {m.replyTo && (
-            <button type="button" className="quote" onClick={() => onJump(m.replyTo!.id)}>
+            // (A reply to a status can't jump anywhere: the status isn't in the chat.)
+            <button type="button" className="quote" onClick={() => m.replyTo!.kind !== 'status' && onJump(m.replyTo!.id)}>
               <strong style={{ color: nameColour(m.replyTo.senderName) }}>
                 {m.replyTo.senderId === myUid ? t.you : m.replyTo.senderName}
               </strong>
@@ -112,6 +113,7 @@ export default memo(function MessageBubble(props: Props) {
           {kind === 'file' && <FileBubble chatId={chatId} m={m} />}
           {kind === 'location' && <LocationBubble chatId={chatId} m={m} mine={mine} />}
           {kind === 'contact' && m.contact && <ContactBubble contact={m.contact} onMessage={onContact} />}
+          {kind === 'scheduledCall' && <ScheduledCallBubble m={m} onCall={onCall} />}
           {kind === 'call' && (
             // "Voice call 2:13" / "Missed video call". Tap it to call back.
             <button type="button" className={m.missed && !mine ? 'call-bubble missed' : 'call-bubble'} disabled={!onCall} onClick={() => onCall?.(!!m.video)}>

@@ -115,7 +115,7 @@ export type SharedContact = { name: string; uid?: string; phone?: string; email?
 
 export type Message = {
   id: string
-  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'call' | 'system' // step 2 messages have no kind: they're text
+  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'call' | 'scheduledCall' | 'system' // step 2 messages have no kind: they're text
   text?: string
   senderId: string
   senderName?: string
@@ -140,6 +140,9 @@ export type Message = {
   contact?: SharedContact
   video?: boolean // calls: a video call (or else a voice call)
   missed?: boolean // calls: nobody picked up
+  startsAt?: Timestamp | null // a scheduled call: when (its name is in text)
+  callId?: string // a scheduled call: its scheduledCalls/<id> (callExtras.ts)
+  cancelled?: boolean // a scheduled call that was called off
   event?: SystemEvent // system messages: "Ali added Sara"
   targetName?: string
   replyTo?: ReplyTo
@@ -160,6 +163,7 @@ export type Content =
   | { kind: 'location'; lat: number; lng: number; accuracy: number; liveMinutes?: number } // see location.ts
   | { kind: 'contact'; contact: SharedContact }
   | { kind: 'call'; video: boolean; seconds: number; missed: boolean } // written by calls.ts when a call ends
+  | { kind: 'scheduledCall'; title: string; startsAt: Date; video: boolean; callId: string } // callExtras.ts
 
 // Extra things a message can carry.
 export type Extras = { replyTo?: ReplyTo; forwarded?: boolean }
@@ -197,6 +201,21 @@ export function chatTitle(chat: Chat, myUid: string) {
   return isGroup(chat) ? (chat.title ?? '') : otherPerson(chat, myUid).name
 }
 
+// Everyone you know: the people in your chats and groups, A to Z.
+// direct: you have a chat with just them (not only a group together).
+export function peopleYouKnow(chats: Chat[], myUid: string): (Person & { direct: boolean })[] {
+  const people = new Map<string, Person & { direct: boolean }>()
+  for (const chat of chats) {
+    for (const uid of chat.members) {
+      if (uid === myUid) continue
+      const known = people.get(uid)
+      const direct = !isGroup(chat) || !!known?.direct
+      people.set(uid, { uid, name: (!isGroup(chat) && chat.names[uid]) || known?.name || chat.names[uid] || '?', direct })
+    }
+  }
+  return [...people.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
 // Look up a PakChat user by phone number or Gmail. Returns null if nobody has it.
 export async function findUser(input: string): Promise<Person | null> {
   const { field, value } = contactKey(input)
@@ -229,6 +248,8 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
     if (content.liveMinutes) Object.assign(message, { live: true, liveUntil: Timestamp.fromMillis(Date.now() + content.liveMinutes * 60_000) })
   } else if (content.kind === 'contact') {
     message.contact = content.contact
+  } else if (content.kind === 'scheduledCall') {
+    Object.assign(message, { text: content.title, startsAt: Timestamp.fromDate(content.startsAt), video: content.video, callId: content.callId })
   } else {
     // The photo, video, voice note or document goes in its own document(s), so the message list stays small.
     message.mediaId = saveMedia(batch, chatRef, content.data, me.uid, expireAt)
@@ -335,6 +356,10 @@ export function shortText(m: Short, myUid: string, t: Strings) {
       return m.live ? t.liveLocationLabel : t.locationLabel
     case 'contact':
       return `👤 ${m.contact?.name ?? m.text ?? ''}`
+    case 'scheduledCall':
+      return `📅 ${m.text ?? ''}`
+    case 'status': // a reply to someone's status (status.ts)
+      return `${t.statusWord} · ${words ?? ''}`
   }
   return m.text ?? ''
 }

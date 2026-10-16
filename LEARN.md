@@ -136,8 +136,9 @@ When we move to the paid plan, only `media.ts` changes, to use Firebase Storage.
   On the free plan they only work while PakChat is open in a tab. The tab title also shows
   unread chats: "(2) PakChat".
 - **Urdu** (`strings.ts`, `lang.ts`, `LangProvider.tsx`): every word lives in `strings.ts`,
-  in English and Urdu. Screens call `useT()` to get the words. Urdu also flips the page
-  to right-to-left (`dir="rtl"`) and uses the Noto Nastaliq Urdu font.
+  in English and Urdu. Screens call `useT()` to get the words. Urdu uses the Noto Nastaliq
+  Urdu font. The layout stays the same in Urdu (nothing flips to the other side): only the
+  words change. Messages and names have `dir="auto"`, so Urdu in them still reads right-to-left.
 - **Block** (`safety.ts`): saves `users/<you>/blocked/<them>`. The **rules** check it, so a
   blocked person really can't message you, even with a hacked app.
 - **Report**: saves the last 5 messages in `reports/`. Nobody can read reports from the app.
@@ -477,3 +478,70 @@ the window under it, a window before the chat.
 - In `location.ts`, change `LIVE_CHOICES` to `[15, 60, 240]` and the 3rd label in
   `strings.ts` to "4 hours". (Over 8 hours would also need the rule's `481` changed.)
 - In `fileColour` (`MediaBubbles.tsx`), give `ZIP` files their own colour.
+
+## Step 15: The left bar, Calls, Status and the Settings window
+
+PakChat now moves around like WhatsApp on a computer: a thin **bar down the left**
+(`Rail.tsx`) with **Chats**, **Calls** and **Status**, then Archived and Starred, and Settings
+and your photo at the bottom. On a phone the same bar sits along the bottom with just
+Chats, Status and Calls (`index.css` moves it; `.wide-only` hides the rest). The bar hides
+inside a chat, like WhatsApp's.
+
+| Part | Files | Saved as |
+|---|---|---|
+| Calls tab | `CallsList.tsx` (left), `CallsMain.tsx` (right) | the calls you already had, read once when you open it |
+| Favourites | `callExtras.ts`, `private.ts` | `users/<you>/private/calls` (only you can read it) |
+| Call links | `callExtras.ts`, `CallDialogs.tsx` | `callLinks/<code>`, opened at `/call/<code>` |
+| Scheduled calls | `callExtras.ts`, `CallDialogs.tsx`, `CardBubbles.tsx` | `scheduledCalls/<id>`, + a card in your chat |
+| Status | `status.ts`, `StatusList.tsx`, `MyStatus.tsx`, `StatusViewer.tsx`, `StatusComposer.tsx` | `statuses/<id>` (+ `media` and `views` inside it) |
+| Settings window | `Settings.tsx` | (the same settings as before) |
+
+### The Calls tab
+On the left: search ("Name, number"; type a number and you can call it), **Favourites**,
+**Upcoming** (scheduled calls) and **Recent**. Calls in a row with the same person, the same
+way, on the same day share one line, like WhatsApp: "Maaz (3)" (`groupCalls`). A red name is
+a call you missed. The number on the bar counts missed calls since you last opened the tab
+(`seenAt` in your private doc). Tap a line for **Call info**.
+
+On the right, four big buttons: **Start call** (pick someone), **New call link** (anyone
+with the link can call you; delete it to stop that), **Call a number** (a keypad) and
+**Schedule call**. A scheduled call is a card in your chat, and when its time comes PakChat
+plays a sound and shows "It's time for your call" to both of you (while PakChat is open).
+
+### Status (photos, videos or words for 24 hours)
+**Who sees it:** when you post, PakChat writes down the people you chat with one to one
+(`audienceFor`), minus anyone you left out in **Status privacy**. That list is saved on the
+status as `audience`, and the **rules** only let those people read it. That's why changing
+your privacy doesn't change statuses you already posted (WhatsApp works the same way).
+
+**24 hours:** the free plan can't run a timer on the server, so the app only shows statuses
+younger than 24 hours, and your own app deletes yours after that (`listenToMine`).
+
+**Seen and liked:** opening someone's status saves `statuses/<id>/views/<you>` (your name,
+the time, and whether you tapped ♥). Only you and the owner can read that doc, so the owner
+sees "Viewed by". Which ones *you* have seen is also kept on your device, to put them under
+"Viewed updates" without reading the database again.
+
+**Replying** sends a normal message in your chat with them, quoting "Status · …".
+
+### The Settings window
+Settings opens in the middle of the screen as its own window: the list on the left, the
+page on the right, **Done** at the bottom. On a phone it fills the screen: first the list,
+then the page you tap, and Back goes from the page to the list. The search box finds a page
+by the settings inside it ("theme" finds Chats).
+
+### Urdu keeps the same layout
+Before, Urdu flipped the whole screen right-to-left. Now the layout stays the same and only
+the words change (`LangProvider.tsx` always sets `dir="ltr"`). Urdu words still read
+right-to-left by themselves.
+
+### New rules and a new index
+`firestore.rules` has rules for `callLinks`, `scheduledCalls`, `statuses` and
+`users/<you>/private`. Statuses need a new **index** (`firestore.indexes.json`): a list of
+statuses where you're in the audience, newest first. That's why this update deploys
+everything, not just the website. Firebase takes a few minutes to build a new index, so
+Status may say it can't load for those first minutes.
+
+### Try this
+- In `status.ts`, add a colour to `STATUS_COLOURS` (a gradient works too).
+- In `callExtras.ts`, change `MAX_FAVOURITES` from 20 to 30.

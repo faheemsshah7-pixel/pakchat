@@ -2,6 +2,7 @@
 // `locale` says how to write dates: [] = your computer's default, ['ur-PK'] = Urdu.
 import { useEffect, useState } from 'react'
 import type { Timestamp } from 'firebase/firestore'
+import { fill, type Strings } from './strings'
 
 // Today: "1:43 PM". Older: "12 Oct".
 export function formatTime(date: Date | undefined, locale: string[]) {
@@ -50,4 +51,27 @@ export function useNow(everyMs: number) {
     return () => clearInterval(timer)
   }, [everyMs])
   return now
+}
+
+// For lists like Calls: today "2:30 PM", then "Yesterday", "Wednesday" (this week), or "12 Oct".
+export function dayOrTime(date: Date | undefined, locale: string[], yesterday: string) {
+  if (!date) return ''
+  if (isToday(date)) return clock(date, locale)
+  if (isYesterday(date)) return yesterday
+  if (Date.now() - date.getTime() < 6 * 86_400_000) return date.toLocaleDateString(locale, { weekday: 'long' })
+  return shortDate(date, locale)
+}
+
+// "Fri 17 Oct, 3:00 PM": a day and time that might be in the future (scheduled calls).
+export function dayAndTime(date: Date, locale: string[]) {
+  return `${date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock(date, locale)}`
+}
+
+// For statuses: "Just now", "5 minutes ago", "Today, 2:30 PM", "Yesterday, 11:05 PM".
+export function agoText(date: Date | undefined, now: number, t: Strings) {
+  if (!date) return t.justNow
+  const minutes = Math.floor((now - date.getTime()) / 60_000)
+  if (minutes < 1) return t.justNow
+  if (minutes < 60) return fill(minutes === 1 ? t.minuteAgo : t.minutesAgo, { n: minutes })
+  return `${isToday(date) ? t.today : t.yesterday}, ${clock(date, t.locale)}`
 }

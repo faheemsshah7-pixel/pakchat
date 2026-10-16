@@ -11,7 +11,8 @@ import { addMessage, type Chat, type Person } from './chats'
 
 export type Invite = { code: string; chatId: string; title: string }
 
-function newCode() {
+// A long random code for a link (also used for call links, callExtras.ts).
+export function newCode() {
   const letters = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   const random = crypto.getRandomValues(new Uint8Array(20)) // the browser's secure random numbers
   return Array.from(random, (n) => letters[n % letters.length]).join('')

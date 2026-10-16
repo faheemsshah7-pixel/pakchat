@@ -1,6 +1,7 @@
 // ChatList.tsx: your chats, pinned ones on top, then newest first.
 // The search box finds a chat by name or message, or starts a new chat with a number or Gmail.
-// All / Unread / Groups filter the list. Archived chats wait in their own list.
+// All / Unread / Groups filter the list. Archived chats wait in their own list (on a phone the
+// "Archived" row at the top opens it; on a computer it's on the left bar, Rail.tsx).
 // Right-click a chat (or use its little arrow) to pin, mute, archive, mark unread or delete it.
 // The chats themselves come from Home.tsx, which listens to the database.
 // Each row is drawn again only when something in it changed (memo, at the bottom).
@@ -57,12 +58,11 @@ type Props = {
   onNewChat: () => void
   onNewGroup: () => void
   onSettings: () => void
-  onCalls: () => void
   onStarred: () => void
 }
 
 export default function ChatList(props: Props) {
-  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onSettings, onCalls, onStarred } = props
+  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onSettings, onStarred } = props
   const { t, lang, setLang } = useT()
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
@@ -104,7 +104,6 @@ export default function ChatList(props: Props) {
 
   const menu: MenuItem[] = [
     { label: t.newGroup, icon: 'users', onClick: onNewGroup },
-    { label: t.calls, icon: 'phone', onClick: onCalls },
     { label: t.starredMessages, icon: 'star', onClick: onStarred },
     { label: t.settings, icon: 'settings', onClick: onSettings },
     { label: t.theme, icon: 'palette', onClick: () => setPicking(true) },
@@ -197,9 +196,6 @@ export default function ChatList(props: Props) {
           </h2>
           <button className="icon" aria-label={t.newChat} title={t.newChat} onClick={onNewChat}>
             <Icon name="chatPlus" />
-          </button>
-          <button className="icon" aria-label={t.calls} title={t.calls} onClick={onCalls}>
-            <Icon name="phone" />
           </button>
           <Menu label={t.menu} items={menu} />
         </header>

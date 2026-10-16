@@ -1,10 +1,10 @@
-// CardBubbles.tsx: a location (a small map) and a contact card, inside a chat bubble.
+// CardBubbles.tsx: a location (a small map), a contact card and a scheduled call, inside a chat bubble.
 import type { Message, SharedContact } from '../chats'
 import { useClockAt } from '../disappearing'
 import { useT } from '../lang'
 import { mapsLink, stopSharing } from '../location'
 import { fill } from '../strings'
-import { clock, useNow } from '../time'
+import { clock, dayAndTime, useNow } from '../time'
 import Avatar, { PersonAvatar } from './Avatar'
 import Icon from './Icon'
 
@@ -100,6 +100,35 @@ export function ContactBubble({ contact, onMessage }: { contact: SharedContact; 
       <button type="button" className="contact-action" onClick={() => onMessage(contact)}>
         {t.message}
       </button>
+    </div>
+  )
+}
+
+// A call planned for later (Calls > Schedule call): its name, when, and a button to call.
+export function ScheduledCallBubble({ m, onCall }: { m: Message; onCall?: (video: boolean) => void }) {
+  const { t } = useT()
+  const when = m.startsAt?.toDate()
+  return (
+    <div className={m.cancelled ? 'plan-card cancelled' : 'plan-card'}>
+      <div className="contact-top">
+        <span className="call-icon">
+          <Icon name="calendar" size={20} />
+        </span>
+        <span className="contact-words">
+          <small>{t.scheduledCall}</small>
+          <strong dir="auto">{m.text}</strong>
+          <small>
+            {when ? dayAndTime(when, t.locale) : ''} · {m.video ? t.videoCall : t.voiceCall}
+          </small>
+        </span>
+      </div>
+      {m.cancelled ? (
+        <p className="plan-cancelled">{t.callCancelled}</p>
+      ) : (
+        <button type="button" className="contact-action" disabled={!onCall} onClick={() => onCall?.(!!m.video)}>
+          <Icon name={m.video ? 'video' : 'phone'} size={16} /> {t.call}
+        </button>
+      )}
     </div>
   )
 }

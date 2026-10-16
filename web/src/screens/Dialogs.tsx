@@ -497,3 +497,71 @@ function phoneContacts() {
 function card(c: SharedContact): SharedContact {
   return Object.fromEntries(Object.entries(c).filter(([, v]) => v)) as SharedContact
 }
+
+// Pick people from everyone you know: one (onPick), or several with tick boxes (onDone).
+// Used for "Add favourite" (Calls) and for status privacy ("My contacts except…").
+type PeopleProps = {
+  title: string
+  hint?: string
+  people: Person[]
+  picked?: string[] // ticked to start with (several)
+  onPick?: (person: Person) => void
+  onDone?: (uids: string[]) => void
+  onClose: () => void
+}
+export function PeopleDialog({ title, hint, people, picked: start, onPick, onDone, onClose }: PeopleProps) {
+  const { t } = useT()
+  const [search, setSearch] = useState('')
+  const [picked, setPicked] = useState<string[]>(start ?? [])
+  const shown = people.filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase()))
+  const toggle = (uid: string) => setPicked(picked.includes(uid) ? picked.filter((p) => p !== uid) : [...picked, uid])
+  return (
+    <Modal title={title} onClose={onClose} className="narrow">
+      {hint && <p className="hint">{hint}</p>}
+      <div className="field">
+        <Icon name="search" size={18} />
+        <input placeholder={t.search} value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+      </div>
+      <div className="pick-list">
+        {shown.map((person) =>
+          onDone ? (
+            <label key={person.uid} className="row pick">
+              <PersonAvatar uid={person.uid} name={person.name} size={42} />
+              <strong className="row-main" dir="auto">
+                {person.name}
+              </strong>
+              <input type="checkbox" checked={picked.includes(person.uid)} onChange={() => toggle(person.uid)} />
+            </label>
+          ) : (
+            <button
+              key={person.uid}
+              className="row"
+              onClick={() => {
+                onPick?.(person)
+                onClose()
+              }}
+            >
+              <PersonAvatar uid={person.uid} name={person.name} size={42} />
+              <strong className="row-main" dir="auto">
+                {person.name}
+              </strong>
+            </button>
+          ),
+        )}
+        {shown.length === 0 && <p className="empty">{people.length ? t.nothingHere : t.noPeopleYet}</p>}
+      </div>
+      {onDone && (
+        <button
+          className="btn"
+          onClick={() => {
+            onDone(picked)
+            onClose()
+          }}
+        >
+          <Icon name="check" size={18} /> {t.done}
+          {picked.length > 0 && <span className="count">{picked.length}</span>}
+        </button>
+      )}
+    </Modal>
+  )
+}

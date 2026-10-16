@@ -46,6 +46,11 @@ service cloud.firestore {
       match /prefs/{chatId} {
         allow read, write: if signedIn() && me() == userId;
       }
+      // users/<uid>/private/<name>: other private things that follow you to any device:
+      // your favourite people to call, and who can see your status (see private.ts).
+      match /private/{name} {
+        allow read, write: if signedIn() && me() == userId;
+      }
     }
 
     // avatars/<uid>: your profile photo, kept small. Anyone logged in can see it.
@@ -143,6 +148,110 @@ service cloud.firestore {
           && next().state == 'ended'
           && next().endedAt == request.time
           && !('offer' in next()) && !('answer' in next());
+      }
+    }
+
+    // callLinks/<code>: a link that calls you, like https://pakchat-f89d8.web.app/call/k3J9x...
+    // (see callExtras.ts). Like invite links, the code is long and random, so only people you
+    // sent it to can find it. You can list and delete your own.
+    match /callLinks/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.owner == me();
+      allow create: if signedIn()
+        && code.size() >= 16
+        && request.resource.data.keys().hasOnly(['owner', 'ownerName', 'video', 'createdAt'])
+        && request.resource.data.owner == me()
+        && request.resource.data.ownerName == get(/databases/$(database)/documents/users/$(me())).data.name
+        && request.resource.data.video is bool
+        && request.resource.data.createdAt == request.time;
+      allow delete: if signedIn() && resource.data.owner == me();
+    }
+
+    // scheduledCalls/<id>: a call you planned with someone, for a time (callExtras.ts).
+    // Only the two of you can see it. The one who planned it can cancel it, and once it's
+    // a day old either of you can tidy it away.
+    match /scheduledCalls/{callId} {
+      function plan() {
+        return request.resource.data;
+      }
+      allow read: if signedIn() && me() in resource.data.members;
+      allow create: if signedIn()
+        && plan().keys().hasOnly(['by', 'byName', 'to', 'toName', 'members', 'title', 'startsAt', 'video', 'chatId', 'messageId'])
+        && plan().by == me()
+        && plan().byName == get(/databases/$(database)/documents/users/$(me())).data.name
+        && plan().to is string && plan().to != me()
+        && plan().toName is string && plan().toName.size() <= 40
+        && plan().members == [me(), plan().to]
+        && plan().chatId == (me() < plan().to ? me() + '_' + plan().to : plan().to + '_' + me())
+        && plan().title is string && plan().title.size() > 0 && plan().title.size() <= 100
+        && plan().startsAt is timestamp
+        && plan().startsAt > request.time - duration.value(10, 'm')
+        && plan().startsAt < request.time + duration.value(366, 'd')
+        && plan().video is bool
+        && plan().messageId is string;
+      allow delete: if signedIn() && me() in resource.data.members
+        && (resource.data.by == me() || resource.data.startsAt < request.time - duration.value(1, 'd'));
+    }
+
+    // statuses/<id>: a status update (see status.ts). It lasts 24 hours.
+    // "audience" lists who may see it: the people you chat with, as your status privacy says.
+    // Nobody else can read it, its photo or video, or who saw it.
+    match /statuses/{statusId} {
+      function status() {
+        return get(/databases/$(database)/documents/statuses/$(statusId)).data;
+      }
+      function canSee(s) {
+        return s.owner == me() || me() in s.audience;
+      }
+      function captionOk(s) {
+        return s.get('caption', '') is string && s.get('caption', '').size() <= 1024;
+      }
+      // Words on a coloured background, a photo, or a video of up to a minute.
+      function statusOk(s) {
+        return (s.kind == 'text' && s.text is string && s.text.size() > 0 && s.text.size() <= 700
+            && s.get('bg', 0) is int && s.get('font', 0) is int)
+          || (s.kind == 'photo' && s.mediaId is string && s.width is number && s.height is number && captionOk(s))
+          || (s.kind == 'video' && s.mediaId is string && s.posterId is string
+            && s.seconds is number && s.seconds <= 61 && s.width is number && s.height is number && captionOk(s));
+      }
+      allow read: if signedIn() && canSee(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['owner', 'ownerName', 'kind', 'text', 'bg', 'font', 'mediaId', 'posterId', 'width', 'height', 'seconds', 'caption', 'thumb', 'postedAt', 'audience'])
+        && request.resource.data.owner == me()
+        && request.resource.data.ownerName == get(/databases/$(database)/documents/users/$(me())).data.name
+        && request.resource.data.postedAt == request.time
+        && request.resource.data.audience is list
+        && request.resource.data.audience.size() <= 1000
+        && request.resource.data.get('thumb', '') is string
+        && request.resource.data.get('thumb', '').size() <= 40000
+        && statusOk(request.resource.data);
+      allow delete: if signedIn() && resource.data.owner == me();
+
+      // Its photo or video, in parts like a chat's (media.ts).
+      match /media/{partId} {
+        allow read: if signedIn() && canSee(status());
+        allow create: if signedIn()
+          && getAfter(/databases/$(database)/documents/statuses/$(statusId)).data.owner == me()
+          && request.resource.data.keys().hasOnly(['data', 'owner', 'parts'])
+          && request.resource.data.owner == me()
+          && request.resource.data.data is string
+          && request.resource.data.get('parts', 2) is int
+          && request.resource.data.get('parts', 2) >= 2
+          && request.resource.data.get('parts', 2) <= 8;
+        allow delete: if signedIn() && resource.data.owner == me();
+      }
+
+      // views/<uid>: who saw it (and liked it). You write only your own; only its owner sees them all.
+      match /views/{uid} {
+        allow read: if signedIn() && (uid == me() || status().owner == me());
+        allow create, update: if signedIn() && uid == me()
+          && me() in status().audience
+          && request.resource.data.keys().hasOnly(['name', 'at', 'liked'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.at == request.time
+          && request.resource.data.get('liked', false) is bool;
+        allow delete: if signedIn() && (uid == me() || status().owner == me());
       }
     }
 
@@ -337,8 +446,9 @@ service cloud.firestore {
           && request.resource.data.sentAt == request.time
           && newMessageOk(request.resource.data)
           && mayTalk(request.resource.data);
-        // Changing a message: a reaction, an edit, "delete for everyone", or a live location moving.
-        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive());
+        // Changing a message: a reaction, an edit, "delete for everyone", a live location moving,
+        // or cancelling a call you scheduled.
+        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall());
         // Disappearing messages: once a message's time is up, anyone in the chat can delete it for good.
         allow delete: if canRead() && expired(resource.data);
       }
@@ -354,7 +464,7 @@ service cloud.firestore {
       // Only these fields, so nobody can sneak in a fake "edited" or "deleted" mark.
       function newMessageOk(m) {
         return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt',
-            'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact'])
+            'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact', 'startsAt', 'callId'])
           && m.get('forwarded', false) is bool
           && expiryOk(m)
           && (!('replyTo' in m)
@@ -393,6 +503,14 @@ service cloud.firestore {
             && m.contact.get('phone', '') is string && m.contact.get('phone', '').size() <= 20
             && m.contact.get('email', '') is string && m.contact.get('email', '').size() <= 100
             && m.contact.get('uid', '') is string && m.contact.get('uid', '').size() <= 128)
+          // A call planned for later (Calls > Schedule call): its name, when, voice or video
+          || (m.kind == 'scheduledCall' && isDirectId()
+            && m.text is string && m.text.size() > 0 && m.text.size() <= 100
+            && m.startsAt is timestamp
+            && m.startsAt > request.time - duration.value(10, 'm')
+            && m.startsAt < request.time + duration.value(366, 'd')
+            && m.video is bool
+            && m.callId is string && m.callId.size() <= 40)
           // "Voice call 2:13" or "Missed voice call": only in chats with one person
           || (m.kind == 'call' && isDirectId()
             && m.video is bool && m.missed is bool
@@ -439,6 +557,13 @@ service cloud.firestore {
           && placeOk(now)
           && (now.get('movedAt', null) == was.get('movedAt', null) || now.movedAt == request.time)
           && (now.liveUntil == was.liveUntil || now.liveUntil == request.time);
+      }
+      // Cancel a call you scheduled: the card in the chat then says "Cancelled".
+      function cancellingCall() {
+        return resource.data.senderId == me()
+          && resource.data.get('kind', 'text') == 'scheduledCall'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cancelled'])
+          && request.resource.data.cancelled == true;
       }
       // Edit your own message (or a photo's, video's or document's caption), up to 15 minutes after sending it.
       function editing() {

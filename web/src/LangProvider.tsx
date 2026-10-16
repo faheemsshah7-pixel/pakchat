@@ -1,5 +1,6 @@
 // LangProvider.tsx: holds the chosen language and remembers it in the browser.
-// Urdu is written right-to-left, so we also flip the page direction.
+// The layout stays the same in both languages (you asked for that): only the words change.
+// Urdu words still read right-to-left by themselves: the browser knows Urdu letters go that way.
 import { useEffect, useState, type ReactNode } from 'react'
 import { LangContext, type Lang } from './lang'
 import { en, ur } from './strings'
@@ -17,7 +18,7 @@ export default function LangProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = lang
-    document.documentElement.dir = lang === 'ur' ? 'rtl' : 'ltr'
+    document.documentElement.dir = 'ltr' // (Urdu doesn't flip the screen around)
   }, [lang])
 
   function setLang(next: Lang) {

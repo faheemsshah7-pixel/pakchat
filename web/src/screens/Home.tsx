@@ -1,8 +1,11 @@
-// Home.tsx: the main screen after login.
-// On a computer it's two panels side by side, like WhatsApp Web:
-//   left:  your chats (or New chat, New group, Archived, Settings)
-//   right: the open chat (or a welcome message when none is open)
-// On a phone there's only room for one, so index.css hides the other.
+// Home.tsx: the main screen after login. Like WhatsApp on a computer, it has three parts:
+//   the bar on the left (Rail.tsx): Chats, Calls, Status, Archived, Starred, Settings
+//   a list:                  your chats       your calls              everyone's status updates
+//   and what you opened:     the open chat    a call's details,       My status
+//                            (or Welcome)     or the big call buttons
+// Settings opens as a window in the middle (Settings.tsx).
+// On a phone there's only room for one part, so index.css hides the others, and the bar
+// moves to the bottom.
 // It also does some jobs in the background while you're logged in:
 //   1. listens to all your chats, and your private settings for each one (prefs.ts)
 //   2. pops up an alert and plays a sound when a message arrives and you're not looking
@@ -12,6 +15,10 @@
 //   6. opens a group invite link, if the page was opened with one
 //   7. listens for calls to you, and shows the call screen (calls.ts, CallScreen.tsx)
 //   8. listens for "typing…" in all your chats (typing.ts)
+//   9. carries on sharing a live location after a reload (location.ts)
+//  10. counts the calls you missed since you last opened Calls (callExtras.ts)
+//  11. listens for your scheduled calls, and reminds you when one starts
+//  12. listens for status updates: other people's, and your own (status.ts)
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from 'firebase/auth'
 import { collection, getCountFromServer, onSnapshot, query, Timestamp, where } from 'firebase/firestore'
@@ -20,6 +27,16 @@ import { showAlert } from '../alerts'
 import { LEVEL, useBack } from '../back'
 import { listenForCalls, useCall } from '../calls'
 import {
+  addFavourite,
+  callCodeFromAddress,
+  listenForMissed,
+  listenForScheduled,
+  markCallsSeen,
+  scheduledWith,
+  type CallGroup,
+  type ScheduledCall,
+} from '../callExtras'
+import {
   chatIdFor,
   chatTitle,
   isGroup,
@@ -27,34 +44,63 @@ import {
   lastRead,
   markDelivered,
   otherPerson,
+  peopleYouKnow,
   previewText,
+  sendMessage,
   type Chat,
   type Person,
 } from '../chats'
 import { codeFromAddress } from '../invites'
 import { useT } from '../lang'
 import { resumeSharing } from '../location'
+import { isPhotoOrVideo, prepareVideo, shrinkPhoto, warmUpSound } from '../media'
 import { isHidden, isMuted, usePrefs, type ChatPrefs } from '../prefs'
 import { startHeartbeat } from '../presence'
+import { usePrivate } from '../private'
 import type { Profile } from '../profiles'
 import { useBlocked } from '../safety'
 import { playPing } from '../sound'
+import { useStable } from '../stable'
+import {
+  audienceFor,
+  groupStatuses,
+  listenToMine,
+  listenToStatuses,
+  makeThumb,
+  MAX_STATUS_VIDEO,
+  postStatus,
+  useStatusMarks,
+  type NewStatus,
+  type Status,
+} from '../status'
+import { fill } from '../strings'
+import { useNow } from '../time'
 import { listenForTyping } from '../typing'
+import { CallLinkDialog, CallReminder, DialDialog, JoinCallDialog, ScheduleDialog, StartCallDialog } from './CallDialogs'
+import { CallInfo, CallsHome } from './CallsMain'
 import CallScreen from './CallScreen'
-import CallsList from './CallsList'
+import CallsList, { type CallAction } from './CallsList'
 import ChatList from './ChatList'
 import ChatRoom from './ChatRoom'
+import { PeopleDialog } from './Dialogs'
 import JoinGroup from './JoinGroup'
+import MyStatus from './MyStatus'
 import NewChat from './NewChat'
 import NewGroup from './NewGroup'
-import Settings from './Settings'
+import PhotoSender, { type PickedPhoto } from './PhotoSender'
+import Rail, { type Tab } from './Rail'
+import Settings, { type Section } from './Settings'
 import StarredList from './StarredList'
+import StatusComposer from './StatusComposer'
+import StatusList, { StatusPrivacyDialog } from './StatusList'
+import StatusViewer from './StatusViewer'
 import Welcome from './Welcome'
 
 // Which chat is open. `other` is set for direct chats (the chat may not exist yet).
 // focus: go to this message when it opens (from "Starred messages").
 export type Open = { chatId: string; other?: Person; focus?: { id: string } }
-type View = 'chats' | 'archived' | 'newChat' | 'newGroup' | 'settings' | 'calls' | 'starred'
+type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'calls' | 'status'
+const CHAT_VIEWS: View[] = ['chats', 'archived', 'starred', 'newChat', 'newGroup'] // (the open chat shows next to these)
 
 export default function Home({ user, profile }: { user: User; profile: Profile }) {
   const { t } = useT()
@@ -65,6 +111,27 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   const [chats, setChats] = useState<Chat[]>([])
   const [counts, setCounts] = useState<Map<string, number>>(new Map())
   const [joinCode, setJoinCode] = useState(codeFromAddress)
+  const [callCode, setCallCode] = useState(callCodeFromAddress) // opened with someone's call link
+  const [settingsAt, setSettingsAt] = useState<{ start: Section | null } | null>(null) // the Settings window
+  const [callGroup, setCallGroup] = useState<CallGroup | null>(null) // the call whose details are open
+  const [callAction, setCallAction] = useState<CallAction | 'favourite' | null>(null) // a window from the Calls tab
+  const [callsReload, setCallsReload] = useState(0)
+  const [missed, setMissed] = useState(0)
+  const [plans, setPlans] = useState<ScheduledCall[]>([])
+  const [reminder, setReminder] = useState<ScheduledCall | null>(null)
+  const [statuses, setStatuses] = useState<Status[]>([]) // other people's
+  const [myStatuses, setMyStatuses] = useState<Status[]>([])
+  const [viewer, setViewer] = useState<{ order: string[]; startItem?: number } | null>(null)
+  const [writing, setWriting] = useState(false) // writing a words-only status
+  const [statusFiles, setStatusFiles] = useState<File[] | null>(null) // photos or videos to post as status
+  const [statusPrivacy, setStatusPrivacy] = useState(false)
+  const [working, setWorking] = useState('') // "Posting…" (stays until it's done)
+  const [notice, setNotice] = useState('') // "Status posted" (goes by itself)
+  const statusInput = useRef<HTMLInputElement>(null)
+  const callPrefs = usePrivate(user.uid, 'calls')
+  const statusPrefs = usePrivate(user.uid, 'status')
+  const marks = useStatusMarks()
+  const minute = useNow(60_000)
   const prefs = usePrefs(user.uid)
   const blocked = useBlocked(user.uid)
   const call = useCall()
@@ -149,15 +216,16 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
     }
   }, [chats, prefs, user.uid])
 
-  // "(2) PakChat" in the tab title. Muted and archived chats don't count.
+  // "(2) PakChat" in the tab title (and the number on Chats). Muted and archived chats don't count.
+  const loud = (c: Chat, p?: ChatPrefs) => isUnread(c, user.uid, p) && !isMuted(p) && !p?.archived && !isHidden(c, p)
+  const unread = chats.filter((c) => loud(c, prefs.get(c.id))).length
+  const archivedUnread = chats.filter((c) => prefs.get(c.id)?.archived && !isHidden(c, prefs.get(c.id)) && isUnread(c, user.uid, prefs.get(c.id))).length
   useEffect(() => {
-    const loud = (c: Chat, p?: ChatPrefs) => isUnread(c, user.uid, p) && !isMuted(p) && !p?.archived && !isHidden(c, p)
-    const unread = chats.filter((c) => loud(c, prefs.get(c.id))).length
     document.title = unread ? `(${unread}) PakChat` : 'PakChat'
     return () => {
       document.title = 'PakChat'
     }
-  }, [chats, prefs, user.uid])
+  }, [unread])
 
   // 5. Heartbeat for "online" / "last seen". Off if you hid your last seen.
   const hideLastSeen = !!profile.hideLastSeen
@@ -189,10 +257,17 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
     [user.uid],
   )
 
-  // The phone's Back button: closes the chat, or goes back to the chat list (back.ts).
-  // On the chat list itself, Back does nothing, so PakChat stays open.
-  useBack(!!open, LEVEL.chat, () => setOpen(null))
+  // The phone's Back button: closes the chat (or a call's details), or goes back to the chat
+  // list (back.ts). On the chat list itself, Back does nothing, so PakChat stays open.
+  const chatView = CHAT_VIEWS.includes(view)
+  useBack(!!open && chatView, LEVEL.chat, () => setOpen(null))
+  useBack(view === 'calls' && !!callGroup, LEVEL.chat, () => setCallGroup(null))
   useBack(view !== 'chats', LEVEL.page, () => setView('chats'))
+  const closeCallLink = useCallback(() => {
+    setCallCode(null)
+    history.replaceState(history.state, '', '/')
+  }, [])
+  useBack(!!callCode, LEVEL.page, closeCallLink)
 
   // 8. "typing…" in all your chats
   useEffect(() => listenForTyping(user.uid), [user.uid])
@@ -200,10 +275,136 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   // 9. A live location you were sharing before you reloaded PakChat: carry on (until its time is up).
   useEffect(() => resumeSharing(user.uid), [user.uid])
 
+  // 10. Missed calls since you last opened Calls. Opening it starts the count again.
+  const seenAt = callPrefs.seenAt?.toMillis()
+  useEffect(() => {
+    const since = Timestamp.fromMillis(seenAt ?? Date.now())
+    return listenForMissed(user.uid, since, setMissed)
+  }, [user.uid, seenAt])
+  useEffect(() => {
+    if (view === 'calls' && missed > 0) markCallsSeen(user.uid).catch(console.error)
+  }, [view, missed, user.uid])
+  // After a call, the Calls list loads again so it's there. (Changed while drawing, see ChatRoom.tsx.)
+  const inCall = !!call
+  const [wasInCall, setWasInCall] = useState(inCall)
+  if (wasInCall !== inCall) {
+    setWasInCall(inCall)
+    if (!inCall) setCallsReload((n) => n + 1)
+  }
+
+  // 11. Scheduled calls: listen for them, and when one's time comes, remind you.
+  useEffect(() => listenForScheduled(user.uid, setPlans), [user.uid])
+  const reminded = useRef(new Set<string>())
+  useEffect(() => {
+    const timers = plans.map((plan) => {
+      const wait = plan.startsAt.toMillis() - Date.now()
+      if (wait < 0 || wait > 2 ** 31 - 1 || reminded.current.has(plan.id)) return 0
+      return window.setTimeout(() => {
+        reminded.current.add(plan.id)
+        setReminder(plan)
+        playPing()
+        if (document.visibilityState !== 'visible') {
+          const t = tRef.current
+          showAlert(t.scheduledCall, `${plan.title} · ${scheduledWith(plan, user.uid).name}`, 'plan-' + plan.id, () => {})
+        }
+      }, wait)
+    })
+    return () => timers.forEach(clearTimeout)
+  }, [plans, user.uid])
+
+  // 12. Status updates: other people's (only ones you're allowed to see), and your own.
+  useEffect(() => listenToStatuses(user.uid, setStatuses), [user.uid])
+  useEffect(() => listenToMine(user.uid, setMyStatuses), [user.uid])
+  const statusGroups = useMemo(
+    () => groupStatuses(statuses.filter((s) => !blocked.has(s.owner)), marks.seen, minute),
+    [statuses, blocked, marks.seen, minute],
+  )
+  const mineGroup = useMemo(() => groupStatuses(myStatuses, new Set(), minute)[0] ?? null, [myStatuses, minute])
+  const allGroups = useMemo(() => (mineGroup ? [...statusGroups, mineGroup] : statusGroups), [statusGroups, mineGroup])
+  const mutedStatus = statusPrefs.muted ?? []
+  const newStatus = statusGroups.some((g) => g.unseen > 0 && !mutedStatus.includes(g.owner.uid))
+  const people = useMemo(() => peopleYouKnow(chats, user.uid), [chats, user.uid])
+
+  // A message that goes away by itself after a moment.
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(''), 2500)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  // ----- Posting a status -----
+  function statusWho() {
+    const mode = statusPrefs.mode ?? 'contacts'
+    if (mode === 'except') return `${t.myContactsExcept} ${fill(t.nExcluded, { n: statusPrefs.except?.length ?? 0 })}`
+    if (mode === 'only') return `${t.onlyShareWith} ${fill(t.nIncluded, { n: statusPrefs.only?.length ?? 0 })}`
+    return t.myContacts
+  }
+  async function post(content: NewStatus) {
+    await postStatus(me, content, audienceFor(user.uid, chats, prefs, blocked, statusPrefs))
+  }
+  async function postWords(text: string, bg: number, font: number) {
+    setWriting(false)
+    setWorking(t.postingStatus)
+    try {
+      await post({ kind: 'text', text, bg, font })
+      setNotice(t.statusPosted)
+    } catch (err) {
+      console.error(err)
+      setNotice(t.statusNotPosted)
+    }
+    setWorking('')
+  }
+  async function postMedia(picked: PickedPhoto[]) {
+    setStatusFiles(null)
+    if (picked.some(({ file }) => file.type.startsWith('video/'))) warmUpSound() // (sound needs a tap, and this is right after one)
+    let failed = ''
+    for (const { file, caption } of picked) {
+      const words = caption ? { caption } : {}
+      try {
+        if (file.type.startsWith('video/')) {
+          let ready = false
+          setWorking(t.preparingVideo)
+          const video = await prepareVideo(file, (done) => !ready && setWorking(`${t.preparingVideo} ${Math.round(done * 100)}%`), MAX_STATUS_VIDEO)
+          ready = true
+          setWorking(t.postingStatus)
+          await post({ kind: 'video', ...video, thumb: await makeThumb(video.poster), ...words })
+        } else {
+          setWorking(t.postingStatus)
+          const photo = await shrinkPhoto(file)
+          await post({ kind: 'photo', ...photo, thumb: await makeThumb(photo.data), ...words })
+        }
+      } catch (err) {
+        console.warn('Status not posted:', err)
+        const why = err instanceof Error ? err.message : ''
+        failed = why === 'too-long' ? t.statusVideoTooLong : why === 'too-big' ? t.videoTooBig : t.statusNotPosted
+      }
+    }
+    setWorking('')
+    setNotice(failed || t.statusPosted)
+  }
+
+  // Replying to someone's status: a message in your chat with them, quoting the status.
+  const replyToStatus = useStable(async (s: Status, text: string) => {
+    const other = { uid: s.owner, name: s.ownerName }
+    const chatId = chatIdFor(user.uid, s.owner)
+    const chat = chats.find((c) => c.id === chatId)
+    const what = s.text ?? s.caption ?? (s.kind === 'photo' ? t.photo : t.videoMessage)
+    await sendMessage(
+      me,
+      { chatId, other, isNew: !chat, timer: chat?.timer },
+      { kind: 'text', text },
+      { replyTo: { id: s.id, senderId: s.owner, senderName: s.ownerName, kind: 'status', text: what.slice(0, 200) } },
+    )
+  })
+
   function openChat(next: Open) {
     setOpen(next)
     if (view !== 'archived' && view !== 'starred') setView('chats')
   }
+
+  // The left bar (or the bottom bar on a phone).
+  const tab: Tab | null = view === 'newChat' || view === 'newGroup' ? 'chats' : view
+  const tabsShown = view === 'chats' || view === 'calls' || view === 'status'
 
   // Every starred message, from all your chats.
   const starred = useMemo(
@@ -220,8 +421,23 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   // (If you just left a group, it's gone from your chats, so nothing is open any more.)
   const showing = open && (open.other || openChatDoc) ? open : null
 
+  // On a phone: is the right-hand part (a chat, a call's details) the one showing?
+  const mainShown = chatView ? !!showing : view === 'calls' && !!callGroup
+  const classes = ['app', mainShown && 'has-chat', !tabsShown && 'no-tabs'].filter(Boolean).join(' ')
+
   return (
-    <div className={showing ? 'app has-chat' : 'app'}>
+    <div className={classes}>
+      <Rail
+        tab={tab}
+        me={me}
+        profile={profile}
+        unreadChats={unread}
+        missedCalls={missed}
+        newStatus={newStatus}
+        archivedUnread={archivedUnread}
+        onTab={(next) => setView(next)}
+        onSettings={(section) => setSettingsAt({ start: section ?? null })}
+      />
       <aside className="side">
         {view === 'newGroup' ? (
           <NewGroup
@@ -235,10 +451,30 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
           />
         ) : view === 'newChat' ? (
           <NewChat me={me} profile={profile} chats={chats} onBack={() => setView('chats')} onOpen={openChat} onNewGroup={() => setView('newGroup')} />
-        ) : view === 'settings' ? (
-          <Settings me={me} profile={profile} blocked={blocked} onBack={() => setView('chats')} />
         ) : view === 'calls' ? (
-          <CallsList me={me} onBack={() => setView('chats')} />
+          <CallsList
+            me={me}
+            prefs={callPrefs}
+            plans={plans}
+            reload={callsReload}
+            selected={callGroup?.key ?? null}
+            onSelect={setCallGroup}
+            onAction={setCallAction}
+            onAddFavourite={() => setCallAction('favourite')}
+          />
+        ) : view === 'status' ? (
+          <StatusList
+            me={me}
+            profile={profile}
+            mine={mineGroup}
+            groups={statusGroups}
+            muted={mutedStatus}
+            onOpen={(list, index) => setViewer({ order: list.slice(index).map((g) => g.owner.uid) })}
+            onMine={() => setViewer({ order: [user.uid], startItem: 0 })}
+            onCamera={() => statusInput.current?.click()}
+            onWrite={() => setWriting(true)}
+            onPrivacy={() => setStatusPrivacy(true)}
+          />
         ) : view === 'starred' ? (
           <StarredList me={me} items={starred} chats={chats} onBack={() => setView('chats')} onOpen={openStarred} />
         ) : (
@@ -254,14 +490,39 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             onOpen={openChat}
             onNewChat={() => setView('newChat')}
             onNewGroup={() => setView('newGroup')}
-            onSettings={() => setView('settings')}
-            onCalls={() => setView('calls')}
+            onSettings={() => setSettingsAt({ start: null })}
             onStarred={() => setView('starred')}
           />
         )}
+        {(working || notice) && <p className="toast app-toast">{working || notice}</p>}
       </aside>
       <main className="main">
-        {showing ? (
+        {view === 'calls' ? (
+          callGroup ? (
+            <CallInfo
+              me={me}
+              group={callGroup}
+              prefs={callPrefs}
+              onBack={() => setCallGroup(null)}
+              onMessage={(person) => {
+                setCallGroup(null)
+                setView('chats')
+                setOpen({ chatId: chatIdFor(user.uid, person.uid), other: person })
+              }}
+            />
+          ) : (
+            <CallsHome onAction={setCallAction} />
+          )
+        ) : view === 'status' ? (
+          <MyStatus
+            me={me}
+            profile={profile}
+            mine={mineGroup}
+            onView={(index) => setViewer({ order: [user.uid], startItem: index })}
+            onCamera={() => statusInput.current?.click()}
+            onWrite={() => setWriting(true)}
+          />
+        ) : showing ? (
           // key: a different chat gets a fresh ChatRoom, so nothing carries over from the last one.
           <ChatRoom
             key={showing.chatId}
@@ -281,6 +542,77 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
           <Welcome />
         )}
       </main>
+
+      {/* Windows and full-screen things, on top of everything */}
+      {settingsAt && (
+        <Settings
+          me={me}
+          profile={profile}
+          blocked={blocked}
+          statusPrefs={statusPrefs}
+          people={people}
+          start={settingsAt.start}
+          onClose={() => setSettingsAt(null)}
+          onStarred={() => {
+            setSettingsAt(null)
+            setView('starred')
+          }}
+        />
+      )}
+      {callAction === 'start' && <StartCallDialog me={me} people={people} onClose={() => setCallAction(null)} />}
+      {callAction === 'dial' && <DialDialog me={me} profile={profile} onClose={() => setCallAction(null)} />}
+      {callAction === 'link' && <CallLinkDialog me={me} onClose={() => setCallAction(null)} />}
+      {callAction === 'schedule' && (
+        <ScheduleDialog
+          me={me}
+          people={people}
+          chats={chats}
+          onClose={() => setCallAction(null)}
+          onDone={() => {
+            setCallAction(null)
+            setNotice(t.callScheduled)
+          }}
+        />
+      )}
+      {callAction === 'favourite' && (
+        <PeopleDialog
+          title={t.addFavourite}
+          people={people.filter((p) => !(callPrefs.favourites ?? []).some((f) => f.uid === p.uid))}
+          onPick={(person) => addFavourite(user.uid, callPrefs, person).catch(console.error)}
+          onClose={() => setCallAction(null)}
+        />
+      )}
+      {reminder && <CallReminder me={me} plan={reminder} onClose={() => setReminder(null)} />}
+      {callCode && !joinCode && <JoinCallDialog me={me} code={callCode} onClose={closeCallLink} />}
+
+      {/* The camera button on Status: pick photos or videos, look at them (PhotoSender.tsx), then post */}
+      <input
+        ref={statusInput}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])].filter(isPhotoOrVideo)
+          e.target.value = ''
+          if (files.length) setStatusFiles(files)
+        }}
+      />
+      {statusFiles && <PhotoSender files={statusFiles} onClose={() => setStatusFiles(null)} onSend={postMedia} />}
+      {writing && <StatusComposer privacy={statusWho()} onPost={postWords} onClose={() => setWriting(false)} />}
+      {statusPrivacy && <StatusPrivacyDialog me={me} prefs={statusPrefs} people={people} onClose={() => setStatusPrivacy(false)} />}
+      {viewer && (
+        <StatusViewer
+          me={me}
+          groups={allGroups}
+          order={viewer.order}
+          startItem={viewer.startItem}
+          muted={mutedStatus}
+          onClose={() => setViewer(null)}
+          onReply={replyToStatus}
+        />
+      )}
+
       {joinCode && <JoinGroup me={me} code={joinCode} onClose={closeJoin} onJoined={joined} />}
       {call && <CallScreen key={call.id} call={call} />}
     </div>

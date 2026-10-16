@@ -121,7 +121,7 @@ export const isPhotoOrVideo = (file: File) => file.type.startsWith('image/') || 
 // length, and the video itself as text. A video that's too big, or in a format other phones
 // might not play (like an iPhone's .mov), is played through once and recorded again smaller.
 // That takes as long as the video. onProgress gets 0 to 1 while it happens.
-export async function prepareVideo(file: File, onProgress: (done: number) => void) {
+export async function prepareVideo(file: File, onProgress: (done: number) => void, maxSeconds = MAX_VIDEO_SECONDS) {
   const url = URL.createObjectURL(file)
   const video = document.createElement('video')
   video.muted = true
@@ -131,7 +131,7 @@ export async function prepareVideo(file: File, onProgress: (done: number) => voi
   try {
     await happens(video, 'loadeddata')
     const seconds = await lengthOf(video)
-    if (seconds > MAX_VIDEO_SECONDS) throw new Error('too-long')
+    if (seconds > maxSeconds) throw new Error('too-long')
     const width = video.videoWidth
     const height = video.videoHeight
     if (!width || !height) throw new Error('cant-play')
@@ -254,43 +254,54 @@ export function sizeText(bytes = 0) {
 // Media we've already loaded (or just sent), so we don't download it twice.
 const loaded = new Map<string, string>()
 
-// The document for part 1, 2, 3 ... of a file.
-function partRef(chatId: string, mediaId: string, part: number) {
-  return doc(db, 'chats', chatId, 'media', part === 1 ? mediaId : `${mediaId}_${part}`)
+// Where a file's parts are kept: under a chat ("chats/<id>") or a status ("statuses/<id>").
+// The document for part 1, 2, 3 ... of a file:
+function partRef(place: string, mediaId: string, part: number) {
+  return doc(db, place, 'media', part === 1 ? mediaId : `${mediaId}_${part}`)
 }
 
 // Adds a photo or voice note to a batch of writes, cut into parts if needed. Returns its id.
 // expireAt: it's in a disappearing message, so it goes when the message does.
 export function saveMedia(batch: WriteBatch, chatRef: DocumentReference, data: string, senderId: string, expireAt?: Timestamp) {
-  const mediaId = doc(collection(chatRef, 'media')).id // a new random id
+  return saveParts(batch, chatRef, data, expireAt ? { senderId, expireAt } : { senderId })
+}
+
+// The same, for anything: `fields` go in every part (who it belongs to, so the rules can check).
+export function saveParts(batch: WriteBatch, parent: DocumentReference, data: string, fields: Record<string, unknown>) {
+  const mediaId = doc(collection(parent, 'media')).id // a new random id
   const parts = Math.ceil(data.length / MAX_MEDIA)
   for (let part = 1; part <= parts; part++) {
     const piece = data.slice((part - 1) * MAX_MEDIA, part * MAX_MEDIA)
-    const fields: Record<string, unknown> = { data: piece, senderId }
-    if (part === 1 && parts > 1) fields.parts = parts
-    if (expireAt) fields.expireAt = expireAt
-    batch.set(partRef(chatRef.id, mediaId, part), fields)
+    const partFields: Record<string, unknown> = { data: piece, ...fields }
+    if (part === 1 && parts > 1) partFields.parts = parts
+    batch.set(partRef(parent.path, mediaId, part), partFields)
   }
   loaded.set(mediaId, data) // so YOUR bubble shows it straight away
   return mediaId
 }
 
 // Adds deleting a photo or voice note (all its parts) to a batch of writes.
-export async function deleteMedia(batch: WriteBatch, chatId: string, mediaId: string) {
+export function deleteMedia(batch: WriteBatch, chatId: string, mediaId: string) {
+  return deleteParts(batch, `chats/${chatId}`, mediaId)
+}
+export async function deleteParts(batch: WriteBatch, place: string, mediaId: string) {
   const known = loaded.get(mediaId)
-  const parts = known ? Math.ceil(known.length / MAX_MEDIA) : (((await getDoc(partRef(chatId, mediaId, 1))).get('parts') as number) ?? 1)
-  for (let part = 1; part <= parts; part++) batch.delete(partRef(chatId, mediaId, part))
+  const parts = known ? Math.ceil(known.length / MAX_MEDIA) : (((await getDoc(partRef(place, mediaId, 1))).get('parts') as number) ?? 1)
+  for (let part = 1; part <= parts; part++) batch.delete(partRef(place, mediaId, part))
   loaded.delete(mediaId)
 }
 
-export async function loadMedia(chatId: string, mediaId: string) {
+export function loadMedia(chatId: string, mediaId: string) {
+  return loadParts(`chats/${chatId}`, mediaId)
+}
+export async function loadParts(place: string, mediaId: string) {
   const known = loaded.get(mediaId)
   if (known) return known
-  const first = await getDoc(partRef(chatId, mediaId, 1))
+  const first = await getDoc(partRef(place, mediaId, 1))
   let data = first.get('data') as string
   const parts = (first.get('parts') as number) ?? 1
   if (parts > 1) {
-    const rest = await Promise.all(Array.from({ length: parts - 1 }, (_, i) => getDoc(partRef(chatId, mediaId, i + 2))))
+    const rest = await Promise.all(Array.from({ length: parts - 1 }, (_, i) => getDoc(partRef(place, mediaId, i + 2))))
     data += rest.map((snap) => snap.get('data') as string).join('')
   }
   loaded.set(mediaId, data)
@@ -301,10 +312,13 @@ export async function loadMedia(chatId: string, mediaId: string) {
 // a long data URL. Made once for each file.
 const blobUrls = new Map<string, string>()
 const blobTypes = new Map<string, string>() // blob URL -> what kind of file it is ("video/mp4")
-export async function loadMediaUrl(chatId: string, mediaId: string) {
+export function loadMediaUrl(chatId: string, mediaId: string) {
+  return loadPartsUrl(`chats/${chatId}`, mediaId)
+}
+export async function loadPartsUrl(place: string, mediaId: string) {
   const known = blobUrls.get(mediaId)
   if (known) return known
-  const data = await loadMedia(chatId, mediaId)
+  const data = await loadParts(place, mediaId)
   const blob = await (await fetch(data)).blob()
   const url = URL.createObjectURL(blob)
   blobUrls.set(mediaId, url)
