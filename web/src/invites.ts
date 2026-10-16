@@ -1,4 +1,5 @@
 // invites.ts: group invite links, like https://pakchat-f89d8.web.app/join/k3J9x...
+// (A community's link works the same way: see communities.ts.)
 //
 // An admin makes a link. Its code is long and random, so nobody can guess it.
 //   invites/<code>   { chatId, title, by }   so the link can say which group it's for
@@ -9,7 +10,8 @@ import { arrayUnion, deleteField, doc, getDoc, writeBatch } from 'firebase/fires
 import { db } from './firebase'
 import { addMessage, type Chat, type Person } from './chats'
 
-export type Invite = { code: string; chatId: string; title: string }
+// communityId: it's a community's link (chatId is then its announcements group).
+export type Invite = { code: string; chatId: string; title: string; communityId?: string }
 
 // A long random code for a link (also used for call links, callExtras.ts).
 export function newCode() {
@@ -46,7 +48,7 @@ export async function removeInvite(chat: Chat) {
 export async function lookupInvite(code: string): Promise<Invite | null> {
   const snap = await getDoc(doc(db, 'invites', code))
   if (!snap.exists()) return null
-  return { code, chatId: snap.get('chatId'), title: snap.get('title') }
+  return { code, chatId: snap.get('chatId'), title: snap.get('title'), communityId: snap.get('communityId') }
 }
 
 // Join: add yourself to the group, with a grey note "Ali joined using this group's invite link".

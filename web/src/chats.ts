@@ -78,6 +78,9 @@ export type SystemEvent =
   | 'pinned' // "Ali pinned a message"
   | 'timer' // "Ali turned on disappearing messages" (seconds says for how long, 0 = turned off)
   | 'listCreated' // "You created this broadcast list"
+  | 'communityCreated' // "Ali created the community" (in its announcements group, communities.ts)
+  | 'joinedCommunity' // "Ali joined the community" (with its invite link)
+  | 'joinedGroup' // "Ali joined from the community" (a community's group)
 
 export type LastMessage = {
   id?: string // which message it is (older chats don't say)
@@ -112,6 +115,8 @@ export type Chat = {
   onlyAdmins?: boolean
   inviteCode?: string
   recipients?: string[] // broadcast lists: who gets the messages
+  communityId?: string // a group in a community (communities.ts)
+  announcements?: boolean // the community's announcements group
   lastMessage?: LastMessage
   updatedAt?: Timestamp | null
   deliveredAt?: Times
@@ -383,6 +388,9 @@ export function systemText(m: { event?: SystemEvent; senderId: string; senderNam
     pinned: t.pinnedNote,
     timer: m.seconds ? t.timerOn : t.timerOff,
     listCreated: t.listCreated,
+    communityCreated: t.communityCreated,
+    joinedCommunity: t.joinedCommunity,
+    joinedGroup: t.joinedGroup,
   }
   return fill(templates[m.event ?? 'left'] ?? '', values)
 }

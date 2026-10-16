@@ -177,7 +177,8 @@ export default function ChatList(props: Props) {
         : { label: t.markUnread, icon: 'chatPlus', onClick: () => setPrefs(me.uid, chat.id, { unread: true }) },
     )
     if (isGroup(chat)) {
-      items.push({ label: t.leaveGroup, icon: 'logout', danger: true, onClick: () => confirm(t.confirmLeave) && leaveGroup(me, chat) })
+      // (A community's announcements: you leave the community instead, in the Communities tab.)
+      if (!chat.announcements) items.push({ label: t.leaveGroup, icon: 'logout', danger: true, onClick: () => confirm(t.confirmLeave) && leaveGroup(me, chat) })
     } else if (isBroadcast(chat)) {
       items.push({ label: t.deleteList, icon: 'trash', danger: true, onClick: () => confirm(t.confirmDeleteList) && deleteList(chat).catch(console.error) })
     } else {

@@ -1,8 +1,8 @@
 // Home.tsx: the main screen after login. Like WhatsApp on a computer, it has three parts:
-//   the bar on the left (Rail.tsx): Chats, Calls, Status, Archived, Starred, Settings
-//   a list:                  your chats       your calls              everyone's status updates
-//   and what you opened:     the open chat    a call's details,       My status
-//                            (or Welcome)     or the big call buttons
+//   the bar on the left (Rail.tsx): Chats, Calls, Status, Communities, Archived, Starred, Settings
+//   a list:                  your chats       your calls              everyone's status updates   your communities
+//   and what you opened:     the open chat    a call's details,       My status                   a community
+//                            (or Welcome)     or the big call buttons                             (or what they are)
 // Settings opens as a window in the middle (Settings.tsx).
 // On a phone there's only room for one part, so index.css hides the others, and the bar
 // moves to the bottom.
@@ -19,6 +19,7 @@
 //  10. counts the calls you missed since you last opened Calls (callExtras.ts)
 //  11. listens for your scheduled calls, and reminds you when one starts
 //  12. listens for status updates: other people's, and your own (status.ts)
+//  13. listens to your communities (communities.ts)
 // Settings, Status, the call screen and the call windows load when first needed (lazy.ts).
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from 'firebase/auth'
@@ -53,6 +54,7 @@ import {
   type Person,
   type ReplyTo,
 } from '../chats'
+import { listenToCommunities, type Community } from '../communities'
 import { codeFromAddress } from '../invites'
 import { useT } from '../lang'
 import { resumeSharing } from '../location'
@@ -84,6 +86,8 @@ import { CallInfo, CallsHome } from './CallsMain'
 import CallsList, { type CallAction } from './CallsList'
 import ChatList from './ChatList'
 import ChatRoom from './ChatRoom'
+import { CommunitiesHome, CommunityList } from './Communities'
+import CommunityInfo from './CommunityInfo'
 import { PeopleDialog } from './Dialogs'
 import JoinGroup from './JoinGroup'
 import { CallLinkDialog, CallReminder, CallScreen, DialDialog, JoinCallDialog, ScheduleDialog, Settings, StartCallDialog, StatusComposer, StatusViewer, warmUp } from './lazy'
@@ -101,7 +105,7 @@ import Welcome from './Welcome'
 // focus: go to this message when it opens (from "Starred messages").
 // reply: start answering this message (from "Reply privately" in a group).
 export type Open = { chatId: string; other?: Person; focus?: { id: string }; reply?: ReplyTo }
-type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'newBroadcast' | 'calls' | 'status'
+type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'newBroadcast' | 'calls' | 'status' | 'communities' | 'newCommunity'
 const CHAT_VIEWS: View[] = ['chats', 'archived', 'starred', 'newChat', 'newGroup', 'newBroadcast'] // (the open chat shows next to these)
 
 export default function Home({ user, profile }: { user: User; profile: Profile }) {
@@ -116,6 +120,8 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   const [callCode, setCallCode] = useState(callCodeFromAddress) // opened with someone's call link
   const [settingsAt, setSettingsAt] = useState<{ start: Section | null } | null>(null) // the Settings window
   const [callGroup, setCallGroup] = useState<CallGroup | null>(null) // the call whose details are open
+  const [communities, setCommunities] = useState<Community[]>([])
+  const [communityId, setCommunityId] = useState<string | null>(null) // the community open in Communities
   const [callAction, setCallAction] = useState<CallAction | 'favourite' | null>(null) // a window from the Calls tab
   const [callsReload, setCallsReload] = useState(0)
   const [missed, setMissed] = useState(0)
@@ -250,6 +256,15 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
     },
     [closeJoin],
   )
+  // (A community's link opens the community.)
+  const joinedCommunity = useCallback(
+    (id: string) => {
+      closeJoin()
+      setView('communities')
+      setCommunityId(id)
+    },
+    [closeJoin],
+  )
 
   // 7. Calls to you. If PakChat isn't on screen, an alert pops up too (the ringing plays anyway).
   useEffect(
@@ -267,6 +282,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   const chatView = CHAT_VIEWS.includes(view)
   useBack(!!open && chatView, LEVEL.chat, () => setOpen(null))
   useBack(view === 'calls' && !!callGroup, LEVEL.chat, () => setCallGroup(null))
+  useBack(view === 'communities' && !!communityId, LEVEL.chat, () => setCommunityId(null))
   useBack(view !== 'chats', LEVEL.page, () => setView('chats'))
   const closeCallLink = useCallback(() => {
     setCallCode(null)
@@ -332,6 +348,14 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   const mutedStatus = statusPrefs.muted ?? []
   const newStatus = statusGroups.some((g) => g.unseen > 0 && !mutedStatus.includes(g.owner.uid))
   const people = useMemo(() => peopleYouKnow(chats, user.uid), [chats, user.uid])
+
+  // 13. Your communities. (One you've left or that was deactivated just isn't in the list any more.)
+  useEffect(() => listenToCommunities(user.uid, setCommunities), [user.uid])
+  const community = communities.find((c) => c.id === communityId)
+  const openCommunity = useCallback((id: string) => {
+    setView('communities')
+    setCommunityId(id)
+  }, [])
 
   // A message that goes away by itself after a moment.
   useEffect(() => {
@@ -411,8 +435,8 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   }
 
   // The left bar (or the bottom bar on a phone).
-  const tab: Tab | null = view === 'newChat' || view === 'newGroup' || view === 'newBroadcast' ? 'chats' : view
-  const tabsShown = view === 'chats' || view === 'calls' || view === 'status'
+  const tab: Tab | null = view === 'newChat' || view === 'newGroup' || view === 'newBroadcast' ? 'chats' : view === 'newCommunity' ? 'communities' : view
+  const tabsShown = view === 'chats' || view === 'calls' || view === 'status' || view === 'communities'
 
   // Every starred message, from all your chats.
   const starred = useMemo(
@@ -430,7 +454,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   const showing = open && (open.other || openChatDoc) ? open : null
 
   // On a phone: is the right-hand part (a chat, a call's details) the one showing?
-  const mainShown = chatView ? !!showing : view === 'calls' && !!callGroup
+  const mainShown = chatView ? !!showing : (view === 'calls' && !!callGroup) || (view === 'communities' && !!community)
   const classes = ['app', mainShown && 'has-chat', !tabsShown && 'no-tabs'].filter(Boolean).join(' ')
 
   return (
@@ -447,7 +471,20 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         onSettings={(section) => setSettingsAt({ start: section ?? null })}
       />
       <aside className="side">
-        {view === 'newGroup' || view === 'newBroadcast' ? (
+        {view === 'newCommunity' ? (
+          // (A community is made on the same screen too: a name, a few words, and people if you like.)
+          <NewGroup key={view} me={me} chats={chats} community onCancel={() => setView('communities')} onCreated={openCommunity} />
+        ) : view === 'communities' ? (
+          <CommunityList
+            me={me}
+            communities={communities}
+            chats={chats}
+            activeId={community?.id ?? null}
+            onSelect={setCommunityId}
+            onNew={() => setView('newCommunity')}
+            onOpenChat={(chatId) => openChat({ chatId })}
+          />
+        ) : view === 'newGroup' || view === 'newBroadcast' ? (
           // (A broadcast list is made on the same screen as a group: pick people, give it a name.)
           <NewGroup
             key={view}
@@ -517,7 +554,22 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         {(working || notice) && <p className="toast app-toast">{working || notice}</p>}
       </aside>
       <main className="main">
-        {view === 'calls' ? (
+        {view === 'communities' || view === 'newCommunity' ? (
+          community ? (
+            <CommunityInfo
+              key={community.id}
+              me={me}
+              community={community}
+              chats={chats}
+              people={people}
+              onBack={() => setCommunityId(null)}
+              onOpenChat={(chatId) => openChat({ chatId })}
+              onOpenPerson={(person) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person })}
+            />
+          ) : (
+            <CommunitiesHome onNew={() => setView('newCommunity')} />
+          )
+        ) : view === 'calls' ? (
           callGroup ? (
             <CallInfo
               me={me}
@@ -555,6 +607,8 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             chats={chats}
             people={people}
             blocked={blocked}
+            community={communities.find((c) => c.id === openChatDoc?.communityId)}
+            onOpenCommunity={openCommunity}
             onBack={() => setOpen(null)}
             onOpenPerson={(person) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person })}
             onReplyPrivately={(person, reply) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person, reply })}
@@ -638,7 +692,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         />
       )}
 
-      {joinCode && <JoinGroup me={me} code={joinCode} onClose={closeJoin} onJoined={joined} />}
+      {joinCode && <JoinGroup me={me} code={joinCode} onClose={closeJoin} onJoined={joined} onJoinedCommunity={joinedCommunity} />}
       {call && <CallScreen key={call.id} call={call} />}
       </Suspense>
     </div>

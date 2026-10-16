@@ -1,8 +1,11 @@
 // GroupInfo.tsx: about a group: photo, name, description, photos shared, starred messages,
 // disappearing messages, wallpaper and sound, settings, invite link, and who's in it. Admins can change the group's info, add and remove people,
 // and make others admin. Anyone can message a member, mute the group, or leave.
+// A group in a community says so, and opens the community. A community's announcements group
+// is looked after in the community (people join and leave there), so those parts are hidden here.
 import { useRef, useState } from 'react'
 import { findUser, isAdmin, type Chat, type Message, type Person } from '../chats'
+import type { Community } from '../communities'
 import { addMember, removeMember, renameGroup, setAdmin, setDescription, setGroupPhoto, setOnlyAdmins } from '../groups'
 import { inviteLink, removeInvite, resetInvite } from '../invites'
 import { useT } from '../lang'
@@ -10,7 +13,7 @@ import { shrinkAvatar } from '../media'
 import { isMuted, type ChatPrefs } from '../prefs'
 import { useProfile } from '../profiles'
 import { fill } from '../strings'
-import { GroupAvatar, PersonAvatar } from './Avatar'
+import Avatar, { GroupAvatar, PersonAvatar } from './Avatar'
 import { ActionRow, ChatExtras, type ChatActions, type Looks } from './ContactInfo'
 import Icon from './Icon'
 import MediaGrid from './MediaGrid'
@@ -25,12 +28,14 @@ type Props = {
   starred: number // how many messages you starred here
   looks: Looks // the chat's wallpaper and sound, in words
   actions: ChatActions
+  community?: Community // the community it's part of (if you're in it)
   onBack: () => void
   onOpenPerson: (person: Person) => void
+  onOpenCommunity: () => void
   onView: (m: Message, data: string) => void
 }
 
-export default function GroupInfo({ me, chat, messages, prefs, starred, looks, actions, onBack, onOpenPerson, onView }: Props) {
+export default function GroupInfo({ me, chat, messages, prefs, starred, looks, actions, community, onBack, onOpenPerson, onOpenCommunity, onView }: Props) {
   const { t } = useT()
   const [number, setNumber] = useState('')
   const [error, setError] = useState('')
@@ -42,6 +47,8 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
   const photoInput = useRef<HTMLInputElement>(null)
   const iAmAdmin = isAdmin(chat, me.uid)
   const muted = isMuted(prefs)
+  const announcements = !!chat.announcements && !!community // (managed in the community)
+  const managing = iAmAdmin && !announcements // adding people, settings, the invite link
 
   // Run a change, and show "Something went wrong" if it fails.
   async function attempt(job: () => Promise<unknown>) {
@@ -98,7 +105,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
   function memberItems(uid: string): PopoverItem[] {
     const person = { uid, name: chat.names[uid] ?? '?' }
     const items: PopoverItem[] = [{ label: fill(t.messageName, { name: person.name }), icon: 'chatPlus', onClick: () => onOpenPerson(person) }]
-    if (iAmAdmin && uid !== chat.admin) {
+    if (managing && uid !== chat.admin) {
       const admin = chat.admins?.includes(uid)
       items.push({
         label: admin ? t.dismissAdmin : t.makeAdmin,
@@ -153,7 +160,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
           ) : (
             <h3 dir="auto">
               {chat.title}
-              {iAmAdmin && (
+              {managing && ( // (an announcements group has the community's name)
                 <button className="icon small" aria-label={t.editName} onClick={() => startEdit('title')}>
                   <Icon name="edit" size={16} />
                 </button>
@@ -200,10 +207,23 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
         </section>
         )}
 
+        {community && (
+          <section className="info-section">
+            <button className="row community-link" onClick={onOpenCommunity}>
+              <Avatar name={community.name} community size={44} />
+              <span className="row-main">
+                <strong dir="auto">{fill(t.partOf, { name: community.name })}</strong>
+                {announcements && <small className="muted">{t.managedInCommunity}</small>}
+              </span>
+              <Icon name="chevronRight" size={18} />
+            </button>
+          </section>
+        )}
+
         <MediaGrid chatId={chat.id} messages={messages} onView={onView} />
         <ChatExtras starred={starred} timer={chat.timer ?? 0} looks={looks} actions={actions} />
 
-        {iAmAdmin && (
+        {managing && (
           <section className="info-section">
             <p className="section-title">{t.groupSettings}</p>
             <Switch label={t.onlyAdminsSetting} hint={t.onlyAdminsHint} on={!!chat.onlyAdmins} disabled={busy} onChange={(on) => attempt(() => setOnlyAdmins(me, chat, on))} />
@@ -237,7 +257,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
 
         <section className="info-section">
           <p className="section-title">{fill(t.members, { n: chat.members.length })}</p>
-          {iAmAdmin && (
+          {managing && (
             <form className="newchat" onSubmit={add}>
               <div className="field">
                 <Icon name="userPlus" size={20} />
@@ -271,7 +291,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
         <section className="info-section actions">
           <ActionRow icon={muted ? 'bell' : 'bellOff'} label={muted ? t.unmute : t.muteNotifications} onClick={actions.mute} />
           <ActionRow icon="eraser" label={t.clearChat} onClick={actions.clear} />
-          <ActionRow icon="logout" label={t.leaveGroup} onClick={actions.leave} danger />
+          {!announcements && <ActionRow icon="logout" label={t.leaveGroup} onClick={actions.leave} danger />}
           <ActionRow icon="flag" label={t.reportGroup} onClick={actions.report} danger />
         </section>
       </div>
@@ -283,7 +303,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
 
 type MemberProps = { uid: string; name: string; photoName: string; admin: boolean; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void }
 
-function MemberRow({ uid, name, photoName, admin, onClick }: MemberProps) {
+export function MemberRow({ uid, name, photoName, admin, onClick }: MemberProps) {
   const { t } = useT()
   const profile = useProfile(uid)
   return (

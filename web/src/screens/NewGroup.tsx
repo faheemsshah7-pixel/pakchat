@@ -1,19 +1,24 @@
 // NewGroup.tsx: pick a name and some people, then create the group.
 // People you already chat with are listed. You can also add someone by number.
 // broadcast: make a broadcast list instead (broadcasts.ts). Its name is optional, and it needs 2 people or more.
+// community: make a community (communities.ts). It also has a few words about what it's for,
+// and you can add people now or later.
 import { useState } from 'react'
 import { MAX_RECIPIENTS, createBroadcast } from '../broadcasts'
 import { findUser, isDirect, otherPerson, type Chat, type Person } from '../chats'
+import { createCommunity, MAX_MEMBERS } from '../communities'
 import { createGroup } from '../groups'
 import { useT } from '../lang'
 import Avatar from './Avatar'
 import Icon from './Icon'
 
-type Props = { me: Person; chats: Chat[]; broadcast?: boolean; onCancel: () => void; onCreated: (chatId: string) => void }
+// onCreated: the new chat's id (or the community's).
+type Props = { me: Person; chats: Chat[]; broadcast?: boolean; community?: boolean; onCancel: () => void; onCreated: (id: string) => void }
 
-export default function NewGroup({ me, chats, broadcast = false, onCancel, onCreated }: Props) {
+export default function NewGroup({ me, chats, broadcast = false, community = false, onCancel, onCreated }: Props) {
   const { t } = useT()
   const [title, setTitle] = useState('')
+  const [about, setAbout] = useState('') // a community's description
   // Everyone from your one-to-one chats (not "Message yourself"), plus anyone you add by number.
   const [people, setPeople] = useState<Person[]>(() =>
     chats
@@ -51,14 +56,19 @@ export default function NewGroup({ me, chats, broadcast = false, onCancel, onCre
   }
 
   async function create() {
-    if (picked.size === 0) return setError(t.pickPeople)
+    if (picked.size === 0 && !community) return setError(t.pickPeople)
     if (broadcast && picked.size < 2) return setError(t.pickTwo)
+    if (community && picked.size + 1 > MAX_MEMBERS) return setError(t.tooManyMembers)
     setBusy(true)
     setError('')
     try {
       const chosen = people.filter((p) => picked.has(p.uid))
-      const chatId = await (broadcast ? createBroadcast(me, title.trim(), chosen.slice(0, MAX_RECIPIENTS)) : createGroup(me, title.trim(), chosen))
-      onCreated(chatId)
+      const id = await (community
+        ? createCommunity(me, title.trim(), about.trim(), chosen)
+        : broadcast
+          ? createBroadcast(me, title.trim(), chosen.slice(0, MAX_RECIPIENTS))
+          : createGroup(me, title.trim(), chosen))
+      onCreated(id)
     } catch (err) {
       setError(t.somethingWrong)
       console.error(err)
@@ -72,14 +82,25 @@ export default function NewGroup({ me, chats, broadcast = false, onCancel, onCre
         <button className="icon back" onClick={onCancel} aria-label={t.back}>
           <Icon name="back" />
         </button>
-        <h2>{broadcast ? t.newBroadcast : t.newGroup}</h2>
+        <h2>{community ? t.newCommunity : broadcast ? t.newBroadcast : t.newGroup}</h2>
       </header>
 
       <div className="group-name">
-        <Avatar name={title || '?'} group={!broadcast} list={broadcast} size={56} />
-        <input dir="auto" placeholder={broadcast ? t.listName : t.groupName} value={title} maxLength={50} onChange={(e) => setTitle(e.target.value)} autoFocus />
+        <Avatar name={title || '?'} group={!broadcast} list={broadcast} community={community} size={56} />
+        <input
+          dir="auto"
+          placeholder={community ? t.communityName : broadcast ? t.listName : t.groupName}
+          aria-label={community ? t.communityName : broadcast ? t.listName : t.groupName}
+          value={title}
+          maxLength={50}
+          onChange={(e) => setTitle(e.target.value)}
+          autoFocus
+        />
       </div>
-      {broadcast && <p className="hint pad">{t.listHint}</p>}
+      {community && (
+        <textarea className="group-about" dir="auto" rows={2} maxLength={500} placeholder={t.communityAbout} aria-label={t.communityAbout} value={about} onChange={(e) => setAbout(e.target.value)} />
+      )}
+      {(broadcast || community) && <p className="hint pad">{broadcast ? t.listHint : t.communityHint}</p>}
 
       <p className="section-title">{t.addPeople}</p>
       <form className="newchat" onSubmit={addByNumber}>
@@ -107,7 +128,7 @@ export default function NewGroup({ me, chats, broadcast = false, onCancel, onCre
       {error && <p className="error pad">{error}</p>}
       <div className="bottom">
         <button className="btn" disabled={busy || (!broadcast && !title.trim())} onClick={create}>
-          {broadcast ? t.createList : t.createGroup}
+          {community ? t.createCommunity : broadcast ? t.createList : t.createGroup}
           {picked.size > 0 && <span className="count">{picked.size}</span>}
         </button>
       </div>

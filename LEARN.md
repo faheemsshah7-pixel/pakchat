@@ -761,3 +761,57 @@ rules too.
 - In `wallpaper.ts`, add a colour to `WALL_COLOURS` (like `'#01411c'`, Pakistan green).
 - In `sound.ts`, change the pitches in `marimba` and pick it in Settings to hear the change.
 - Make a broadcast list with two friends and send "Eid Mubarak". Each gets it in their own chat.
+
+## Step 19: Communities
+
+| Part | Files | Saved as |
+|---|---|---|
+| The Communities tab | `Rail.tsx`, `Communities.tsx`, `Home.tsx` | |
+| A community's page | `CommunityInfo.tsx` | `communities/<id>` |
+| Making one | `NewGroup.tsx` (with `community`), `communities.ts` | the community and its announcements group, together |
+| Its invite link | `communities.ts`, `JoinGroup.tsx` | `invites/<code>` with `communityId` |
+
+### What a community is
+Like WhatsApp: one name (a school, a family, a mohalla) with groups under it, and an
+**Announcements** group that everyone in the community is in. Only admins post announcements.
+- **Communities** is a new tab on the left bar (on a phone, along the bottom). It lists your
+  communities, each with its announcements and the groups of it you're in.
+- Tap a community (or **View all**) for its page: the description, its groups (the ones you're in,
+  and **Other groups you can join** with a **Join** button), its people, and the invite link.
+- Admins can make a **new group** in it, **add existing groups** they look after (everyone in
+  those groups joins the community too), add or remove people, and make other admins.
+- **Leave community** leaves its announcements and every group of it you're in, too. The owner
+  can't leave: they **Deactivate** it instead. Then the community goes, and its groups carry on
+  as normal groups.
+
+### How it's saved
+```
+communities/<id>
+  name, description, owner
+  admins:  [uid, ...]       (the owner too)
+  members: [uid, ...]       (up to 256: everyone is also in the announcements group)
+  names:   { uid: 'Ali' }
+  groups:  { chatId: 'Cricket' }   its groups, with their names
+  announcementsId           the announcements group
+```
+The announcements group is a normal group with `announcements: true`, `communityId` and
+"only admins can send". Adding someone to the community adds them to it **in the same batch**
+(`writeBatch`), so the two never disagree. A community admin is also an admin there.
+
+Why does the community keep its groups' **names**? Because you can only read a chat you're in.
+To show "Other groups you can join", the names have to be somewhere you *can* read: the community.
+
+### New rules
+- Only the people in a community can see it. Only admins can change it, the owner always stays,
+  and someone who isn't in it can only add themselves with the current invite code (like a
+  group's invite link).
+- A group can say it's part of a community (`communityId`) only if one of the community's admins
+  links it, and the community lists it (`linkedHere`). The rules check the community "after"
+  the write (`getAfter`), because the group and the community change in the same batch.
+- Anyone in the community can join one of its groups (rule 7 in the chats rules), but only if the
+  community lists that group. A group in a community can start with just you in it.
+- The announcements group can't be taken out of its community.
+
+### Try this
+- In `communities.ts`, change `MAX_GROUPS` to 10, and see the error when you add an 11th group.
+- Make a community for your family, add a group "Shaadi plans" to it, and share the invite link.

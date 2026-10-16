@@ -561,6 +561,17 @@ const PATHS = {
       <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
     </>
   ),
+  // A community: three people together
+  community: (
+    <>
+      <circle cx="12" cy="8" r="3" />
+      <path d="M6.5 20v-1a5.5 5.5 0 0 1 11 0v1" />
+      <circle cx="5" cy="10" r="2" />
+      <path d="M1.5 19v-.5A3.5 3.5 0 0 1 5 15" />
+      <circle cx="19" cy="10" r="2" />
+      <path d="M22.5 19v-.5A3.5 3.5 0 0 0 19 15" />
+    </>
+  ),
   music: (
     <>
       <path d="M9 18V5l12-2v13" />

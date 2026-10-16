@@ -3664,7 +3664,7 @@ button.setting:disabled {
   }
 }
 @media (max-width: 899px) {
-  /* Phones: Chats, Status and Calls along the bottom, like WhatsApp on a phone. */
+  /* Phones: Chats, Status, Communities and Calls along the bottom, like WhatsApp on a phone. */
   .rail {
     flex-direction: row;
     justify-content: space-around;
@@ -3719,8 +3719,11 @@ button.setting:disabled {
   .rail-status {
     order: 2;
   }
-  .rail-calls {
+  .rail-communities {
     order: 3;
+  }
+  .rail-calls {
+    order: 4;
   }
 }
 
@@ -5790,6 +5793,77 @@ button.icon.once-toggle.on:hover {
 }
 .row.recipient .icon.small:disabled {
   opacity: 0.35;
+}
+
+/* ================= 8l. Communities ================= */
+/* A community's picture is a rounded square, so you can tell it from a group's circle. */
+.avatar.square {
+  border-radius: 28%;
+}
+.avatar.big {
+  width: 110px;
+  height: 110px;
+}
+.group-about {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 4px 16px 0;
+  resize: none;
+}
+
+/* The Communities list: each community, with its announcements and your groups under it. */
+.community-card {
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.community-head strong {
+  font-size: 16px;
+}
+.row.community-group,
+.row.community-more {
+  padding-block: 7px;
+  padding-inline-start: 24px;
+}
+.row.community-group .row-main,
+.community-info .row-open .row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.row.community-group small,
+.community-info .row-open small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row.community-more {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.row.community-more .ico {
+  margin-inline: 9px;
+}
+
+/* A community's own page */
+.community-info .row.community-group {
+  padding-inline-start: 10px;
+}
+.community-info .row-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  color: inherit;
+  text-align: start;
+}
+.community-info .row.community-group .icon.small {
+  color: var(--muted);
+}
+.row.community-announcements .row-main,
+.row.community-link .row-main {
+  display: flex;
+  flex-direction: column;
 }
 
 /* ================= 9. Phones ================= */

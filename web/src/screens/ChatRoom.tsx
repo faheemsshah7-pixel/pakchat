@@ -50,6 +50,7 @@ import { presenceText } from '../presence'
 import { rememberProfile, useProfile, type Profile } from '../profiles'
 import { block, report, unblock } from '../safety'
 import { leaveGroup } from '../groups'
+import type { Community } from '../communities'
 import { getSetting } from '../settings'
 import { playConversationTone } from '../sound'
 import { useStable } from '../stable'
@@ -97,8 +98,10 @@ type Props = {
   chats: Chat[] // all your chats (to forward messages to)
   people: Person[] // everyone you know (to add to a broadcast list)
   blocked: Set<string> // people I blocked
+  community?: Community // the community this group is part of (communities.ts)
   onBack: () => void
   onOpenPerson: (person: Person) => void // "Message" someone from the group's member list
+  onOpenCommunity: (id: string) => void
   onReplyPrivately: (person: Person, reply: ReplyTo) => void // answer a group's message in your chat with its sender
   focus?: { id: string } // go to this message (from "Starred messages")
   reply?: ReplyTo // start with this reply ready (from "Reply privately")
@@ -111,7 +114,7 @@ const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = fast
 const LOOK_BACK = 1000 // going to an old message loads at most this many
 
 export default function ChatRoom(props: Props) {
-  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, people: everyone, blocked, onBack, onOpenPerson, onReplyPrivately, focus: focusProp } = props
+  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, people: everyone, blocked, community, onBack, onOpenPerson, onOpenCommunity, onReplyPrivately, focus: focusProp } = props
   const { t } = useT()
   const [limit, setLimit] = useState(PAGE)
   const [raw, setRaw] = useState<Message[]>([]) // what the database sent
@@ -559,7 +562,8 @@ export default function ChatRoom(props: Props) {
   if (messages.length > 0) menuItems.push({ label: t.clearChat, icon: 'eraser', onClick: actions.clear })
   if (other && !self) menuItems.push({ label: iBlockedThem ? t.unblock : t.block, icon: 'block', onClick: actions.block, danger: !iBlockedThem })
   if (messages.length > 0 && !self && !broadcast) menuItems.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
-  if (group) menuItems.push({ label: t.leaveGroup, icon: 'logout', onClick: actions.leave, danger: true })
+  // (You leave a community's announcements by leaving the community.)
+  if (group && !(chat?.announcements && community)) menuItems.push({ label: t.leaveGroup, icon: 'logout', onClick: actions.leave, danger: true })
   else if (chat) menuItems.push({ label: broadcast ? t.deleteList : t.deleteChat, icon: 'trash', onClick: actions.remove, danger: true })
 
   // ----- The menu on one message -----
@@ -751,8 +755,10 @@ export default function ChatRoom(props: Props) {
           starred={starredIds.size}
           looks={looks}
           actions={actions}
+          community={community}
           onBack={() => setShowInfo(false)}
           onOpenPerson={onOpenPerson}
+          onOpenCommunity={() => community && onOpenCommunity(community.id)}
           onView={(m, data) => setViewing({ m, data })}
         />
         {infoDialogs}

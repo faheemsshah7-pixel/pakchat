@@ -1,14 +1,14 @@
 // Rail.tsx: the bar that takes you between PakChat's main parts, like WhatsApp's.
-// On a computer it runs down the left edge: Chats, Calls and Status, then Archived and Starred,
+// On a computer it runs down the left edge: Chats, Calls, Status and Communities, then Archived and Starred,
 // and Settings and your photo at the bottom. On a phone it sits along the bottom with just
-// Chats, Status and Calls (index.css moves it and hides the rest).
+// Chats, Calls, Status and Communities (index.css moves it and hides the rest).
 import type { Person } from '../chats'
 import { useT } from '../lang'
 import { useAvatar, type Profile } from '../profiles'
 import Avatar from './Avatar'
 import Icon, { type IconName } from './Icon'
 
-export type Tab = 'chats' | 'calls' | 'status' | 'archived' | 'starred'
+export type Tab = 'chats' | 'calls' | 'status' | 'communities' | 'archived' | 'starred'
 
 type Props = {
   tab: Tab | null // the one that's lit up
@@ -50,6 +50,7 @@ export default function Rail({ tab, me, profile, unreadChats, missedCalls, newSt
       {item('chats', 'chat', t.chatsTab, count(unreadChats))}
       {item('calls', 'phone', t.calls, count(missedCalls))}
       {item('status', 'status', t.status, newStatus ? <span className="dot" /> : null)}
+      {item('communities', 'community', t.communities, null)}
       <hr className="wide-only" />
       {item('archived', 'archive', t.archived, archivedUnread > 0 ? <small className="rail-count">{archivedUnread}</small> : null, true)}
       {item('starred', 'star', t.starredMessages, null, true)}

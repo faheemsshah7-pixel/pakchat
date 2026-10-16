@@ -88,22 +88,110 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.reporterId == me();
     }
 
-    // invites/<code>: a group's invite link. The code is long and random, so only people
-    // who were sent the link can find it. Nobody can list them all.
+    // invites/<code>: a group's (or a community's) invite link. The code is long and random,
+    // so only people who were sent the link can find it. Nobody can list them all.
     match /invites/{code} {
       function chatOf(id) {
         return /databases/$(database)/documents/chats/$(id);
       }
+      function communityOf(id) {
+        return /databases/$(database)/documents/communities/$(id);
+      }
+      function invite() {
+        return request.resource.data;
+      }
+      function forCommunity(d) {
+        return d.get('communityId', '') != '';
+      }
       allow get: if signedIn();
       allow create: if signedIn()
         && code.size() >= 16
-        && request.resource.data.keys().hasOnly(['chatId', 'title', 'by'])
-        && request.resource.data.by == me()
-        && request.resource.data.title is string
-        && request.resource.data.title.size() <= 50
-        && adminIn(get(chatOf(request.resource.data.chatId)).data, me())
-        && getAfter(chatOf(request.resource.data.chatId)).data.get('inviteCode', '') == code;
-      allow delete: if signedIn() && adminIn(get(chatOf(resource.data.chatId)).data, me());
+        && invite().keys().hasOnly(['chatId', 'communityId', 'title', 'by'])
+        && invite().by == me()
+        && invite().title is string
+        && invite().title.size() <= 50
+        && (
+          // A group's: you're one of its admins, and it's the group's link now.
+          (!forCommunity(invite())
+            && adminIn(get(chatOf(invite().chatId)).data, me())
+            && getAfter(chatOf(invite().chatId)).data.get('inviteCode', '') == code)
+          ||
+          // A community's: you're one of its admins, it's the community's link now,
+          // and chatId is its announcements group.
+          (forCommunity(invite())
+            && me() in get(communityOf(invite().communityId)).data.admins
+            && invite().chatId == get(communityOf(invite().communityId)).data.announcementsId
+            && getAfter(communityOf(invite().communityId)).data.get('inviteCode', '') == code)
+        );
+      allow delete: if signedIn()
+        && ((!forCommunity(resource.data) && adminIn(get(chatOf(resource.data.chatId)).data, me()))
+          || (forCommunity(resource.data) && me() in get(communityOf(resource.data.communityId)).data.admins));
+    }
+
+    // communities/<id>: see communities.ts. Only the people in a community can see it.
+    match /communities/{communityId} {
+      function was() {
+        return resource.data;
+      }
+      function now() {
+        return request.resource.data;
+      }
+      function changed() {
+        return now().diff(was()).affectedKeys();
+      }
+      function chatOf(id) {
+        return /databases/$(database)/documents/chats/$(id);
+      }
+      // What a community must look like: a name, up to 256 people (they're all in its
+      // announcements group), up to 50 groups, and its admins (with its owner) are in it.
+      function shapeOk() {
+        return now().keys().hasOnly(['name', 'description', 'owner', 'admins', 'members', 'names', 'groups', 'announcementsId', 'inviteCode', 'joinCode', 'createdAt'])
+          && now().name is string && now().name.size() > 0 && now().name.size() <= 50
+          && now().get('description', '') is string && now().get('description', '').size() <= 500
+          && now().members is list && now().members.size() <= 256
+          && now().admins is list && now().members.hasAll(now().admins)
+          && now().owner in now().admins
+          && now().names is map
+          && now().groups is map && now().groups.size() <= 50
+          && now().announcementsId is string;
+      }
+      // Names can only be added for people who are new, or changed for yourself.
+      function namesOk() {
+        return now().names.diff(was().names).affectedKeys().hasOnly(now().members.removeAll(was().members).concat([me()]));
+      }
+      allow read: if signedIn() && me() in resource.data.members;
+      // Making one: you're its owner and only admin, and its announcements group is made with it.
+      allow create: if signedIn() && shapeOk()
+        && now().owner == me()
+        && now().admins == [me()]
+        && me() in now().members
+        && now().groups.size() == 0
+        && !('inviteCode' in now()) && !('joinCode' in now())
+        && now().createdAt == request.time
+        && getAfter(chatOf(now().announcementsId)).data.get('communityId', '') == communityId;
+      allow update: if signedIn() && shapeOk() && namesOk()
+        && now().owner == was().owner
+        && now().announcementsId == was().announcementsId
+        && now().createdAt == was().createdAt
+        && (
+          // 1. An admin: its name, description, groups, people, admins and invite link. (The owner stays.)
+          (me() in was().admins && was().owner in now().members)
+          ||
+          // 2. Leaving: only you go. (The owner can't: they deactivate it instead.)
+          (me() in was().members && me() != was().owner
+            && now().members == was().members.removeAll([me()])
+            && now().admins == was().admins.removeAll([me()])
+            && changed().hasOnly(['members', 'admins']))
+          ||
+          // 3. Joining with an invite link: you must know its current code.
+          (!(me() in was().members)
+            && was().get('inviteCode', '') != ''
+            && now().get('joinCode', '') == was().inviteCode
+            && now().members == was().members.concat([me()])
+            && changed().hasOnly(['members', 'names', 'joinCode']))
+        );
+      // Deactivating it: only its owner.
+      allow delete: if signedIn() && resource.data.owner == me();
     }
 
     // calls/<id>: voice and video calls (see calls.ts). Only the two people in a call can see it.
@@ -394,25 +482,58 @@ service cloud.firestore {
       function removed() {
         return before().members.removeAll(after().members);
       }
+      // ----- groups in a community (see communities.ts) -----
+      function communityPath(id) {
+        return /databases/$(database)/documents/communities/$(id);
+      }
+      // The community (as it will be after this write) lists this group, and you're one of its admins.
+      // Its announcements group is the one it says it is.
+      function linkedHere(id) {
+        let com = getAfter(communityPath(id)).data;
+        return me() in com.admins
+          && (chatId in com.groups || com.announcementsId == chatId)
+          && after().get('announcements', false) == (com.announcementsId == chatId);
+      }
+      // A new group: in no community, or in one you look after.
+      function communityLinkOk() {
+        let id = after().get('communityId', '');
+        return (id == '' && after().get('announcements', false) == false)
+          || (id is string && id != '' && linkedHere(id));
+      }
+      // A group joining or leaving a community: only one of its admins, and never the announcements group.
+      function communityChangeOk() {
+        return (after().get('communityId', '') == before().get('communityId', '')
+            && after().get('announcements', false) == before().get('announcements', false))
+          || (wasAdmin()
+            && before().get('announcements', false) == false
+            && after().get('announcements', false) == false
+            && (after().get('communityId', '') == '' || linkedHere(after().communityId)));
+      }
+      // You're in the community (after this write), and it lists this group.
+      function inCommunityAfter(id) {
+        let com = getAfter(communityPath(id)).data;
+        return me() in com.members && (chatId in com.groups || com.announcementsId == chatId);
+      }
 
       // ----- the chat document -----
       allow get: if signedIn() && (inId() || me() in resource.data.members);
       // Listing ("show me my chats") only works if the query asks for chats you're in.
       allow list: if signedIn() && me() in resource.data.members;
 
-      allow create: if signedIn() && lastMessageIsMine() && infoOk() && (
+      allow create: if signedIn() && lastMessageIsMine() && infoOk() && communityLinkOk() && (
         // A direct chat: you must be one of the two, and nobody else can be in it.
         (inId()
           && after().members == ids()
           && after().get('type', 'direct') == 'direct')
         ||
         // A group: you made it (so you're its admin), it has a name and 2 to 256 people.
+        // (A community's group can start with just you: the others join it from the community.)
         (!isDirectId()
           && after().type == 'group'
           && after().admin == me()
           && after().get('admins', []).size() == 0
           && me() in after().members
-          && after().members.size() >= 2
+          && (after().members.size() >= 2 || after().get('communityId', '') != '')
           && after().members.size() <= 256)
         ||
         // A broadcast list: just you in it.
@@ -431,6 +552,7 @@ service cloud.firestore {
         // a direct chat can't turn into a group, or the other way round
         && after().get('type', 'direct') == before().get('type', 'direct')
         && (!isBroadcastChat(after()) || broadcastOk())
+        && communityChangeOk()
         && (
           // 1. Normal updates by someone in the chat (new message, ticks, typing): nobody joins or leaves.
           //    Admins can also change the group's info and who else is admin.
@@ -478,6 +600,16 @@ service cloud.firestore {
           (isBroadcastChat(before())
             && before().admin == me()
             && sameMembers() && sameOwner() && sameAdmins())
+          ||
+          // 7. Joining a community's group (or its announcements): you must be in the community,
+          //    and the community must list the group.
+          (isGroupChat(before())
+            && before().get('communityId', '') != ''
+            && !(me() in before().members)
+            && after().members == before().members.concat([me()])
+            && after().members.size() <= 256
+            && sameOwner() && sameAdmins() && !infoChanged()
+            && inCommunityAfter(before().communityId))
         );
 
       // ----- messages -----
@@ -608,7 +740,7 @@ service cloud.firestore {
             && m.video is bool && m.missed is bool
             && m.seconds is number && m.seconds >= 0 && m.seconds < 86400)
           || (m.kind == 'system'
-            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer', 'listCreated']
+            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer', 'listCreated', 'communityCreated', 'joinedCommunity', 'joinedGroup']
             // "Ali turned on disappearing messages" says for how long
             && (m.event != 'timer' || m.get('seconds', -1) in [0, 86400, 604800, 7776000]));
       }
@@ -620,7 +752,7 @@ service cloud.firestore {
         let c = getAfter(chatPath()).data;
         return isDirectId()
           || isBroadcastChat(c)
-          || (m.kind == 'system' && m.event in ['left', 'joined'])
+          || (m.kind == 'system' && m.event in ['left', 'joined', 'joinedCommunity', 'joinedGroup'])
           || adminIn(c, me())
           || ((m.kind != 'system' || m.event == 'pinned') && !c.get('onlyAdmins', false));
       }
