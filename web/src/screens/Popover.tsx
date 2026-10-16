@@ -3,6 +3,7 @@
 // goes off the edge of the screen.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { LEVEL, useBack } from '../back'
 import Icon, { type IconName } from './Icon'
 
 export type PopoverItem = { label: string; onClick: () => void; icon?: IconName; danger?: boolean }
@@ -18,6 +19,7 @@ type Props = {
 export default function Popover({ x, y, onClose, items, top }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const [place, setPlace] = useState({ left: x, top: y, ready: false })
+  useBack(true, LEVEL.menu, onClose)
 
   // Measure the menu, then nudge it back on screen if it would stick out.
   useLayoutEffect(() => {

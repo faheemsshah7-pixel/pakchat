@@ -1,33 +1,71 @@
-// MediaGrid.tsx: the photos shared in a chat, as little squares (in contact and group info).
-// It shows photos from the messages already loaded, newest first.
+// MediaGrid.tsx: the photos, videos and documents shared in a chat (in contact and group info).
+// It shows them from the messages already loaded, newest first.
+import { useState } from 'react'
 import type { Message } from '../chats'
 import { useT } from '../lang'
-import { useMedia } from '../media'
+import { loadMediaUrl, useMedia } from '../media'
+import Icon from './Icon'
+import { FileBubble } from './MediaBubbles'
 
-export default function MediaGrid({ chatId, messages, onView }: { chatId: string; messages: Message[]; onView: (m: Message, data: string) => void }) {
+type Props = { chatId: string; messages: Message[]; onView: (m: Message, data: string) => void }
+
+export default function MediaGrid({ chatId, messages, onView }: Props) {
   const { t } = useT()
-  const photos = messages.filter((m) => m.kind === 'photo' && !m.deleted && m.mediaId).reverse()
-  if (photos.length === 0) return null
+  const shared = messages.filter((m) => !m.deleted && m.mediaId).reverse()
+  const media = shared.filter((m) => m.kind === 'photo' || m.kind === 'video')
+  const docs = shared.filter((m) => m.kind === 'file')
   return (
-    <section className="info-section">
-      <p className="section-title">
-        {t.media} <span className="muted">{photos.length}</span>
-      </p>
-      <div className="media-grid">
-        {photos.slice(0, 12).map((m) => (
-          <Thumb key={m.id} chatId={chatId} m={m} onView={onView} />
-        ))}
-      </div>
-    </section>
+    <>
+      {media.length > 0 && (
+        <section className="info-section">
+          <p className="section-title">
+            {t.media} <span className="muted">{media.length}</span>
+          </p>
+          <div className="media-grid">
+            {media.slice(0, 12).map((m) => (
+              <Thumb key={m.id} chatId={chatId} m={m} onView={onView} />
+            ))}
+          </div>
+        </section>
+      )}
+      {docs.length > 0 && (
+        <section className="info-section">
+          <p className="section-title">
+            {t.documents} <span className="muted">{docs.length}</span>
+          </p>
+          <div className="doc-shelf">
+            {docs.slice(0, 5).map((m) => (
+              <FileBubble key={m.id} chatId={chatId} m={m} />
+            ))}
+          </div>
+        </section>
+      )}
+    </>
   )
 }
 
+// One square. A video shows its first picture with a ▶, and loads when you tap it.
 function Thumb({ chatId, m, onView }: { chatId: string; m: Message; onView: (m: Message, data: string) => void }) {
-  const data = useMedia(chatId, m.mediaId)
-  if (!data) return <span className="thumb-box loading" />
+  const video = m.kind === 'video'
+  const picture = useMedia(chatId, video ? m.posterId : m.mediaId)
+  const [opening, setOpening] = useState(false)
+
+  async function open(picture: string) {
+    if (!video) return onView(m, picture)
+    setOpening(true)
+    try {
+      onView(m, await loadMediaUrl(chatId, m.mediaId ?? ''))
+    } catch (err) {
+      console.error(err)
+    }
+    setOpening(false)
+  }
+
+  if (!picture) return <span className="thumb-box loading" />
   return (
-    <button className="thumb-box" onClick={() => onView(m, data)}>
-      <img src={data} alt="" />
+    <button className="thumb-box" onClick={() => open(picture)}>
+      <img src={picture} alt="" />
+      {video && <span className="thumb-play">{opening ? <span className="spinner" /> : <Icon name="play" size={18} />}</span>}
     </button>
   )
 }

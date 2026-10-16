@@ -18,12 +18,13 @@
 //     pins:  { messageId: a small copy of the message }   pinned messages, up to 3 (see pins.ts)
 //     timer: seconds before new messages disappear (0 = off) (see disappearing.ts)
 //   chats/<chatId>/messages/<id>    one document per message
-//     kind: 'text' | 'photo' | 'voice' | 'system', senderId, sentAt, and the content
+//     kind: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'call' | 'system',
+//     senderId, sentAt, and the content
 //     replyTo:   a small copy of the message it answers
 //     reactions: { uidA: '👍' }
 //     editedAt, deleted, forwarded
 //     expireAt:  when it disappears (only in chats with disappearing messages on)
-//   chats/<chatId>/media/<id>       the photo or voice note itself (see media.ts)
+//   chats/<chatId>/media/<id>       the photo, video, voice note or document itself (see media.ts)
 //   chats/<chatId>/typing/<uid>     when each person last pressed a key (see typing.ts)
 //
 // Direct chat ids are the two people's ids sorted and joined: "uidA_uidB".
@@ -78,6 +79,8 @@ export type LastMessage = {
   seconds?: number
   deleted?: boolean
   expireAt?: Timestamp | null
+  fileName?: string
+  live?: boolean
 }
 
 export type Chat = {
@@ -107,9 +110,12 @@ export type Pin = { senderId: string; senderName: string; kind: string; text: st
 // A small copy of the message you're answering, so the reply can show it.
 export type ReplyTo = { id: string; senderId: string; senderName: string; kind: string; text: string }
 
+// A contact card someone shared: a PakChat user (uid), or anyone with a phone number.
+export type SharedContact = { name: string; uid?: string; phone?: string; email?: string }
+
 export type Message = {
   id: string
-  kind?: 'text' | 'photo' | 'voice' | 'call' | 'system' // step 2 messages have no kind: they're text
+  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'call' | 'system' // step 2 messages have no kind: they're text
   text?: string
   senderId: string
   senderName?: string
@@ -117,10 +123,21 @@ export type Message = {
   pending: boolean // true = still on its way to the server
   fresh?: boolean // arrived while the chat was open, so it slides in (not saved, just for the screen)
   mediaId?: string
-  width?: number // photos
+  posterId?: string // videos: the picture shown before it plays
+  width?: number // photos and videos
   height?: number
   caption?: string
-  seconds?: number // voice notes, and how long a call lasted
+  seconds?: number // voice notes, videos, and how long a call lasted
+  fileName?: string // documents
+  fileSize?: number // (bytes)
+  mime?: string // what kind of file, like "application/pdf"
+  lat?: number // locations
+  lng?: number
+  accuracy?: number // (metres)
+  live?: boolean // live location: it moves until liveUntil
+  liveUntil?: Timestamp | null
+  movedAt?: Timestamp | null // when a live location last moved
+  contact?: SharedContact
   video?: boolean // calls: a video call (or else a voice call)
   missed?: boolean // calls: nobody picked up
   event?: SystemEvent // system messages: "Ali added Sara"
@@ -133,11 +150,15 @@ export type Message = {
   expireAt?: Timestamp | null // disappearing messages: when it goes
 }
 
-// What you can send. Photos and voice notes arrive as text ("data URLs"), see media.ts.
+// What you can send. Photos, videos, voice notes and documents arrive as text ("data URLs"), see media.ts.
 export type Content =
   | { kind: 'text'; text: string }
   | { kind: 'photo'; data: string; width: number; height: number; caption?: string }
+  | { kind: 'video'; data: string; poster: string; width: number; height: number; seconds: number; caption?: string }
   | { kind: 'voice'; data: string; seconds: number }
+  | { kind: 'file'; data: string; fileName: string; fileSize: number; mime: string; caption?: string }
+  | { kind: 'location'; lat: number; lng: number; accuracy: number; liveMinutes?: number } // see location.ts
+  | { kind: 'contact'; contact: SharedContact }
   | { kind: 'call'; video: boolean; seconds: number; missed: boolean } // written by calls.ts when a call ends
 
 // Extra things a message can carry.
@@ -187,8 +208,8 @@ export async function findUser(input: string): Promise<Person | null> {
 }
 
 // Send one message. A "batch" saves several things together: the message,
-// the photo or voice note (if any), and the chat's "last message" for the chat list.
-// Either all of them are saved or none are.
+// the photo, video, voice note or document (if any), and the chat's "last message" for the chat list.
+// Either all of them are saved or none are. Returns the new message's id.
 export async function sendMessage(me: Person, target: Target, content: Content, extras: Extras = {}) {
   const chatRef = doc(db, 'chats', target.chatId)
   const batch = writeBatch(db)
@@ -203,17 +224,28 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
     message.text = content.text
   } else if (content.kind === 'call') {
     Object.assign(message, { video: content.video, seconds: content.seconds, missed: content.missed })
+  } else if (content.kind === 'location') {
+    Object.assign(message, { lat: content.lat, lng: content.lng, accuracy: Math.round(content.accuracy) })
+    if (content.liveMinutes) Object.assign(message, { live: true, liveUntil: Timestamp.fromMillis(Date.now() + content.liveMinutes * 60_000) })
+  } else if (content.kind === 'contact') {
+    message.contact = content.contact
   } else {
-    // The photo or voice note goes in its own document(s), so the message list stays small.
+    // The photo, video, voice note or document goes in its own document(s), so the message list stays small.
     message.mediaId = saveMedia(batch, chatRef, content.data, me.uid, expireAt)
     if (content.kind === 'photo') {
       Object.assign(message, { width: content.width, height: content.height })
-      if (content.caption) message.caption = content.caption
+    } else if (content.kind === 'video') {
+      message.posterId = saveMedia(batch, chatRef, content.poster, me.uid, expireAt)
+      Object.assign(message, { width: content.width, height: content.height, seconds: Math.round(content.seconds) })
+    } else if (content.kind === 'file') {
+      Object.assign(message, { fileName: content.fileName, fileSize: content.fileSize, mime: content.mime })
     } else message.seconds = content.seconds
+    if ('caption' in content && content.caption) message.caption = content.caption
   }
 
-  addMessage(batch, target, message, me, target.other ? directChatFields(me, target.other, !!target.isNew) : {})
+  const id = addMessage(batch, target, message, me, target.other ? directChatFields(me, target.other, !!target.isNew) : {})
   await batch.commit()
+  return id
 }
 
 function directChatFields(me: Person, other: Person, isNew: boolean) {
@@ -225,17 +257,18 @@ function directChatFields(me: Person, other: Person, isNew: boolean) {
   }
 }
 
-// Adds a message to a batch, and updates the chat's lastMessage to match.
+// Adds a message to a batch, and updates the chat's lastMessage to match. Returns the message's id.
 // Used for normal messages and for "Ali added Sara" system messages (groups.ts).
 export function addMessage(batch: WriteBatch, target: Target, message: Record<string, unknown>, me: Person, chatFields: object) {
   const chatRef = doc(db, 'chats', target.chatId)
-  batch.set(doc(collection(chatRef, 'messages')), { ...message, sentAt: serverTimestamp() }) // the server's clock
-  const { kind, senderId, senderName, event, targetName, video, missed, expireAt } = message
-  // The chat list shows a photo's caption as its text.
-  const text = message.text ?? message.caption
+  const messageRef = doc(collection(chatRef, 'messages')) // a new random id
+  batch.set(messageRef, { ...message, sentAt: serverTimestamp() }) // the server's clock
+  const { kind, senderId, senderName, event, targetName, video, missed, expireAt, fileName, live } = message
+  // The chat list shows a photo's caption as its text, and a contact card's name.
+  const text = message.text ?? message.caption ?? (message.contact as SharedContact | undefined)?.name
   const seconds = kind === 'system' ? message.seconds : undefined // "turned on disappearing messages for 7 days"
   const lastMessage = Object.fromEntries(
-    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt }).filter(([, v]) => v !== undefined),
+    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live }).filter(([, v]) => v !== undefined),
   )
   // Sending a message means you've read the chat, so it isn't "unread" for you.
   const receipts = myPrivacy.readReceipts || !isDirectId(target.chatId)
@@ -247,6 +280,7 @@ export function addMessage(batch: WriteBatch, target: Target, message: Record<st
     { ...chatFields, ...read, lastMessage, updatedAt: serverTimestamp() },
     { merge: true },
   )
+  return messageRef.id
 }
 
 // "Ali added Sara", "You left", ... in the chosen language.
@@ -271,16 +305,43 @@ export function systemText(m: { event?: SystemEvent; senderId: string; senderNam
 }
 
 // What a message says, in one short line (for the chat list, replies and alerts).
-export function shortText(
-  m: { kind?: string; text?: string; caption?: string; deleted?: boolean; senderId: string; video?: boolean; missed?: boolean },
-  myUid: string,
-  t: Strings,
-) {
+type Short = {
+  kind?: string
+  text?: string
+  caption?: string
+  deleted?: boolean
+  senderId: string
+  video?: boolean
+  missed?: boolean
+  fileName?: string
+  live?: boolean
+  contact?: SharedContact
+}
+export function shortText(m: Short, myUid: string, t: Strings) {
   if (m.deleted) return m.senderId === myUid ? t.youDeleted : t.wasDeleted
-  if (m.kind === 'call') return (m.video ? '📹 ' : '📞 ') + callTitle(m, myUid, t)
-  if (m.kind === 'photo') return m.caption || m.text ? `📷 ${m.caption ?? m.text}` : t.photo
-  if (m.kind === 'voice') return t.voice
+  const words = m.caption ?? m.text
+  switch (m.kind) {
+    case 'call':
+      return (m.video ? '📹 ' : '📞 ') + callTitle(m, myUid, t)
+    case 'photo':
+      return words ? `📷 ${words}` : t.photo
+    case 'video':
+      return words ? `🎥 ${words}` : t.videoMessage
+    case 'voice':
+      return t.voice
+    case 'file':
+      return `📄 ${m.fileName ?? words ?? ''}`
+    case 'location':
+      return m.live ? t.liveLocationLabel : t.locationLabel
+    case 'contact':
+      return `👤 ${m.contact?.name ?? m.text ?? ''}`
+  }
   return m.text ?? ''
+}
+
+// All the words in a message, for searching: its text, caption, file name or contact's name.
+export function searchText(m: Message) {
+  return [m.text, m.caption, m.fileName, m.contact?.name].filter(Boolean).join(' ')
 }
 
 // "Voice call", "Video call", or (for the person who was called) "Missed voice call".

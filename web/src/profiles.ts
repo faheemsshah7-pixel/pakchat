@@ -66,6 +66,16 @@ export function useProfile(uid: string | undefined) {
   return profile
 }
 
+// Someone's profile, loaded if we don't have it yet (for sharing their contact card).
+export async function getProfile(uid: string) {
+  const known = profiles.get(uid)
+  if (known) return known
+  const snap = await getDoc(doc(db, 'users', uid))
+  if (!snap.exists()) return undefined
+  rememberProfile(uid, snap.data() as Profile)
+  return snap.data() as Profile
+}
+
 // Someone's profile photo, or null if they have none (or it's still loading).
 export function useAvatar(uid: string | undefined, version: number | undefined) {
   const key = `${uid}:${version}`

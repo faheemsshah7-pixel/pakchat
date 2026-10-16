@@ -379,6 +379,29 @@ const PATHS = {
       <circle cx="12" cy="14" r="8" />
     </>
   ),
+  file: (
+    <>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M8 13h8" />
+      <path d="M8 17h5" />
+    </>
+  ),
+  mapPin: (
+    <>
+      <path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0" />
+      <circle cx="12" cy="10" r="3" />
+    </>
+  ),
+  contact: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="10" r="2.5" />
+      <path d="M5.5 16.5c.6-1.8 2-2.8 3.5-2.8s2.9 1 3.5 2.8" />
+      <path d="M15 9h3" />
+      <path d="M15 13h3" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

@@ -29,15 +29,18 @@ export function replySnapshot(m: Message): ReplyTo {
     senderId: m.senderId,
     senderName: m.senderName ?? '',
     kind: m.kind ?? 'text',
-    text: (m.text ?? m.caption ?? '').slice(0, 200),
+    text: (m.text ?? m.caption ?? m.fileName ?? m.contact?.name ?? '').slice(0, 200),
   }
 }
 
-// You can edit your own text (or a photo's caption) for 15 minutes.
+// Messages whose words you can edit: a text, or the caption of a photo, video or document.
+const EDITABLE = ['text', 'photo', 'video', 'file']
+export const captionKind = (m: Message) => (m.kind ?? 'text') !== 'text'
+
+// You can edit your own text (or a caption) for 15 minutes.
 // (We stop 30 seconds early, in case your computer's clock is a little off.)
 export function canEdit(m: Message, myUid: string) {
-  const kind = m.kind ?? 'text'
-  return m.senderId === myUid && !m.deleted && !m.pending && (kind === 'text' || kind === 'photo')
+  return m.senderId === myUid && !m.deleted && !m.pending && EDITABLE.includes(m.kind ?? 'text')
     && Date.now() - sentMillis(m) < EDIT_MINUTES * 60_000 - 30_000
 }
 
@@ -51,7 +54,7 @@ export function canUnsend(m: Message, myUid: string) {
 // (A pinned message's copy in the pin bar is kept up to date in ChatRoom.tsx, from the message itself.)
 export async function editMessage(chatId: string, me: Person, m: Message, text: string, isLast: boolean) {
   const batch = writeBatch(db)
-  const field = (m.kind ?? 'text') === 'photo' ? 'caption' : 'text'
+  const field = captionKind(m) ? 'caption' : 'text'
   batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp() })
   if (isLast) {
     batch.update(doc(db, 'chats', chatId), {
@@ -61,18 +64,22 @@ export async function editMessage(chatId: string, me: Person, m: Message, text: 
   await batch.commit()
 }
 
-// Delete for everyone: the words, photo or voice note are wiped from the database.
+// Delete for everyone: the words, photo, video, voice note or document are wiped from the database.
 // Everyone sees "This message was deleted" instead. If it was pinned, the pin goes too.
 export async function unsendMessage(chatId: string, me: Person, m: Message, isLast: boolean, pinned = false) {
   const batch = writeBatch(db)
   const wipe = Object.fromEntries(
-    ['text', 'caption', 'mediaId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'].map((key) => [
+    [
+      ...['text', 'caption', 'mediaId', 'posterId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'],
+      ...['fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'movedAt', 'contact'],
+    ].map((key) => [
       key,
       deleteField(),
     ]),
   )
   batch.update(doc(db, 'chats', chatId, 'messages', m.id), { ...wipe, deleted: true })
   if (m.mediaId) await deleteMedia(batch, chatId, m.mediaId)
+  if (m.posterId) await deleteMedia(batch, chatId, m.posterId)
   const chatFields: Record<string, unknown> = {}
   if (isLast) chatFields.lastMessage = { kind: m.kind ?? 'text', deleted: true, senderId: me.uid, senderName: me.name, ...expiry(m) }
   if (pinned) chatFields[`pins.${m.id}`] = deleteField()
@@ -80,18 +87,10 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
   await batch.commit()
 }
 
-// Forward a message to other chats. Photos and voice notes are copied into each chat.
+// Forward a message to other chats. Photos, videos, voice notes and documents are copied into each chat.
+// (A live location is forwarded as a plain location: where it was.)
 export async function forwardMessage(me: Person, fromChatId: string, m: Message, targets: Target[]) {
-  let content: Content
-  const kind = m.kind ?? 'text'
-  if (kind === 'text') content = { kind: 'text', text: m.text ?? '' }
-  else {
-    const data = await loadMedia(fromChatId, m.mediaId ?? '')
-    content =
-      kind === 'photo'
-        ? { kind: 'photo', data, width: m.width ?? 4, height: m.height ?? 3, caption: m.caption }
-        : { kind: 'voice', data, seconds: m.seconds ?? 0 }
-  }
+  const content = await contentOf(fromChatId, m)
   // One chat at a time, so a problem with one doesn't stop the others.
   const failed: string[] = []
   for (const target of targets) {
@@ -101,4 +100,32 @@ export async function forwardMessage(me: Person, fromChatId: string, m: Message,
     })
   }
   return failed
+}
+
+// What to send to make a copy of a message.
+async function contentOf(chatId: string, m: Message): Promise<Content> {
+  const media = () => loadMedia(chatId, m.mediaId ?? '')
+  switch (m.kind ?? 'text') {
+    case 'photo':
+      return { kind: 'photo', data: await media(), width: m.width ?? 4, height: m.height ?? 3, caption: m.caption }
+    case 'video':
+      return {
+        kind: 'video',
+        data: await media(),
+        poster: await loadMedia(chatId, m.posterId ?? ''),
+        width: m.width ?? 16,
+        height: m.height ?? 9,
+        seconds: m.seconds ?? 0,
+        caption: m.caption,
+      }
+    case 'voice':
+      return { kind: 'voice', data: await media(), seconds: m.seconds ?? 0 }
+    case 'file':
+      return { kind: 'file', data: await media(), fileName: m.fileName ?? 'file', fileSize: m.fileSize ?? 0, mime: m.mime ?? '', caption: m.caption }
+    case 'location':
+      return { kind: 'location', lat: m.lat ?? 0, lng: m.lng ?? 0, accuracy: m.accuracy ?? 0 }
+    case 'contact':
+      return { kind: 'contact', contact: m.contact ?? { name: '?' } }
+  }
+  return { kind: 'text', text: m.text ?? '' }
 }

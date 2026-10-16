@@ -5,6 +5,7 @@
 // Zoomed in, drag the photo to look around. Esc, ✕, or a click beside the photo closes it.
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { LEVEL, useBack } from '../back'
 import { useT } from '../lang'
 import Icon from './Icon'
 
@@ -19,6 +20,7 @@ type Props = { src: string; who: string; when: string; caption?: string; fileNam
 
 export default function PhotoViewer({ src, who, when, caption, fileName, onClose }: Props) {
   const { t } = useT()
+  useBack(true, LEVEL.cover, onClose)
   const [view, setView] = useState<View>(FITTED)
   const viewer = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)

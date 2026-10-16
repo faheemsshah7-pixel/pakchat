@@ -38,7 +38,7 @@ export async function setTimer(me: Person, chat: Chat, seconds: number) {
   await batch.commit()
 }
 
-// Delete this chat's messages whose time is up (and their photos and voice notes).
+// Delete this chat's messages whose time is up (and their photos, videos, voice notes and documents).
 // One message at a time, so if someone else is deleting the same ones, we don't get in each other's way.
 export async function deleteExpired(chatId: string) {
   const due = query(collection(db, 'chats', chatId, 'messages'), where('expireAt', '<=', Timestamp.now()), limit(50))
@@ -46,9 +46,11 @@ export async function deleteExpired(chatId: string) {
   for (const message of snap.docs) {
     const batch = writeBatch(db)
     batch.delete(message.ref)
-    const mediaId = message.get('mediaId') as string | undefined
     try {
-      if (mediaId) await deleteMedia(batch, chatId, mediaId)
+      for (const field of ['mediaId', 'posterId']) {
+        const mediaId = message.get(field) as string | undefined
+        if (mediaId) await deleteMedia(batch, chatId, mediaId)
+      }
       await batch.commit()
     } catch (err) {
       console.warn('Could not delete an old message yet:', err) // someone else got there first

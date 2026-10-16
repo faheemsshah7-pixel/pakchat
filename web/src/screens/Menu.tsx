@@ -1,11 +1,13 @@
 // Menu.tsx: the ⋮ button that opens a small list of actions.
 import { useState } from 'react'
+import { LEVEL, useBack } from '../back'
 import Icon, { type IconName } from './Icon'
 
 export type MenuItem = { label: string; onClick: () => void; icon?: IconName; danger?: boolean }
 
 export default function Menu({ label, items }: { label: string; items: MenuItem[] }) {
   const [open, setOpen] = useState(false)
+  useBack(open, LEVEL.menu, () => setOpen(false))
   return (
     <div className="menu">
       <button className="icon" aria-label={label} title={label} onClick={() => setOpen(!open)}>

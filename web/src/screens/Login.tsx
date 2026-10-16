@@ -13,6 +13,7 @@ import {
   type ConfirmationResult,
 } from 'firebase/auth'
 import { auth } from '../firebase'
+import { LEVEL, useBack } from '../back'
 import { useT } from '../lang'
 import { toInternational } from '../phone'
 import { useFixedTheme } from '../theme'
@@ -28,6 +29,13 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   // reCAPTCHA is an invisible "are you a robot?" check Google requires before sending an SMS.
   const recaptcha = useRef<RecaptchaVerifier | null>(null)
+  // Back, on the "enter the code" step: back to the phone number (with a fresh robot check).
+  useBack(!!confirmation, LEVEL.page, () => {
+    setConfirmation(null)
+    setCode('')
+    recaptcha.current?.clear()
+    recaptcha.current = null
+  })
   useFixedTheme('aurora') // the login page is always Aurora
 
   async function sendCode(e: React.FormEvent) {

@@ -17,6 +17,7 @@ import type { User } from 'firebase/auth'
 import { collection, getCountFromServer, onSnapshot, query, Timestamp, where } from 'firebase/firestore'
 import { db } from '../firebase'
 import { showAlert } from '../alerts'
+import { LEVEL, useBack } from '../back'
 import { listenForCalls, useCall } from '../calls'
 import {
   chatIdFor,
@@ -32,6 +33,7 @@ import {
 } from '../chats'
 import { codeFromAddress } from '../invites'
 import { useT } from '../lang'
+import { resumeSharing } from '../location'
 import { isHidden, isMuted, usePrefs, type ChatPrefs } from '../prefs'
 import { startHeartbeat } from '../presence'
 import type { Profile } from '../profiles'
@@ -164,8 +166,9 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   // 6. Done with the invite link: take it out of the address bar.
   const closeJoin = useCallback(() => {
     setJoinCode(null)
-    history.replaceState(null, '', '/')
+    history.replaceState(history.state, '', '/') // (keeps the Back button's guard, see back.ts)
   }, [])
+  useBack(!!joinCode, LEVEL.page, closeJoin)
   const joined = useCallback(
     (chatId: string) => {
       closeJoin()
@@ -186,8 +189,16 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
     [user.uid],
   )
 
+  // The phone's Back button: closes the chat, or goes back to the chat list (back.ts).
+  // On the chat list itself, Back does nothing, so PakChat stays open.
+  useBack(!!open, LEVEL.chat, () => setOpen(null))
+  useBack(view !== 'chats', LEVEL.page, () => setView('chats'))
+
   // 8. "typing…" in all your chats
   useEffect(() => listenForTyping(user.uid), [user.uid])
+
+  // 9. A live location you were sharing before you reloaded PakChat: carry on (until its time is up).
+  useEffect(() => resumeSharing(user.uid), [user.uid])
 
   function openChat(next: Open) {
     setOpen(next)

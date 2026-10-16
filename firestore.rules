@@ -337,8 +337,8 @@ service cloud.firestore {
           && request.resource.data.sentAt == request.time
           && newMessageOk(request.resource.data)
           && mayTalk(request.resource.data);
-        // Changing a message: a reaction, an edit, or "delete for everyone".
-        allow update: if canPost() && (reacting() || editing() || unsending());
+        // Changing a message: a reaction, an edit, "delete for everyone", or a live location moving.
+        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive());
         // Disappearing messages: once a message's time is up, anyone in the chat can delete it for good.
         allow delete: if canRead() && expired(resource.data);
       }
@@ -353,7 +353,8 @@ service cloud.firestore {
 
       // Only these fields, so nobody can sneak in a fake "edited" or "deleted" mark.
       function newMessageOk(m) {
-        return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt'])
+        return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt',
+            'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact'])
           && m.get('forwarded', false) is bool
           && expiryOk(m)
           && (!('replyTo' in m)
@@ -373,6 +374,25 @@ service cloud.firestore {
         return (m.kind == 'text' && textOk(m.text))
           || (m.kind == 'photo' && m.mediaId is string && captionOk(m))
           || (m.kind == 'voice' && m.mediaId is string)
+          // A video, with its first picture (the poster) saved separately
+          || (m.kind == 'video' && m.mediaId is string && m.posterId is string && captionOk(m)
+            && m.seconds is number && m.width is number && m.height is number)
+          // A document: its name, size and type
+          || (m.kind == 'file' && m.mediaId is string && captionOk(m)
+            && m.fileName is string && m.fileName.size() > 0 && m.fileName.size() <= 255
+            && m.fileSize is int && m.get('mime', '') is string && m.get('mime', '').size() <= 255)
+          // A location. A live one says until when (at most 8 hours).
+          || (m.kind == 'location' && placeOk(m)
+            && m.get('live', false) is bool
+            && (!m.get('live', false)
+              || (m.liveUntil is timestamp && m.liveUntil > request.time && m.liveUntil < request.time + duration.value(481, 'm'))))
+          // A contact card: a name, and a phone number, Gmail or PakChat id
+          || (m.kind == 'contact' && m.contact is map
+            && m.contact.keys().hasOnly(['name', 'phone', 'email', 'uid'])
+            && m.contact.name is string && m.contact.name.size() > 0 && m.contact.name.size() <= 60
+            && m.contact.get('phone', '') is string && m.contact.get('phone', '').size() <= 20
+            && m.contact.get('email', '') is string && m.contact.get('email', '').size() <= 100
+            && m.contact.get('uid', '') is string && m.contact.get('uid', '').size() <= 128)
           // "Voice call 2:13" or "Missed voice call": only in chats with one person
           || (m.kind == 'call' && isDirectId()
             && m.video is bool && m.missed is bool
@@ -401,7 +421,26 @@ service cloud.firestore {
           && now.diff(old).affectedKeys().hasOnly([me()])
           && (!(me() in now) || (now[me()] is string && now[me()].size() <= 16));
       }
-      // Edit your own message, up to 15 minutes after sending it.
+      // A real spot on Earth, and how accurate it is (metres).
+      function placeOk(m) {
+        return m.lat is number && m.lng is number
+          && m.lat >= -90 && m.lat <= 90 && m.lng >= -180 && m.lng <= 180
+          && m.get('accuracy', 0) is number;
+      }
+      // Live location: while it's live, the sender's app moves the pin (lat, lng, accuracy, movedAt),
+      // or stops sharing early (liveUntil becomes now).
+      function movingLive() {
+        let was = resource.data;
+        let now = request.resource.data;
+        return was.senderId == me()
+          && was.get('live', false) == true
+          && request.time < was.liveUntil
+          && now.diff(was).affectedKeys().hasOnly(['lat', 'lng', 'accuracy', 'movedAt', 'liveUntil'])
+          && placeOk(now)
+          && (now.get('movedAt', null) == was.get('movedAt', null) || now.movedAt == request.time)
+          && (now.liveUntil == was.liveUntil || now.liveUntil == request.time);
+      }
+      // Edit your own message (or a photo's, video's or document's caption), up to 15 minutes after sending it.
       function editing() {
         return resource.data.senderId == me()
           && !resource.data.get('deleted', false)
@@ -409,7 +448,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'caption', 'editedAt'])
           && request.resource.data.editedAt == request.time
           && ((resource.data.get('kind', 'text') == 'text' && textOk(request.resource.data.text))
-            || (resource.data.get('kind', 'text') == 'photo' && captionOk(request.resource.data)));
+            || (resource.data.get('kind', 'text') in ['photo', 'video', 'file'] && captionOk(request.resource.data)));
       }
       // Delete for everyone: your own message, up to 60 hours after sending it.
       // What it said is wiped. Only "this message was deleted" stays.

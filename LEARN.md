@@ -428,3 +428,52 @@ Like WhatsApp, this isn't a promise: people can still copy a message before it g
   to 4 would also need the rule's `<= 3` changed, or the server says no.)
 - Turn on disappearing messages with a friend and look at a new message in the Firebase
   console: it has an `expireAt` field.
+
+## Step 14: Videos, documents, location, contacts, and the Back button
+
+The paperclip in the message box now opens a menu, like WhatsApp's: **Photos & videos**,
+**Camera** (phones only), **Document**, **Location** and **Contact**.
+
+| Feature | Files | Saved as |
+|---|---|---|
+| Video | `media.ts` (`prepareVideo`), `MediaBubbles.tsx`, `VideoViewer.tsx` | the video + its first picture, in `media` docs |
+| Document | `Dialogs.tsx` (`DocumentSender`), `MediaBubbles.tsx` (`FileBubble`) | the file, in `media` docs, + `fileName`, `fileSize` |
+| Location | `location.ts`, `CardBubbles.tsx` | `lat`, `lng` on the message (a live one also `liveUntil`) |
+| Contact | `Dialogs.tsx` (`ContactDialog`), `CardBubbles.tsx` | `contact: { name, phone, uid }` on the message |
+
+### Videos and documents: about 5 MB each
+On the free plan we have no file storage, so files go into the database in pieces, like
+voice notes (8 pieces of 900,000 letters = about 5 MB, see `MAX_FILE_BYTES`).
+A bigger video, or one other phones might not play (an iPhone `.mov`), is played through
+once and recorded again smaller (`shrinkVideo`): it draws each frame onto a small canvas
+and records that with `MediaRecorder`. That takes as long as the video, so videos can be
+up to 3 minutes. You see "Preparing video… 40%" meanwhile.
+
+### Location (`location.ts`)
+The browser finds you (`navigator.geolocation`, it asks first). The little map is made of
+square pictures ("tiles") from OpenStreetMap, which is free and needs no key: `MapPreview`
+works out which tiles are around you and puts them together. Tap it to open Google Maps.
+
+**Live location** keeps moving the pin while PakChat is open on your device (a website
+can't run in the background). `watchPosition` tells us when you move; we save at most every
+10 seconds, and once a minute anyway, so the others see "Updated just now". The rules
+(`movingLive`) only let the sender move it, and only until `liveUntil`.
+
+### Contacts
+Pick people from your chats, from your phone's contacts (Chrome on Android only), or type a
+name and number. If they're on PakChat, the card's **Message** button opens a chat with them.
+
+### The Back button (`back.ts`)
+PakChat is one web page, so the phone's Back button used to leave it. Now PakChat keeps one
+extra step in the browser's history (the "guard"). Back uses it up; we add it straight back
+and close whatever is on top instead: a menu, a window, a photo, the info panel, the chat.
+On the chat list there's nothing to close, so you stay.
+
+Anything that Back should close says so with one line, for example in `Modal.tsx`:
+`useBack(true, LEVEL.window, onClose)`. `LEVEL` decides the order: a menu closes before
+the window under it, a window before the chat.
+
+### Try this
+- In `location.ts`, change `LIVE_CHOICES` to `[15, 60, 240]` and the 3rd label in
+  `strings.ts` to "4 hours". (Over 8 hours would also need the rule's `481` changed.)
+- In `fileColour` (`MediaBubbles.tsx`), give `ZIP` files their own colour.

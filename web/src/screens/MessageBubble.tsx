@@ -1,16 +1,18 @@
 // MessageBubble.tsx: one message in a chat: who sent it (in groups), what it answers,
-// the words / photo / voice note / call, the time and ticks, and any emoji reactions under it.
+// the words / photo / video / voice note / document / location / contact / call,
+// the time and ticks, and any emoji reactions under it.
 // Right-click it (or hold your finger on it on a phone, or use the little arrow) for its menu.
 // memo (at the bottom): a bubble is only drawn again when ITS message changed. A chat shows
 // 50 messages, and drawing all of them for every new one made sending feel slow on phones.
 import { memo, useRef } from 'react'
-import { callTitle, type Message, type Tick } from '../chats'
+import { callTitle, shortText, type Message, type SharedContact, type Tick } from '../chats'
 import { nameColour } from '../colours'
 import { isJumboEmoji } from '../emoji'
 import { useT } from '../lang'
 import { clock, duration } from '../time'
 import Icon from './Icon'
-import { PhotoBubble, VoiceBubble } from './MediaBubbles'
+import { ContactBubble, LocationBubble } from './CardBubbles'
+import { FileBubble, PhotoBubble, VideoBubble, VoiceBubble } from './MediaBubbles'
 import RichText from './RichText'
 import Ticks from './Ticks'
 
@@ -27,18 +29,21 @@ type Props = {
   onMenu: (m: Message, x: number, y: number) => void
   onReactions: (m: Message) => void
   onJump: (messageId: string) => void
-  onView: (m: Message, data: string) => void
+  onView: (m: Message, data: string) => void // a photo or video, full screen
+  onContact: (contact: SharedContact) => void // "Message" on a contact card
   onCall?: (video: boolean) => void // tapping a call in the chat calls them back
 }
 
 export default memo(function MessageBubble(props: Props) {
-  const { m, tick, chatId, myUid, group, first, highlight, starred, pinned, onMenu, onReactions, onJump, onView, onCall } = props
+  const { m, tick, chatId, myUid, group, first, highlight, starred, pinned, onMenu, onReactions, onJump, onView, onContact, onCall } = props
   const { t } = useT()
   const mine = m.senderId === myUid
   const kind = m.kind ?? 'text'
-  const text = kind === 'photo' ? m.caption : m.text
+  const text = kind === 'text' ? m.text : m.caption // (photos, videos and documents can have a caption)
   const jumbo = kind === 'text' && !m.deleted && !m.replyTo && isJumboEmoji(m.text ?? '')
-  const classes = ['bubble', mine && 'mine', first && 'first', kind === 'photo' && !m.deleted && 'has-photo', jumbo && 'jumbo', kind === 'call' && 'is-call', m.fresh && 'fresh']
+  // Photos, videos and maps fill the bubble, with a thin edge.
+  const big = ['photo', 'video', 'location'].includes(kind) && !m.deleted
+  const classes = ['bubble', mine && 'mine', first && 'first', big && 'has-photo', jumbo && 'jumbo', kind === 'call' && 'is-call', m.fresh && 'fresh']
 
   // Holding a finger on the message opens its menu (phones don't have right-click).
   const press = useRef<{ timer: number; opened: number }>({ timer: 0, opened: 0 })
@@ -96,13 +101,17 @@ export default memo(function MessageBubble(props: Props) {
               <strong style={{ color: nameColour(m.replyTo.senderName) }}>
                 {m.replyTo.senderId === myUid ? t.you : m.replyTo.senderName}
               </strong>
-              <span dir="auto">{m.replyTo.text || (m.replyTo.kind === 'photo' ? t.photo : m.replyTo.kind === 'voice' ? t.voice : '')}</span>
+              <span dir="auto">{shortText(m.replyTo, myUid, t)}</span>
             </button>
           )}
           {kind === 'photo' && (
             <PhotoBubble chatId={chatId} mediaId={m.mediaId} width={m.width} height={m.height} onView={(data) => onView(m, data)} />
           )}
+          {kind === 'video' && <VideoBubble chatId={chatId} m={m} onView={(url) => onView(m, url)} />}
           {kind === 'voice' && <VoiceBubble chatId={chatId} mediaId={m.mediaId} seconds={m.seconds} />}
+          {kind === 'file' && <FileBubble chatId={chatId} m={m} />}
+          {kind === 'location' && <LocationBubble chatId={chatId} m={m} mine={mine} />}
+          {kind === 'contact' && m.contact && <ContactBubble contact={m.contact} onMessage={onContact} />}
           {kind === 'call' && (
             // "Voice call 2:13" / "Missed video call". Tap it to call back.
             <button type="button" className={m.missed && !mine ? 'call-bubble missed' : 'call-bubble'} disabled={!onCall} onClick={() => onCall?.(!!m.video)}>

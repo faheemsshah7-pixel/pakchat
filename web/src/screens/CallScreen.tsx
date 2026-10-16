@@ -5,6 +5,7 @@
 //   "Back to chats" (the arrow at the top) shrinks it to a green bar, so you can chat during a call.
 import { useState } from 'react'
 import { acceptCall, closeCallScreen, declineCall, hangUp, toggleCamera, toggleMic, type Call, type CallEnd } from '../calls'
+import { LEVEL, useBack } from '../back'
 import { useT } from '../lang'
 import type { Strings } from '../strings'
 import { duration, useNow } from '../time'
@@ -15,6 +16,8 @@ export default function CallScreen({ call }: { call: Call }) {
   const { t } = useT()
   const now = useNow(1000)
   const [small, setSmall] = useState(false)
+  // Back shrinks the call to a bar at the top (it doesn't hang up). While it rings, Back does nothing.
+  useBack(!small, LEVEL.cover, () => call.phase !== 'incoming' && setSmall(true))
   const status = statusText(call, now, t)
   const theirVideo = call.video && call.phase === 'connected' && !!call.remote?.getVideoTracks().length
   const myVideo = call.video && !!call.local?.getVideoTracks().length && !call.cameraOff

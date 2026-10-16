@@ -2,6 +2,7 @@
 // Esc or a click outside closes it. Used for forwarding, message info, deleting, and more.
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { LEVEL, useBack } from '../back'
 import { useT } from '../lang'
 import Icon from './Icon'
 
@@ -9,6 +10,7 @@ type Props = { title: string; onClose: () => void; children: ReactNode; classNam
 
 export default function Modal({ title, onClose, children, className = '' }: Props) {
   const { t } = useT()
+  useBack(true, LEVEL.window, onClose) // the phone's Back button closes it too
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)

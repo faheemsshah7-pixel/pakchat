@@ -1,25 +1,30 @@
 // Composer.tsx: the bar at the bottom of a chat.
-//   smiley: emojis    paperclip: photos    microphone: voice note    paper plane: send
+//   smiley: emojis    paperclip: photos & videos, camera, document, location, contact
+//   microphone: voice note    paper plane: send
 // Enter sends and Shift+Enter starts a new line (you can switch this in Settings).
 // What you type is kept as a draft if you leave the chat before sending (drafts.ts).
 // Above it, a strip shows the message you're replying to, or editing.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { Content, Extras, Message } from '../chats'
+import { shortText, type Content, type Extras, type Message } from '../chats'
 import { getDraft, saveDraft } from '../drafts'
 import { useT } from '../lang'
-import { MAX_VOICE_SECONDS, startRecording, type Recording } from '../media'
+import { isPhotoOrVideo, MAX_VOICE_SECONDS, startRecording, type Recording } from '../media'
 import { replySnapshot } from '../messages'
 import { useSettings } from '../settings'
 import { duration, useNow } from '../time'
 import EmojiPicker from './EmojiPicker'
 import Icon from './Icon'
+import Popover, { type PopoverItem } from './Popover'
 
 type Props = {
   chatId: string
   myUid: string
-  onSend: (content: Content, extras?: Extras) => Promise<void>
+  onSend: (content: Content, extras?: Extras) => Promise<unknown>
   onTyping: () => void
-  onPhotos: (files: File[]) => void // photos picked or pasted: ChatRoom shows them before sending
+  onPhotos: (files: File[]) => void // photos or videos picked or pasted: ChatRoom shows them before sending
+  onDocuments: (files: File[]) => void // documents picked or pasted
+  onLocation: () => void // "Location" in the paperclip menu
+  onContact: () => void // "Contact" in the paperclip menu
   replyTo: Message | null
   onCancelReply: () => void
   editing: Message | null
@@ -31,14 +36,17 @@ type Props = {
 const touchScreen = window.matchMedia('(pointer: coarse)').matches
 
 export default function Composer(props: Props) {
-  const { chatId, myUid, onSend, onTyping, onPhotos, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
+  const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
   const { t } = useT()
   const { enterSends } = useSettings()
   const [text, setText] = useState(() => getDraft(chatId))
   const [error, setError] = useState('')
   const [recording, setRecording] = useState<Recording | null>(null)
   const [emojis, setEmojis] = useState(false)
+  const [attach, setAttach] = useState<{ x: number; y: number } | null>(null) // the paperclip menu
   const photoInput = useRef<HTMLInputElement>(null)
+  const cameraInput = useRef<HTMLInputElement>(null)
+  const docInput = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLTextAreaElement>(null)
 
   // Start editing: put the message's words in the box. Stop: bring the draft back.
@@ -46,7 +54,7 @@ export default function Composer(props: Props) {
   const [lastEditing, setLastEditing] = useState(editing)
   if (editing !== lastEditing) {
     setLastEditing(editing)
-    setText(editing ? ((editing.kind === 'photo' ? editing.caption : editing.text) ?? '') : getDraft(chatId))
+    setText(editing ? (((editing.kind ?? 'text') === 'text' ? editing.text : editing.caption) ?? '') : getDraft(chatId))
   }
   useEffect(() => {
     box.current?.focus()
@@ -88,7 +96,7 @@ export default function Composer(props: Props) {
     e?.preventDefault()
     const clean = text.trim()
     if (editing) {
-      if (!clean && editing.kind !== 'photo') return
+      if (!clean && (editing.kind ?? 'text') === 'text') return // (a caption can be emptied)
       try {
         await onSaveEdit(clean)
       } catch (err) {
@@ -115,20 +123,31 @@ export default function Composer(props: Props) {
     }
   }
 
-  // Pasting a photo (Ctrl+V) sends it like picking one.
+  // Pasting a photo, video or file (Ctrl+V) sends it like picking one.
   function paste(e: React.ClipboardEvent) {
-    const images = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
-    if (images.length && !editing) {
-      e.preventDefault()
-      onPhotos(images)
-    }
+    const files = [...e.clipboardData.files]
+    if (!files.length || editing) return
+    e.preventDefault()
+    const media = files.filter(isPhotoOrVideo)
+    if (media.length) onPhotos(media)
+    const docs = files.filter((f) => !isPhotoOrVideo(f))
+    if (docs.length) onDocuments(docs)
   }
 
-  function pickPhotos(e: React.ChangeEvent<HTMLInputElement>) {
+  function pick(e: React.ChangeEvent<HTMLInputElement>, then: (files: File[]) => void) {
     const files = [...(e.target.files ?? [])]
-    e.target.value = '' // so picking the same photo again still works
-    if (files.length) onPhotos(files)
+    e.target.value = '' // so picking the same file again still works
+    if (files.length) then(files)
   }
+
+  // The paperclip menu, like WhatsApp's. (Camera only on phones: computers open a file list instead.)
+  const attachItems: PopoverItem[] = [
+    { label: t.photosVideos, icon: 'image', onClick: () => photoInput.current?.click() },
+    ...(touchScreen ? [{ label: t.camera, icon: 'camera' as const, onClick: () => cameraInput.current?.click() }] : []),
+    { label: t.document, icon: 'file', onClick: () => docInput.current?.click() },
+    { label: t.location, icon: 'mapPin', onClick: onLocation },
+    { label: t.contact, icon: 'contact', onClick: onContact },
+  ]
 
   // Put an emoji where the cursor is.
   function addEmoji(emoji: string) {
@@ -174,7 +193,7 @@ export default function Composer(props: Props) {
           <Icon name={editing ? 'edit' : 'reply'} size={18} />
           <div className="quote">
             <strong>{editing ? t.editMessage : strip.senderId === myUid ? t.you : strip.senderName}</strong>
-            <span dir="auto">{(strip.kind === 'photo' ? strip.caption || t.photo : strip.kind === 'voice' ? t.voice : strip.text) ?? ''}</span>
+            <span dir="auto">{shortText(strip, myUid, t)}</span>
           </div>
           <button className="icon" aria-label={t.cancel} onClick={editing ? onCancelEdit : onCancelReply}>
             <Icon name="close" size={18} />
@@ -190,11 +209,22 @@ export default function Composer(props: Props) {
               <Icon name="smile" />
             </button>
             {!editing && (
-              <button type="button" className="icon" aria-label={t.sendPhoto} title={t.sendPhoto} onClick={() => photoInput.current?.click()}>
+              <button
+                type="button"
+                className="icon"
+                aria-label={t.attach}
+                title={t.attach}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  setAttach({ x: r.left, y: r.top - 8 })
+                }}
+              >
                 <Icon name="paperclip" />
               </button>
             )}
-            <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={pickPhotos} />
+            <input ref={photoInput} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => pick(e, onPhotos)} />
+            <input ref={cameraInput} type="file" accept="image/*,video/*" capture="environment" hidden onChange={(e) => pick(e, onPhotos)} />
+            <input ref={docInput} type="file" multiple hidden onChange={(e) => pick(e, onDocuments)} />
             <textarea
               ref={box}
               rows={1}
@@ -222,6 +252,7 @@ export default function Composer(props: Props) {
           {emojis && <EmojiPicker className="above-composer" onPick={addEmoji} onClose={() => setEmojis(false)} />}
         </form>
       )}
+      {attach && <Popover x={attach.x} y={attach.y} items={attachItems} onClose={() => setAttach(null)} />}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 // EmojiPicker.tsx: a panel of emojis, in groups. Tap one to add it.
 // The first tab is the ones you used most recently.
 import { useEffect, useState } from 'react'
+import { LEVEL, useBack } from '../back'
 import { EMOJI_GROUPS, recentEmojis, rememberEmoji } from '../emoji'
 import { useT } from '../lang'
 
@@ -10,6 +11,7 @@ export default function EmojiPicker({ onPick, onClose, className = '' }: Props) 
   const { t } = useT()
   const [recent] = useState(recentEmojis)
   const [tab, setTab] = useState(recent.length ? -1 : 0) // -1 = recent
+  useBack(true, LEVEL.menu, onClose)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()

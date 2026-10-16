@@ -1,8 +1,10 @@
 // Dialogs.tsx: small windows: forward a message to other chats, message info (who read it),
-// who reacted, delete a message, mute a chat, pin a message, and disappearing messages.
-import { useState } from 'react'
+// who reacted, delete a message, mute a chat, pin a message, disappearing messages,
+// send documents, share your location, and share a contact.
+import { useEffect, useState } from 'react'
 import {
   chatTitle,
+  findUser,
   isGroup,
   myPrivacy,
   otherPerson,
@@ -10,15 +12,20 @@ import {
   type Chat,
   type Message,
   type Person,
+  type SharedContact,
   type Target,
 } from '../chats'
 import { timerLabel, TIMER_CHOICES } from '../disappearing'
 import { useT } from '../lang'
+import { findMe, LIVE_CHOICES, type Spot } from '../location'
+import { MAX_FILE_BYTES, sizeText } from '../media'
 import { canUnsend, forwardMessage, react } from '../messages'
 import { PIN_CHOICES } from '../pins'
 import { HOUR, MUTE_ALWAYS } from '../prefs'
+import { getProfile } from '../profiles'
 import { fill } from '../strings'
 import { ChatAvatar, PersonAvatar } from './Avatar'
+import { MapPreview } from './CardBubbles'
 import Icon from './Icon'
 import Modal from './Modal'
 import Ticks from './Ticks'
@@ -278,4 +285,215 @@ export function TimerDialog({ current, canChange, onSave, onClose }: TimerProps)
       )}
     </Modal>
   )
+}
+
+// Documents picked to send: their names and sizes, an optional caption (for one), then Send.
+// Files over 5 MB can't be sent on the free plan, so they're shown in red and left out.
+type DocsProps = { files: File[]; onSend: (files: File[], caption: string) => void; onClose: () => void }
+export function DocumentSender({ files, onSend, onClose }: DocsProps) {
+  const { t } = useT()
+  const [caption, setCaption] = useState('')
+  const ok = files.filter((file) => file.size <= MAX_FILE_BYTES)
+  return (
+    <Modal title={t.sendDocuments} onClose={onClose} className="narrow">
+      <div className="doc-list">
+        {files.map((file, i) => (
+          <div key={i} className={file.size <= MAX_FILE_BYTES ? 'row doc-row' : 'row doc-row too-big'}>
+            <Icon name="file" />
+            <span className="row-main">
+              <strong dir="auto">{file.name}</strong>
+              <small>{file.size <= MAX_FILE_BYTES ? sizeText(file.size) : fill(t.fileTooBig, { size: sizeText(file.size) })}</small>
+            </span>
+          </div>
+        ))}
+      </div>
+      {ok.length === 1 && (
+        <div className="field">
+          <input dir="auto" placeholder={t.addCaption} value={caption} maxLength={1024} onChange={(e) => setCaption(e.target.value)} autoFocus />
+        </div>
+      )}
+      <button
+        className="btn"
+        disabled={ok.length === 0}
+        onClick={() => {
+          onSend(ok, caption.trim())
+          onClose()
+        }}
+      >
+        <Icon name="send" size={18} /> {t.send}
+        {ok.length > 1 && <span className="count">{ok.length}</span>}
+      </button>
+    </Modal>
+  )
+}
+
+// Share where you are: your current spot, or a live location for 15 minutes, 1 hour or 8 hours.
+type LocationProps = { onSend: (spot: Spot, liveMinutes?: number) => void; onClose: () => void }
+export function LocationDialog({ onSend, onClose }: LocationProps) {
+  const { t } = useT()
+  const [spot, setSpot] = useState<Spot | null>(null)
+  const [error, setError] = useState('')
+  const [minutes, setMinutes] = useState(LIVE_CHOICES[0])
+  const labels = [t.minutes15, t.hour1, t.hours8]
+
+  useEffect(() => {
+    let stillHere = true
+    findMe().then(
+      (found) => stillHere && setSpot(found),
+      (err: GeolocationPositionError | Error) => {
+        console.warn(err)
+        if (stillHere) setError('code' in err && err.code === 1 ? t.locationBlocked : t.locationFailed)
+      },
+    )
+    return () => {
+      stillHere = false
+    }
+  }, [t])
+
+  function send(liveMinutes?: number) {
+    if (!spot) return
+    onSend(spot, liveMinutes)
+    onClose()
+  }
+
+  return (
+    <Modal title={t.shareLocation} onClose={onClose} className="narrow">
+      <div className="location-preview">
+        {spot ? <MapPreview lat={spot.lat} lng={spot.lng} width={320} height={160} /> : <p className={error ? 'error' : 'hint'}>{error || t.findingYou}</p>}
+      </div>
+      {spot && <p className="hint">{fill(t.accurateTo, { m: Math.round(spot.accuracy) })}</p>}
+      <button className="btn" disabled={!spot} onClick={() => send()}>
+        <Icon name="mapPin" size={18} /> {t.sendCurrentLocation}
+      </button>
+      <p className="section-title">{t.shareLive}</p>
+      <div className="choices" role="radiogroup">
+        {LIVE_CHOICES.map((choice, i) => (
+          <label key={choice} className="choice">
+            <input type="radio" name="live" checked={minutes === choice} onChange={() => setMinutes(choice)} />
+            {labels[i]}
+          </label>
+        ))}
+      </div>
+      <p className="hint">{t.liveHint}</p>
+      <button className="btn secondary" disabled={!spot} onClick={() => send(minutes)}>
+        {t.shareLive}
+      </button>
+    </Modal>
+  )
+}
+
+// Share a contact: someone from your chats, someone from your phone's contacts (Android only),
+// or a name and number you type in.
+type ContactProps = { me: Person; chats: Chat[]; onSend: (contacts: SharedContact[]) => void; onClose: () => void }
+export function ContactDialog({ me, chats, onSend, onClose }: ContactProps) {
+  const { t } = useT()
+  const [search, setSearch] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const [typing, setTyping] = useState(false) // typing in a name and number
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  // (Only Chrome on Android lets websites open your phone's contacts.)
+  const phoneBook = !!phoneContacts()?.select
+
+  // Everyone you chat with: the other person in each chat, and the people in your groups.
+  const people = new Map<string, string>()
+  for (const chat of chats) for (const uid of chat.members) if (uid !== me.uid && chat.names[uid]) people.set(uid, chat.names[uid])
+  const q = search.trim().toLowerCase()
+  const shown = [...people].filter(([, n]) => n.toLowerCase().includes(q)).sort((a, b) => a[1].localeCompare(b[1]))
+
+  function toggle(uid: string) {
+    if (picked.includes(uid)) setPicked(picked.filter((p) => p !== uid))
+    else if (picked.length < 5) setPicked([...picked, uid])
+  }
+
+  async function send() {
+    setBusy(true)
+    setError('')
+    try {
+      const cards: SharedContact[] = []
+      for (const uid of picked) {
+        const profile = await getProfile(uid)
+        cards.push(card({ name: people.get(uid) ?? profile?.name ?? '?', uid, phone: profile?.phone ?? undefined, email: profile?.email ?? undefined }))
+      }
+      if (typing && name.trim() && phone.trim()) {
+        // On PakChat? Then the card can open a chat with them.
+        const found = await findUser(phone.trim()).catch(() => null)
+        cards.push(card({ name: name.trim(), phone: phone.trim(), uid: found?.uid }))
+      }
+      if (cards.length) onSend(cards)
+      onClose()
+    } catch (err) {
+      console.error(err)
+      setError(t.somethingWrong)
+      setBusy(false)
+    }
+  }
+
+  async function fromPhone() {
+    try {
+      const chosen = (await phoneContacts()?.select?.(['name', 'tel'], { multiple: true })) ?? []
+      const cards = chosen.filter((c) => c.tel?.[0]).map((c) => card({ name: c.name?.[0] || c.tel![0], phone: c.tel![0] }))
+      if (cards.length) {
+        onSend(cards)
+        onClose()
+      }
+    } catch (err) {
+      console.warn(err) // you closed the list without picking anyone
+    }
+  }
+
+  const ready = picked.length > 0 || (typing && name.trim() && phone.trim().length >= 5)
+  return (
+    <Modal title={t.shareContact} onClose={onClose} className="narrow">
+      <div className="field">
+        <Icon name="search" size={18} />
+        <input placeholder={t.search} value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+      </div>
+      <div className="pick-list">
+        {shown.map(([uid, n]) => (
+          <label key={uid} className="row pick">
+            <PersonAvatar uid={uid} name={n} size={42} />
+            <strong className="row-main" dir="auto">
+              {n}
+            </strong>
+            <input type="checkbox" checked={picked.includes(uid)} onChange={() => toggle(uid)} />
+          </label>
+        ))}
+        {shown.length === 0 && <p className="empty">{t.nothingHere}</p>}
+      </div>
+      {phoneBook && (
+        <button className="btn secondary" onClick={fromPhone}>
+          <Icon name="contact" size={18} /> {t.phoneContacts}
+        </button>
+      )}
+      {typing ? (
+        <div className="contact-form">
+          <input dir="auto" placeholder={t.contactName} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} aria-label={t.contactName} />
+          <input dir="ltr" type="tel" placeholder={t.contactNumber} value={phone} maxLength={20} onChange={(e) => setPhone(e.target.value)} aria-label={t.contactNumber} />
+        </div>
+      ) : (
+        <button className="link" onClick={() => setTyping(true)}>
+          {t.someoneElse}
+        </button>
+      )}
+      {error && <p className="error">{error}</p>}
+      <button className="btn" disabled={!ready || busy} onClick={send}>
+        <Icon name="send" size={18} /> {busy ? t.sending : t.send}
+      </button>
+    </Modal>
+  )
+}
+
+// The phone's contacts, where the browser allows it ("Contact Picker", Chrome on Android).
+type PhoneContact = { name?: string[]; tel?: string[] }
+type ContactPicker = { select?: (fields: string[], options: object) => Promise<PhoneContact[]> }
+function phoneContacts() {
+  return (navigator as Navigator & { contacts?: ContactPicker }).contacts
+}
+
+// A contact card without empty parts (the database rules only allow name, phone, email and uid).
+function card(c: SharedContact): SharedContact {
+  return Object.fromEntries(Object.entries(c).filter(([, v]) => v)) as SharedContact
 }

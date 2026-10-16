@@ -3,17 +3,21 @@
 // Each message has a menu (MessageBubble.tsx): react, reply, copy, forward, pin, star, edit, info, delete.
 // Pinned messages show in a bar under the top (pins.ts). Disappearing messages vanish on time (disappearing.ts).
 // In a chat with one person, the phone and camera at the top start a call (calls.ts).
+// The paperclip sends photos, videos, documents, your location (location.ts) or a contact card.
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query, where, type Timestamp } from 'firebase/firestore'
 import { db } from '../firebase'
+import { LEVEL, useBack } from '../back'
 import { startCall } from '../calls'
 import {
+  findUser,
   isAdmin,
   isGroup,
   lastRead,
   markRead,
   otherPerson,
+  searchText,
   sendMessage,
   shortText,
   systemText,
@@ -23,11 +27,13 @@ import {
   type Extras,
   type Message,
   type Person,
+  type SharedContact,
 } from '../chats'
 import { deleteExpired, isExpired, setTimer, useClockAt } from '../disappearing'
 import { useT } from '../lang'
-import { shrinkPhoto } from '../media'
-import { canEdit, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
+import { startSharing, type Spot } from '../location'
+import { blobToDataUrl, isPhotoOrVideo, prepareVideo, shrinkPhoto, videoExtension, warmUpSound } from '../media'
+import { canEdit, captionKind, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
 import { activePins, pinMessage, unpinMessage } from '../pins'
 import { clearChat, deleteChat, hideMessage, isMuted, setPrefs, starMessage, type ChatPrefs } from '../prefs'
 import { presenceText } from '../presence'
@@ -41,7 +47,18 @@ import { markTyping, typingText, useTypingVersion } from '../typing'
 import Avatar, { GroupAvatar, PersonAvatar, TimerBadge } from './Avatar'
 import Composer from './Composer'
 import ContactInfo from './ContactInfo'
-import { DeleteDialog, ForwardDialog, InfoDialog, MuteDialog, PinDialog, ReactionsDialog, TimerDialog } from './Dialogs'
+import {
+  ContactDialog,
+  DeleteDialog,
+  DocumentSender,
+  ForwardDialog,
+  InfoDialog,
+  LocationDialog,
+  MuteDialog,
+  PinDialog,
+  ReactionsDialog,
+  TimerDialog,
+} from './Dialogs'
 import EmojiPicker from './EmojiPicker'
 import GroupInfo from './GroupInfo'
 import Icon from './Icon'
@@ -51,6 +68,7 @@ import PhotoSender, { type PickedPhoto } from './PhotoSender'
 import PhotoViewer from './PhotoViewer'
 import Popover, { type PopoverItem } from './Popover'
 import StarredList from './StarredList'
+import VideoViewer from './VideoViewer'
 
 type Props = {
   me: Person
@@ -66,7 +84,7 @@ type Props = {
   focus?: { id: string } // go to this message (from "Starred messages")
 }
 
-type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin'; m: Message } | { kind: 'mute' | 'timer' }
+type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin'; m: Message } | { kind: 'mute' | 'timer' | 'location' | 'contact' }
 const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = faster)
 const LOOK_BACK = 1000 // going to an old message loads at most this many
 
@@ -78,13 +96,15 @@ export default function ChatRoom(props: Props) {
   const [hasMore, setHasMore] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
-  const [viewing, setViewing] = useState<{ m: Message; data: string } | null>(null) // a photo shown full size
+  const [viewing, setViewing] = useState<{ m: Message; data: string } | null>(null) // a photo or video, full screen
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number } | null>(null)
   const [reactingTo, setReactingTo] = useState<Message | null>(null) // the full emoji picker, for a reaction
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [editing, setEditing] = useState<Message | null>(null)
-  const [photos, setPhotos] = useState<File[] | null>(null)
+  const [photos, setPhotos] = useState<File[] | null>(null) // photos and videos picked, to add captions to
+  const [documents, setDocuments] = useState<File[] | null>(null) // documents picked
+  const [working, setWorking] = useState('') // "Preparing video… 40%" (stays until it's done)
   const [dragging, setDragging] = useState(false)
   const [searching, setSearching] = useState(false)
   const [search, setSearch] = useState('')
@@ -103,6 +123,11 @@ export default function ChatRoom(props: Props) {
     setFocusFrom(focusProp)
     if (focusProp) setFocus(focusProp.id)
   }
+
+  // The phone's Back button closes these first (back.ts), then the chat itself (Home.tsx).
+  useBack(showInfo, LEVEL.panel, () => setShowInfo(false))
+  useBack(showStarred, LEVEL.panel, () => setShowStarred(false))
+  useBack(searching, LEVEL.panel, () => setSearching(false))
 
   const scroller = useRef<HTMLDivElement>(null)
   const nearBottom = useRef(true)
@@ -326,20 +351,79 @@ export default function ChatRoom(props: Props) {
     setToast(t.somethingWrong)
   }
 
-  // Photos picked, pasted or dropped: shrink and send them one by one.
-  async function sendPhotos(picked: PickedPhoto[]) {
-    setPhotos(null)
+  // The message you're replying to (if any), for the next thing you send. The reply bar closes.
+  function takeReply(): Extras {
     const extras = replyTo ? { replyTo: replySnapshot(replyTo) } : {}
     setReplyTo(null)
+    return extras
+  }
+
+  // Photos and videos picked, pasted or dropped: shrink and send them one by one.
+  // (Only the first one is the reply, like WhatsApp.)
+  async function sendPhotos(picked: PickedPhoto[]) {
+    setPhotos(null)
+    if (picked.some(({ file }) => file.type.startsWith('video/'))) warmUpSound() // (sound needs a tap, and this is right after one)
+    const extras = takeReply()
     for (const [i, { file, caption }] of picked.entries()) {
+      const words = caption ? { caption } : {}
+      const isVideo = file.type.startsWith('video/')
       try {
-        const photo = await shrinkPhoto(file)
-        await send({ kind: 'photo', ...photo, ...(caption ? { caption } : {}) }, i === 0 ? extras : {})
+        if (isVideo) {
+          let ready = false
+          setWorking(t.preparingVideo)
+          const video = await prepareVideo(file, (done) => !ready && setWorking(`${t.preparingVideo} ${Math.round(done * 100)}%`))
+          ready = true
+          setWorking('')
+          await send({ kind: 'video', ...video, ...words }, i === 0 ? extras : {})
+        } else {
+          const photo = await shrinkPhoto(file)
+          await send({ kind: 'photo', ...photo, ...words }, i === 0 ? extras : {})
+        }
       } catch (err) {
-        console.error(err)
-        setToast(t.photoNotSent)
+        console.warn('Not sent:', err)
+        setWorking('')
+        const why = err instanceof Error ? err.message : ''
+        if (!isVideo) setToast(t.photoNotSent)
+        else setToast(why === 'too-long' ? t.videoTooLong : why === 'too-big' ? t.videoTooBig : t.videoNotSent)
       }
     }
+  }
+
+  // Documents: sent as they are (any kind of file, up to about 5 MB).
+  async function sendDocuments(files: File[], caption: string) {
+    const extras = takeReply()
+    for (const [i, file] of files.entries()) {
+      try {
+        const content: Content = {
+          kind: 'file',
+          data: await blobToDataUrl(file),
+          fileName: file.name.slice(-255) || 'file',
+          fileSize: file.size,
+          mime: (file.type || 'application/octet-stream').slice(0, 255),
+          ...(caption ? { caption } : {}),
+        }
+        await send(content, i === 0 ? extras : {})
+      } catch (err) {
+        console.error(err)
+        setToast(t.fileNotSent)
+      }
+    }
+  }
+
+  // Your location. A live one keeps moving as you do, until its time is up (location.ts).
+  async function shareLocation(spot: Spot, liveMinutes?: number) {
+    try {
+      const id = await send({ kind: 'location', ...spot, ...(liveMinutes ? { liveMinutes } : {}) }, takeReply())
+      if (liveMinutes) startSharing({ uid: me.uid, chatId, messageId: id, until: Date.now() + liveMinutes * 60_000 })
+    } catch (err) {
+      oops(err)
+    }
+  }
+
+  // Contact cards, one message each.
+  async function shareContacts(contacts: SharedContact[]) {
+    const extras = takeReply()
+    for (const [i, contact] of contacts.entries()) await send({ kind: 'contact', contact }, i === 0 ? extras : {}).catch(oops)
   }
 
   async function saveEdit(text: string) {
@@ -392,7 +476,7 @@ export default function ChatRoom(props: Props) {
   // ----- The menu on one message -----
   function messageMenu(m: Message): PopoverItem[] {
     const items: PopoverItem[] = []
-    const text = (m.kind === 'photo' ? m.caption : m.text) ?? ''
+    const text = (captionKind(m) ? m.caption : m.text) ?? ''
     if (m.deleted || m.kind === 'call') return [{ label: t.delete, icon: 'trash', danger: true, onClick: () => setDialog({ kind: 'delete', m }) }]
     if (canTalk && !iBlockedThem) items.push({ label: t.reply, icon: 'reply', onClick: () => (setEditing(null), setReplyTo(m)) })
     if (text) {
@@ -431,12 +515,19 @@ export default function ChatRoom(props: Props) {
   const openMenu = useStable((m: Message, x: number, y: number) => setMenu({ m, x, y }))
   const showReactions = useStable((m: Message) => setDialog({ kind: 'reactions', m }))
   const viewPhoto = useStable((m: Message, data: string) => setViewing({ m, data }))
+  // "Message" on a contact card: open a chat with them, if they're on PakChat.
+  const openContact = useStable(async (contact: SharedContact) => {
+    const number = contact.phone ?? contact.email
+    const person = contact.uid ? { uid: contact.uid, name: contact.name } : number ? await findUser(number).catch(() => null) : null
+    if (!person) setToast(t.notOnPakChat)
+    else if (person.uid !== me.uid) onOpenPerson(person)
+  })
   const callBack = useStable((video: boolean) => call?.(video))
 
   // ----- Search: find words in the loaded messages -----
   const q = searching ? search.trim().toLowerCase() : ''
   const matches = q
-    ? messages.filter((m) => !m.deleted && ((m.kind === 'photo' ? m.caption : m.text) ?? '').toLowerCase().includes(q))
+    ? messages.filter((m) => !m.deleted && searchText(m).toLowerCase().includes(q))
     : []
   const matchIndex = Math.min(match, matches.length - 1)
   const foundId = matches[matches.length - 1 - matchIndex]?.id
@@ -444,17 +535,21 @@ export default function ChatRoom(props: Props) {
     if (foundId) jumpTo(foundId)
   }, [foundId, jumpTo])
 
-  // A photo opened full size (from the chat, or from the media in the contact or group info).
-  const viewer = viewing && (
-    <PhotoViewer
-      src={viewing.data}
-      who={viewing.m.senderId === me.uid ? t.you : (viewing.m.senderName ?? '')}
-      when={viewing.m.sentAt ? `${dayLabel(viewing.m.sentAt.toDate(), t)}, ${clock(viewing.m.sentAt.toDate(), t.locale)}` : ''}
-      caption={viewing.m.caption}
-      fileName={`PakChat photo ${viewing.m.id}.jpg`}
-      onClose={() => setViewing(null)}
-    />
-  )
+  // A photo or video opened full screen (from the chat, or from the media in the contact or group info).
+  const seen = viewing && {
+    src: viewing.data,
+    who: viewing.m.senderId === me.uid ? t.you : (viewing.m.senderName ?? ''),
+    when: viewing.m.sentAt ? `${dayLabel(viewing.m.sentAt.toDate(), t)}, ${clock(viewing.m.sentAt.toDate(), t.locale)}` : '',
+    caption: viewing.m.caption,
+    onClose: () => setViewing(null),
+  }
+  const viewer =
+    seen &&
+    (viewing.m.kind === 'video' ? (
+      <VideoViewer {...seen} fileName={`PakChat video ${viewing.m.id}.${videoExtension(seen.src)}`} />
+    ) : (
+      <PhotoViewer {...seen} fileName={`PakChat photo ${viewing.m.id}.jpg`} />
+    ))
 
   // Windows about the whole chat. They can open from the chat's menu or its info panel.
   const chatDialogs = (
@@ -547,8 +642,10 @@ export default function ChatRoom(props: Props) {
       onDrop={(e) => {
         e.preventDefault()
         setDragging(false)
-        const images = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'))
-        if (images.length) setPhotos(images)
+        const files = [...e.dataTransfer.files]
+        const media = files.filter(isPhotoOrVideo) // photos and videos get a preview, other files are documents
+        if (media.length) setPhotos(media)
+        else if (files.length) setDocuments(files)
       }}
     >
       <header className="bar">
@@ -688,6 +785,7 @@ export default function ChatRoom(props: Props) {
                     onReactions={showReactions}
                     onJump={jumpTo}
                     onView={viewPhoto}
+                    onContact={openContact}
                     onCall={call ? callBack : undefined}
                   />
                 )}
@@ -701,7 +799,7 @@ export default function ChatRoom(props: Props) {
             {newBelow > 0 && <span className="badge">{newBelow}</span>}
           </button>
         )}
-        {toast && <p className="toast">{toast}</p>}
+        {(working || toast) && <p className="toast">{working || toast}</p>}
         {dragging && (
           <div className="drop-here">
             <Icon name="image" size={40} />
@@ -728,6 +826,9 @@ export default function ChatRoom(props: Props) {
           onSend={send}
           onTyping={onTyping}
           onPhotos={setPhotos}
+          onDocuments={setDocuments}
+          onLocation={() => setDialog({ kind: 'location' })}
+          onContact={() => setDialog({ kind: 'contact' })}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           editing={editing}
@@ -828,9 +929,12 @@ export default function ChatRoom(props: Props) {
           }}
         />
       )}
+      {dialog?.kind === 'location' && <LocationDialog onClose={() => setDialog(null)} onSend={shareLocation} />}
+      {dialog?.kind === 'contact' && <ContactDialog me={me} chats={chats} onClose={() => setDialog(null)} onSend={shareContacts} />}
       {chatDialogs}
 
       {photos && <PhotoSender files={photos} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
+      {documents && <DocumentSender files={documents} onClose={() => setDocuments(null)} onSend={sendDocuments} />}
 
       {viewer}
     </div>

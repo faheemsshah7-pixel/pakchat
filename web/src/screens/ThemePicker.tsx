@@ -2,12 +2,14 @@
 // Each little preview is drawn with that look's own colours (data-theme on the preview).
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { LEVEL, useBack } from '../back'
 import { useT } from '../lang'
 import { applyTheme, savedTheme, THEMES, type Theme } from '../theme'
 import Icon from './Icon'
 
 export default function ThemePicker({ onClose }: { onClose: () => void }) {
   const { t } = useT()
+  useBack(true, LEVEL.window, onClose)
   const [current, setCurrent] = useState<Theme>(savedTheme)
 
   // Esc closes the window too.

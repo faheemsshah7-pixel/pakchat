@@ -1,11 +1,12 @@
-// media.ts: photos and voice notes.
+// media.ts: photos, videos, voice notes and documents.
 //
 // We're on Firebase's free plan, which has no file storage. So we save each photo or
 // voice note as text (a "data URL", like "data:image/jpeg;base64,/9j/4AAQ...")
 // in Firestore documents: chats/<chatId>/media/<id>.
 // One document can hold up to 1 MB. A photo is shrunk to fit in one.
-// A voice note is recorded in good quality, so a long one is cut into parts:
+// Bigger things (voice notes, videos, documents) are cut into parts, up to 8:
 //   media/<id> (the first part, and how many parts there are), media/<id>_2, media/<id>_3 ...
+// So the biggest file we can send is about 5 MB. Bigger videos are made smaller first.
 // Later, on the paid plan, this file is the only one that changes to use real file storage.
 import { useEffect, useState } from 'react'
 import { collection, doc, getDoc, type DocumentReference, type Timestamp, type WriteBatch } from 'firebase/firestore'
@@ -16,6 +17,9 @@ export const MAX_PARTS = 8 // documents for one voice note (a 5-minute note need
 export const MAX_VOICE_SECONDS = 300 // 5 minutes
 export const MAX_PHOTOS = 10 // photos you can send at once
 export const VOICE_QUALITY = 64_000 // bits per second: very clear speech at a sensible size (WhatsApp uses about 16,000-24,000)
+// The biggest file that fits: 8 parts of text, and text takes 4 letters for every 3 bytes.
+export const MAX_FILE_BYTES = Math.floor((MAX_MEDIA * MAX_PARTS * 3) / 4) - 1000
+export const MAX_VIDEO_SECONDS = 180 // 3 minutes
 
 // ---------- Photos ----------
 
@@ -99,13 +103,150 @@ export async function startRecording() {
 
 export type Recording = Awaited<ReturnType<typeof startRecording>>
 
-function blobToDataUrl(blob: Blob) {
+export function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(blob)
   })
+}
+
+// ---------- Videos ----------
+
+// Photos and videos get a preview before sending (PhotoSender.tsx). Other files go as documents.
+export const isPhotoOrVideo = (file: File) => file.type.startsWith('image/') || file.type.startsWith('video/')
+
+// Get a video ready to send: its first picture (the "poster" shown in the chat), its size and
+// length, and the video itself as text. A video that's too big, or in a format other phones
+// might not play (like an iPhone's .mov), is played through once and recorded again smaller.
+// That takes as long as the video. onProgress gets 0 to 1 while it happens.
+export async function prepareVideo(file: File, onProgress: (done: number) => void) {
+  const url = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'auto'
+  video.src = url
+  try {
+    await happens(video, 'loadeddata')
+    const seconds = await lengthOf(video)
+    if (seconds > MAX_VIDEO_SECONDS) throw new Error('too-long')
+    const width = video.videoWidth
+    const height = video.videoHeight
+    if (!width || !height) throw new Error('cant-play')
+    const poster = await grabFrame(video, Math.min(0.5, seconds / 2))
+    const plays = ['video/mp4', 'video/webm'].includes(file.type) // formats every browser plays
+    const blob = plays && file.size <= MAX_FILE_BYTES ? file : await shrinkVideo(video, seconds, onProgress)
+    if (blob.size > MAX_FILE_BYTES) throw new Error('too-big')
+    return { data: await blobToDataUrl(blob), poster, width, height, seconds }
+  } finally {
+    // Let go of the file: no src, and load() so the video stops reading it.
+    video.pause()
+    video.removeAttribute('src')
+    video.load()
+    URL.revokeObjectURL(url)
+  }
+}
+
+// Wait for something to happen to a video (like 'loadeddata': its first picture is ready).
+function happens(video: HTMLVideoElement, event: string) {
+  return new Promise<void>((resolve, reject) => {
+    video.addEventListener(event, () => resolve(), { once: true })
+    video.addEventListener('error', () => reject(new Error('cant-play')), { once: true })
+  })
+}
+
+// How long a video is. Videos recorded in a browser sometimes don't say, until you jump to the end.
+async function lengthOf(video: HTMLVideoElement) {
+  if (Number.isFinite(video.duration)) return video.duration
+  video.currentTime = 1e9
+  await happens(video, 'seeked')
+  const seconds = video.duration
+  video.currentTime = 0
+  await happens(video, 'seeked')
+  return Number.isFinite(seconds) ? seconds : video.currentTime
+}
+
+// One picture from the video, small, as a JPEG.
+async function grabFrame(video: HTMLVideoElement, at: number) {
+  video.currentTime = at
+  await happens(video, 'seeked')
+  const scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(video.videoWidth * scale)
+  canvas.height = Math.round(video.videoHeight * scale)
+  canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.7)
+}
+
+// The sound of a video goes through here while it's recorded again. Browsers only let sound
+// start right after a tap, so warmUpSound() is called the moment you press Send.
+let sound: AudioContext | null = null
+export function warmUpSound() {
+  sound ??= new AudioContext()
+  sound.resume().catch(() => {})
+}
+
+// Play the video once, drawing it smaller onto a canvas, and record the canvas and the sound.
+// The quality is picked so the result fits in about 5 MB.
+async function shrinkVideo(video: HTMLVideoElement, seconds: number, onProgress: (done: number) => void) {
+  const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round((video.videoWidth * scale) / 2) * 2 // (even sizes work best)
+  canvas.height = Math.round((video.videoHeight * scale) / 2) * 2
+  const draw = canvas.getContext('2d')!
+  const stream = canvas.captureStream(30)
+  // The sound goes into the recording only, not to the speakers, so you don't hear it play.
+  warmUpSound()
+  const source = sound!.createMediaElementSource(video)
+  const out = sound!.createMediaStreamDestination()
+  source.connect(out)
+  out.stream.getAudioTracks().forEach((track) => stream.addTrack(track))
+
+  // H.264 MP4 plays on every phone, so that first. (Then WebM, which Chrome always can.)
+  const mimeType = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/webm;codecs=vp8,opus', 'video/mp4', 'video/webm'].find((type) =>
+    MediaRecorder.isTypeSupported(type),
+  )
+  const bits = (MAX_FILE_BYTES * 8 * 0.85) / Math.max(seconds, 1) // bits per second that fit
+  const videoBits = Math.round(Math.min(1_500_000, Math.max(150_000, bits - 64_000)))
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: videoBits, audioBitsPerSecond: 64_000 })
+  const chunks: Blob[] = []
+  recorder.ondataavailable = (e) => chunks.push(e.data)
+  const stopped = new Promise((resolve) => (recorder.onstop = resolve))
+
+  video.currentTime = 0
+  await happens(video, 'seeked')
+  video.muted = false // (a muted video would record silence)
+  recorder.start(1000)
+  // If the browser won't play sound without a tap, record it without sound rather than not at all.
+  await video.play().catch(() => {
+    video.muted = true
+    return video.play()
+  })
+  let finished = false
+  const paint = () => {
+    if (finished) return
+    draw.drawImage(video, 0, 0, canvas.width, canvas.height)
+    onProgress(Math.min(1, video.currentTime / seconds))
+    requestAnimationFrame(paint)
+  }
+  paint()
+  await happens(video, 'ended')
+  finished = true
+  recorder.stop()
+  await stopped
+  source.disconnect()
+  stream.getTracks().forEach((track) => track.stop())
+  return new Blob(chunks, { type: recorder.mimeType })
+}
+
+// ---------- Documents ----------
+
+// "850 KB", "1.2 MB"
+export function sizeText(bytes = 0) {
+  if (bytes < 1000_000) return `${Math.max(1, Math.round(bytes / 1000))} KB`
+  return `${(bytes / 1000_000).toFixed(1)} MB`
 }
 
 // ---------- Saving and loading ----------
@@ -154,6 +295,26 @@ export async function loadMedia(chatId: string, mediaId: string) {
   }
   loaded.set(mediaId, data)
   return data
+}
+
+// A video or document as a "blob URL" (blob:...), which plays and downloads much better than
+// a long data URL. Made once for each file.
+const blobUrls = new Map<string, string>()
+const blobTypes = new Map<string, string>() // blob URL -> what kind of file it is ("video/mp4")
+export async function loadMediaUrl(chatId: string, mediaId: string) {
+  const known = blobUrls.get(mediaId)
+  if (known) return known
+  const data = await loadMedia(chatId, mediaId)
+  const blob = await (await fetch(data)).blob()
+  const url = URL.createObjectURL(blob)
+  blobUrls.set(mediaId, url)
+  blobTypes.set(url, blob.type)
+  return url
+}
+
+// The end of the file name for a video we loaded: "webm" or "mp4". (For Download.)
+export function videoExtension(url: string) {
+  return blobTypes.get(url)?.includes('webm') ? 'webm' : 'mp4'
 }
 
 // A photo or voice note for a screen: null while it's loading.
