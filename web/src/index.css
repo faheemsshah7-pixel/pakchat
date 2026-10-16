@@ -1106,7 +1106,10 @@ label.row:hover {
   background-size: 200% 100%;
   animation: shimmer 1.2s linear infinite;
 }
-/* Voice notes */
+/* Voice notes. The time tucks up under the bar, so the bubble isn't so tall. */
+.bubble:has(.voice) time {
+  margin-top: -4px;
+}
 .voice {
   display: flex;
   align-items: center;
@@ -1775,9 +1778,14 @@ mark {
   margin: 2px 2px 6px;
   width: auto;
 }
+/* The caption runs on like a normal message, so the time fits at the end of its last line */
 .bubble.has-photo .text {
-  display: block;
-  padding: 6px 6px 0;
+  padding: 0 6px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.bubble.has-photo:has(.text) .photo {
+  margin-bottom: 5px;
 }
 /* Only 1 to 3 emojis: big, with no bubble around them (like WhatsApp). */
 .bubble.jumbo {
@@ -2251,11 +2259,15 @@ a.icon {
   height: 22px;
   overflow: hidden;
   color: var(--muted);
-  transition: width 0.12s;
+  opacity: 0; /* (hidden fully: a 0-wide box still showed a sliver of the arrow) */
+  transition:
+    width 0.12s,
+    opacity 0.12s;
 }
 .chat-row:hover .row-menu,
 .row-menu:focus-visible {
   width: 22px;
+  opacity: 1;
 }
 @media (pointer: coarse) {
   .bubble-menu {
@@ -2401,9 +2413,14 @@ img.avatar {
 .inline-edit.column .btn {
   align-self: flex-end;
 }
+/* Contact and group info on a computer: a column in the middle, not stretched across the screen */
+.info-pane .list {
+  padding-inline: max(8px, calc((100% - 720px) / 2));
+}
 .media-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Small squares, as many as fit (3 on a phone, 6 on a computer), like WhatsApp */
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 4px;
   padding: 0 8px 8px;
 }
@@ -2922,9 +2939,190 @@ button.setting:disabled {
 
 /* On small phones there's no room for search in a chat's top bar (it's in the ⋮ menu too). */
 @media (max-width: 420px) {
+  /* (button.hide-narrow, so it wins over button.icon's display: grid) */
+  button.hide-narrow,
   .hide-narrow {
     display: none;
   }
+}
+
+/* ================= 8f. Starred, pinned and disappearing messages ================= */
+/* The little star and pin next to a message's time */
+.bubble time .ico {
+  flex-shrink: 0;
+}
+/* The pin bar under the top of a chat, like WhatsApp's */
+.pin-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 8px 4px 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  animation: fade-in 0.15s;
+}
+.pin-show {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 6px 4px 16px;
+  color: var(--text);
+  text-align: start;
+}
+.pin-show > .ico {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.pin-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pin-text strong {
+  font-weight: 600;
+}
+/* With 2 or 3 pins, a short line for each; the one showing is darker. */
+.pin-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: stretch;
+  justify-content: center;
+}
+.pin-steps span {
+  width: 3px;
+  flex: 0 1 12px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.pin-steps span.on {
+  background: var(--accent);
+}
+.pin-bar .icon {
+  color: var(--muted);
+}
+/* A timer on the avatar: this chat has disappearing messages on. */
+.has-timer {
+  position: relative;
+  display: inline-grid;
+  flex-shrink: 0;
+}
+.timer-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 1.5px var(--panel);
+}
+[dir='rtl'] .timer-badge {
+  right: auto;
+  left: -2px;
+}
+/* "Starred messages" */
+.starred {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.starred-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px;
+  border-radius: 14px;
+  color: var(--text);
+  text-align: start;
+}
+.starred-open:hover {
+  background: var(--hover);
+}
+.starred-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+.starred-top strong {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.starred-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.starred-top time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.starred-bubble {
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 2px 12px;
+  max-width: 100%;
+  margin-inline-start: 34px;
+  padding: 7px 9px 6px;
+  border-radius: var(--radius);
+  background: var(--bubble);
+  color: var(--bubble-text);
+  box-shadow: var(--bubble-shadow);
+  font-size: 14.2px;
+  overflow-wrap: anywhere;
+}
+.starred-bubble.mine {
+  background: var(--mine);
+  color: var(--mine-text);
+}
+.starred-bubble > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.starred-bubble small {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--meta);
+  font-size: 11px;
+}
+.starred-bubble.mine small {
+  color: var(--mine-meta);
+}
+/* The list sits on the chat wallpaper colour, so the bubbles look like the chat's. */
+.info-pane .list:has(.starred) {
+  background: var(--chat-bg);
 }
 
 /* ================= 9. Phones ================= */

@@ -1,5 +1,5 @@
 // Dialogs.tsx: small windows: forward a message to other chats, message info (who read it),
-// who reacted, delete a message, and mute a chat.
+// who reacted, delete a message, mute a chat, pin a message, and disappearing messages.
 import { useState } from 'react'
 import {
   chatTitle,
@@ -12,8 +12,10 @@ import {
   type Person,
   type Target,
 } from '../chats'
+import { timerLabel, TIMER_CHOICES } from '../disappearing'
 import { useT } from '../lang'
 import { canUnsend, forwardMessage, react } from '../messages'
+import { PIN_CHOICES } from '../pins'
 import { HOUR, MUTE_ALWAYS } from '../prefs'
 import { fill } from '../strings'
 import { ChatAvatar, PersonAvatar } from './Avatar'
@@ -43,7 +45,8 @@ export function ForwardDialog(props: { me: Person; chats: Chat[]; fromChatId: st
     setError('')
     const targets: Target[] = picked.map((id) => {
       const chat = chats.find((c) => c.id === id)!
-      return isGroup(chat) ? { chatId: id } : { chatId: id, other: otherPerson(chat, me.uid) }
+      // (timer: if that chat has disappearing messages on, the copy disappears too)
+      return isGroup(chat) ? { chatId: id, timer: chat.timer } : { chatId: id, other: otherPerson(chat, me.uid), timer: chat.timer }
     })
     try {
       const failed = await forwardMessage(me, fromChatId, m, targets)
@@ -209,6 +212,70 @@ export function MuteDialog({ onMute, onClose }: { onMute: (until: number) => voi
       >
         <Icon name="bellOff" size={18} /> {t.mute}
       </button>
+    </Modal>
+  )
+}
+
+// Pin a message for everyone: for 24 hours, 7 days or 30 days.
+export function PinDialog({ onPin, onClose }: { onPin: (lasts: number) => void; onClose: () => void }) {
+  const { t } = useT()
+  const [choice, setChoice] = useState(1) // 7 days, like WhatsApp
+  const labels = [t.hours24, `7 ${t.days}`, `30 ${t.days}`]
+  return (
+    <Modal title={t.pinTitle} onClose={onClose} className="narrow">
+      <p className="hint">{t.pinHint}</p>
+      <div className="choices" role="radiogroup">
+        {PIN_CHOICES.map((lasts, i) => (
+          <label key={lasts} className="choice">
+            <input type="radio" name="pin" checked={choice === i} onChange={() => setChoice(i)} />
+            {labels[i]}
+          </label>
+        ))}
+      </div>
+      <button
+        className="btn"
+        onClick={() => {
+          onPin(PIN_CHOICES[choice])
+          onClose()
+        }}
+      >
+        <Icon name="pin" size={18} /> {t.pinMsg}
+      </button>
+    </Modal>
+  )
+}
+
+// Disappearing messages: off, 24 hours, 7 days or 90 days.
+// In a group only admins can change it; everyone else just sees what it's set to.
+type TimerProps = { current: number; canChange: boolean; onSave: (seconds: number) => void; onClose: () => void }
+export function TimerDialog({ current, canChange, onSave, onClose }: TimerProps) {
+  const { t } = useT()
+  const [choice, setChoice] = useState(current)
+  return (
+    <Modal title={t.disappearing} onClose={onClose} className="narrow">
+      <p className="hint">{t.timerHint}</p>
+      <div className="choices" role="radiogroup">
+        {TIMER_CHOICES.map((seconds) => (
+          <label key={seconds} className="choice">
+            <input type="radio" name="timer" checked={choice === seconds} disabled={!canChange} onChange={() => setChoice(seconds)} />
+            {timerLabel(seconds, t)}
+          </label>
+        ))}
+      </div>
+      {canChange ? (
+        <button
+          className="btn"
+          disabled={choice === current}
+          onClick={() => {
+            onSave(choice)
+            onClose()
+          }}
+        >
+          <Icon name="timer" size={18} /> {t.save}
+        </button>
+      ) : (
+        <p className="hint">{t.timerAdminsOnly}</p>
+      )}
     </Modal>
   )
 }

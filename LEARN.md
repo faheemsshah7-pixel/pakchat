@@ -364,3 +364,67 @@ When you tap the message box, two things went wrong on phones:
 ### Try this
 - Open a photo and pinch on your trackpad, then double-click a face.
 - In `PhotoViewer.tsx`, change `MAX = 5` to `MAX = 10` to zoom further.
+
+## Step 12: A design check against WhatsApp
+
+We took screenshots of every main screen on a computer and a phone, measured them, and put
+them next to WhatsApp's sizes (see the "PakChat vs WhatsApp Web" doc). Most of what we fixed
+was small CSS:
+
+- **Why the search icon still showed on phones.** `.hide-narrow { display: none }` lost to
+  `button.icon { display: grid }`, because `button.icon` is more *specific* (a tag + a class
+  beats one class). `button.hide-narrow` is just as specific and comes later, so it wins.
+- **Photo grid:** `repeat(auto-fill, minmax(96px, 1fr))` means "as many columns as fit, each
+  at least 96px". 3 fit on a phone, 6 on a computer.
+- **A column in the middle:** `padding-inline: max(8px, calc((100% - 720px) / 2))` keeps the
+  content 720px wide on a big screen, and gives 8px on each side on a small one.
+- **Time at the end of a caption:** the time "floats" to the end of the line. It only fits on
+  the caption's last line if the caption is *inline* text, like a normal message, not a block.
+
+### Try this
+- Change `720px` to `600px` and look at Contact info on your Mac.
+
+## Step 13: Starred, pinned and disappearing messages
+
+The first batch of WhatsApp features we didn't have yet. Each one is saved in a different
+place, and *where* you save something decides who can see it:
+
+| Feature | Saved in | Who sees it |
+|---|---|---|
+| Star | `users/<you>/prefs/<chatId>` → `starred: [ids]` | only you |
+| Pin | `chats/<chatId>` → `pins: { id: copy }` | everyone in the chat |
+| Disappearing | `chats/<chatId>` → `timer`, and each message's `expireAt` | everyone in the chat |
+
+### Starred messages (`prefs.ts`, `StarredList.tsx`)
+Star a message from its menu. A little ★ shows by its time. Find them again in the chat's
+info, or **Starred messages** in the chat list's ⋮ menu (all chats). Your prefs only keep the
+message *ids*, so `StarredList.tsx` fetches each message once with `getDoc`.
+
+Tapping one opens the chat *at that message*. If it's older than the 50 messages we load,
+ChatRoom loads more (`setLimit`) until it's there, then scrolls to it (the `focus` effect).
+
+### Pinned messages (`pins.ts`)
+Pin a message for 24 hours, 7 days or 30 days. It shows in a bar at the top for everyone;
+tap the bar to jump to it. Up to 3: a 4th takes the oldest off. The chat keeps a small
+*copy* of each pinned message, so the bar works even when the message isn't loaded.
+
+New rule (`pinsOk` in `firestore.rules`): at most 3 pins, and in an "only admins can send"
+group, only admins can pin.
+
+### Disappearing messages (`disappearing.ts`)
+Turn it on in Contact info (or Group info, admins only, or the chat's ⋮ menu). Every new
+message gets `expireAt` = now + 24 hours (or 7 / 90 days). Then:
+
+1. **On screen:** `useClockAt` sets a timer for the moment the next message runs out, and
+   the chat re-draws without it. No checking every second.
+2. **In the database:** we have no server on the free plan, so the next person to open the
+   chat deletes it (`deleteExpired`). The rules allow anyone in the chat to delete a message,
+   but *only once its time is up*: `expireAt < request.time`.
+
+Like WhatsApp, this isn't a promise: people can still copy a message before it goes.
+
+### Try this
+- In `pins.ts`, change `MAX_PINS = 3` to `2`: now a 3rd pin takes the oldest off. (Going up
+  to 4 would also need the rule's `<= 3` changed, or the server says no.)
+- Turn on disappearing messages with a friend and look at a new message in the Firebase
+  console: it has an `expireAt` field.

@@ -8,7 +8,7 @@
 //   media/<id> (the first part, and how many parts there are), media/<id>_2, media/<id>_3 ...
 // Later, on the paid plan, this file is the only one that changes to use real file storage.
 import { useEffect, useState } from 'react'
-import { collection, doc, getDoc, type DocumentReference, type WriteBatch } from 'firebase/firestore'
+import { collection, doc, getDoc, type DocumentReference, type Timestamp, type WriteBatch } from 'firebase/firestore'
 import { db } from './firebase'
 
 export const MAX_MEDIA = 900_000 // characters in one document
@@ -119,12 +119,16 @@ function partRef(chatId: string, mediaId: string, part: number) {
 }
 
 // Adds a photo or voice note to a batch of writes, cut into parts if needed. Returns its id.
-export function saveMedia(batch: WriteBatch, chatRef: DocumentReference, data: string, senderId: string) {
+// expireAt: it's in a disappearing message, so it goes when the message does.
+export function saveMedia(batch: WriteBatch, chatRef: DocumentReference, data: string, senderId: string, expireAt?: Timestamp) {
   const mediaId = doc(collection(chatRef, 'media')).id // a new random id
   const parts = Math.ceil(data.length / MAX_MEDIA)
   for (let part = 1; part <= parts; part++) {
     const piece = data.slice((part - 1) * MAX_MEDIA, part * MAX_MEDIA)
-    batch.set(partRef(chatRef.id, mediaId, part), part === 1 && parts > 1 ? { data: piece, senderId, parts } : { data: piece, senderId })
+    const fields: Record<string, unknown> = { data: piece, senderId }
+    if (part === 1 && parts > 1) fields.parts = parts
+    if (expireAt) fields.expireAt = expireAt
+    batch.set(partRef(chatRef.id, mediaId, part), fields)
   }
   loaded.set(mediaId, data) // so YOUR bubble shows it straight away
   return mediaId

@@ -211,8 +211,11 @@ service cloud.firestore {
         return changed.hasOnly(added.concat([me()]));
       }
       // Group name, description, photo and settings: only admins can change these.
+      // (That includes a group's disappearing messages timer. In a chat with one person, either of you can change it.)
       function infoChanged() {
-        return after().diff(before()).affectedKeys().hasAny(['title', 'description', 'photoId', 'onlyAdmins', 'inviteCode']);
+        let changed = after().diff(before()).affectedKeys();
+        return changed.hasAny(['title', 'description', 'photoId', 'onlyAdmins', 'inviteCode'])
+          || (isGroupChat(before()) && changed.hasAny(['timer']));
       }
       function infoOk() {
         return after().get('title', '') is string
@@ -221,7 +224,19 @@ service cloud.firestore {
           && after().get('description', '') is string
           && after().get('description', '').size() <= 500
           && after().get('photoId', '') is string
-          && after().get('onlyAdmins', false) is bool;
+          && after().get('onlyAdmins', false) is bool
+          // Disappearing messages: off (0), 24 hours, 7 days or 90 days, in seconds.
+          && after().get('timer', 0) in [0, 86400, 604800, 7776000];
+      }
+      // Pinned messages, shown at the top of the chat for everyone: at most 3.
+      // In a group where only admins can send, only admins can pin. Anyone can take a pin off
+      // (needed when someone deletes a pinned message for everyone).
+      function pinsOk() {
+        let was = before().get('pins', {});
+        let now = after().get('pins', {});
+        return now == was
+          || (now is map && now.keys().size() <= 3
+            && (!before().get('onlyAdmins', false) || wasAdmin() || was.keys().hasAll(now.keys())));
       }
       function sameMembers() {
         return after().members == before().members;
@@ -265,6 +280,7 @@ service cloud.firestore {
         && lastMessageOk()
         && namesOk()
         && infoOk()
+        && pinsOk()
         // a direct chat can't turn into a group, or the other way round
         && after().get('type', 'direct') == before().get('type', 'direct')
         && (
@@ -323,12 +339,23 @@ service cloud.firestore {
           && mayTalk(request.resource.data);
         // Changing a message: a reaction, an edit, or "delete for everyone".
         allow update: if canPost() && (reacting() || editing() || unsending());
+        // Disappearing messages: once a message's time is up, anyone in the chat can delete it for good.
+        allow delete: if canRead() && expired(resource.data);
+      }
+      function expired(d) {
+        return d.get('expireAt', null) is timestamp && d.expireAt < request.time;
+      }
+      // A disappearing message says when it goes: in the future, and not more than 90 days away.
+      function expiryOk(d) {
+        return !('expireAt' in d)
+          || (d.expireAt is timestamp && d.expireAt > request.time && d.expireAt < request.time + duration.value(91, 'd'));
       }
 
       // Only these fields, so nobody can sneak in a fake "edited" or "deleted" mark.
       function newMessageOk(m) {
-        return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed'])
+        return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt'])
           && m.get('forwarded', false) is bool
+          && expiryOk(m)
           && (!('replyTo' in m)
             || (m.replyTo is map
               && m.replyTo.keys().hasOnly(['id', 'senderId', 'senderName', 'kind', 'text'])
@@ -351,16 +378,19 @@ service cloud.firestore {
             && m.video is bool && m.missed is bool
             && m.seconds is number && m.seconds >= 0 && m.seconds < 86400)
           || (m.kind == 'system'
-            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone']);
+            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer']
+            // "Ali turned on disappearing messages" says for how long
+            && (m.event != 'timer' || m.get('seconds', -1) in [0, 86400, 604800, 7776000]));
       }
       // In a group set to "only admins can send", only admins can post.
       // Anyone can still leave or join (those add a small grey note).
+      // Other grey notes are for admins, except "Ali pinned a message" (anyone who can send can pin).
       function mayTalk(m) {
         let c = getAfter(chatPath()).data;
         return isDirectId()
           || (m.kind == 'system' && m.event in ['left', 'joined'])
           || adminIn(c, me())
-          || (m.kind != 'system' && !c.get('onlyAdmins', false));
+          || ((m.kind != 'system' || m.event == 'pinned') && !c.get('onlyAdmins', false));
       }
 
       // Reactions: { uid: '👍' }. You can only set or remove YOUR OWN reaction.
@@ -388,7 +418,7 @@ service cloud.firestore {
           && !(resource.data.get('kind', 'text') in ['system', 'call'])
           && request.time < resource.data.sentAt + duration.value(60, 'h')
           && request.resource.data.deleted == true
-          && request.resource.data.keys().hasOnly(['kind', 'senderId', 'senderName', 'sentAt', 'deleted']);
+          && request.resource.data.keys().hasOnly(['kind', 'senderId', 'senderName', 'sentAt', 'deleted', 'expireAt']);
       }
 
       // ----- photos and voice notes (see media.ts) -----
@@ -396,14 +426,16 @@ service cloud.firestore {
       match /media/{mediaId} {
         allow read: if canRead();
         allow create: if canPost()
-          && request.resource.data.keys().hasOnly(['data', 'senderId', 'parts'])
+          && request.resource.data.keys().hasOnly(['data', 'senderId', 'parts', 'expireAt'])
           && request.resource.data.senderId == me()
           && request.resource.data.data is string
+          && expiryOk(request.resource.data)
           && request.resource.data.get('parts', 2) is int
           && request.resource.data.get('parts', 2) >= 2
           && request.resource.data.get('parts', 2) <= 8;
         // The person who sent it can delete it (when they delete the message for everyone).
-        allow delete: if canRead() && resource.data.senderId == me();
+        // Anyone in the chat can delete it once its time is up (disappearing messages).
+        allow delete: if canRead() && (resource.data.senderId == me() || expired(resource.data));
       }
 
       // ----- "typing…" (see typing.ts) -----

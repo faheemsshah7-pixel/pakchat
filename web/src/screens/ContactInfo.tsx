@@ -1,6 +1,8 @@
 // ContactInfo.tsx: about the person you're chatting with: photo, name, number or Gmail,
-// their "about" line, photos you shared, and buttons to call, mute, clear, block, report or delete.
+// their "about" line, photos you shared, starred messages, disappearing messages,
+// and buttons to call, mute, clear, block, report or delete.
 import type { Message, Person } from '../chats'
+import { timerLabel } from '../disappearing'
 import { useT } from '../lang'
 import { useProfile } from '../profiles'
 import { PersonAvatar } from './Avatar'
@@ -14,6 +16,8 @@ export type ChatActions = {
   block: () => void
   report: () => void
   leave: () => void
+  starred: () => void // show the starred messages
+  timer: () => void // change disappearing messages
 }
 
 type Props = {
@@ -23,13 +27,15 @@ type Props = {
   messages: Message[]
   muted: boolean
   blocked: boolean
+  starred: number // how many messages you starred here
+  timer?: number // disappearing messages (seconds, 0 = off). Missing before the first message.
   actions: ChatActions
   onCall?: (video: boolean) => void // missing when you blocked them
   onBack: () => void
   onView: (m: Message, data: string) => void
 }
 
-export default function ContactInfo({ chatId, person, messages, muted, blocked, actions, onCall, onBack, onView }: Props) {
+export default function ContactInfo({ chatId, person, messages, muted, blocked, starred, timer, actions, onCall, onBack, onView }: Props) {
   const { t } = useT()
   const profile = useProfile(person.uid)
   return (
@@ -65,6 +71,7 @@ export default function ContactInfo({ chatId, person, messages, muted, blocked, 
           </p>
         </section>
         <MediaGrid chatId={chatId} messages={messages} onView={onView} />
+        <ChatExtras starred={starred} timer={timer} actions={actions} />
         <section className="info-section actions">
           <ActionRow icon={muted ? 'bell' : 'bellOff'} label={muted ? t.unmute : t.muteNotifications} onClick={actions.mute} />
           <ActionRow icon="eraser" label={t.clearChat} onClick={actions.clear} />
@@ -77,13 +84,28 @@ export default function ContactInfo({ chatId, person, messages, muted, blocked, 
   )
 }
 
-export function ActionRow({ icon, label, onClick, danger }: { icon: IconName; label: string; onClick: () => void; danger?: boolean }) {
+// value: a small line under the label, like "Off" or "3".
+type RowProps = { icon: IconName; label: string; value?: string; onClick: () => void; danger?: boolean }
+export function ActionRow({ icon, label, value, onClick, danger }: RowProps) {
   return (
     <button className={danger ? 'row action danger' : 'row action'} onClick={onClick}>
       <Icon name={icon} />
       <span className="row-main" dir="auto">
         {label}
+        {value && <small>{value}</small>}
       </span>
+      {value !== undefined && <Icon name="chevronRight" size={18} />}
     </button>
+  )
+}
+
+// "Starred messages" and "Disappearing messages", in both contact info and group info.
+export function ChatExtras({ starred, timer, actions }: { starred: number; timer?: number; actions: ChatActions }) {
+  const { t } = useT()
+  return (
+    <section className="info-section actions">
+      <ActionRow icon="star" label={t.starredMessages} value={starred ? String(starred) : t.none} onClick={actions.starred} />
+      {timer !== undefined && <ActionRow icon="timer" label={t.disappearing} value={timerLabel(timer, t)} onClick={actions.timer} />}
+    </section>
   )
 }

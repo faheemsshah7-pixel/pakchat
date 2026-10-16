@@ -22,6 +22,8 @@ type Props = {
   group: boolean
   first: boolean // first of several in a row from the same person: gets the tail (and the name, in groups)
   highlight: string // words you searched for
+  starred: boolean // you starred it: a small star by the time
+  pinned: boolean // pinned in this chat: a small pin by the time
   onMenu: (m: Message, x: number, y: number) => void
   onReactions: (m: Message) => void
   onJump: (messageId: string) => void
@@ -30,7 +32,7 @@ type Props = {
 }
 
 export default memo(function MessageBubble(props: Props) {
-  const { m, tick, chatId, myUid, group, first, highlight, onMenu, onReactions, onJump, onView, onCall } = props
+  const { m, tick, chatId, myUid, group, first, highlight, starred, pinned, onMenu, onReactions, onJump, onView, onCall } = props
   const { t } = useT()
   const mine = m.senderId === myUid
   const kind = m.kind ?? 'text'
@@ -51,6 +53,8 @@ export default memo(function MessageBubble(props: Props) {
 
   const time = (
     <time>
+      {pinned && !m.deleted && <Icon name="pin" size={12} />}
+      {starred && !m.deleted && <Icon name="starFilled" size={12} />}
       {m.editedAt && !m.deleted && <span className="edited">{t.edited}</span>}
       {m.sentAt && clock(m.sentAt.toDate(), t.locale)}
       {mine && !m.deleted && <Ticks tick={tick} />}

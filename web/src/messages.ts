@@ -11,6 +11,8 @@ export const UNSEND_HOURS = 60
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
 const sentMillis = (m: Message) => m.sentAt?.toMillis() ?? Date.now()
+// A disappearing message's time, so the chat list's preview still disappears with it.
+const expiry = (m: Message) => (m.expireAt ? { expireAt: m.expireAt } : {})
 
 // The little bar of emojis: tap one to react, tap the same one again to take it back.
 // emoji = null removes your reaction.
@@ -46,21 +48,22 @@ export function canUnsend(m: Message, myUid: string) {
 }
 
 // isLast: it's the newest message, so the chat list's preview changes too.
+// (A pinned message's copy in the pin bar is kept up to date in ChatRoom.tsx, from the message itself.)
 export async function editMessage(chatId: string, me: Person, m: Message, text: string, isLast: boolean) {
   const batch = writeBatch(db)
   const field = (m.kind ?? 'text') === 'photo' ? 'caption' : 'text'
   batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp() })
   if (isLast) {
     batch.update(doc(db, 'chats', chatId), {
-      lastMessage: { kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name },
+      lastMessage: { kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name, ...expiry(m) },
     })
   }
   await batch.commit()
 }
 
 // Delete for everyone: the words, photo or voice note are wiped from the database.
-// Everyone sees "This message was deleted" instead.
-export async function unsendMessage(chatId: string, me: Person, m: Message, isLast: boolean) {
+// Everyone sees "This message was deleted" instead. If it was pinned, the pin goes too.
+export async function unsendMessage(chatId: string, me: Person, m: Message, isLast: boolean, pinned = false) {
   const batch = writeBatch(db)
   const wipe = Object.fromEntries(
     ['text', 'caption', 'mediaId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'].map((key) => [
@@ -70,11 +73,10 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
   )
   batch.update(doc(db, 'chats', chatId, 'messages', m.id), { ...wipe, deleted: true })
   if (m.mediaId) await deleteMedia(batch, chatId, m.mediaId)
-  if (isLast) {
-    batch.update(doc(db, 'chats', chatId), {
-      lastMessage: { kind: m.kind ?? 'text', deleted: true, senderId: me.uid, senderName: me.name },
-    })
-  }
+  const chatFields: Record<string, unknown> = {}
+  if (isLast) chatFields.lastMessage = { kind: m.kind ?? 'text', deleted: true, senderId: me.uid, senderName: me.name, ...expiry(m) }
+  if (pinned) chatFields[`pins.${m.id}`] = deleteField()
+  if (isLast || pinned) batch.update(doc(db, 'chats', chatId), chatFields)
   await batch.commit()
 }
 

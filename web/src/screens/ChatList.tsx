@@ -21,6 +21,7 @@ import {
   type Chat,
   type Person,
 } from '../chats'
+import { isExpired } from '../disappearing'
 import { getDraft, useDraftsVersion } from '../drafts'
 import { leaveGroup } from '../groups'
 import { useT } from '../lang'
@@ -57,10 +58,11 @@ type Props = {
   onNewGroup: () => void
   onSettings: () => void
   onCalls: () => void
+  onStarred: () => void
 }
 
 export default function ChatList(props: Props) {
-  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onSettings, onCalls } = props
+  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onSettings, onCalls, onStarred } = props
   const { t, lang, setLang } = useT()
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
@@ -103,6 +105,7 @@ export default function ChatList(props: Props) {
   const menu: MenuItem[] = [
     { label: t.newGroup, icon: 'users', onClick: onNewGroup },
     { label: t.calls, icon: 'phone', onClick: onCalls },
+    { label: t.starredMessages, icon: 'star', onClick: onStarred },
     { label: t.settings, icon: 'settings', onClick: onSettings },
     { label: t.theme, icon: 'palette', onClick: () => setPicking(true) },
     { label: t.switchLanguage, icon: 'language', onClick: () => setLang(lang === 'en' ? 'ur' : 'en') },
@@ -263,6 +266,7 @@ export default function ChatList(props: Props) {
             typing={typingText(chat, me.uid, now, t)}
             draft={chat.id === activeId ? '' : getDraft(chat.id)} // (no "Draft:" for the chat you're typing in)
             muted={isMuted(prefs.get(chat.id), now)}
+            gone={!!chat.lastMessage && isExpired(chat.lastMessage, now)}
             onOpen={openRow}
             onMenu={rowMenuAt}
           />
@@ -286,16 +290,17 @@ type RowProps = {
   typing: string // "typing…", or ''
   draft: string
   muted: boolean
+  gone: boolean // the last message disappeared (disappearing messages), so the preview is empty
   onOpen: (chat: Chat) => void
   onMenu: (chat: Chat, x: number, y: number) => void
 }
 
 // memo: only drawn again when one of its props changed (a new message in THIS chat, say).
-const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, draft, muted, onOpen, onMenu }: RowProps) {
+const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, draft, muted, gone, onOpen, onMenu }: RowProps) {
   const { t } = useT()
   const title = chatTitle(chat, me.uid)
   const last = chat.lastMessage
-  const mine = last?.senderId === me.uid && last.kind !== 'system' && !last.deleted
+  const mine = last?.senderId === me.uid && last.kind !== 'system' && !last.deleted && !gone
   const unread = isUnread(chat, me.uid, prefs)
   const classes = ['row', 'chat-row', unread && 'unread', active && 'active', muted && 'muted'].filter(Boolean).join(' ')
 

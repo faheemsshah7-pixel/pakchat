@@ -1,8 +1,9 @@
-// prefs.ts: YOUR settings for each chat: pinned, muted, archived, marked unread, cleared.
+// prefs.ts: YOUR settings for each chat: pinned, muted, archived, marked unread, cleared,
+// and the messages you starred.
 // Saved in users/<you>/prefs/<chatId>. They're private: the rules only let you see your own,
 // so the other person never knows you muted or archived them.
 import { useEffect, useState } from 'react'
-import { arrayUnion, collection, doc, onSnapshot, serverTimestamp, setDoc, type Timestamp } from 'firebase/firestore'
+import { arrayRemove, arrayUnion, collection, doc, onSnapshot, serverTimestamp, setDoc, type Timestamp } from 'firebase/firestore'
 import type { Chat } from './chats'
 import { db } from './firebase'
 
@@ -15,6 +16,7 @@ export type ChatPrefs = {
   clearedAt?: Timestamp | null // "Clear chat": messages before this are hidden for you
   deletedAt?: Timestamp | null // "Delete chat": hidden from your list until a new message comes
   hidden?: string[] // messages you deleted just for yourself
+  starred?: string[] // messages you starred (only you see your stars)
 }
 
 export const MAX_PINNED = 3
@@ -68,4 +70,10 @@ export function deleteChat(uid: string, chatId: string) {
 // "Delete for me": hide one message, just for you.
 export function hideMessage(uid: string, chatId: string, messageId: string) {
   return setPrefs(uid, chatId, { hidden: arrayUnion(messageId) })
+}
+
+// Star a message, or take its star off. Starred messages are easy to find again
+// (in the chat's info, or "Starred messages" in the chat list's menu). Only you see your stars.
+export function starMessage(uid: string, chatId: string, messageId: string, on: boolean) {
+  return setPrefs(uid, chatId, { starred: on ? arrayUnion(messageId) : arrayRemove(messageId) })
 }

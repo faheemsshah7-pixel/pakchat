@@ -1,8 +1,9 @@
 // ChatRoom.tsx: one conversation (with one person, or a group).
 // Messages appear live, for everyone in it. Older messages load as you scroll up.
-// Each message has a menu (MessageBubble.tsx): react, reply, copy, forward, edit, info, delete.
+// Each message has a menu (MessageBubble.tsx): react, reply, copy, forward, pin, star, edit, info, delete.
+// Pinned messages show in a bar under the top (pins.ts). Disappearing messages vanish on time (disappearing.ts).
 // In a chat with one person, the phone and camera at the top start a call (calls.ts).
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query, where, type Timestamp } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -14,6 +15,7 @@ import {
   markRead,
   otherPerson,
   sendMessage,
+  shortText,
   systemText,
   tickFor,
   type Chat,
@@ -22,10 +24,12 @@ import {
   type Message,
   type Person,
 } from '../chats'
+import { deleteExpired, isExpired, setTimer, useClockAt } from '../disappearing'
 import { useT } from '../lang'
 import { shrinkPhoto } from '../media'
 import { canEdit, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
-import { clearChat, deleteChat, hideMessage, isMuted, setPrefs, type ChatPrefs } from '../prefs'
+import { activePins, pinMessage, unpinMessage } from '../pins'
+import { clearChat, deleteChat, hideMessage, isMuted, setPrefs, starMessage, type ChatPrefs } from '../prefs'
 import { presenceText } from '../presence'
 import { rememberProfile, useProfile, type Profile } from '../profiles'
 import { block, report, unblock } from '../safety'
@@ -34,10 +38,10 @@ import { useStable } from '../stable'
 import { fill, type Strings } from '../strings'
 import { clock, dayNumber, isToday, isYesterday, useNow } from '../time'
 import { markTyping, typingText, useTypingVersion } from '../typing'
-import Avatar, { GroupAvatar, PersonAvatar } from './Avatar'
+import Avatar, { GroupAvatar, PersonAvatar, TimerBadge } from './Avatar'
 import Composer from './Composer'
 import ContactInfo from './ContactInfo'
-import { DeleteDialog, ForwardDialog, InfoDialog, MuteDialog, ReactionsDialog } from './Dialogs'
+import { DeleteDialog, ForwardDialog, InfoDialog, MuteDialog, PinDialog, ReactionsDialog, TimerDialog } from './Dialogs'
 import EmojiPicker from './EmojiPicker'
 import GroupInfo from './GroupInfo'
 import Icon from './Icon'
@@ -46,6 +50,7 @@ import MessageBubble from './MessageBubble'
 import PhotoSender, { type PickedPhoto } from './PhotoSender'
 import PhotoViewer from './PhotoViewer'
 import Popover, { type PopoverItem } from './Popover'
+import StarredList from './StarredList'
 
 type Props = {
   me: Person
@@ -58,18 +63,21 @@ type Props = {
   blocked: Set<string> // people I blocked
   onBack: () => void
   onOpenPerson: (person: Person) => void // "Message" someone from the group's member list
+  focus?: { id: string } // go to this message (from "Starred messages")
 }
 
-type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete'; m: Message } | { kind: 'mute' }
+type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin'; m: Message } | { kind: 'mute' | 'timer' }
 const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = faster)
+const LOOK_BACK = 1000 // going to an old message loads at most this many
 
 export default function ChatRoom(props: Props) {
-  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, blocked, onBack, onOpenPerson } = props
+  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, blocked, onBack, onOpenPerson, focus: focusProp } = props
   const { t } = useT()
   const [limit, setLimit] = useState(PAGE)
   const [raw, setRaw] = useState<Message[]>([]) // what the database sent
   const [hasMore, setHasMore] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
+  const [showStarred, setShowStarred] = useState(false)
   const [viewing, setViewing] = useState<{ m: Message; data: string } | null>(null) // a photo shown full size
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number } | null>(null)
   const [reactingTo, setReactingTo] = useState<Message | null>(null) // the full emoji picker, for a reaction
@@ -87,6 +95,14 @@ export default function ChatRoom(props: Props) {
   // The "3 unread messages" line, worked out once when the chat opens.
   const [openedAt] = useState(() => (chat ? lastRead(chat, me.uid, prefs) : 0))
   const [divider, setDivider] = useState<{ id: string; count: number } | null>(null)
+  const [focus, setFocus] = useState<string | null>(focusProp?.id ?? null) // a message to go to
+  const [focusFrom, setFocusFrom] = useState(focusProp)
+  const [pinIndex, setPinIndex] = useState(0) // which pin the pin bar shows
+  // Asked to go to a different message while this chat is open (from "Starred messages").
+  if (focusProp !== focusFrom) {
+    setFocusFrom(focusProp)
+    if (focusProp) setFocus(focusProp.id)
+  }
 
   const scroller = useRef<HTMLDivElement>(null)
   const nearBottom = useRef(true)
@@ -97,6 +113,7 @@ export default function ChatRoom(props: Props) {
   const newest = useRef('')
   const lastTypingSent = useRef(0)
   const lastMarkedRead = useRef('')
+  const loadedLimit = useRef(0) // the limit of the messages we have now (more may be on the way)
 
   const group = isGroup(chat)
   const other = group ? undefined : (otherProp ?? (chat && otherPerson(chat, me.uid)))
@@ -107,7 +124,16 @@ export default function ChatRoom(props: Props) {
   const call = other && !iBlockedThem ? (video: boolean) => startCall(me, other, video) : undefined
   const clearedAt = prefs?.clearedAt?.toMillis() ?? 0
   const hidden = prefs?.hidden
-  const messages = hidden?.length ? raw.filter((m) => !hidden.includes(m.id)) : raw
+  // Disappearing messages and pins run out at set times. `now` moves on right when one does.
+  const endTimes = raw.flatMap((m) => (m.expireAt ? [m.expireAt.toMillis()] : []))
+  Object.values(chat?.pins ?? {}).forEach((pin) => endTimes.push(pin.until))
+  const now = useClockAt(endTimes)
+  // What's shown: not the ones you deleted for yourself, and not the ones whose time is up.
+  const messages = useMemo(() => raw.filter((m) => !hidden?.includes(m.id) && !isExpired(m, now)), [raw, hidden, now])
+  const starredIds = useMemo(() => new Set(prefs?.starred ?? []), [prefs?.starred])
+  // Pinned messages, newest first. (Not ones deleted for everyone.)
+  const pins = activePins(chat, now).filter((pin) => !messages.find((m) => m.id === pin.id)?.deleted)
+  const pinnedIds = new Set(pins.map((pin) => pin.id))
 
   // Listen LIVE to the last 50 messages (more as you scroll up), oldest at the top.
   // After "Clear chat", only messages sent after that.
@@ -132,6 +158,7 @@ export default function ChatRoom(props: Props) {
         } as Message
       })
       known.current = new Map(list.map((m) => [m.id, m]))
+      loadedLimit.current = limit
       setRaw(list)
       setHasMore(snap.size >= limit)
       // The first time only (with fresh news from the server): where do the unread messages start?
@@ -181,6 +208,14 @@ export default function ChatRoom(props: Props) {
     return () => watch.disconnect()
   }, [showInfo])
 
+  // Disappearing messages: the first person to open the chat after a message's time is up deletes it for good.
+  const expiredCount = raw.length - raw.filter((m) => !isExpired(m, now)).length
+  const usesTimer = !!chat?.timer || raw.some((m) => m.expireAt)
+  const chatExists = !!chat
+  useEffect(() => {
+    if (usesTimer && chatExists) deleteExpired(chatId).catch(console.warn)
+  }, [chatId, usesTimer, chatExists, expiredCount])
+
   function onScroll() {
     const el = scroller.current!
     nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
@@ -207,6 +242,27 @@ export default function ChatRoom(props: Props) {
     void el.offsetWidth // (restarts the glow if it's already glowing)
     el.classList.add('flash')
   }, [])
+
+  // Going to a message (a starred or pinned one) that may be too old to be loaded yet:
+  // load older messages until it's there, then scroll to it.
+  // (It has to wait for the messages to arrive and be drawn, so it's an effect. The lint rule
+  // below warns about changing state in an effect; here that's what we want.)
+  useEffect(() => {
+    if (!focus || !loadedOnce.current || loadedLimit.current !== limit) return // (still loading)
+    if (messages.some((m) => m.id === focus)) {
+      nearBottom.current = false // (so nothing pulls the chat back down to the bottom)
+      jumpTo(focus)
+      // oxlint-disable-next-line react/set-state-in-effect
+      setFocus(null)
+    } else if (hasMore && limit < LOOK_BACK) {
+      const el = scroller.current
+      if (el) restoreFrom.current = el.scrollHeight - el.scrollTop
+      setLimit((n) => n + PAGE * 4)
+    } else {
+      setFocus(null)
+      setToast(t.notFound)
+    }
+  }, [focus, messages, hasMore, limit, jumpTo, t])
 
   // Esc closes the photo you're looking at, the search, or else the chat (like WhatsApp Web).
   useEffect(() => {
@@ -255,7 +311,19 @@ export default function ChatRoom(props: Props) {
   function send(content: Content, extras?: Extras) {
     lastTypingSent.current = 0
     nearBottom.current = true
-    return sendMessage(me, { chatId, other, isNew: !chat }, content, extras)
+    return sendMessage(me, { chatId, other, isNew: !chat, timer: chat?.timer }, content, extras)
+  }
+
+  function goTo(messageId: string) {
+    setShowStarred(false)
+    setShowInfo(false)
+    setFocus(messageId)
+  }
+
+  // Shows "Something went wrong" if a change didn't save.
+  function oops(err: unknown) {
+    console.error(err)
+    setToast(t.somethingWrong)
   }
 
   // Photos picked, pasted or dropped: shrink and send them one by one.
@@ -304,6 +372,8 @@ export default function ChatRoom(props: Props) {
     },
     report: reportChat,
     leave: () => chat && confirm(t.confirmLeave) && leaveGroup(me, chat).catch(console.error),
+    starred: () => setShowStarred(true),
+    timer: () => setDialog({ kind: 'timer' }),
   }
 
   const menuItems: MenuItem[] = [
@@ -311,6 +381,8 @@ export default function ChatRoom(props: Props) {
     { label: t.searchMessages, icon: 'search', onClick: () => setSearching(true) },
     { label: muted ? t.unmute : t.mute, icon: muted ? 'bell' : 'bellOff', onClick: actions.mute },
   ]
+  if (chat) menuItems.push({ label: t.disappearing, icon: 'timer', onClick: actions.timer })
+  if (starredIds.size > 0) menuItems.push({ label: t.starredMessages, icon: 'star', onClick: actions.starred })
   if (messages.length > 0) menuItems.push({ label: t.clearChat, icon: 'eraser', onClick: actions.clear })
   if (other) menuItems.push({ label: iBlockedThem ? t.unblock : t.block, icon: 'block', onClick: actions.block, danger: !iBlockedThem })
   if (messages.length > 0) menuItems.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
@@ -331,6 +403,16 @@ export default function ChatRoom(props: Props) {
       })
     }
     items.push({ label: t.forward, icon: 'forward', onClick: () => setDialog({ kind: 'forward', m }) })
+    // Pin for everyone (if you can send messages here), and star just for you.
+    if (chat && canTalk && !iBlockedThem) {
+      items.push(
+        pinnedIds.has(m.id)
+          ? { label: t.unpinMsg, icon: 'pinOff', onClick: () => unpinMessage(chatId, m.id).catch(oops) }
+          : { label: t.pinMsg, icon: 'pin', onClick: () => setDialog({ kind: 'pin', m }) },
+      )
+    }
+    const starred = starredIds.has(m.id)
+    items.push({ label: starred ? t.unstar : t.star, icon: starred ? 'starOff' : 'star', onClick: () => starMessage(me.uid, chatId, m.id, !starred).catch(oops) })
     if (canEdit(m, me.uid)) items.push({ label: t.edit, icon: 'edit', onClick: () => (setReplyTo(null), setEditing(m)) })
     if (m.senderId === me.uid && chat) items.push({ label: t.info, icon: 'info', onClick: () => setDialog({ kind: 'info', m }) })
     items.push({ label: t.delete, icon: 'trash', danger: true, onClick: () => setDialog({ kind: 'delete', m }) })
@@ -374,10 +456,55 @@ export default function ChatRoom(props: Props) {
     />
   )
 
+  // Windows about the whole chat. They can open from the chat's menu or its info panel.
+  const chatDialogs = (
+    <>
+      {dialog?.kind === 'mute' && (
+        <MuteDialog onClose={() => setDialog(null)} onMute={(until) => setPrefs(me.uid, chatId, { mutedUntil: until }).catch(console.error)} />
+      )}
+      {dialog?.kind === 'timer' && chat && (
+        <TimerDialog
+          current={chat.timer ?? 0}
+          canChange={!group || isAdmin(chat, me.uid)}
+          onClose={() => setDialog(null)}
+          onSave={(seconds) => setTimer(me, chat, seconds).catch(oops)}
+        />
+      )}
+    </>
+  )
+  const infoDialogs = (
+    <>
+      {chatDialogs}
+      {toast && <p className="toast">{toast}</p>}
+    </>
+  )
+
+  if (showStarred) {
+    return (
+      <StarredList
+        me={me}
+        items={[...starredIds].map((id) => ({ chatId, id }))}
+        chats={chats}
+        onBack={() => setShowStarred(false)}
+        onOpen={(_, id) => goTo(id)}
+      />
+    )
+  }
   if (showInfo && chat && group) {
     return (
       <>
-        <GroupInfo me={me} chat={chat} messages={messages} prefs={prefs} actions={actions} onBack={() => setShowInfo(false)} onOpenPerson={onOpenPerson} onView={(m, data) => setViewing({ m, data })} />
+        <GroupInfo
+          me={me}
+          chat={chat}
+          messages={messages}
+          prefs={prefs}
+          starred={starredIds.size}
+          actions={actions}
+          onBack={() => setShowInfo(false)}
+          onOpenPerson={onOpenPerson}
+          onView={(m, data) => setViewing({ m, data })}
+        />
+        {infoDialogs}
         {viewer}
       </>
     )
@@ -392,15 +519,21 @@ export default function ChatRoom(props: Props) {
           messages={messages}
           muted={muted}
           blocked={iBlockedThem}
+          starred={starredIds.size}
+          timer={chat ? (chat.timer ?? 0) : undefined}
           actions={actions}
           onCall={call}
           onBack={() => setShowInfo(false)}
           onView={(m, data) => setViewing({ m, data })}
         />
+        {infoDialogs}
         {viewer}
       </>
     )
   }
+
+  const pin = pins.length ? pins[pinIndex % pins.length] : undefined
+  const pinLive = pin && messages.find((m) => m.id === pin.id) // (its words may have been edited since)
 
   return (
     <div
@@ -423,7 +556,9 @@ export default function ChatRoom(props: Props) {
           <Icon name="back" />
         </button>
         <button className="bar-who" onClick={() => setShowInfo(true)} disabled={!chat && !other}>
-          {group && chat ? <GroupAvatar chat={chat} size={42} /> : other ? <PersonAvatar uid={other.uid} name={other.name} size={42} /> : <Avatar name={title} size={42} />}
+          <TimerBadge on={!!chat?.timer}>
+            {group && chat ? <GroupAvatar chat={chat} size={42} /> : other ? <PersonAvatar uid={other.uid} name={other.name} size={42} /> : <Avatar name={title} size={42} />}
+          </TimerBadge>
           <h2 dir="auto">
             {title}
             <small>
@@ -480,6 +615,38 @@ export default function ChatRoom(props: Props) {
         </div>
       )}
 
+      {/* Pinned messages: tap to go to it. With more than one, each tap goes to the next. */}
+      {pin && (
+        <div className="pin-bar">
+          <button
+            className="pin-show"
+            aria-label={t.pinnedMessage}
+            onClick={() => {
+              goTo(pin.id)
+              setPinIndex((i) => (i + 1) % pins.length)
+            }}
+          >
+            {pins.length > 1 && (
+              <span className="pin-steps" aria-hidden>
+                {pins.map((p) => (
+                  <span key={p.id} className={p.id === pin.id ? 'on' : ''} />
+                ))}
+              </span>
+            )}
+            <Icon name="pin" size={18} />
+            <span className="pin-text" dir="auto">
+              {group && <strong>{pin.senderId === me.uid ? t.you : pin.senderName}: </strong>}
+              {shortText(pinLive ?? pin, me.uid, t)}
+            </span>
+          </button>
+          {canTalk && !iBlockedThem && (
+            <button className="icon" aria-label={t.unpinMsg} title={t.unpinMsg} onClick={() => unpinMessage(chatId, pin.id).catch(oops)}>
+              <Icon name="pinOff" size={18} />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* The wall is the patterned background. The messages scroll on top of it. */}
       <div className="wall">
         <div className="messages" ref={scroller} onScroll={onScroll}>
@@ -515,6 +682,8 @@ export default function ChatRoom(props: Props) {
                     // "first" = the first of several messages in a row from the same person. It gets the little tail.
                     first={newDay || !before || before.kind === 'system' || before.senderId !== m.senderId || divider?.id === m.id}
                     highlight={q}
+                    starred={starredIds.has(m.id)}
+                    pinned={pinnedIds.has(m.id)}
                     onMenu={openMenu}
                     onReactions={showReactions}
                     onJump={jumpTo}
@@ -645,17 +814,21 @@ export default function ChatRoom(props: Props) {
           }}
           onForEveryone={() => {
             const isLast = messages[messages.length - 1]?.id === dialog.m.id
-            unsendMessage(chatId, me, dialog.m, isLast).catch((err) => {
-              console.error(err)
-              setToast(t.somethingWrong)
-            })
+            unsendMessage(chatId, me, dialog.m, isLast, !!chat?.pins?.[dialog.m.id]).catch(oops)
             setDialog(null)
           }}
         />
       )}
-      {dialog?.kind === 'mute' && (
-        <MuteDialog onClose={() => setDialog(null)} onMute={(until) => setPrefs(me.uid, chatId, { mutedUntil: until }).catch(console.error)} />
+      {dialog?.kind === 'pin' && chat && (
+        <PinDialog
+          onClose={() => setDialog(null)}
+          onPin={(lasts) => {
+            setPinIndex(0) // show the new pin
+            pinMessage(me, chat, dialog.m, lasts).catch(oops)
+          }}
+        />
       )}
+      {chatDialogs}
 
       {photos && <PhotoSender files={photos} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
 
@@ -700,5 +873,7 @@ function ChatStatus({ me, myProfile, chat, other }: { me: Person; myProfile: Pro
     return <>{presenceText(lastSeen, now, t) || t.tapForInfo}</>
   }
   // Groups: "Ali, Sara, You"
-  return <>{chat?.members.map((uid) => (uid === me.uid ? t.you : chat.names[uid])).join(', ')}</>
+  // Everyone else first, then "You" at the end, like WhatsApp.
+  const others = chat?.members.filter((uid) => uid !== me.uid).map((uid) => chat.names[uid]) ?? []
+  return <>{[...others, t.you].join(', ')}</>
 }

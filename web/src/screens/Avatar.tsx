@@ -1,6 +1,7 @@
 // Avatar.tsx: the round picture next to a name.
 // With a photo, it shows the photo. Without one, a coloured circle with the first letter
 // (or a group icon). The colour comes from the name, so each person always gets the same one.
+import type { ReactNode } from 'react'
 import { isGroup, otherPerson, type Chat } from '../chats'
 import { avatarBackground } from '../colours'
 import { useMedia } from '../media'
@@ -34,7 +35,23 @@ export function GroupAvatar({ chat, size }: { chat: Chat; size?: number }) {
 
 // The avatar for a chat in the list: the group's, or the other person's.
 export function ChatAvatar({ chat, myUid, size }: { chat: Chat; myUid: string; size?: number }) {
-  if (isGroup(chat)) return <GroupAvatar chat={chat} size={size} />
   const other = otherPerson(chat, myUid)
-  return <PersonAvatar uid={other.uid} name={other.name} size={size} />
+  return (
+    <TimerBadge on={!!chat.timer}>
+      {isGroup(chat) ? <GroupAvatar chat={chat} size={size} /> : <PersonAvatar uid={other.uid} name={other.name} size={size} />}
+    </TimerBadge>
+  )
+}
+
+// A little timer on the corner of an avatar: this chat has disappearing messages on.
+export function TimerBadge({ on, children }: { on: boolean; children: ReactNode }) {
+  if (!on) return children
+  return (
+    <span className="has-timer">
+      {children}
+      <span className="timer-badge">
+        <Icon name="timer" size={11} />
+      </span>
+    </span>
+  )
 }

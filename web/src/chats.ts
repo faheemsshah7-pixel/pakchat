@@ -14,11 +14,15 @@
 //     admin:   who made the group      admins: [uid, ...] anyone else they made admin
 //     onlyAdmins: true = only admins can send messages
 //     inviteCode: the code in the group's invite link (see invites.ts)
+//   Any chat can also have:
+//     pins:  { messageId: a small copy of the message }   pinned messages, up to 3 (see pins.ts)
+//     timer: seconds before new messages disappear (0 = off) (see disappearing.ts)
 //   chats/<chatId>/messages/<id>    one document per message
 //     kind: 'text' | 'photo' | 'voice' | 'system', senderId, sentAt, and the content
 //     replyTo:   a small copy of the message it answers
 //     reactions: { uidA: '👍' }
 //     editedAt, deleted, forwarded
+//     expireAt:  when it disappears (only in chats with disappearing messages on)
 //   chats/<chatId>/media/<id>       the photo or voice note itself (see media.ts)
 //   chats/<chatId>/typing/<uid>     when each person last pressed a key (see typing.ts)
 //
@@ -31,12 +35,13 @@ import {
   limit,
   query,
   serverTimestamp,
+  Timestamp,
   updateDoc,
   where,
   writeBatch,
-  type Timestamp,
   type WriteBatch,
 } from 'firebase/firestore'
+import { isExpired, timerLabel } from './disappearing'
 import { db } from './firebase'
 import { saveMedia } from './media'
 import { contactKey } from './phone'
@@ -58,6 +63,8 @@ export type SystemEvent =
   | 'description'
   | 'onlyAdmins'
   | 'everyone'
+  | 'pinned' // "Ali pinned a message"
+  | 'timer' // "Ali turned on disappearing messages" (seconds says for how long, 0 = turned off)
 
 export type LastMessage = {
   kind?: Message['kind']
@@ -68,7 +75,9 @@ export type LastMessage = {
   senderName?: string
   event?: SystemEvent
   targetName?: string
+  seconds?: number
   deleted?: boolean
+  expireAt?: Timestamp | null
 }
 
 export type Chat = {
@@ -87,7 +96,13 @@ export type Chat = {
   updatedAt?: Timestamp | null
   deliveredAt?: Times
   readAt?: Times
+  pins?: Record<string, Pin>
+  timer?: number
 }
+
+// A pinned message: a small copy of it, so the bar at the top can show it even when it isn't loaded.
+// at = when it was pinned, until = when the pin runs out (both in milliseconds).
+export type Pin = { senderId: string; senderName: string; kind: string; text: string; at: number; until: number }
 
 // A small copy of the message you're answering, so the reply can show it.
 export type ReplyTo = { id: string; senderId: string; senderName: string; kind: string; text: string }
@@ -115,6 +130,7 @@ export type Message = {
   reactions?: Record<string, string>
   editedAt?: Timestamp | null
   deleted?: boolean
+  expireAt?: Timestamp | null // disappearing messages: when it goes
 }
 
 // What you can send. Photos and voice notes arrive as text ("data URLs"), see media.ts.
@@ -129,7 +145,8 @@ export type Extras = { replyTo?: ReplyTo; forwarded?: boolean }
 
 // Which chat to send to. `other` is set for direct chats, so a new chat can be created.
 // isNew: the chat doesn't exist yet, so this message creates it.
-export type Target = { chatId: string; other?: Person; isNew?: boolean }
+// timer: the chat has disappearing messages on, so the message goes after this many seconds.
+export type Target = { chatId: string; other?: Person; isNew?: boolean; timer?: number }
 
 // Your "read receipts" setting (Settings > Privacy). Home.tsx keeps it up to date.
 // Off = the other person doesn't see blue ticks from you, and you don't see theirs.
@@ -178,6 +195,9 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
   const message: Record<string, unknown> = { kind: content.kind, senderId: me.uid, senderName: me.name }
   if (extras.replyTo) message.replyTo = extras.replyTo
   if (extras.forwarded) message.forwarded = true
+  // Disappearing messages: it says when it goes. (Your clock, which is close enough.)
+  const expireAt = target.timer && content.kind !== 'call' ? Timestamp.fromMillis(Date.now() + target.timer * 1000) : undefined
+  if (expireAt) message.expireAt = expireAt
 
   if (content.kind === 'text') {
     message.text = content.text
@@ -185,7 +205,7 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
     Object.assign(message, { video: content.video, seconds: content.seconds, missed: content.missed })
   } else {
     // The photo or voice note goes in its own document(s), so the message list stays small.
-    message.mediaId = saveMedia(batch, chatRef, content.data, me.uid)
+    message.mediaId = saveMedia(batch, chatRef, content.data, me.uid, expireAt)
     if (content.kind === 'photo') {
       Object.assign(message, { width: content.width, height: content.height })
       if (content.caption) message.caption = content.caption
@@ -210,11 +230,12 @@ function directChatFields(me: Person, other: Person, isNew: boolean) {
 export function addMessage(batch: WriteBatch, target: Target, message: Record<string, unknown>, me: Person, chatFields: object) {
   const chatRef = doc(db, 'chats', target.chatId)
   batch.set(doc(collection(chatRef, 'messages')), { ...message, sentAt: serverTimestamp() }) // the server's clock
-  const { kind, senderId, senderName, event, targetName, video, missed } = message
+  const { kind, senderId, senderName, event, targetName, video, missed, expireAt } = message
   // The chat list shows a photo's caption as its text.
   const text = message.text ?? message.caption
+  const seconds = kind === 'system' ? message.seconds : undefined // "turned on disappearing messages for 7 days"
   const lastMessage = Object.fromEntries(
-    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed }).filter(([, v]) => v !== undefined),
+    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt }).filter(([, v]) => v !== undefined),
   )
   // Sending a message means you've read the chat, so it isn't "unread" for you.
   const receipts = myPrivacy.readReceipts || !isDirectId(target.chatId)
@@ -229,9 +250,9 @@ export function addMessage(batch: WriteBatch, target: Target, message: Record<st
 }
 
 // "Ali added Sara", "You left", ... in the chosen language.
-export function systemText(m: { event?: SystemEvent; senderId: string; senderName?: string; targetName?: string }, myUid: string, t: Strings) {
+export function systemText(m: { event?: SystemEvent; senderId: string; senderName?: string; targetName?: string; seconds?: number }, myUid: string, t: Strings) {
   const name = m.senderId === myUid ? t.you : (m.senderName ?? '')
-  const values = { name, other: m.targetName ?? '' }
+  const values = { name, other: m.targetName ?? '', time: timerLabel(m.seconds ?? 0, t) }
   const templates: Record<SystemEvent, string> = {
     created: t.created,
     added: t.added,
@@ -243,6 +264,8 @@ export function systemText(m: { event?: SystemEvent; senderId: string; senderNam
     description: t.changedDescription,
     onlyAdmins: t.setOnlyAdmins,
     everyone: t.setEveryone,
+    pinned: t.pinnedNote,
+    timer: m.seconds ? t.timerOn : t.timerOff,
   }
   return fill(templates[m.event ?? 'left'] ?? '', values)
 }
@@ -269,7 +292,7 @@ export function callTitle(m: { senderId: string; video?: boolean; missed?: boole
 // The grey line under a chat's name in the chat list.
 export function previewText(chat: Chat, myUid: string, t: Strings) {
   const last = chat.lastMessage
-  if (!last) return ''
+  if (!last || isExpired(last)) return '' // it disappeared
   if (last.kind === 'system') return systemText(last, myUid, t)
   const body = shortText(last, myUid, t)
   // In groups, say who sent it: "Ali: salam"

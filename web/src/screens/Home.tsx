@@ -46,11 +46,13 @@ import JoinGroup from './JoinGroup'
 import NewChat from './NewChat'
 import NewGroup from './NewGroup'
 import Settings from './Settings'
+import StarredList from './StarredList'
 import Welcome from './Welcome'
 
 // Which chat is open. `other` is set for direct chats (the chat may not exist yet).
-export type Open = { chatId: string; other?: Person }
-type View = 'chats' | 'archived' | 'newChat' | 'newGroup' | 'settings' | 'calls'
+// focus: go to this message when it opens (from "Starred messages").
+export type Open = { chatId: string; other?: Person; focus?: { id: string } }
+type View = 'chats' | 'archived' | 'newChat' | 'newGroup' | 'settings' | 'calls' | 'starred'
 
 export default function Home({ user, profile }: { user: User; profile: Profile }) {
   const { t } = useT()
@@ -189,7 +191,18 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
 
   function openChat(next: Open) {
     setOpen(next)
-    if (view !== 'archived') setView('chats')
+    if (view !== 'archived' && view !== 'starred') setView('chats')
+  }
+
+  // Every starred message, from all your chats.
+  const starred = useMemo(
+    () => [...prefs.entries()].flatMap(([chatId, p]) => (p.starred ?? []).map((id) => ({ chatId, id }))),
+    [prefs],
+  )
+  function openStarred(chatId: string, id: string) {
+    const chat = chats.find((c) => c.id === chatId)
+    if (!chat) return
+    openChat({ chatId, other: isGroup(chat) ? undefined : otherPerson(chat, user.uid), focus: { id } })
   }
 
   const openChatDoc = open ? chats.find((c) => c.id === open.chatId) : undefined
@@ -215,6 +228,8 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
           <Settings me={me} profile={profile} blocked={blocked} onBack={() => setView('chats')} />
         ) : view === 'calls' ? (
           <CallsList me={me} onBack={() => setView('chats')} />
+        ) : view === 'starred' ? (
+          <StarredList me={me} items={starred} chats={chats} onBack={() => setView('chats')} onOpen={openStarred} />
         ) : (
           <ChatList
             me={me}
@@ -230,6 +245,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             onNewGroup={() => setView('newGroup')}
             onSettings={() => setView('settings')}
             onCalls={() => setView('calls')}
+            onStarred={() => setView('starred')}
           />
         )}
       </aside>
@@ -248,6 +264,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             blocked={blocked}
             onBack={() => setOpen(null)}
             onOpenPerson={(person) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person })}
+            focus={showing.focus}
           />
         ) : (
           <Welcome />
