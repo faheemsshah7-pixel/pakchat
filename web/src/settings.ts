@@ -1,10 +1,15 @@
 // settings.ts: settings saved on THIS device only (in the browser's "localStorage"),
 // like sounds and text size. Your look (theme.ts) and language work the same way.
 import { useSyncExternalStore } from 'react'
+import type { Tone } from './sound'
 
 export type TextSize = 'small' | 'medium' | 'large'
 export type Settings = {
   sounds: boolean // a little sound when a message arrives
+  messageTone: Tone // which sound, for chats with one person (sound.ts)
+  groupTone: Tone // which sound, for groups
+  conversationTones: boolean // little sounds while a chat is open: a message you send, and one that arrives
+  toneVolume: number // how loud those are, 0 to 1
   textSize: TextSize // how big messages are written
   enterSends: boolean // Enter sends; Shift+Enter makes a new line
   lowDataCalls: boolean // lower picture quality in video calls, to save mobile data (calls.ts)
@@ -13,7 +18,7 @@ export type Settings = {
   transcriptLang: 'en' | 'ur' // the language you speak in your voice notes
 }
 
-const DEFAULTS: Settings = { sounds: true, textSize: 'medium', enterSends: true, lowDataCalls: false, photoHD: false, transcripts: false, transcriptLang: 'en' }
+const DEFAULTS: Settings = { sounds: true, messageTone: 'ping', groupTone: 'ping', conversationTones: true, toneVolume: 0.6, textSize: 'medium', enterSends: true, lowDataCalls: false, photoHD: false, transcripts: false, transcriptLang: 'en' }
 const listeners = new Set<() => void>()
 let current: Settings = load()
 

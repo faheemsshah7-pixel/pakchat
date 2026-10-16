@@ -1,11 +1,12 @@
 // prefs.ts: YOUR settings for each chat: pinned, muted, archived, marked unread, cleared,
-// and the messages you starred.
+// its notification sound, and the messages you starred.
 // Saved in users/<you>/prefs/<chatId>. They're private: the rules only let you see your own,
 // so the other person never knows you muted or archived them.
 import { useEffect, useState } from 'react'
 import { arrayRemove, arrayUnion, collection, doc, onSnapshot, serverTimestamp, setDoc, type Timestamp } from 'firebase/firestore'
 import type { Chat } from './chats'
 import { db } from './firebase'
+import type { Tone } from './sound'
 
 export type ChatPrefs = {
   pinnedAt?: number | null // when you pinned it (pinned chats stay on top). null = not pinned
@@ -17,6 +18,7 @@ export type ChatPrefs = {
   deletedAt?: Timestamp | null // "Delete chat": hidden from your list until a new message comes
   hidden?: string[] // messages you deleted just for yourself
   starred?: string[] // messages you starred (only you see your stars)
+  tone?: Tone | null // this chat's own notification sound (sound.ts). null = the usual one
 }
 
 export const MAX_PINNED = 3

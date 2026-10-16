@@ -1,6 +1,6 @@
 // ContactInfo.tsx: about the person you're chatting with: photo, name, number or Gmail,
-// their "about" line, photos you shared, starred messages, disappearing messages,
-// and buttons to call, mute, clear, block, report or delete.
+// their "about" line, photos you shared, starred messages, disappearing messages, the chat's
+// wallpaper and notification sound, and buttons to call, mute, clear, block, report or delete.
 // In "Message yourself" it's about you, without calls, block or report.
 import type { Message, Person } from '../chats'
 import { timerLabel } from '../disappearing'
@@ -20,6 +20,8 @@ export type ChatActions = {
   leave: () => void
   starred: () => void // show the starred messages
   timer: () => void // change disappearing messages
+  wallpaper: () => void // change the chat's wallpaper (wallpaper.ts)
+  tone: () => void // change the chat's notification sound (sound.ts)
 }
 
 type Props = {
@@ -32,13 +34,14 @@ type Props = {
   blocked: boolean
   starred: number // how many messages you starred here
   timer?: number // disappearing messages (seconds, 0 = off). Missing before the first message.
+  looks: Looks // the chat's wallpaper and sound, in words
   actions: ChatActions
   onCall?: (video: boolean) => void // missing when you blocked them
   onBack: () => void
   onView: (m: Message, data: string) => void
 }
 
-export default function ContactInfo({ chatId, self, person, messages, muted, blocked, starred, timer, actions, onCall, onBack, onView }: Props) {
+export default function ContactInfo({ chatId, self, person, messages, muted, blocked, starred, timer, looks, actions, onCall, onBack, onView }: Props) {
   const { t } = useT()
   const profile = useProfile(person.uid)
   return (
@@ -74,7 +77,7 @@ export default function ContactInfo({ chatId, self, person, messages, muted, blo
           </p>
         </section>
         <MediaGrid chatId={chatId} messages={messages} onView={onView} />
-        <ChatExtras starred={starred} timer={timer} actions={actions} />
+        <ChatExtras starred={starred} timer={timer} looks={self ? { wallpaper: looks.wallpaper } : looks} actions={actions} />
         <section className="info-section actions">
           <ActionRow icon={muted ? 'bell' : 'bellOff'} label={muted ? t.unmute : t.muteNotifications} onClick={actions.mute} />
           <ActionRow icon="eraser" label={t.clearChat} onClick={actions.clear} />
@@ -106,13 +109,20 @@ export function ActionRow({ icon, label, value, onClick, danger }: RowProps) {
   )
 }
 
-// "Starred messages" and "Disappearing messages", in both contact info and group info.
-export function ChatExtras({ starred, timer, actions }: { starred: number; timer?: number; actions: ChatActions }) {
+// The chat's wallpaper ("Default", "Colour"...) and notification sound ("Chime"). No tone = no sound row
+// (in "Message yourself" and broadcast lists, nobody else sends you messages).
+export type Looks = { wallpaper: string; tone?: string }
+
+// "Starred messages", "Disappearing messages", "Wallpaper" and "Notification tone",
+// in contact info, group info and broadcast list info.
+export function ChatExtras({ starred, timer, looks, actions }: { starred: number; timer?: number; looks: Looks; actions: ChatActions }) {
   const { t } = useT()
   return (
     <section className="info-section actions">
       <ActionRow icon="star" label={t.starredMessages} value={starred ? String(starred) : t.none} onClick={actions.starred} />
       {timer !== undefined && <ActionRow icon="timer" label={t.disappearing} value={timerLabel(timer, t)} onClick={actions.timer} />}
+      <ActionRow icon="image" label={t.wallpaper} value={looks.wallpaper} onClick={actions.wallpaper} />
+      {looks.tone && <ActionRow icon="music" label={t.notificationTone} value={looks.tone} onClick={actions.tone} />}
     </section>
   )
 }

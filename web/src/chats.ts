@@ -14,6 +14,8 @@
 //     admin:   who made the group      admins: [uid, ...] anyone else they made admin
 //     onlyAdmins: true = only admins can send messages
 //     inviteCode: the code in the group's invite link (see invites.ts)
+//   Broadcast lists are chats only you are in, with type 'broadcast' (see broadcasts.ts):
+//     recipients: [uid, ...] who gets your messages, each in their own chat with you
 //   Any chat can also have:
 //     pins:  { messageId: a small copy of the message }   pinned messages, up to 3 (see pins.ts)
 //     timer: seconds before new messages disappear (0 = off) (see disappearing.ts)
@@ -27,6 +29,7 @@
 //     once:      true = "view once" (photos, videos, voice notes)   openedBy: { uidA: time }  (see once.ts)
 //     round:     true = a round video message (videoNotes.ts)    hd: true = an HD photo
 //     transcript: a voice note's words, written out while it was recorded (transcribe.ts)
+//     copies:    broadcast lists: { uid: id } where each person's copy is (see broadcasts.ts)
 //     editedAt, deleted, forwarded
 //     expireAt:  when it disappears (only in chats with disappearing messages on)
 //   chats/<chatId>/media/<id>       the photo, video, voice note or document itself (see media.ts)
@@ -34,7 +37,7 @@
 //
 // Direct chat ids are the two people's ids sorted and joined: "uidA_uidB".
 // "Message yourself" is a direct chat with you twice: "uidA_uidA".
-// Group chat ids are random, picked by Firestore.
+// Group and broadcast list ids are random, picked by Firestore.
 import {
   collection,
   deleteField,
@@ -74,8 +77,10 @@ export type SystemEvent =
   | 'everyone'
   | 'pinned' // "Ali pinned a message"
   | 'timer' // "Ali turned on disappearing messages" (seconds says for how long, 0 = turned off)
+  | 'listCreated' // "You created this broadcast list"
 
 export type LastMessage = {
+  id?: string // which message it is (older chats don't say)
   kind?: Message['kind']
   text?: string
   video?: boolean // calls
@@ -96,7 +101,7 @@ export type LastMessage = {
 
 export type Chat = {
   id: string
-  type?: 'direct' | 'group' // chats from step 2 have no type: they're direct
+  type?: 'direct' | 'group' | 'broadcast' // chats from step 2 have no type: they're direct
   members: string[]
   names: Record<string, string>
   title?: string
@@ -106,6 +111,7 @@ export type Chat = {
   admins?: string[]
   onlyAdmins?: boolean
   inviteCode?: string
+  recipients?: string[] // broadcast lists: who gets the messages
   lastMessage?: LastMessage
   updatedAt?: Timestamp | null
   deliveredAt?: Times
@@ -173,6 +179,7 @@ export type Message = {
   editedAt?: Timestamp | null
   deleted?: boolean
   expireAt?: Timestamp | null // disappearing messages: when it goes
+  copies?: Record<string, string> // broadcast lists: { uid: the id of their copy, in your chat with them }
 }
 
 // What you can send. Photos, videos, voice notes and documents arrive as text ("data URLs"), see media.ts.
@@ -209,10 +216,13 @@ export function chatIdFor(a: string, b: string) {
 }
 
 export const isGroup = (chat: Chat | undefined) => chat?.type === 'group'
+export const isBroadcast = (chat: Chat | undefined) => chat?.type === 'broadcast'
+// A chat with one other person (or with yourself): not a group, and not a broadcast list.
+export const isDirect = (chat: Chat | undefined) => !!chat && !isGroup(chat) && !isBroadcast(chat)
 const isDirectId = (chatId: string) => chatId.split('_').length === 2
 
 // "Message yourself": a chat where both members are you. For notes, links and photos you want to keep.
-export const isSelfChat = (chat: Chat | undefined) => !!chat && !isGroup(chat) && chat.members.length > 0 && chat.members.every((m) => m === chat.members[0])
+export const isSelfChat = (chat: Chat | undefined) => isDirect(chat) && chat!.members.length > 0 && chat!.members.every((m) => m === chat!.members[0])
 
 // Group admins: whoever made it, plus anyone they made admin.
 export function isAdmin(chat: Chat | undefined, uid: string) {
@@ -227,6 +237,8 @@ export function otherPerson(chat: Chat, myUid: string): Person {
 
 export function chatTitle(chat: Chat, myUid: string, t?: Strings) {
   if (isGroup(chat)) return chat.title ?? ''
+  // A broadcast list without a name: the people on it, "Ali, Sara, Bilal".
+  if (isBroadcast(chat)) return chat.title || (chat.recipients ?? []).map((uid) => chat.names[uid] ?? '?').join(', ')
   const name = otherPerson(chat, myUid).name
   return t && isSelfChat(chat) ? fill(t.youName, { name }) : name // "Sheharyar (You)"
 }
@@ -338,7 +350,7 @@ export function addMessage(batch: WriteBatch, target: Target, message: Record<st
   // Every field the chat list's preview can have. The ones this message doesn't have are deleted
   // (deleteField). Without that, merge: true below would KEEP them from the message before,
   // so a photo after "Delete for everyone" would still say "This message was deleted".
-  const values: Record<string, unknown> = { kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live, mentions, once, round }
+  const values: Record<string, unknown> = { id: messageRef.id, kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live, mentions, once, round }
   const lastMessage = Object.fromEntries([...Object.keys(values), 'deleted'].map((key) => [key, values[key] ?? deleteField()]))
   // Sending a message means you've read the chat, so it isn't "unread" for you.
   const receipts = myPrivacy.readReceipts || !isDirectId(target.chatId)
@@ -370,6 +382,7 @@ export function systemText(m: { event?: SystemEvent; senderId: string; senderNam
     everyone: t.setEveryone,
     pinned: t.pinnedNote,
     timer: m.seconds ? t.timerOn : t.timerOff,
+    listCreated: t.listCreated,
   }
   return fill(templates[m.event ?? 'left'] ?? '', values)
 }

@@ -693,3 +693,71 @@ server's time), and the view once checks on media. So this update deploys the ru
 - In `photoEdit.ts`, add a colour to `COLOURS` (like `'#01411c'`, Pakistan green).
 - Send a friend a view once photo (it isn't offered in Message yourself), and watch it say
   "Opened" on your side when they open it.
+
+## Step 18: Wallpapers, notification tones, conversation tones, broadcast lists
+
+| Feature | Files | Saved as |
+|---|---|---|
+| A wallpaper for each chat | `wallpaper.ts`, `WallpaperPicker.tsx` | `users/<you>/wallpapers/<chatId>` (or `/default` for all chats) |
+| A notification tone for each chat | `sound.ts`, `ToneDialog` in `Dialogs.tsx` | `tone` in your prefs for that chat (`prefs.ts`) |
+| Message and group tones | Settings > Notifications | `messageTone`, `groupTone` on this device (`settings.ts`) |
+| Conversation tones | `sound.ts`, Settings > Chats | `conversationTones` (on or off), `toneVolume` (0 to 1) on this device |
+| Broadcast lists | `broadcasts.ts`, `BroadcastInfo.tsx`, `NewGroup.tsx` | a chat with `type: 'broadcast'` that only you are in |
+
+### Wallpapers
+Open a chat's menu and pick **Wallpaper**, or **Settings > Chats > Wallpaper** for every chat.
+Pick a colour (with or without the little drawings, "Doodles") or one of your photos (with
+**Darken**, so the messages stand out). The preview at the top shows how it will look.
+- A chat uses its own wallpaper, or else the one for all chats, or else the look's own.
+  That's `own ?? all` in `useWallpaper`. ("??" means "if the left side is empty, use the right".)
+- The doodles are drawn by `.wall::before` in `index.css`. A wallpaper only changes two
+  "CSS variables": `--pattern` (white on a dark colour, brown on a light one) and
+  `--pattern-opacity` (0 hides them). `isDark` works out if a colour is dark, counting green
+  most, like our eyes do.
+- A photo is darkened with a see-through black layer drawn on top of it
+  (`linear-gradient(rgb(0 0 0 / 0.3), ...)`), so nothing has to change the photo itself.
+- Wallpapers are saved in the database, so they follow you to any device. Only you can read
+  yours (the rules), and they must be a colour like `#1b2a4a` or a picture, not too big.
+
+### Notification tones
+Seven sounds: Ping, Chime, Pop, Bell, Drops, Marimba and None. There are no sound files: each
+one is a few short notes the browser plays itself (`MELODIES` in `sound.ts`). A note is a
+pitch in Hz (880 is a high A), a start time, a length and a loudness that fades out.
+- **Settings > Notifications** picks the tone for all chats and the one for all groups.
+- **Chat info > Notification tone** picks one for just that chat ("Default" = the usual one).
+- Picking a tone plays it, so you can hear it before you save.
+Which plays: the chat's own, or else the group or message tone (`Home.tsx`, where alerts play).
+
+### Conversation tones
+While a chat is open, a soft "whoosh" when your message reaches the server, and a soft "pop"
+when someone else's arrives (instead of the usual tone, which is for chats you aren't looking
+at). **Settings > Chats** has the switch and a **How loud** slider. Letting go of the slider
+plays one, so you can hear how loud it is. The loudness is a "gain" node: every note goes
+through it, and `gain.value = 0.3` makes them all 30% as loud.
+
+### Broadcast lists
+**New broadcast** (the chat list menu, or the New chat screen). Pick 2 people or more, and
+give it a name if you like. Each message you send to the list goes to each person **in your
+own chat with them**, as if you'd sent it just to them. They can't see the list or who else
+is on it, and their answers come to your chat with them, like WhatsApp.
+- The list is a chat with `type: 'broadcast'`, `members: [you]` and `recipients: [...]`.
+  Because you're the only member, nobody else can read it (the usual chat rules do that).
+- `sendToList` sends a copy to each person, 5 at a time, then saves `copies: { uid: id }`
+  on the list's message. That's how **Edit** and **Delete for everyone** find every copy.
+- The ticks on your messages in the list come from your chats with each of them
+  (`listAsChat`), so ✓✓ turns blue once everyone has read it, and Message info says who.
+- **List info** renames it, adds or takes people off, and **Delete broadcast list** deletes the
+  list and what you sent in it. The copies stay in each person's chat.
+- No polls, replies, pins, disappearing messages or view once in a list: they need everyone
+  to be in one chat.
+
+### New rules
+`firestore.rules` has the `wallpapers` rules, the `broadcastOk()` check (just you in it, 1 to
+256 people, not you), the one-time `copies` on a list message, and lets you delete a
+broadcast list (only a list: other chats are cleared or left). So this update deploys the
+rules too.
+
+### Try this
+- In `wallpaper.ts`, add a colour to `WALL_COLOURS` (like `'#01411c'`, Pakistan green).
+- In `sound.ts`, change the pitches in `marimba` and pick it in Settings to hear the change.
+- Make a broadcast list with two friends and send "Eid Mubarak". Each gets it in their own chat.

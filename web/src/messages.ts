@@ -60,7 +60,7 @@ export async function editMessage(chatId: string, me: Person, m: Message, text: 
   batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp(), ...tags })
   if (isLast) {
     batch.update(doc(db, 'chats', chatId), {
-      lastMessage: { kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name, ...expiry(m), ...(mentions?.length ? { mentions } : {}) },
+      lastMessage: { id: m.id, kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name, ...expiry(m), ...(mentions?.length ? { mentions } : {}) },
     })
   }
   await batch.commit()
@@ -74,7 +74,7 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
     [
       ...['text', 'caption', 'mediaId', 'posterId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'],
       ...['fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'movedAt', 'contact'],
-      ...['options', 'multi', 'votes', 'sticker', 'mentions', 'once', 'openedBy', 'round', 'hd', 'transcript'],
+      ...['options', 'multi', 'votes', 'sticker', 'mentions', 'once', 'openedBy', 'round', 'hd', 'transcript', 'copies'],
     ].map((key) => [
       key,
       deleteField(),
@@ -84,7 +84,7 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
   if (m.mediaId) await deleteMedia(batch, chatId, m.mediaId)
   if (m.posterId) await deleteMedia(batch, chatId, m.posterId)
   const chatFields: Record<string, unknown> = {}
-  if (isLast) chatFields.lastMessage = { kind: m.kind ?? 'text', deleted: true, senderId: me.uid, senderName: me.name, ...expiry(m) }
+  if (isLast) chatFields.lastMessage = { id: m.id, kind: m.kind ?? 'text', deleted: true, senderId: me.uid, senderName: me.name, ...expiry(m) }
   if (pinned) chatFields[`pins.${m.id}`] = deleteField()
   if (isLast || pinned) batch.update(doc(db, 'chats', chatId), chatFields)
   await batch.commit()

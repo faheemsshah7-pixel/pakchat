@@ -13,6 +13,10 @@ service cloud.firestore {
     function isGroupChat(c) {
       return c.get('type', 'direct') == 'group';
     }
+    // A broadcast list (see broadcasts.ts): a chat only its maker is in.
+    function isBroadcastChat(c) {
+      return c.get('type', 'direct') == 'broadcast';
+    }
     // Group admins: whoever made the group ("admin"), plus anyone they made admin ("admins").
     function adminIn(c, uid) {
       return isGroupChat(c) && (uid == c.get('admin', '') || uid in c.get('admins', []));
@@ -50,6 +54,21 @@ service cloud.firestore {
       // your favourite people to call, and who can see your status (see private.ts).
       match /private/{name} {
         allow read, write: if signedIn() && me() == userId;
+      }
+      // users/<uid>/wallpapers/<chatId, or "default" for all chats>: the background behind your
+      // messages (see wallpaper.ts). Only you see yours. A colour, or a photo (one document's worth).
+      match /wallpapers/{chatId} {
+        function wall() {
+          return request.resource.data;
+        }
+        allow read, delete: if signedIn() && me() == userId;
+        allow create, update: if signedIn() && me() == userId
+          && wall().keys().hasOnly(['kind', 'colour', 'doodles', 'data', 'dim'])
+          && ((wall().kind == 'colour' && wall().colour is string && wall().colour.matches('#[0-9a-f]{6}')
+              && wall().get('doodles', true) is bool)
+            || (wall().kind == 'photo' && wall().data is string && wall().data.matches('data:image/.*')
+              && wall().data.size() <= 900000
+              && wall().get('dim', 0) is number && wall().get('dim', 0) >= 0 && wall().get('dim', 0) <= 0.6));
       }
     }
 
@@ -314,10 +333,22 @@ service cloud.firestore {
           || lastMessageIsMine();
       }
       // You can only change your own name in the chat, plus the names of people being added.
+      // (In your broadcast list, the names are of the people on it, and only you can see them.)
       function namesOk() {
         let changed = after().get('names', {}).diff(before().get('names', {})).affectedKeys();
         let added = after().members.removeAll(before().members);
-        return changed.hasOnly(added.concat([me()]));
+        return changed.hasOnly(added.concat([me()])) || isBroadcastChat(before());
+      }
+      // A broadcast list: only you are in it (as its maker), and it goes to 1 to 256 other people.
+      function broadcastOk() {
+        return after().members == [me()]
+          && after().admin == me()
+          && after().get('admins', []).size() == 0
+          && after().recipients is list
+          && after().recipients.size() >= 1
+          && after().recipients.size() <= 256
+          && !(me() in after().recipients)
+          && after().names is map;
       }
       // Group name, description, photo and settings: only admins can change these.
       // (That includes a group's disappearing messages timer. In a chat with one person, either of you can change it.)
@@ -383,7 +414,14 @@ service cloud.firestore {
           && me() in after().members
           && after().members.size() >= 2
           && after().members.size() <= 256)
+        ||
+        // A broadcast list: just you in it.
+        (!isDirectId()
+          && after().type == 'broadcast'
+          && broadcastOk())
       );
+      // Only a broadcast list can be deleted (by you, its maker). Other chats are cleared or left instead.
+      allow delete: if signedIn() && isBroadcastChat(resource.data) && resource.data.admin == me();
 
       allow update: if signedIn()
         && lastMessageOk()
@@ -392,6 +430,7 @@ service cloud.firestore {
         && pinsOk()
         // a direct chat can't turn into a group, or the other way round
         && after().get('type', 'direct') == before().get('type', 'direct')
+        && (!isBroadcastChat(after()) || broadcastOk())
         && (
           // 1. Normal updates by someone in the chat (new message, ticks, typing): nobody joins or leaves.
           //    Admins can also change the group's info and who else is admin.
@@ -434,6 +473,11 @@ service cloud.firestore {
             && after().members == before().members.concat([me()])
             && after().members.size() <= 256
             && sameOwner() && sameAdmins() && !infoChanged())
+          ||
+          // 6. Your broadcast list: rename it, or change who's on it (broadcastOk, above).
+          (isBroadcastChat(before())
+            && before().admin == me()
+            && sameMembers() && sameOwner() && sameAdmins())
         );
 
       // ----- messages -----
@@ -447,10 +491,12 @@ service cloud.firestore {
           && newMessageOk(request.resource.data)
           && mayTalk(request.resource.data);
         // Changing a message: a reaction, an edit, "delete for everyone", a live location moving,
-        // cancelling a call you scheduled, voting in a poll, or opening a "view once" photo.
-        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall() || voting() || opening());
+        // cancelling a call you scheduled, voting in a poll, opening a "view once" photo,
+        // or a broadcast list's message remembering where its copies went.
+        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall() || voting() || opening() || recordingCopies());
         // Disappearing messages: once a message's time is up, anyone in the chat can delete it for good.
-        allow delete: if canRead() && expired(resource.data);
+        // In your broadcast list (only you are in it), you can delete them all, to delete the list.
+        allow delete: if canRead() && (expired(resource.data) || isBroadcastChat(get(chatPath()).data));
       }
       function expired(d) {
         return d.get('expireAt', null) is timestamp && d.expireAt < request.time;
@@ -562,16 +608,18 @@ service cloud.firestore {
             && m.video is bool && m.missed is bool
             && m.seconds is number && m.seconds >= 0 && m.seconds < 86400)
           || (m.kind == 'system'
-            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer']
+            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer', 'listCreated']
             // "Ali turned on disappearing messages" says for how long
             && (m.event != 'timer' || m.get('seconds', -1) in [0, 86400, 604800, 7776000]));
       }
       // In a group set to "only admins can send", only admins can post.
       // Anyone can still leave or join (those add a small grey note).
       // Other grey notes are for admins, except "Ali pinned a message" (anyone who can send can pin).
+      // (Your broadcast list is yours: you can post anything there.)
       function mayTalk(m) {
         let c = getAfter(chatPath()).data;
         return isDirectId()
+          || isBroadcastChat(c)
           || (m.kind == 'system' && m.event in ['left', 'joined'])
           || adminIn(c, me())
           || ((m.kind != 'system' || m.event == 'pinned') && !c.get('onlyAdmins', false));
@@ -637,6 +685,16 @@ service cloud.firestore {
           && now is map
           && now.diff(old).affectedKeys().hasOnly([me()])
           && now[me()] == request.time;
+      }
+      // Broadcast lists: once your message's copies are sent, it remembers where they are,
+      // copies = { uid: id }, so editing or deleting it can change the copies too (broadcasts.ts). Only once.
+      function recordingCopies() {
+        return resource.data.senderId == me()
+          && isBroadcastChat(get(chatPath()).data)
+          && !('copies' in resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['copies'])
+          && request.resource.data.copies is map
+          && request.resource.data.copies.size() <= 256;
       }
       // Cancel a call you scheduled: the card in the chat then says "Cancelled".
       function cancellingCall() {

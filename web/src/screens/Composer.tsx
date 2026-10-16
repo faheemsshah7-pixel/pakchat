@@ -28,7 +28,7 @@ type Props = {
   onDocuments: (files: File[]) => void // documents picked or pasted
   onLocation: () => void // "Location" in the paperclip menu
   onContact: () => void // "Contact" in the paperclip menu
-  onPoll: () => void // "Poll" in the paperclip menu
+  onPoll?: () => void // "Poll" in the paperclip menu (not in broadcast lists)
   canOnce: boolean // "view once" voice notes are offered (not in "Message yourself")
   people?: Person[] // a group's other members, to @mention (missing in chats with one person)
   replyTo: ReplyTo | null
@@ -202,7 +202,7 @@ export default function Composer(props: Props) {
     { label: t.document, icon: 'file', onClick: () => docInput.current?.click() },
     { label: t.location, icon: 'mapPin', onClick: onLocation },
     { label: t.contact, icon: 'contact', onClick: onContact },
-    { label: t.poll, icon: 'poll', onClick: onPoll },
+    ...(onPoll ? [{ label: t.poll, icon: 'poll' as const, onClick: onPoll }] : []),
   ]
 
   // Put an emoji where the cursor is.

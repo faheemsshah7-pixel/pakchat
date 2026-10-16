@@ -555,6 +555,19 @@ const PATHS = {
     </>
   ),
   stop: <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />,
+  megaphone: (
+    <>
+      <path d="m3 11 18-5v12L3 14v-3z" />
+      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+    </>
+  ),
+  music: (
+    <>
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

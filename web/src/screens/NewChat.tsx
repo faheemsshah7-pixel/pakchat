@@ -1,7 +1,7 @@
 // NewChat.tsx: start a chat. Type a friend's number or Gmail, or pick someone you already
-// know (from your chats and groups). "New group" and "Message yourself" are here too.
+// know (from your chats and groups). "New group", "New broadcast" and "Message yourself" are here too.
 import { useState } from 'react'
-import { chatIdFor, findUser, isGroup, type Chat, type Person } from '../chats'
+import { chatIdFor, findUser, isDirect, type Chat, type Person } from '../chats'
 import { useT } from '../lang'
 import { contactKey } from '../phone'
 import type { Profile } from '../profiles'
@@ -10,9 +10,9 @@ import { PersonAvatar } from './Avatar'
 import type { Open } from './Home'
 import Icon from './Icon'
 
-type Props = { me: Person; profile: Profile; chats: Chat[]; onBack: () => void; onOpen: (open: Open) => void; onNewGroup: () => void }
+type Props = { me: Person; profile: Profile; chats: Chat[]; onBack: () => void; onOpen: (open: Open) => void; onNewGroup: () => void; onNewBroadcast: () => void }
 
-export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup }: Props) {
+export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup, onNewBroadcast }: Props) {
   const { t } = useT()
   const [number, setNumber] = useState('')
   const [error, setError] = useState('')
@@ -26,7 +26,7 @@ export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup
   const known = [...people.entries()].map(([uid, name]) => ({ uid, name })).sort((a, b) => a.name.localeCompare(b.name))
   const q = number.trim().toLowerCase()
   const shown = q ? known.filter((p) => p.name.toLowerCase().includes(q)) : known
-  const direct = new Set(chats.filter((c) => !isGroup(c)).flatMap((c) => c.members))
+  const direct = new Set(chats.filter(isDirect).flatMap((c) => c.members))
   // "Message yourself": notes, links and photos you want to keep (a chat with you twice: uid_uid).
   const self = { chatId: chatIdFor(me.uid, me.uid), other: me }
 
@@ -74,6 +74,12 @@ export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup
             <Icon name="users" />
           </span>
           <strong className="row-main">{t.newGroup}</strong>
+        </button>
+        <button className="row new-group" onClick={onNewBroadcast}>
+          <span className="avatar accent">
+            <Icon name="megaphone" />
+          </span>
+          <strong className="row-main">{t.newBroadcast}</strong>
         </button>
         <button className="row" onClick={() => onOpen(self)}>
           <PersonAvatar uid={me.uid} name={me.name} size={44} />

@@ -3,16 +3,20 @@
 // All / Unread / Groups filter the list. Archived chats wait in their own list (on a phone the
 // "Archived" row at the top opens it; on a computer it's on the left bar, Rail.tsx).
 // Right-click a chat (or use its little arrow) to pin, mute, archive, mark unread or delete it.
+// The menu at the top makes a new group or broadcast list (broadcasts.ts).
 // The chats themselves come from Home.tsx, which listens to the database.
 // Each row is drawn again only when something in it changed (memo, at the bottom).
 import { memo, useState } from 'react'
 import { signOut } from 'firebase/auth'
 import { auth } from '../firebase'
 import { alertsState, turnOnAlerts } from '../alerts'
+import { deleteList } from '../broadcasts'
 import {
   chatIdFor,
   chatTitle,
   findUser,
+  isBroadcast,
+  isDirect,
   isGroup,
   isUnread,
   markRead,
@@ -57,12 +61,13 @@ type Props = {
   onOpen: (open: Open) => void
   onNewChat: () => void
   onNewGroup: () => void
+  onNewBroadcast: () => void
   onSettings: () => void
   onStarred: () => void
 }
 
 export default function ChatList(props: Props) {
-  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onSettings, onStarred } = props
+  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onNewBroadcast, onSettings, onStarred } = props
   const { t, lang, setLang } = useT()
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
@@ -108,6 +113,7 @@ export default function ChatList(props: Props) {
 
   const menu: MenuItem[] = [
     { label: t.newGroup, icon: 'users', onClick: onNewGroup },
+    { label: t.newBroadcast, icon: 'megaphone', onClick: onNewBroadcast },
     { label: t.starredMessages, icon: 'star', onClick: onStarred },
     { label: t.settings, icon: 'settings', onClick: onSettings },
     { label: t.theme, icon: 'palette', onClick: () => setPicking(true) },
@@ -140,7 +146,7 @@ export default function ChatList(props: Props) {
   ]
 
   // The same two functions for every row, every time (see stable.ts), so memo() works.
-  const openRow = useStable((chat: Chat) => onOpen(isGroup(chat) ? { chatId: chat.id } : { chatId: chat.id, other: otherPerson(chat, me.uid) }))
+  const openRow = useStable((chat: Chat) => onOpen(isDirect(chat) ? { chatId: chat.id, other: otherPerson(chat, me.uid) } : { chatId: chat.id }))
   const rowMenuAt = useStable((chat: Chat, x: number, y: number) => setRowMenu({ chat, x, y }))
 
   // The menu on one chat.
@@ -172,6 +178,8 @@ export default function ChatList(props: Props) {
     )
     if (isGroup(chat)) {
       items.push({ label: t.leaveGroup, icon: 'logout', danger: true, onClick: () => confirm(t.confirmLeave) && leaveGroup(me, chat) })
+    } else if (isBroadcast(chat)) {
+      items.push({ label: t.deleteList, icon: 'trash', danger: true, onClick: () => confirm(t.confirmDeleteList) && deleteList(chat).catch(console.error) })
     } else {
       items.push({ label: t.deleteChat, icon: 'trash', danger: true, onClick: () => confirm(t.confirmDeleteChat) && deleteChat(me.uid, chat.id) })
     }

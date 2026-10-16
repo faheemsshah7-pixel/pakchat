@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../firebase'
-import { isGroup, otherPerson, shortText, type Chat, type Message, type Person } from '../chats'
+import { chatTitle, isDirect, otherPerson, shortText, type Chat, type Message, type Person } from '../chats'
 import { isExpired } from '../disappearing'
 import { useT } from '../lang'
 import { starMessage } from '../prefs'
@@ -53,7 +53,7 @@ export default function StarredList({ me, items, chats, onBack, onOpen }: Props)
   function where(chatId: string, m: Message) {
     const chat = chats.find((c) => c.id === chatId)
     if (!chat) return ''
-    if (isGroup(chat)) return chat.title ?? ''
+    if (!isDirect(chat)) return chatTitle(chat, me.uid) // a group's or broadcast list's name
     return m.senderId === me.uid ? otherPerson(chat, me.uid).name : t.you
   }
 

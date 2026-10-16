@@ -1,10 +1,12 @@
 // Dialogs.tsx: small windows: forward a message to other chats, message info (who read it),
 // who reacted, delete a message, mute a chat, pin a message, disappearing messages,
-// send documents, share your location, and share a contact.
+// send documents, share your location, share a contact, and pick a notification sound.
 import { useEffect, useState } from 'react'
 import {
   chatTitle,
   findUser,
+  isBroadcast,
+  isDirect,
   isGroup,
   myPrivacy,
   otherPerson,
@@ -23,6 +25,8 @@ import { canUnsend, forwardMessage, react } from '../messages'
 import { PIN_CHOICES } from '../pins'
 import { HOUR, MUTE_ALWAYS } from '../prefs'
 import { getProfile } from '../profiles'
+import { getSetting } from '../settings'
+import { previewTone, TONES, type Tone } from '../sound'
 import { fill } from '../strings'
 import { ChatAvatar, PersonAvatar } from './Avatar'
 import { MapPreview } from './CardBubbles'
@@ -40,7 +44,8 @@ export function ForwardDialog(props: { me: Person; chats: Chat[]; fromChatId: st
   const [picked, setPicked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const shown = chats.filter((c) => chatTitle(c, me.uid, t).toLowerCase().includes(search.trim().toLowerCase()))
+  // (Not to broadcast lists: forward to the people themselves.)
+  const shown = chats.filter((c) => !isBroadcast(c) && chatTitle(c, me.uid, t).toLowerCase().includes(search.trim().toLowerCase()))
 
   function toggle(id: string) {
     if (picked.includes(id)) setPicked(picked.filter((p) => p !== id))
@@ -53,7 +58,7 @@ export function ForwardDialog(props: { me: Person; chats: Chat[]; fromChatId: st
     const targets: Target[] = picked.map((id) => {
       const chat = chats.find((c) => c.id === id)!
       // (timer: if that chat has disappearing messages on, the copy disappears too)
-      return isGroup(chat) ? { chatId: id, timer: chat.timer } : { chatId: id, other: otherPerson(chat, me.uid), timer: chat.timer }
+      return isDirect(chat) ? { chatId: id, other: otherPerson(chat, me.uid), timer: chat.timer } : { chatId: id, timer: chat.timer }
     })
     try {
       const failed = await forwardMessage(me, fromChatId, m, targets)
@@ -328,8 +333,9 @@ export function DocumentSender({ files, onSend, onClose }: DocsProps) {
 }
 
 // Share where you are: your current spot, or a live location for 15 minutes, 1 hour or 8 hours.
-type LocationProps = { onSend: (spot: Spot, liveMinutes?: number) => void; onClose: () => void }
-export function LocationDialog({ onSend, onClose }: LocationProps) {
+// canLive: live location is offered too (not in broadcast lists: one moving pin can't be in many chats).
+type LocationProps = { onSend: (spot: Spot, liveMinutes?: number) => void; onClose: () => void; canLive?: boolean }
+export function LocationDialog({ onSend, onClose, canLive = true }: LocationProps) {
   const { t } = useT()
   const [spot, setSpot] = useState<Spot | null>(null)
   const [error, setError] = useState('')
@@ -365,19 +371,23 @@ export function LocationDialog({ onSend, onClose }: LocationProps) {
       <button className="btn" disabled={!spot} onClick={() => send()}>
         <Icon name="mapPin" size={18} /> {t.sendCurrentLocation}
       </button>
-      <p className="section-title">{t.shareLive}</p>
-      <div className="choices" role="radiogroup">
-        {LIVE_CHOICES.map((choice, i) => (
-          <label key={choice} className="choice">
-            <input type="radio" name="live" checked={minutes === choice} onChange={() => setMinutes(choice)} />
-            {labels[i]}
-          </label>
-        ))}
-      </div>
-      <p className="hint">{t.liveHint}</p>
-      <button className="btn secondary" disabled={!spot} onClick={() => send(minutes)}>
-        {t.shareLive}
-      </button>
+      {canLive && (
+        <>
+          <p className="section-title">{t.shareLive}</p>
+          <div className="choices" role="radiogroup">
+            {LIVE_CHOICES.map((choice, i) => (
+              <label key={choice} className="choice">
+                <input type="radio" name="live" checked={minutes === choice} onChange={() => setMinutes(choice)} />
+                {labels[i]}
+              </label>
+            ))}
+          </div>
+          <p className="hint">{t.liveHint}</p>
+          <button className="btn secondary" disabled={!spot} onClick={() => send(minutes)}>
+            {t.shareLive}
+          </button>
+        </>
+      )}
     </Modal>
   )
 }
@@ -562,6 +572,46 @@ export function PeopleDialog({ title, hint, people, picked: start, onPick, onDon
           {picked.length > 0 && <span className="count">{picked.length}</span>}
         </button>
       )}
+    </Modal>
+  )
+}
+
+// Pick a notification sound (sound.ts). Tapping one plays it, so you can hear it first.
+// usual: for one chat, the first choice is "Default", which plays the tone from Settings
+// (leave it out when this IS the setting).
+type ToneProps = { title: string; current: Tone | null; usual?: Tone; onSave: (tone: Tone | null) => void; onClose: () => void }
+export function ToneDialog({ title, current, usual, onSave, onClose }: ToneProps) {
+  const { t } = useT()
+  const [choice, setChoice] = useState<Tone | null>(current)
+  const choices: (Tone | null)[] = usual ? [null, ...TONES] : [...TONES]
+  return (
+    <Modal title={title} onClose={onClose} className="narrow">
+      <p className="hint">{getSetting('sounds') ? t.toneHint : t.soundsAreOff}</p>
+      <div className="choices" role="radiogroup">
+        {choices.map((tone) => (
+          <label key={tone ?? 'usual'} className="choice">
+            <input
+              type="radio"
+              name="tone"
+              checked={choice === tone}
+              onChange={() => {
+                setChoice(tone)
+                previewTone(tone ?? usual ?? 'ping')
+              }}
+            />
+            {tone ? t.toneNames[tone] : fill(t.usualTone, { name: t.toneNames[usual ?? 'ping'] })}
+          </label>
+        ))}
+      </div>
+      <button
+        className="btn"
+        onClick={() => {
+          onSave(choice)
+          onClose()
+        }}
+      >
+        <Icon name="check" size={18} /> {t.save}
+      </button>
     </Modal>
   )
 }

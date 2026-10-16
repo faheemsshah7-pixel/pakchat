@@ -40,6 +40,7 @@ import {
 import {
   chatIdFor,
   chatTitle,
+  isDirect,
   isGroup,
   isUnread,
   lastRead,
@@ -61,6 +62,7 @@ import { startHeartbeat } from '../presence'
 import { usePrivate } from '../private'
 import type { Profile } from '../profiles'
 import { useBlocked } from '../safety'
+import { getSetting } from '../settings'
 import { playPing } from '../sound'
 import { useStable } from '../stable'
 import {
@@ -99,8 +101,8 @@ import Welcome from './Welcome'
 // focus: go to this message when it opens (from "Starred messages").
 // reply: start answering this message (from "Reply privately" in a group).
 export type Open = { chatId: string; other?: Person; focus?: { id: string }; reply?: ReplyTo }
-type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'calls' | 'status'
-const CHAT_VIEWS: View[] = ['chats', 'archived', 'starred', 'newChat', 'newGroup'] // (the open chat shows next to these)
+type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'newBroadcast' | 'calls' | 'status'
+const CHAT_VIEWS: View[] = ['chats', 'archived', 'starred', 'newChat', 'newGroup', 'newBroadcast'] // (the open chat shows next to these)
 
 export default function Home({ user, profile }: { user: User; profile: Profile }) {
   const { t } = useT()
@@ -176,9 +178,10 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         // Muted chats stay quiet, unless someone @mentions you (like WhatsApp).
         const mentioned = !!chat.lastMessage?.mentions?.includes(user.uid)
         if (looking || (isMuted(prefsRef.current.get(chat.id)) && !mentioned)) continue
-        playPing()
+        // The chat's own sound, or else the one for all groups or all chats (Settings > Notifications).
+        playPing(prefsRef.current.get(chat.id)?.tone ?? getSetting(isGroup(chat) ? 'groupTone' : 'messageTone'))
         showAlert(chatTitle(chat, user.uid, tRef.current), previewText(chat, user.uid, tRef.current), chat.id, () =>
-          setOpen(isGroup(chat) ? { chatId: chat.id } : { chatId: chat.id, other: otherPerson(chat, user.uid) }),
+          setOpen(isDirect(chat) ? { chatId: chat.id, other: otherPerson(chat, user.uid) } : { chatId: chat.id }),
         )
       }
       first = false
@@ -408,7 +411,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   }
 
   // The left bar (or the bottom bar on a phone).
-  const tab: Tab | null = view === 'newChat' || view === 'newGroup' ? 'chats' : view
+  const tab: Tab | null = view === 'newChat' || view === 'newGroup' || view === 'newBroadcast' ? 'chats' : view
   const tabsShown = view === 'chats' || view === 'calls' || view === 'status'
 
   // Every starred message, from all your chats.
@@ -419,7 +422,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   function openStarred(chatId: string, id: string) {
     const chat = chats.find((c) => c.id === chatId)
     if (!chat) return
-    openChat({ chatId, other: isGroup(chat) ? undefined : otherPerson(chat, user.uid), focus: { id } })
+    openChat({ chatId, other: isDirect(chat) ? otherPerson(chat, user.uid) : undefined, focus: { id } })
   }
 
   const openChatDoc = open ? chats.find((c) => c.id === open.chatId) : undefined
@@ -444,10 +447,13 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         onSettings={(section) => setSettingsAt({ start: section ?? null })}
       />
       <aside className="side">
-        {view === 'newGroup' ? (
+        {view === 'newGroup' || view === 'newBroadcast' ? (
+          // (A broadcast list is made on the same screen as a group: pick people, give it a name.)
           <NewGroup
+            key={view}
             me={me}
             chats={chats}
+            broadcast={view === 'newBroadcast'}
             onCancel={() => setView('chats')}
             onCreated={(chatId) => {
               setView('chats')
@@ -455,7 +461,15 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             }}
           />
         ) : view === 'newChat' ? (
-          <NewChat me={me} profile={profile} chats={chats} onBack={() => setView('chats')} onOpen={openChat} onNewGroup={() => setView('newGroup')} />
+          <NewChat
+            me={me}
+            profile={profile}
+            chats={chats}
+            onBack={() => setView('chats')}
+            onOpen={openChat}
+            onNewGroup={() => setView('newGroup')}
+            onNewBroadcast={() => setView('newBroadcast')}
+          />
         ) : view === 'calls' ? (
           <CallsList
             me={me}
@@ -495,6 +509,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             onOpen={openChat}
             onNewChat={() => setView('newChat')}
             onNewGroup={() => setView('newGroup')}
+            onNewBroadcast={() => setView('newBroadcast')}
             onSettings={() => setSettingsAt({ start: null })}
             onStarred={() => setView('starred')}
           />
@@ -538,6 +553,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             other={showing.other}
             prefs={prefs.get(showing.chatId)}
             chats={chats}
+            people={people}
             blocked={blocked}
             onBack={() => setOpen(null)}
             onOpenPerson={(person) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person })}

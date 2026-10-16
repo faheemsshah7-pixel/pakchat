@@ -2,13 +2,15 @@
 // On the left: search, your profile, and the parts of Settings. On the right: the part you picked.
 //   Profile        your photo, name, about line and number
 //   Privacy        last seen, read receipts, who sees your status, blocked people
-//   Notifications  alerts and sounds
+//   Notifications  alerts, sounds, and which sound (for chats, and for groups)
 //   Calls          using less data
-//   Chats          the look, text size, the Enter key, photo quality (HD), voice message transcripts, language
+//   Chats          the look, the wallpaper, conversation tones (on or off, and how loud), text size, the Enter key,
+//                  photo quality (HD), voice message transcripts, language
 //   App            installing PakChat
 // On a phone the window fills the screen: first the list, then the part you tap (Back returns).
 // Profile and privacy are saved in the database (users/<you>), so they follow you to any device.
 // Sounds, text size, the Enter key, photo quality, transcripts and call data are saved on this device only (settings.ts).
+// The wallpaper for all chats is saved in the database (wallpaper.ts), so it follows you too.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { signOut } from 'firebase/auth'
@@ -23,13 +25,17 @@ import { removeMyPhoto, setAbout, setMyName, setMyPhoto, setPrivacy, useAvatar, 
 import { install, isInstalled, useCanInstall } from '../pwa'
 import { unblock } from '../safety'
 import { setSetting, useSettings, type TextSize } from '../settings'
+import { playConversationTone, type Tone } from '../sound'
 import { fill } from '../strings'
 import { canTranscribe } from '../transcribe'
+import { ALL_CHATS, setWallpaper, useWallDoc, wallLabel } from '../wallpaper'
 import Avatar, { PersonAvatar } from './Avatar'
 import Icon, { type IconName } from './Icon'
+import { ToneDialog } from './Dialogs'
 import { StatusPrivacyDialog } from './StatusList'
 import Switch from './Switch'
 import ThemePicker from './ThemePicker'
+import WallpaperPicker from './WallpaperPicker'
 
 export type Section = 'profile' | 'privacy' | 'notifications' | 'calls' | 'chats' | 'app'
 
@@ -72,6 +78,9 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
   const [picking, setPicking] = useState(false)
   const [statusPrivacy, setStatusPrivacy] = useState(false)
   const [showBlocked, setShowBlocked] = useState(false)
+  const [toneFor, setToneFor] = useState<'messageTone' | 'groupTone' | null>(null) // picking a sound
+  const [pickingWall, setPickingWall] = useState(false)
+  const wall = useWallDoc(me.uid, ALL_CHATS) // the wallpaper for all chats (wallpaper.ts)
   const [alerts, setAlerts] = useState(alertsState)
   const photoInput = useRef<HTMLInputElement>(null)
   // On a computer one part is always showing (Profile to start with).
@@ -81,10 +90,10 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
   const back = () => (!wide && section ? setPicked(null) : onClose())
   useBack(true, LEVEL.window, back)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !picking && !statusPrivacy && onClose()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !picking && !statusPrivacy && !toneFor && !pickingWall && onClose()
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, picking, statusPrivacy])
+  }, [onClose, picking, statusPrivacy, toneFor, pickingWall])
 
   async function attempt(job: () => Promise<unknown>) {
     setError('')
@@ -134,9 +143,9 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
   // The parts, with words to find them by (the search box looks at these too).
   const parts: [Section, IconName, string, string[]][] = [
     ['privacy', 'lock', t.privacy, [t.showLastSeen, t.readReceipts, t.blockedContacts, t.statusPrivacy]],
-    ['notifications', 'bell', t.notifications, [t.desktopAlerts, t.sounds]],
+    ['notifications', 'bell', t.notifications, [t.desktopAlerts, t.sounds, t.messageTone, t.groupTone]],
     ['calls', 'phone', t.calls, [t.lowDataCalls]],
-    ['chats', 'palette', t.chatsSettings, [t.theme, t.textSize, t.enterSends, t.language, t.photoQuality, t.transcripts]],
+    ['chats', 'palette', t.chatsSettings, [t.theme, t.wallpaper, t.conversationTones, t.textSize, t.enterSends, t.language, t.photoQuality, t.transcripts]],
     ['app', 'install', t.app, [t.installApp]],
   ]
   const q = search.trim().toLowerCase()
@@ -259,6 +268,16 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
           )}
         </div>
         <Switch label={t.sounds} hint={t.soundsHint} on={settings.sounds} onChange={(on) => setSetting('sounds', on)} />
+        {/* Which sound plays. (A chat can have its own: its info, "Notification tone".) */}
+        {(['messageTone', 'groupTone'] as const).map((key) => (
+          <button key={key} className="setting" onClick={() => setToneFor(key)}>
+            <span className="setting-text">
+              <span>{key === 'messageTone' ? t.messageTone : t.groupTone}</span>
+              <small>{t.toneNames[settings[key]]}</small>
+            </span>
+            <Icon name="chevronRight" size={18} />
+          </button>
+        ))}
       </section>
     ),
     calls: (
@@ -275,6 +294,40 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
           </span>
           <Icon name="chevronRight" size={18} />
         </button>
+        <button className="setting" onClick={() => setPickingWall(true)}>
+          <span className="setting-text">
+            <span>{t.wallpaper}</span>
+            <small>
+              {wallLabel(wall, t)} · {t.wallpaperHint}
+            </small>
+          </span>
+          <Icon name="chevronRight" size={18} />
+        </button>
+        {/* Conversation tones: little sounds while a chat is open (sound.ts). The slider sets how loud,
+            and plays one when you let go, so you can hear it. */}
+        <Switch label={t.conversationTones} hint={t.conversationTonesHint} on={settings.conversationTones} onChange={(on) => setSetting('conversationTones', on)} />
+        {settings.conversationTones && (
+          <div className="setting static">
+            <span className="setting-text">
+              <span>{t.toneVolume}</span>
+            </span>
+            <span className="volume">
+              <Icon name="volume" size={18} />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(settings.toneVolume * 100)}
+                aria-label={t.toneVolume}
+                onChange={(e) => setSetting('toneVolume', Number(e.target.value) / 100)}
+                onPointerUp={() => playConversationTone('received', true)}
+                onKeyUp={() => playConversationTone('received', true)}
+              />
+              <span className="volume-number">{Math.round(settings.toneVolume * 100)}%</span>
+            </span>
+          </div>
+        )}
         <div className="setting static">
           <span className="setting-text">
             <span>{t.textSize}</span>
@@ -428,6 +481,23 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
         {/* (Inside the window, so a click in these doesn't count as a click outside it.) */}
         {picking && <ThemePicker onClose={() => setPicking(false)} />}
         {statusPrivacy && <StatusPrivacyDialog me={me} prefs={statusPrefs} people={people} onClose={() => setStatusPrivacy(false)} />}
+        {pickingWall && (
+          <WallpaperPicker
+            title={t.defaultWallpaper}
+            current={wall}
+            usual={null}
+            onSave={(next) => setWallpaper(me.uid, ALL_CHATS, next)}
+            onClose={() => setPickingWall(false)}
+          />
+        )}
+        {toneFor && (
+          <ToneDialog
+            title={toneFor === 'messageTone' ? t.messageTone : t.groupTone}
+            current={settings[toneFor]}
+            onSave={(tone) => setSetting(toneFor, tone as Tone)}
+            onClose={() => setToneFor(null)}
+          />
+        )}
       </div>
     </div>,
     document.body,

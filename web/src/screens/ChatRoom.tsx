@@ -1,19 +1,24 @@
-// ChatRoom.tsx: one conversation (with one person, or a group).
+// ChatRoom.tsx: one conversation (with one person, a group, or a broadcast list).
 // Messages appear live, for everyone in it. Older messages load as you scroll up.
 // Each message has a menu (MessageBubble.tsx): react, reply, copy, forward, pin, star, edit, info, delete.
 // Pinned messages show in a bar under the top (pins.ts). Disappearing messages vanish on time (disappearing.ts).
 // In a chat with one person, the phone and camera at the top start a call (calls.ts).
 // The paperclip sends photos, videos, documents, your location (location.ts), a contact card or a poll (polls.ts).
 // In groups, @mentions (mentions.ts) and "Reply privately". A chat with yourself is "Message yourself".
+// In a broadcast list, what you send also goes to each person on it, in your chat with them (broadcasts.ts).
+// Each chat can have its own wallpaper (wallpaper.ts) and notification sound (sound.ts).
 import { Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query, where, type Timestamp } from 'firebase/firestore'
 import { db } from '../firebase'
 import { LEVEL, useBack } from '../back'
+import { deleteList, editCopies, listAsChat, sendToList, unsendCopies } from '../broadcasts'
 import { startCall } from '../calls'
 import {
+  chatTitle,
   findUser,
   isAdmin,
+  isBroadcast,
   isGroup,
   isSelfChat,
   lastRead,
@@ -34,7 +39,7 @@ import {
 } from '../chats'
 import { deleteExpired, isExpired, setTimer, useClockAt } from '../disappearing'
 import { useT } from '../lang'
-import { startSharing, type Spot } from '../location'
+import { shareFor, type Spot } from '../location'
 import { blobToDataUrl, isPhotoOrVideo, loadMedia, prepareVideo, shrinkPhoto, videoExtension, warmUpSound } from '../media'
 import { findMentions } from '../mentions'
 import { canEdit, captionKind, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
@@ -45,12 +50,16 @@ import { presenceText } from '../presence'
 import { rememberProfile, useProfile, type Profile } from '../profiles'
 import { block, report, unblock } from '../safety'
 import { leaveGroup } from '../groups'
+import { getSetting } from '../settings'
+import { playConversationTone } from '../sound'
 import { useStable } from '../stable'
 import { keepSticker } from '../stickers'
 import { fill, type Strings } from '../strings'
 import { clock, dayNumber, isToday, isYesterday, useNow } from '../time'
 import { markTyping, typingText, useTypingVersion } from '../typing'
+import { setWallpaper, useWallpaper, useWallStyle, wallLabel } from '../wallpaper'
 import Avatar, { GroupAvatar, PersonAvatar, TimerBadge } from './Avatar'
+import BroadcastInfo from './BroadcastInfo'
 import Composer from './Composer'
 import ContactInfo from './ContactInfo'
 import {
@@ -64,6 +73,7 @@ import {
   PinDialog,
   ReactionsDialog,
   TimerDialog,
+  ToneDialog,
 } from './Dialogs'
 import GroupInfo from './GroupInfo'
 import Icon from './Icon'
@@ -75,6 +85,7 @@ import PhotoSender, { type PickedPhoto } from './PhotoSender'
 import { PollDialog, VotesDialog } from './Polls'
 import Popover, { type PopoverItem } from './Popover'
 import StarredList from './StarredList'
+import WallpaperPicker from './WallpaperPicker'
 
 type Props = {
   me: Person
@@ -84,6 +95,7 @@ type Props = {
   other?: Person // set for direct chats
   prefs: ChatPrefs | undefined // your settings for this chat (prefs.ts)
   chats: Chat[] // all your chats (to forward messages to)
+  people: Person[] // everyone you know (to add to a broadcast list)
   blocked: Set<string> // people I blocked
   onBack: () => void
   onOpenPerson: (person: Person) => void // "Message" someone from the group's member list
@@ -92,12 +104,14 @@ type Props = {
   reply?: ReplyTo // start with this reply ready (from "Reply privately")
 }
 
-type Dialog = { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin' | 'votes'; m: Message } | { kind: 'mute' | 'timer' | 'location' | 'contact' | 'poll' }
+type Dialog =
+  | { kind: 'forward' | 'info' | 'reactions' | 'delete' | 'pin' | 'votes'; m: Message }
+  | { kind: 'mute' | 'timer' | 'location' | 'contact' | 'poll' | 'tone' | 'wallpaper' }
 const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = faster)
 const LOOK_BACK = 1000 // going to an old message loads at most this many
 
 export default function ChatRoom(props: Props) {
-  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, blocked, onBack, onOpenPerson, onReplyPrivately, focus: focusProp } = props
+  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, people: everyone, blocked, onBack, onOpenPerson, onReplyPrivately, focus: focusProp } = props
   const { t } = useT()
   const [limit, setLimit] = useState(PAGE)
   const [raw, setRaw] = useState<Message[]>([]) // what the database sent
@@ -164,10 +178,18 @@ export default function ChatRoom(props: Props) {
   const loadedLimit = useRef(0) // the limit of the messages we have now (more may be on the way)
 
   const group = isGroup(chat)
-  const other = group ? undefined : (otherProp ?? (chat && otherPerson(chat, me.uid)))
+  // A broadcast list: only you are in it. No calls, typing, replies, polls, pins or disappearing messages.
+  const broadcast = isBroadcast(chat)
+  const other = group || broadcast ? undefined : (otherProp ?? (chat && otherPerson(chat, me.uid)))
   // "Message yourself": your own notes. No calls, typing, blocking or reporting there.
   const self = isSelfChat(chat) || (!chat && other?.uid === me.uid)
-  const title = group ? (chat?.title ?? '') : self ? fill(t.youName, { name: me.name }) : (other?.name ?? '')
+  const title = (group || broadcast) && chat ? chatTitle(chat, me.uid) : self ? fill(t.youName, { name: me.name }) : (other?.name ?? '')
+  // A broadcast list's ticks come from your chats with each person on it (broadcasts.ts).
+  const ticksChat = useMemo(() => (broadcast && chat ? listAsChat(chat, chats, me.uid) : chat), [broadcast, chat, chats, me.uid])
+  // This chat's wallpaper (its own, or the one for all chats) and its sound.
+  const walls = useWallpaper(me.uid, chatId)
+  const wallStyle = useWallStyle(walls.shown)
+  const usualTone = getSetting(group ? 'groupTone' : 'messageTone')
   const iBlockedThem = !!other && blocked.has(other.uid)
   const canTalk = !group || !chat?.onlyAdmins || isAdmin(chat, me.uid)
   // Calls are for chats with one person (not groups), and not with someone you blocked.
@@ -254,6 +276,8 @@ export default function ChatRoom(props: Props) {
       // (Straight away, not a smooth glide: a glide made new messages feel late.)
       if (nearBottom.current || last.senderId === me.uid) el.scrollTop = el.scrollHeight
       else setNewBelow((n) => n + 1)
+      // Someone else's message, while you're looking: a soft "pop" (a conversation tone, sound.ts).
+      if (last.senderId !== me.uid && last.kind !== 'system' && document.visibilityState === 'visible') playConversationTone('received')
     }
     loadedOnce.current = true
     newest.current = last.id
@@ -365,8 +389,8 @@ export default function ChatRoom(props: Props) {
   }, [toast])
 
   function onTyping() {
-    // Tell the others we're typing, at most once every 3 seconds. (Nobody to tell in "Message yourself".)
-    if (chat && !self && Date.now() - lastTypingSent.current > 3000) {
+    // Tell the others we're typing, at most once every 3 seconds. (Nobody to tell in "Message yourself" or a broadcast list.)
+    if (chat && !self && !broadcast && Date.now() - lastTypingSent.current > 3000) {
       lastTypingSent.current = Date.now()
       markTyping(chat, me.uid).catch(console.error)
     }
@@ -375,7 +399,15 @@ export default function ChatRoom(props: Props) {
   function send(content: Content, extras?: Extras) {
     lastTypingSent.current = 0
     nearBottom.current = true
-    return sendMessage(me, { chatId, other, isNew: !chat, timer: chat?.timer }, content, extras)
+    return sendMessage(me, { chatId, other, isNew: !chat, timer: chat?.timer }, content, extras).then((id) => {
+      playConversationTone('sent') // it reached the server: a soft "whoosh"
+      // A broadcast list: now a copy for each person on it (not people you blocked). It carries on
+      // in the background: the message shows in the list straight away, and its ticks follow the copies.
+      if (broadcast && chat) {
+        sendToList(me, chat, chats, id, content, blocked).then((failed) => failed > 0 && setToast(fill(t.notSentTo, { n: failed })), oops)
+      }
+      return id
+    })
   }
 
   function goTo(messageId: string) {
@@ -459,7 +491,7 @@ export default function ChatRoom(props: Props) {
   async function shareLocation(spot: Spot, liveMinutes?: number) {
     try {
       const id = await send({ kind: 'location', ...spot, ...(liveMinutes ? { liveMinutes } : {}) }, takeReply())
-      if (liveMinutes) startSharing({ uid: me.uid, chatId, messageId: id, until: Date.now() + liveMinutes * 60_000 })
+      if (liveMinutes) shareFor({ uid: me.uid, chatId, messageId: id }, liveMinutes)
     } catch (err) {
       oops(err)
     }
@@ -476,6 +508,7 @@ export default function ChatRoom(props: Props) {
     const isLast = messages[messages.length - 1]?.id === editing.id
     // In a group, who the words @mention may have changed too.
     await editMessage(chatId, me, editing, text, isLast, people ? findMentions(text, people) : undefined)
+    if (broadcast) editCopies(me, editing, text, chats).catch(console.warn) // everyone's copy changes too
     setEditing(null)
   }
 
@@ -491,8 +524,10 @@ export default function ChatRoom(props: Props) {
     mute: () => (muted ? setPrefs(me.uid, chatId, { mutedUntil: null }) : setDialog({ kind: 'mute' })),
     clear: () => confirm(t.confirmClear) && clearChat(me.uid, chatId).catch(console.error),
     remove: () => {
-      if (!confirm(t.confirmDeleteChat)) return
-      deleteChat(me.uid, chatId).catch(console.error)
+      if (!confirm(broadcast ? t.confirmDeleteList : t.confirmDeleteChat)) return
+      // (A broadcast list is deleted for good. A chat is only cleared and hidden, just for you.)
+      if (broadcast && chat) deleteList(chat).catch(oops)
+      else deleteChat(me.uid, chatId).catch(console.error)
       onBack()
     },
     block: () => {
@@ -504,27 +539,36 @@ export default function ChatRoom(props: Props) {
     leave: () => chat && confirm(t.confirmLeave) && leaveGroup(me, chat).catch(console.error),
     starred: () => setShowStarred(true),
     timer: () => setDialog({ kind: 'timer' }),
+    wallpaper: () => setDialog({ kind: 'wallpaper' }),
+    tone: () => setDialog({ kind: 'tone' }),
+  }
+  // The wallpaper and sound, in words, for the info panel.
+  const looks = {
+    wallpaper: wallLabel(walls.own, t),
+    tone: self || broadcast ? undefined : prefs?.tone ? t.toneNames[prefs.tone] : fill(t.usualTone, { name: t.toneNames[usualTone] }),
   }
 
   const menuItems: MenuItem[] = [
-    { label: group ? t.groupInfo : t.contactInfo, icon: 'info', onClick: () => setShowInfo(true) },
+    { label: group ? t.groupInfo : broadcast ? t.listInfo : t.contactInfo, icon: 'info', onClick: () => setShowInfo(true) },
     { label: t.searchMessages, icon: 'search', onClick: () => setSearching(true) },
-    { label: muted ? t.unmute : t.mute, icon: muted ? 'bell' : 'bellOff', onClick: actions.mute },
   ]
-  if (chat) menuItems.push({ label: t.disappearing, icon: 'timer', onClick: actions.timer })
+  if (!broadcast) menuItems.push({ label: muted ? t.unmute : t.mute, icon: muted ? 'bell' : 'bellOff', onClick: actions.mute })
+  menuItems.push({ label: t.wallpaper, icon: 'image', onClick: actions.wallpaper })
+  if (chat && !broadcast) menuItems.push({ label: t.disappearing, icon: 'timer', onClick: actions.timer })
   if (starredIds.size > 0) menuItems.push({ label: t.starredMessages, icon: 'star', onClick: actions.starred })
   if (messages.length > 0) menuItems.push({ label: t.clearChat, icon: 'eraser', onClick: actions.clear })
   if (other && !self) menuItems.push({ label: iBlockedThem ? t.unblock : t.block, icon: 'block', onClick: actions.block, danger: !iBlockedThem })
-  if (messages.length > 0 && !self) menuItems.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
+  if (messages.length > 0 && !self && !broadcast) menuItems.push({ label: t.report, icon: 'flag', onClick: reportChat, danger: true })
   if (group) menuItems.push({ label: t.leaveGroup, icon: 'logout', onClick: actions.leave, danger: true })
-  else if (chat) menuItems.push({ label: t.deleteChat, icon: 'trash', onClick: actions.remove, danger: true })
+  else if (chat) menuItems.push({ label: broadcast ? t.deleteList : t.deleteChat, icon: 'trash', onClick: actions.remove, danger: true })
 
   // ----- The menu on one message -----
   function messageMenu(m: Message): PopoverItem[] {
     const items: PopoverItem[] = []
     const text = (captionKind(m) ? m.caption : m.text) ?? ''
     if (m.deleted || m.kind === 'call') return [{ label: t.delete, icon: 'trash', danger: true, onClick: () => setDialog({ kind: 'delete', m }) }]
-    if (canTalk && !iBlockedThem) items.push({ label: t.reply, icon: 'reply', onClick: () => (setEditing(null), setReplyTo(replySnapshot(m))) })
+    // (No replies in a broadcast list: the people on it don't have the message you'd be answering.)
+    if (canTalk && !iBlockedThem && !broadcast) items.push({ label: t.reply, icon: 'reply', onClick: () => (setEditing(null), setReplyTo(replySnapshot(m))) })
     // "Reply privately": in a group, answer someone's message in your chat with just them.
     if (group && m.senderId !== me.uid) {
       const sender = { uid: m.senderId, name: m.senderName ?? '?' }
@@ -553,7 +597,7 @@ export default function ChatRoom(props: Props) {
       })
     }
     // Pin for everyone (if you can send messages here), and star just for you. (Not "view once" ones.)
-    if (chat && canTalk && !iBlockedThem && !m.once) {
+    if (chat && canTalk && !iBlockedThem && !m.once && !broadcast) {
       items.push(
         pinnedIds.has(m.id)
           ? { label: t.unpinMsg, icon: 'pinOff', onClick: () => unpinMessage(chatId, m.id).catch(oops) }
@@ -630,6 +674,24 @@ export default function ChatRoom(props: Props) {
       {dialog?.kind === 'mute' && (
         <MuteDialog onClose={() => setDialog(null)} onMute={(until) => setPrefs(me.uid, chatId, { mutedUntil: until }).catch(console.error)} />
       )}
+      {dialog?.kind === 'tone' && (
+        <ToneDialog
+          title={t.notificationTone}
+          current={prefs?.tone ?? null}
+          usual={usualTone}
+          onSave={(tone) => setPrefs(me.uid, chatId, { tone }).catch(oops)}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'wallpaper' && (
+        <WallpaperPicker
+          title={t.chatWallpaper}
+          current={walls.own}
+          usual={walls.all}
+          onSave={(wall) => setWallpaper(me.uid, chatId, wall)}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog?.kind === 'timer' && chat && (
         <TimerDialog
           current={chat.timer ?? 0}
@@ -658,6 +720,26 @@ export default function ChatRoom(props: Props) {
       />
     )
   }
+  if (showInfo && chat && broadcast) {
+    return (
+      <>
+        <BroadcastInfo
+          me={me}
+          chat={chat}
+          people={everyone}
+          messages={messages}
+          starred={starredIds.size}
+          looks={looks}
+          actions={actions}
+          onBack={() => setShowInfo(false)}
+          onOpenPerson={onOpenPerson}
+          onView={(m, data) => setViewing({ m, data })}
+        />
+        {infoDialogs}
+        {viewer}
+      </>
+    )
+  }
   if (showInfo && chat && group) {
     return (
       <>
@@ -667,6 +749,7 @@ export default function ChatRoom(props: Props) {
           messages={messages}
           prefs={prefs}
           starred={starredIds.size}
+          looks={looks}
           actions={actions}
           onBack={() => setShowInfo(false)}
           onOpenPerson={onOpenPerson}
@@ -690,6 +773,7 @@ export default function ChatRoom(props: Props) {
           blocked={iBlockedThem}
           starred={starredIds.size}
           timer={chat ? (chat.timer ?? 0) : undefined}
+          looks={looks}
           actions={actions}
           onCall={call}
           onBack={() => setShowInfo(false)}
@@ -728,11 +812,26 @@ export default function ChatRoom(props: Props) {
         </button>
         <button className="bar-who" onClick={() => setShowInfo(true)} disabled={!chat && !other}>
           <TimerBadge on={!!chat?.timer}>
-            {group && chat ? <GroupAvatar chat={chat} size={42} /> : other ? <PersonAvatar uid={other.uid} name={other.name} size={42} /> : <Avatar name={title} size={42} />}
+            {group && chat ? (
+              <GroupAvatar chat={chat} size={42} />
+            ) : other ? (
+              <PersonAvatar uid={other.uid} name={other.name} size={42} />
+            ) : (
+              <Avatar name={title} list={broadcast} size={42} />
+            )}
           </TimerBadge>
           <h2 dir="auto">
             {title}
-            <small>{self ? t.messageYourselfHint : <ChatStatus me={me} myProfile={myProfile} chat={chat} other={other} />}</small>
+            <small>
+              {self ? (
+                t.messageYourselfHint
+              ) : broadcast && chat ? (
+                // A named list shows who's on it; an unnamed one already does, so it says how many.
+                chat.title ? (chat.recipients ?? []).map((uid) => chat.names[uid] ?? '?').join(', ') : fill(t.nRecipients, { n: chat.recipients?.length ?? 0 })
+              ) : (
+                <ChatStatus me={me} myProfile={myProfile} chat={chat} other={other} />
+              )}
+            </small>
           </h2>
         </button>
         {muted && (
@@ -816,10 +915,16 @@ export default function ChatRoom(props: Props) {
         </div>
       )}
 
-      {/* The wall is the patterned background. The messages scroll on top of it. */}
-      <div className="wall">
+      {/* The wall is the background: the look's own pattern, or the chat's wallpaper (wallpaper.ts).
+          The messages scroll on top of it. */}
+      <div className="wall" style={wallStyle}>
         <div className="messages" ref={scroller} onScroll={onScroll}>
           {hasMore && <p className="loading-older">{t.loadingOlder}</p>}
+          {broadcast && !hasMore && (
+            <p className="list-note">
+              <Icon name="megaphone" size={16} /> {t.listNote}
+            </p>
+          )}
           {messages.length === 0 && <p className="say-hi">{t.sayHi}</p>}
           {messages.map((m, i) => {
             const before = messages[i - 1]
@@ -844,7 +949,7 @@ export default function ChatRoom(props: Props) {
                 ) : (
                   <MessageBubble
                     m={m}
-                    tick={m.senderId === me.uid ? tickFor(chat, me.uid, m.sentAt, m.pending) : 'sent'}
+                    tick={m.senderId === me.uid ? tickFor(ticksChat, me.uid, m.sentAt, m.pending) : 'sent'}
                     chatId={chatId}
                     myUid={me.uid}
                     group={group}
@@ -906,8 +1011,8 @@ export default function ChatRoom(props: Props) {
           onDocuments={setDocuments}
           onLocation={() => setDialog({ kind: 'location' })}
           onContact={() => setDialog({ kind: 'contact' })}
-          onPoll={() => setDialog({ kind: 'poll' })}
-          canOnce={!self}
+          onPoll={broadcast ? undefined : () => setDialog({ kind: 'poll' })}
+          canOnce={!self && !broadcast}
           people={people}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
@@ -982,7 +1087,7 @@ export default function ChatRoom(props: Props) {
           }}
         />
       )}
-      {dialog?.kind === 'info' && chat && <InfoDialog chat={chat} m={dialog.m} me={me} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'info' && ticksChat && <InfoDialog chat={ticksChat} m={dialog.m} me={me} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'reactions' && (
         <ReactionsDialog chat={chat} chatId={chatId} m={dialog.m} myUid={me.uid} onClose={() => setDialog(null)} />
       )}
@@ -998,6 +1103,7 @@ export default function ChatRoom(props: Props) {
           onForEveryone={() => {
             const isLast = messages[messages.length - 1]?.id === dialog.m.id
             unsendMessage(chatId, me, dialog.m, isLast, !!chat?.pins?.[dialog.m.id]).catch(oops)
+            if (broadcast) unsendCopies(me, dialog.m, chats).catch(console.warn) // everyone's copy goes too
             setDialog(null)
           }}
         />
@@ -1011,7 +1117,7 @@ export default function ChatRoom(props: Props) {
           }}
         />
       )}
-      {dialog?.kind === 'location' && <LocationDialog onClose={() => setDialog(null)} onSend={shareLocation} />}
+      {dialog?.kind === 'location' && <LocationDialog canLive={!broadcast} onClose={() => setDialog(null)} onSend={shareLocation} />}
       {dialog?.kind === 'contact' && <ContactDialog me={me} chats={chats} onClose={() => setDialog(null)} onSend={shareContacts} />}
       {dialog?.kind === 'poll' && <PollDialog onClose={() => setDialog(null)} onSend={sendPoll} />}
       {dialog?.kind === 'votes' && (
@@ -1020,7 +1126,7 @@ export default function ChatRoom(props: Props) {
       )}
       {chatDialogs}
 
-      {photos && <PhotoSender files={photos} canOnce={!self} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
+      {photos && <PhotoSender files={photos} canOnce={!self && !broadcast} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
       {documents && <DocumentSender files={documents} onClose={() => setDocuments(null)} onSend={sendDocuments} />}
 
       {viewer}

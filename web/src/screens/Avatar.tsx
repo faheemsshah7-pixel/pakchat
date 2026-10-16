@@ -1,21 +1,22 @@
 // Avatar.tsx: the round picture next to a name.
 // With a photo, it shows the photo. Without one, a coloured circle with the first letter
-// (or a group icon). The colour comes from the name, so each person always gets the same one.
+// (or a group's or broadcast list's icon). The colour comes from the name, so each person always gets the same one.
 import type { ReactNode } from 'react'
-import { isGroup, otherPerson, type Chat } from '../chats'
+import { chatTitle, isBroadcast, isGroup, otherPerson, type Chat } from '../chats'
 import { avatarBackground } from '../colours'
 import { useMedia } from '../media'
 import { useAvatar, useProfile } from '../profiles'
 import Icon from './Icon'
 
-type Props = { name: string; group?: boolean; size?: number; photo?: string | null }
+type Props = { name: string; group?: boolean; list?: boolean; size?: number; photo?: string | null }
 
-export default function Avatar({ name, group = false, size = 48, photo }: Props) {
+// group: a group's icon (people). list: a broadcast list's icon (a megaphone).
+export default function Avatar({ name, group = false, list = false, size = 48, photo }: Props) {
   const style = { background: avatarBackground(name), width: size, height: size, fontSize: size * 0.42 }
   if (photo) return <img className="avatar" style={{ width: size, height: size }} src={photo} alt="" />
   return (
     <span className="avatar" style={style} aria-hidden>
-      {group ? <Icon name="users" size={size * 0.48} /> : (name.trim()[0] ?? '?').toUpperCase()}
+      {list ? <Icon name="megaphone" size={size * 0.48} /> : group ? <Icon name="users" size={size * 0.48} /> : (name.trim()[0] ?? '?').toUpperCase()}
     </span>
   )
 }
@@ -33,12 +34,18 @@ export function GroupAvatar({ chat, size }: { chat: Chat; size?: number }) {
   return <Avatar name={chat.title ?? ''} group size={size} photo={photo} />
 }
 
-// The avatar for a chat in the list: the group's, or the other person's.
+// The avatar for a chat in the list: the group's, a broadcast list's, or the other person's.
 export function ChatAvatar({ chat, myUid, size }: { chat: Chat; myUid: string; size?: number }) {
   const other = otherPerson(chat, myUid)
   return (
     <TimerBadge on={!!chat.timer}>
-      {isGroup(chat) ? <GroupAvatar chat={chat} size={size} /> : <PersonAvatar uid={other.uid} name={other.name} size={size} />}
+      {isGroup(chat) ? (
+        <GroupAvatar chat={chat} size={size} />
+      ) : isBroadcast(chat) ? (
+        <Avatar name={chatTitle(chat, myUid)} list size={size} />
+      ) : (
+        <PersonAvatar uid={other.uid} name={other.name} size={size} />
+      )}
     </TimerBadge>
   )
 }

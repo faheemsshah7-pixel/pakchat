@@ -1,5 +1,5 @@
 // GroupInfo.tsx: about a group: photo, name, description, photos shared, starred messages,
-// disappearing messages, settings, invite link, and who's in it. Admins can change the group's info, add and remove people,
+// disappearing messages, wallpaper and sound, settings, invite link, and who's in it. Admins can change the group's info, add and remove people,
 // and make others admin. Anyone can message a member, mute the group, or leave.
 import { useRef, useState } from 'react'
 import { findUser, isAdmin, type Chat, type Message, type Person } from '../chats'
@@ -11,7 +11,7 @@ import { isMuted, type ChatPrefs } from '../prefs'
 import { useProfile } from '../profiles'
 import { fill } from '../strings'
 import { GroupAvatar, PersonAvatar } from './Avatar'
-import { ActionRow, ChatExtras, type ChatActions } from './ContactInfo'
+import { ActionRow, ChatExtras, type ChatActions, type Looks } from './ContactInfo'
 import Icon from './Icon'
 import MediaGrid from './MediaGrid'
 import Popover, { type PopoverItem } from './Popover'
@@ -23,13 +23,14 @@ type Props = {
   messages: Message[]
   prefs: ChatPrefs | undefined
   starred: number // how many messages you starred here
+  looks: Looks // the chat's wallpaper and sound, in words
   actions: ChatActions
   onBack: () => void
   onOpenPerson: (person: Person) => void
   onView: (m: Message, data: string) => void
 }
 
-export default function GroupInfo({ me, chat, messages, prefs, starred, actions, onBack, onOpenPerson, onView }: Props) {
+export default function GroupInfo({ me, chat, messages, prefs, starred, looks, actions, onBack, onOpenPerson, onView }: Props) {
   const { t } = useT()
   const [number, setNumber] = useState('')
   const [error, setError] = useState('')
@@ -200,7 +201,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, actions,
         )}
 
         <MediaGrid chatId={chat.id} messages={messages} onView={onView} />
-        <ChatExtras starred={starred} timer={chat.timer ?? 0} actions={actions} />
+        <ChatExtras starred={starred} timer={chat.timer ?? 0} looks={looks} actions={actions} />
 
         {iAmAdmin && (
           <section className="info-section">

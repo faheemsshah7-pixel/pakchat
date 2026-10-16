@@ -27,7 +27,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import { isGroup, otherPerson, type Chat, type Person } from './chats'
+import { isDirect, otherPerson, type Chat, type Person } from './chats'
 import { deleteParts, saveParts } from './media'
 import { isHidden, type ChatPrefs } from './prefs'
 import { setPrivate, type StatusPrefs } from './private'
@@ -103,7 +103,7 @@ export function audienceFor(myUid: string, chats: Chat[], prefs: Map<string, Cha
   if (privacy.mode === 'only') return (privacy.only ?? []).filter((uid) => !blocked.has(uid)).slice(0, 1000)
   const contacts = new Set<string>()
   for (const chat of chats) {
-    if (isGroup(chat) || isHidden(chat, prefs.get(chat.id))) continue
+    if (!isDirect(chat) || isHidden(chat, prefs.get(chat.id))) continue
     const other = otherPerson(chat, myUid).uid
     if (other !== myUid && !blocked.has(other)) contacts.add(other)
   }

@@ -61,6 +61,11 @@ export function startSharing(share: Share) {
   watch()
 }
 
+// Start sharing for this many minutes from now.
+export function shareFor(share: Omit<Share, 'until'>, minutes: number) {
+  startSharing({ ...share, until: Date.now() + minutes * 60_000 })
+}
+
 // Stop early: the message shows "Live location ended" for everyone.
 export async function stopSharing(chatId: string, messageId: string) {
   shares = shares.filter((s) => s.messageId !== messageId)
