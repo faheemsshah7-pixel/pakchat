@@ -20,7 +20,8 @@
 //  11. listens for your scheduled calls, and reminds you when one starts
 //  12. listens for status updates: other people's, and your own (status.ts)
 //  13. listens to your communities (communities.ts)
-// Settings, Status, the call screen and the call windows load when first needed (lazy.ts).
+//  14. listens for group calls in your groups, and shows the group call screen (groupCalls.ts, GroupCallScreen.tsx)
+// Settings, Status, the call screens and the call windows load when first needed (lazy.ts).
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from 'firebase/auth'
 import { collection, getCountFromServer, onSnapshot, query, Timestamp, where } from 'firebase/firestore'
@@ -55,6 +56,7 @@ import {
   type ReplyTo,
 } from '../chats'
 import { listenToCommunities, type Community } from '../communities'
+import { listenForGroupCalls, useGroupCall } from '../groupCalls'
 import { codeFromAddress } from '../invites'
 import { useT } from '../lang'
 import { resumeSharing } from '../location'
@@ -90,7 +92,7 @@ import { CommunitiesHome, CommunityList } from './Communities'
 import CommunityInfo from './CommunityInfo'
 import { PeopleDialog } from './Dialogs'
 import JoinGroup from './JoinGroup'
-import { CallLinkDialog, CallReminder, CallScreen, DialDialog, JoinCallDialog, ScheduleDialog, Settings, StartCallDialog, StatusComposer, StatusViewer, warmUp } from './lazy'
+import { CallLinkDialog, CallReminder, CallScreen, DialDialog, GroupCallScreen, JoinCallDialog, ScheduleDialog, Settings, StartCallDialog, StatusComposer, StatusViewer, warmUp } from './lazy'
 import MyStatus from './MyStatus'
 import NewChat from './NewChat'
 import NewGroup from './NewGroup'
@@ -351,6 +353,19 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
 
   // 13. Your communities. (One you've left or that was deactivated just isn't in the list any more.)
   useEffect(() => listenToCommunities(user.uid, setCommunities), [user.uid])
+
+  // 14. Group calls in your groups. One that rings pops up an alert too, if PakChat isn't on screen.
+  useEffect(
+    () =>
+      listenForGroupCalls({ uid: user.uid, name: nameRef.current }, (ringing) => {
+        if (document.visibilityState === 'visible') return
+        const t = tRef.current
+        const kind = ringing.video ? t.incomingGroupVideoCall : t.incomingGroupVoiceCall
+        showAlert(ringing.title, `${fill(t.groupCalling, { name: ringing.by.name })} · ${kind}`, 'call', () => {})
+      }),
+    [user.uid],
+  )
+  const groupCall = useGroupCall()
   const community = communities.find((c) => c.id === communityId)
   const openCommunity = useCallback((id: string) => {
     setView('communities')
@@ -694,6 +709,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
 
       {joinCode && <JoinGroup me={me} code={joinCode} onClose={closeJoin} onJoined={joined} onJoinedCommunity={joinedCommunity} />}
       {call && <CallScreen key={call.id} call={call} />}
+      {groupCall && <GroupCallScreen key={groupCall.id} call={groupCall} chat={chats.find((c) => c.id === groupCall.chatId)} />}
       </Suspense>
     </div>
   )

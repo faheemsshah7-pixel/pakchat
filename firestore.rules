@@ -21,6 +21,10 @@ service cloud.firestore {
     function adminIn(c, uid) {
       return isGroupChat(c) && (uid == c.get('admin', '') || uid in c.get('admins', []));
     }
+    // A call's connection description ("offer" or "answer"): plain text, not too long.
+    function sdpOk(x) {
+      return x is map && x.keys().hasOnly(['type', 'sdp']) && x.type is string && x.sdp is string && x.sdp.size() < 30000;
+    }
 
     // users/<uid>: anyone logged in can see profiles (to find friends),
     // but you can only create or change YOUR OWN profile,
@@ -206,10 +210,6 @@ service cloud.firestore {
       function changes() {
         return next().diff(call()).affectedKeys();
       }
-      // A connection description ("offer" or "answer"): plain text, not too long.
-      function sdpOk(x) {
-        return x is map && x.keys().hasOnly(['type', 'sdp']) && x.type is string && x.sdp is string && x.sdp.size() < 30000;
-      }
       function blockedEitherWay(a, b) {
         return exists(/databases/$(database)/documents/users/$(a)/blocked/$(b))
           || exists(/databases/$(database)/documents/users/$(b)/blocked/$(a));
@@ -255,6 +255,113 @@ service cloud.firestore {
           && next().state == 'ended'
           && next().endedAt == request.time
           && !('offer' in next()) && !('answer' in next());
+      }
+    }
+
+    // groupCalls/<id>: a call with a group (see groupCalls.ts). Only the group's members can see it.
+    match /groupCalls/{callId} {
+      function call() {
+        return resource.data;
+      }
+      function next() {
+        return request.resource.data;
+      }
+      function changes() {
+        return next().diff(call()).affectedKeys();
+      }
+      // Who's in the call: what changed in "joined"
+      function joinedChanges() {
+        return next().joined.diff(call().joined).affectedKeys();
+      }
+      function groupOf(chatId) {
+        return get(/databases/$(database)/documents/chats/$(chatId)).data;
+      }
+      allow read: if signedIn() && me() in call().members;
+      // Starting one: as yourself, in a group you're in (where you can send, if only admins can),
+      // for everyone in the group, with only you in it so far.
+      allow create: if signedIn()
+        && next().keys().hasOnly(['chatId', 'title', 'by', 'byName', 'video', 'members', 'names', 'joined', 'state', 'startedAt', 'aliveAt'])
+        && next().by == me()
+        && next().byName == get(/databases/$(database)/documents/users/$(me())).data.name
+        && next().video is bool
+        && next().title is string && next().title.size() <= 100
+        && next().names is map
+        && next().state == 'active'
+        && next().startedAt == request.time
+        && next().aliveAt == request.time
+        && next().joined.keys().hasOnly([me()]) && next().joined[me()] == request.time
+        && isGroupChat(groupOf(next().chatId))
+        && me() in groupOf(next().chatId).members
+        && next().members == groupOf(next().chatId).members
+        && (groupOf(next().chatId).get('onlyAdmins', false) != true || adminIn(groupOf(next().chatId), me()));
+      allow update: if signedIn() && me() in call().members && (joining() || stillOn() || leaving() || ending());
+      // Joining (only yourself, at the server's time, while it's on, up to 8 people)
+      function joining() {
+        return call().state == 'active'
+          && changes().hasOnly(['joined'])
+          && joinedChanges().hasOnly([me()])
+          && next().joined[me()] == request.time
+          && next().joined.size() <= 8;
+      }
+      // "Still on" (someone in the call, every 2 minutes)
+      function stillOn() {
+        return call().state == 'active'
+          && me() in call().joined
+          && changes().hasOnly(['joined', 'aliveAt'])
+          && joinedChanges().hasOnly([me()])
+          && next().joined[me()] == request.time
+          && next().aliveAt == request.time;
+      }
+      // Leaving (only yourself)
+      function leaving() {
+        return changes().hasOnly(['joined'])
+          && joinedChanges().hasOnly([me()])
+          && !(me() in next().joined);
+      }
+      // The call is over (the last one to leave, or it went quiet). Anyone in the group can say so.
+      function ending() {
+        return call().state == 'active'
+          && changes().hasOnly(['joined', 'state', 'endedAt'])
+          && joinedChanges().hasOnly([me()])
+          && !(me() in next().joined)
+          && next().state == 'ended'
+          && next().endedAt == request.time;
+      }
+
+      // links/<from>_<to>: the connection between two people in the call. Only those two can see it.
+      match /links/{linkId} {
+        function link() {
+          return resource.data;
+        }
+        function nextLink() {
+          return request.resource.data;
+        }
+        function groupCall() {
+          return get(/databases/$(database)/documents/groupCalls/$(callId)).data;
+        }
+        allow read: if signedIn() && (link().from == me() || link().to == me());
+        // An offer (a new one, or again): from you, while you're in the call, to someone in the group.
+        // (The id is the two ids, "from_to".)
+        allow create: if signedIn() && offerOk();
+        allow update: if signedIn() && ((link().from == me() && offerOk()) || answerOk());
+        function offerOk() {
+          return nextLink().keys().hasOnly(['from', 'to', 'round', 'offer'])
+            && nextLink().from == me()
+            && nextLink().to is string && nextLink().to != me()
+            && linkId == me() + '_' + nextLink().to
+            && nextLink().round is string && nextLink().round.size() <= 40
+            && sdpOk(nextLink().offer)
+            && me() in groupCall().joined
+            && nextLink().to in groupCall().members;
+        }
+        // The answer: from the one it was offered to, for the offer that's there now (answerRound).
+        function answerOk() {
+          return link().to == me()
+            && nextLink().diff(link()).affectedKeys().hasOnly(['answer', 'answerRound'])
+            && nextLink().answerRound == link().round
+            && sdpOk(nextLink().answer);
+        }
+        allow delete: if signedIn() && (link().from == me() || link().to == me());
       }
     }
 
@@ -740,13 +847,14 @@ service cloud.firestore {
             && m.video is bool && m.missed is bool
             && m.seconds is number && m.seconds >= 0 && m.seconds < 86400)
           || (m.kind == 'system'
-            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer', 'listCreated', 'communityCreated', 'joinedCommunity', 'joinedGroup']
+            && m.event in ['created', 'added', 'left', 'removed', 'joined', 'renamed', 'photo', 'description', 'onlyAdmins', 'everyone', 'pinned', 'timer', 'listCreated', 'communityCreated', 'joinedCommunity', 'joinedGroup', 'voiceCall', 'videoCall']
             // "Ali turned on disappearing messages" says for how long
             && (m.event != 'timer' || m.get('seconds', -1) in [0, 86400, 604800, 7776000]));
       }
       // In a group set to "only admins can send", only admins can post.
       // Anyone can still leave or join (those add a small grey note).
-      // Other grey notes are for admins, except "Ali pinned a message" (anyone who can send can pin).
+      // Other grey notes are for admins, except "Ali pinned a message" and "Ali started a voice call"
+      // (anyone who can send can pin, or call the group).
       // (Your broadcast list is yours: you can post anything there.)
       function mayTalk(m) {
         let c = getAfter(chatPath()).data;
@@ -754,7 +862,7 @@ service cloud.firestore {
           || isBroadcastChat(c)
           || (m.kind == 'system' && m.event in ['left', 'joined', 'joinedCommunity', 'joinedGroup'])
           || adminIn(c, me())
-          || ((m.kind != 'system' || m.event == 'pinned') && !c.get('onlyAdmins', false));
+          || ((m.kind != 'system' || m.event in ['pinned', 'voiceCall', 'videoCall']) && !c.get('onlyAdmins', false));
       }
 
       // Reactions: { uid: '👍' }. You can only set or remove YOUR OWN reaction.

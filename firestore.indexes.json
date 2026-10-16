@@ -17,6 +17,14 @@
       ]
     },
     {
+      "collectionGroup": "groupCalls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "members", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "state", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "statuses",
       "queryScope": "COLLECTION",
       "fields": [

@@ -1,13 +1,15 @@
 // CallScreen.tsx: the screen during a call. calls.ts does the actual work; this only shows it.
 //   Someone calling you: their name and photo, with Decline and Accept.
-//   During a call: their picture (video calls) or photo, a timer, and three buttons:
-//     camera on/off (video calls only), microphone on/off, and the red End call.
+//   During a call: their picture (video calls) or photo, a timer, and the buttons:
+//     camera on/off (video calls only), microphone on/off, Share screen (computers), and the red End call.
+//   When they share their screen, it fills the call screen (all of it shows, nothing cut off).
 //   "Back to chats" (the arrow at the top) shrinks it to a green bar, so you can chat during a call.
 import { useState } from 'react'
-import { acceptCall, closeCallScreen, declineCall, hangUp, toggleCamera, toggleMic, type Call, type CallEnd } from '../calls'
+import { acceptCall, closeCallScreen, declineCall, hangUp, toggleCamera, toggleMic, toggleShare, type Call, type CallEnd } from '../calls'
 import { LEVEL, useBack } from '../back'
+import { play } from '../rtc'
 import { useT } from '../lang'
-import type { Strings } from '../strings'
+import { fill, type Strings } from '../strings'
 import { duration, useNow } from '../time'
 import { PersonAvatar } from './Avatar'
 import Icon, { type IconName } from './Icon'
@@ -19,8 +21,11 @@ export default function CallScreen({ call }: { call: Call }) {
   // Back shrinks the call to a bar at the top (it doesn't hang up). While it rings, Back does nothing.
   useBack(!small, LEVEL.cover, () => call.phase !== 'incoming' && setSmall(true))
   const status = statusText(call, now, t)
-  const theirVideo = call.video && call.phase === 'connected' && !!call.remote?.getVideoTracks().length
-  const myVideo = call.video && !!call.local?.getVideoTracks().length && !call.cameraOff
+  // Their picture: their camera in a video call (unless it's off), or their screen when they share it.
+  const theyShare = call.theirs.sharing
+  const theirVideo = call.phase === 'connected' && !!call.remote?.getVideoTracks().length && (theyShare || (call.video && !call.theirs.cameraOff))
+  // Mine, small in the corner: my screen while I share it, otherwise my camera.
+  const myVideo = call.screen ?? (call.video && !!call.local?.getVideoTracks().length && !call.cameraOff ? call.local : null)
 
   // Their voice plays through this. It stays on the page even when the screen is shrunk.
   const voice = <audio ref={(el) => play(el, call.remote)} autoPlay />
@@ -42,9 +47,17 @@ export default function CallScreen({ call }: { call: Call }) {
   return (
     <div className={theirVideo ? 'call-screen has-video' : 'call-screen'} role="dialog" aria-label={call.video ? t.videoCall : t.voiceCall}>
       {voice}
-      {theirVideo && <video className="remote-video" ref={(el) => play(el, call.remote)} autoPlay playsInline muted />}
-      {/* Your own camera: big while it rings, then small in the corner. */}
-      {myVideo && <video className={theirVideo ? 'local-video' : 'local-video full'} ref={(el) => play(el, call.local)} autoPlay playsInline muted />}
+      {theirVideo && <video className={theyShare ? 'remote-video screen' : 'remote-video'} ref={(el) => play(el, call.remote)} autoPlay playsInline muted />}
+      {/* Your own camera: big while it rings, then small in the corner. (Your screen: always small.) */}
+      {myVideo && (
+        <video
+          className={['local-video', !theirVideo && !call.screen && 'full', call.screen && 'screen'].filter(Boolean).join(' ')}
+          ref={(el) => play(el, myVideo)}
+          autoPlay
+          playsInline
+          muted
+        />
+      )}
 
       <div className="call-top">
         {call.phase !== 'incoming' && call.phase !== 'ended' && (
@@ -58,6 +71,11 @@ export default function CallScreen({ call }: { call: Call }) {
         {!theirVideo && <PersonAvatar uid={call.peer.uid} name={call.peer.name} size={120} />}
         <h2 dir="auto">{call.peer.name}</h2>
         <p className={call.phase === 'ended' && call.end !== 'ended' ? 'call-status problem' : 'call-status'}>{status}</p>
+        {call.phase === 'connected' && (call.screen || (theirVideo && theyShare)) && (
+          <p className="call-sharing">
+            <Icon name="screen" size={16} /> {call.screen ? t.youreSharing : fill(t.theyreSharing, { name: call.peer.name })}
+          </p>
+        )}
       </div>
 
       <div className="call-controls">
@@ -74,6 +92,9 @@ export default function CallScreen({ call }: { call: Call }) {
               <CallButton icon={call.cameraOff ? 'videoOff' : 'video'} label={call.cameraOff ? t.cameraOn : t.cameraOff} pressed={call.cameraOff} onClick={toggleCamera} />
             )}
             <CallButton icon={call.micOff ? 'micOff' : 'mic'} label={call.micOff ? t.unmuteMic : t.muteMic} pressed={call.micOff} onClick={toggleMic} />
+            {call.phase === 'connected' && call.canShare && (
+              <CallButton icon="screen" label={call.screen ? t.stopScreen : t.shareScreen} pressed={!!call.screen} onClick={toggleShare} />
+            )}
             <CallButton icon="phone" label={t.endCall} className="end" onClick={() => hangUp()} />
           </>
         )}
@@ -84,7 +105,7 @@ export default function CallScreen({ call }: { call: Call }) {
 
 type ButtonProps = { icon: IconName; label: string; onClick: () => void; className?: string; pressed?: boolean }
 
-function CallButton({ icon, label, onClick, className = '', pressed }: ButtonProps) {
+export function CallButton({ icon, label, onClick, className = '', pressed }: ButtonProps) {
   return (
     <span className="call-btn-wrap">
       <button className={`call-btn ${className} ${pressed ? 'on' : ''}`} aria-label={label} aria-pressed={pressed} onClick={onClick}>
@@ -93,11 +114,6 @@ function CallButton({ icon, label, onClick, className = '', pressed }: ButtonPro
       <small>{label}</small>
     </span>
   )
-}
-
-// Connect a sound or video stream to an <audio>/<video> on the page (only when it changed).
-function play(el: HTMLMediaElement | null, stream: MediaStream | null) {
-  if (el && el.srcObject !== stream) el.srcObject = stream
 }
 
 function statusText(call: Call, now: number, t: Strings) {

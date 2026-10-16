@@ -815,3 +815,74 @@ To show "Other groups you can join", the names have to be somewhere you *can* re
 ### Try this
 - In `communities.ts`, change `MAX_GROUPS` to 10, and see the error when you add an 11th group.
 - Make a community for your family, add a group "Shaadi plans" to it, and share the invite link.
+
+## Step 20: Group calls and sharing your screen
+
+| Part | Files | Saved as |
+|---|---|---|
+| What both kinds of call share | `rtc.ts` (new) | |
+| Sharing your screen in a call | `calls.ts`, `CallScreen.tsx` | nothing new: it goes straight between the browsers |
+| Group calls | `groupCalls.ts` (new), `GroupCallScreen.tsx` (new) | `groupCalls/<id>`, `groupCalls/<id>/links/<from>_<to>` |
+| The call buttons and "call in progress" bar in a group | `ChatRoom.tsx` | |
+
+### Sharing your screen
+In any call on a computer there's a **Share screen** button. The browser asks which screen,
+window or tab, and the other side sees it whole, with "Ali is sharing their screen". Press
+**Stop sharing** (or the browser's own button) and your camera comes back. Phone browsers can't
+share their screen, so phones don't get the button.
+
+How it works: every call now has a picture **slot** from the start, even a voice call.
+In a voice call it's empty. Sharing puts your screen in it with `replaceTrack`, so nothing has to
+connect again. (`addPictureSlot` and `takePictureSlot` in `rtc.ts`.)
+
+There's also a small text channel between the two browsers (`sideChannel`, a WebRTC "data
+channel"). Each side uses it to say "I'm sharing my screen", "my camera is off" or "my mic is off".
+That's how the other side knows to show your photo instead of a black picture when your camera is off.
+
+### Group calls
+In a group, the phone and camera at the top now start a **group call** (up to 8 people).
+- Everyone in the group gets a ring (in groups of up to 32 people, like WhatsApp), with **Join**
+  and **Decline**. The chat gets a note: "Ali started a voice call".
+- While it's on, the group's chat shows **Voice call in progress · 3 in the call · Join**,
+  so you can join after declining or join late.
+- On the call screen everyone is a tile: their camera, or their photo. A muted mic shows on the tile.
+  Someone sharing their screen gets the big space at the top.
+- **Leave** leaves. The last one to leave ends the call.
+
+### How it's saved
+```
+groupCalls/<id>
+  chatId, title, by, byName, video
+  members: [uid, ...]        everyone in the group (only they can see or join it)
+  names:   { uid: 'Ali' }
+  joined:  { uid: when }     who's in it right now
+  state:   'active', then 'ended'
+  aliveAt                    "still on", every 2 minutes
+groupCalls/<id>/links/<from>_<to>
+  from, to, round, offer, answer, answerRound
+```
+A one-to-one call has one connection. A group call has one for **every two people** (a "mesh"):
+4 people means 6 connections, and each browser sends its sound and picture to each of the others.
+That's why there's a limit of 8. (Bigger calls need a server in the middle, which costs money.)
+
+Who connects to whom? For every two people, the one whose id comes first A to Z writes the
+**offer** in their link, and the other writes the **answer**. Because both of them can work that
+out on their own, two people never both make an offer to each other.
+
+What if everyone's app closes suddenly? Nobody is left to say the call ended. So one person in it
+writes `aliveAt` every 2 minutes, and a call that's been quiet for 5 minutes counts as over.
+
+### New rules
+- Only the group's members can see its calls. You can only start one in a group you're in (and
+  only as an admin, if only admins can send there), for the whole group.
+- You can only add or take out **yourself** in `joined`, at the server's time, and there can't be
+  more than 8.
+- A link can only be read by its two people. Only the first one can write the offer, and only
+  while they're in the call. The answer must say which offer it answers (`answerRound`), so an
+  answer to an old offer is turned away.
+- New index: `groupCalls` by `members` (array-contains) and `state`. That's why this deploy
+  is a full one, not just hosting.
+
+### Try this
+- In `groupCalls.ts`, change `MAX_IN_CALL` to 3, and see "This call is full" when a 4th person joins.
+- In a call on your computer, share a browser tab with a YouTube video in it.

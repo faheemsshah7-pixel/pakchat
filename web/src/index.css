@@ -2882,6 +2882,177 @@ button.setting:disabled {
   font-weight: 500;
 }
 
+/* Sharing a screen: all of it shows (nothing cut off), on black. Your own isn't mirrored. */
+.remote-video.screen {
+  object-fit: contain;
+  background: #000;
+}
+.local-video.screen {
+  width: min(36vw, 280px);
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  transform: none;
+}
+.call-sharing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px auto 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.14);
+  font-size: 13px;
+}
+
+/* ----- Group calls: everyone in tiles ----- */
+.call-screen.group-call {
+  justify-content: flex-start;
+}
+.gc-head {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 14px 64px 4px;
+  text-align: center;
+}
+.gc-head .call-min {
+  top: 10px;
+}
+.gc-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.gc-title strong {
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gc-title .call-status {
+  font-size: 14px;
+}
+/* Someone's screen, big at the top */
+.gc-spotlight {
+  flex: 3 1 0;
+  width: calc(100% - 24px);
+  min-height: 0;
+  margin: 8px 12px 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+}
+.gc-spotlight video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* The tiles: 1 column for 1 or 2 people (on a phone), 2 for up to 6, then 3 */
+.gc-grid {
+  --cols: 1;
+  flex: 1 1 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  padding: 8px 12px 0;
+}
+.gc-grid:is([data-count='3'], [data-count='4'], [data-count='5'], [data-count='6']) {
+  --cols: 2;
+}
+.gc-grid:is([data-count='7'], [data-count='8'], [data-count='9']) {
+  --cols: 3;
+}
+@media (min-width: 900px) {
+  .gc-grid[data-count='2'] {
+    --cols: 2;
+  }
+  .gc-grid:is([data-count='5'], [data-count='6']) {
+    --cols: 3;
+  }
+}
+/* Under someone's screen, the tiles go in one row */
+.gc-spotlight + .gc-grid {
+  flex: 1 1 0;
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(130px, 1fr);
+  overflow-x: auto;
+}
+.gc-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.07);
+}
+.gc-tile video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gc-tile video.mirror {
+  transform: scaleX(-1);
+}
+.gc-tile.connecting > .avatar {
+  opacity: 0.5;
+}
+.gc-name {
+  position: absolute;
+  bottom: 8px;
+  inset-inline-start: 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 16px);
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  font-size: 13px;
+  font-weight: 600;
+}
+.gc-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gc-name small {
+  opacity: 0.8;
+  font-weight: 500;
+}
+.call-screen.group-call .call-controls {
+  padding-top: 16px;
+}
+
+/* "Voice call in progress · Join", under a group's top bar */
+.group-call-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-bottom: 1px solid var(--border);
+  animation: fade-in 0.15s;
+}
+.group-call-bar .row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.group-call-bar small {
+  opacity: 0.8;
+}
+
 /* A call in the chat: "Voice call 2:13" / "Missed voice call" */
 .call-bubble {
   display: flex;

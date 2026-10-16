@@ -11,6 +11,7 @@
 //   3. She presses Accept. Her browser writes an "answer" (her connection details): state 'accepted'.
 //   4. The two browsers connect to each other and the call starts.
 //   5. Either of them hangs up: state 'ended', and the connection details are wiped.
+//   During the call, either of them can share their screen (rtc.ts).
 //   Asad's app then writes the call into their chat: "Voice call 2:13", or "Missed voice call".
 // Other endings: 'declined' (she said no), 'busy' (she's on another call),
 // 'cancelled' (Asad gave up), 'missed' (nobody answered in 45 seconds).
@@ -33,24 +34,28 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { chatIdFor, sendMessage, type Person } from './chats'
-import { getSetting } from './settings'
+import {
+  addPictureSlot,
+  busyWhen,
+  canShareScreen,
+  describe,
+  gathered,
+  getMedia,
+  getScreen,
+  ICE_SERVERS,
+  limitVideo,
+  onACall,
+  pictureSender,
+  quality,
+  sideChannel,
+  stopTracks,
+  takePictureSlot,
+  type Signals,
+} from './rtc'
 import { startRinging } from './sound'
 
 const RING_SECONDS = 45 // then it's a missed call
 const CONNECT_SECONDS = 20 // accepted, but still not connected after this long: give up
-
-// STUN servers tell each browser its address on the internet, so the two can find each other.
-// They're free. (On some mobile networks two phones can't reach each other directly; a paid
-// "TURN" relay server fixes that, and it would go in this list too.)
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-]
-
-// Sound quality: 64 kbit/s, about 3 times what WhatsApp uses. Clear, and about 1 MB a minute.
-const AUDIO_KBPS = 64
-// Picture quality. "Use less data for calls" (Settings) picks the lower one.
-const VIDEO_KBPS = { normal: 450, low: 150 }
 
 export type CallEnd = 'ended' | 'declined' | 'busy' | 'noAnswer' | 'failed' | 'micBlocked' | 'cantCall'
 
@@ -69,6 +74,9 @@ export type Call = {
   local: MediaStream | null // my microphone (and camera)
   remote: MediaStream | null // their sound (and picture)
   end: CallEnd | null // why it ended, shown for a moment before the screen closes
+  canShare: boolean // I can share my screen (a computer, and their PakChat is new enough)
+  screen: MediaStream | null // my screen, while I share it
+  theirs: Signals // what the other side said: sharing their screen, camera off, microphone off
 }
 
 // A record from calls/<id>, for the Calls list.
@@ -116,12 +124,16 @@ type Live = {
   unwatch: () => void
   stopSound: () => void
   timers: number[]
+  signal: (signals: Signals) => void // tell the other side (rtc.ts)
 }
 let live: Live | null = null
+busyWhen(() => !!current && current.phase !== 'ended')
 
-function begin(call: Omit<Call, 'connectedAt' | 'micOff' | 'cameraOff' | 'local' | 'remote' | 'end'>, ref: Live['ref']) {
-  current = { ...call, connectedAt: null, micOff: false, cameraOff: false, local: null, remote: null, end: null }
-  live = { ref, pc: null, state: 'new', accepted: false, unwatch: () => {}, stopSound: () => {}, timers: [] }
+type Fresh = 'connectedAt' | 'micOff' | 'cameraOff' | 'local' | 'remote' | 'end' | 'canShare' | 'screen' | 'theirs'
+function begin(call: Omit<Call, Fresh>, ref: Live['ref']) {
+  const theirs = { sharing: false, cameraOff: false, micOff: false }
+  current = { ...call, connectedAt: null, micOff: false, cameraOff: false, local: null, remote: null, end: null, canShare: false, screen: null, theirs }
+  live = { ref, pc: null, state: 'new', accepted: false, unwatch: () => {}, stopSound: () => {}, timers: [], signal: () => {} }
   listeners.forEach((listener) => listener())
   return live
 }
@@ -129,7 +141,7 @@ function begin(call: Omit<Call, 'connectedAt' | 'micOff' | 'cameraOff' | 'local'
 // ---------- Calling someone ----------
 
 export async function startCall(me: Person, peer: Person, video: boolean) {
-  if (current && current.phase !== 'ended') return // already in a call
+  if (onACall()) return // already in a call
   const ref = doc(collection(db, 'calls'))
   const session = begin({ id: ref.id, chatId: chatIdFor(me.uid, peer.uid), me, peer, video, outgoing: true, phase: 'calling' }, ref)
   try {
@@ -137,6 +149,7 @@ export async function startCall(me: Person, peer: Person, video: boolean) {
     if (live !== session) return stopTracks(local) // you hung up while the browser was asking
     show({ local })
     const pc = connect(session, local)
+    addPictureSlot(pc, local) // (for sharing your screen in a voice call)
     await pc.setLocalDescription(await pc.createOffer())
     await gathered(pc)
     if (live !== session) return
@@ -148,7 +161,7 @@ export async function startCall(me: Person, peer: Person, video: boolean) {
       toName: peer.name,
       video,
       state: 'ringing',
-      offer: describe(pc),
+      offer: describe(pc, quality(false)),
       startedAt: serverTimestamp(),
     })
     if (live !== session) return
@@ -197,9 +210,9 @@ export function listenForCalls(me: Person, onRing: (call: Call) => void) {
           updateDoc(change.doc.ref, { state: 'missed', endedAt: serverTimestamp(), offer: deleteField() }).catch(console.error)
           continue
         }
-        // Already on a call: tell them you're busy.
-        if (current && current.phase !== 'ended') {
-          if (current.id !== change.doc.id) updateDoc(change.doc.ref, { state: 'busy', endedAt: serverTimestamp(), offer: deleteField() }).catch(console.error)
+        // Already on a call (this kind or a group call): tell them you're busy.
+        if (onACall()) {
+          if (current?.id !== change.doc.id) updateDoc(change.doc.ref, { state: 'busy', endedAt: serverTimestamp(), offer: deleteField() }).catch(console.error)
           continue
         }
         const peer = { uid: data.from as string, name: data.fromName as string }
@@ -234,10 +247,11 @@ export async function acceptCall() {
     show({ local })
     const pc = connect(session, local)
     await pc.setRemoteDescription(session.offer)
+    takePictureSlot(pc, local)
     await pc.setLocalDescription(await pc.createAnswer())
     await gathered(pc)
     if (live !== session) return
-    await updateDoc(session.ref, { state: 'accepted', answer: describe(pc), answeredAt: serverTimestamp() })
+    await updateDoc(session.ref, { state: 'accepted', answer: describe(pc, quality(false)), answeredAt: serverTimestamp() })
     session.state = 'accepted'
     session.accepted = true
     watchConnecting(session)
@@ -257,13 +271,51 @@ export function toggleMic() {
   const micOff = !current.micOff
   current.local?.getAudioTracks().forEach((track) => (track.enabled = !micOff))
   show({ micOff })
+  tellThem()
 }
 
 export function toggleCamera() {
   if (!current) return
   const cameraOff = !current.cameraOff
-  current.local?.getVideoTracks().forEach((track) => (track.enabled = !cameraOff)) // they see black
+  current.local?.getVideoTracks().forEach((track) => (track.enabled = !cameraOff)) // they'd see black, so they show your photo
   show({ cameraOff })
+  tellThem()
+}
+
+// Share your screen, or stop. Your screen takes the place of your camera; stopping puts it back.
+// (The browser's own "Stop sharing" button works too.)
+export async function toggleShare() {
+  const session = live
+  const sender = session?.pc && pictureSender(session.pc)
+  if (!session || !sender || !current) return
+  if (current.screen) return stopSharing()
+  try {
+    const track = await getScreen()
+    if (live !== session) return track.stop() // the call ended while you were picking a screen
+    await sender.replaceTrack(track)
+    track.addEventListener('ended', stopSharing)
+    show({ screen: new MediaStream([track]) })
+    tellThem()
+  } catch (err) {
+    // You pressed Cancel: nothing to do. Anything else: say so in the console.
+    if ((err as Error).name !== 'NotAllowedError') console.error(err)
+  }
+}
+
+function stopSharing() {
+  const sender = live?.pc && pictureSender(live.pc)
+  if (!current?.screen) return
+  stopTracks(current.screen)
+  sender?.replaceTrack(current.local?.getVideoTracks()[0] ?? null).catch(console.error)
+  show({ screen: null })
+  tellThem()
+}
+
+// (No camera at all counts as "camera off", so they show your photo.)
+function tellThem() {
+  if (!current) return
+  const cameraOff = current.cameraOff || !current.local?.getVideoTracks().length
+  live?.signal({ sharing: !!current.screen, cameraOff, micOff: current.micOff })
 }
 
 // Hang up (or decline, or give up). end: what to show for a moment ("Call ended", "No answer"...).
@@ -292,9 +344,10 @@ function finish(end: CallEnd | null) {
   session.unwatch()
   session.pc?.close()
   stopTracks(call.local)
+  stopTracks(call.screen)
   if (call.outgoing && session.state !== 'new') logCall(call, session.accepted).catch(console.error)
   if (!end) return show(null)
-  show({ phase: 'ended', end, local: null, remote: null })
+  show({ phase: 'ended', end, local: null, remote: null, screen: null })
   // Show "Call ended" (or why it ended) for a moment, then close the call screen.
   setTimeout(() => current?.id === call.id && current.phase === 'ended' && show(null), end === 'ended' ? 2000 : 5000)
 }
@@ -331,38 +384,19 @@ export async function recentCalls(uid: string) {
 
 // ---------- The connection itself (WebRTC) ----------
 
-// The microphone (and camera). The browser asks "Allow PakChat to use your microphone?" the first time.
-const AUDIO: MediaTrackConstraints = {
-  echoCancellation: true, // so they don't hear themselves back from your speaker
-  noiseSuppression: true,
-  autoGainControl: true,
-  channelCount: 1,
-  sampleRate: 48_000,
-}
-async function getMedia(video: boolean) {
-  if (!video) return navigator.mediaDevices.getUserMedia({ audio: AUDIO })
-  try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: AUDIO,
-      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 }, facingMode: 'user' },
-    })
-  } catch {
-    // No camera, it's busy, or you said no to it: carry on with just the microphone.
-    return navigator.mediaDevices.getUserMedia({ audio: AUDIO })
-  }
-}
-
 function connect(session: Live, local: MediaStream) {
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
   session.pc = pc
   if (import.meta.env.DEV) Object.assign(window, { pakchatCall: pc }) // (only while testing: lets tests measure the sound)
   local.getTracks().forEach((track) => pc.addTrack(track, local))
   pc.ontrack = (e) => live === session && show({ remote: e.streams[0] })
+  session.signal = sideChannel(pc, (theirs) => live === session && show({ theirs }))
   pc.onconnectionstatechange = () => {
     if (live !== session) return
     if (pc.connectionState === 'connected' && !current?.connectedAt) {
-      show({ phase: 'connected', connectedAt: Date.now() })
-      limitVideo(pc).catch(console.error)
+      show({ phase: 'connected', connectedAt: Date.now(), canShare: canShareScreen && !!pictureSender(pc) })
+      tellThem()
+      limitVideo(pc, quality(false)).catch(console.error)
     } else if (pc.connectionState === 'failed') hangUp('failed')
     else if (pc.connectionState === 'disconnected') {
       // A short drop (a train tunnel, Wi-Fi to mobile data) often comes back by itself. Wait a bit.
@@ -374,68 +408,6 @@ function connect(session: Live, local: MediaStream) {
 
 function watchConnecting(session: Live) {
   session.timers.push(window.setTimeout(() => live === session && current?.phase === 'connecting' && hangUp('failed'), CONNECT_SECONDS * 1000))
-}
-
-// Wait until the browser has found its addresses (or 3 seconds), so they all go in one write.
-function gathered(pc: RTCPeerConnection) {
-  return new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === 'complete') return resolve()
-    const done = () => {
-      clearTimeout(timer)
-      pc.removeEventListener('icegatheringstatechange', check)
-      resolve()
-    }
-    const check = () => pc.iceGatheringState === 'complete' && done()
-    const timer = setTimeout(done, 3000)
-    pc.addEventListener('icegatheringstatechange', check)
-  })
-}
-
-// My connection details, to save in the call document.
-function describe(pc: RTCPeerConnection) {
-  const description = pc.localDescription!
-  return { type: description.type, sdp: tune(description.sdp) }
-}
-
-// The details are plain text (called SDP). Two lines in it decide the quality the OTHER side sends me:
-//   a=fmtp:111 ...maxaveragebitrate=64000   sound at 64 kbit/s (browsers normally use about 32)
-//   b=AS:450                                  picture at most 450 kbit/s
-function tune(sdp: string) {
-  const lowData = getSetting('lowDataCalls')
-  const opus = sdp.match(/a=rtpmap:(\d+) opus\/48000/i)?.[1]
-  let section = ''
-  const lines: string[] = []
-  for (const line of sdp.split('\r\n')) {
-    if (line.startsWith('m=')) section = line.slice(2).split(' ')[0] // 'audio' or 'video'
-    if (opus && line.startsWith(`a=fmtp:${opus} `)) {
-      const params = new Map(line.slice(`a=fmtp:${opus} `.length).split(';').map((p) => p.trim().split('=') as [string, string]))
-      params.set('maxaveragebitrate', String(AUDIO_KBPS * 1000))
-      params.set('maxplaybackrate', '48000') // full range of the voice, not "telephone" sound
-      params.set('useinbandfec', '1') // repairs sound when a packet gets lost
-      lines.push(`a=fmtp:${opus} ` + [...params].map(([key, value]) => `${key}=${value}`).join(';'))
-      continue
-    }
-    if (section === 'video' && line.startsWith('b=AS:')) continue // we add our own below
-    lines.push(line)
-    if (section === 'video' && line.startsWith('c=')) lines.push(`b=AS:${lowData ? VIDEO_KBPS.low : VIDEO_KBPS.normal}`)
-  }
-  return lines.join('\r\n')
-}
-
-// And what I send: at most my own picture limit too.
-async function limitVideo(pc: RTCPeerConnection) {
-  const kbps = getSetting('lowDataCalls') ? VIDEO_KBPS.low : VIDEO_KBPS.normal
-  for (const sender of pc.getSenders()) {
-    if (sender.track?.kind !== 'video') continue
-    const params = sender.getParameters()
-    if (!params.encodings?.length) params.encodings = [{}]
-    params.encodings[0].maxBitrate = kbps * 1000
-    await sender.setParameters(params)
-  }
-}
-
-function stopTracks(stream: MediaStream | null) {
-  stream?.getTracks().forEach((track) => track.stop()) // turns the microphone and camera light off
 }
 
 // A call couldn't start: say why, in words the call screen can show.

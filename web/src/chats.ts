@@ -81,6 +81,8 @@ export type SystemEvent =
   | 'communityCreated' // "Ali created the community" (in its announcements group, communities.ts)
   | 'joinedCommunity' // "Ali joined the community" (with its invite link)
   | 'joinedGroup' // "Ali joined from the community" (a community's group)
+  | 'voiceCall' // "Ali started a voice call" (a group call, groupCalls.ts)
+  | 'videoCall'
 
 export type LastMessage = {
   id?: string // which message it is (older chats don't say)
@@ -391,6 +393,8 @@ export function systemText(m: { event?: SystemEvent; senderId: string; senderNam
     communityCreated: t.communityCreated,
     joinedCommunity: t.joinedCommunity,
     joinedGroup: t.joinedGroup,
+    voiceCall: t.startedVoiceCall,
+    videoCall: t.startedVideoCall,
   }
   return fill(templates[m.event ?? 'left'] ?? '', values)
 }

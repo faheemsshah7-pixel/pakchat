@@ -579,6 +579,14 @@ const PATHS = {
       <circle cx="18" cy="16" r="3" />
     </>
   ),
+  // Share your screen: a computer screen with an arrow going up out of it
+  screen: (
+    <>
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8M12 17v4" />
+      <path d="m9 10 3-3 3 3M12 7v6" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

@@ -2,7 +2,8 @@
 // Messages appear live, for everyone in it. Older messages load as you scroll up.
 // Each message has a menu (MessageBubble.tsx): react, reply, copy, forward, pin, star, edit, info, delete.
 // Pinned messages show in a bar under the top (pins.ts). Disappearing messages vanish on time (disappearing.ts).
-// In a chat with one person, the phone and camera at the top start a call (calls.ts).
+// The phone and camera at the top start a call: with one person (calls.ts), or with a group (groupCalls.ts).
+// While a group's call is on, a bar under the top says so, with a Join button.
 // The paperclip sends photos, videos, documents, your location (location.ts), a contact card or a poll (polls.ts).
 // In groups, @mentions (mentions.ts) and "Reply privately". A chat with yourself is "Message yourself".
 // In a broadcast list, what you send also goes to each person on it, in your chat with them (broadcasts.ts).
@@ -14,6 +15,7 @@ import { db } from '../firebase'
 import { LEVEL, useBack } from '../back'
 import { deleteList, editCopies, listAsChat, sendToList, unsendCopies } from '../broadcasts'
 import { startCall } from '../calls'
+import { isOn, joinGroupCall, startGroupCall, useGroupCall, useGroupCallIn } from '../groupCalls'
 import {
   chatTitle,
   findUser,
@@ -195,8 +197,15 @@ export default function ChatRoom(props: Props) {
   const usualTone = getSetting(group ? 'groupTone' : 'messageTone')
   const iBlockedThem = !!other && blocked.has(other.uid)
   const canTalk = !group || !chat?.onlyAdmins || isAdmin(chat, me.uid)
-  // Calls are for chats with one person (not groups), and not with someone you blocked.
-  const call = other && !iBlockedThem && !self ? (video: boolean) => startCall(me, other, video) : undefined
+  // Calls: with one person (not someone you blocked), or with a group you can send in.
+  // (A group where only admins can send: only admins can call it.)
+  const inGroup = group && !!chat?.members.includes(me.uid)
+  const call =
+    other && !iBlockedThem && !self
+      ? (video: boolean) => startCall(me, other, video)
+      : inGroup && canTalk && chat
+        ? (video: boolean) => startGroupCall(me, chat, video).catch(console.error)
+        : undefined
   // A group's other members, A to Z, for @mentions.
   const members = chat?.members
   const names = chat?.names
@@ -861,6 +870,8 @@ export default function ChatRoom(props: Props) {
         <Menu label={t.menu} items={menuItems} />
       </header>
 
+      {inGroup && <GroupCallBar me={me} chatId={chatId} />}
+
       {searching && (
         <div className="search-bar">
           <div className="field">
@@ -1146,6 +1157,27 @@ export default function ChatRoom(props: Props) {
           />
         </Suspense>
       )}
+    </div>
+  )
+}
+
+// "Voice call in progress · 3 in the call · Join", while a group's call is on (and you're not in it).
+function GroupCallBar({ me, chatId }: { me: Person; chatId: string }) {
+  const { t } = useT()
+  const call = useGroupCallIn(chatId)
+  const mine = useGroupCall()
+  const now = useNow(30_000)
+  if (!call || !isOn(call, now) || (mine?.id === call.id && mine.phase !== 'incoming')) return null
+  return (
+    <div className="group-call-bar">
+      <Icon name={call.video ? 'video' : 'phone'} size={18} />
+      <span className="row-main">
+        <strong>{call.video ? t.videoCallOn : t.voiceCallOn}</strong>
+        <small>{fill(t.inCall, { n: Object.keys(call.joined).length })}</small>
+      </span>
+      <button className="btn small" onClick={() => joinGroupCall(me, call).catch(console.error)}>
+        {t.join}
+      </button>
     </div>
   )
 }
