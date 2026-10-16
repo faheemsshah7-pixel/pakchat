@@ -22,7 +22,11 @@ export default function MyStatus({ me, profile, mine, onView, onCamera, onWrite 
   const [views, setViews] = useState<Map<string, number>>(new Map())
 
   // How many saw each one (one cheap count each, when this opens or a new one is posted).
-  const ids = items.map((s) => s.id).join(',')
+  // (Not while a new one is still uploading: the database would say no, it isn't there yet.)
+  const ids = items
+    .filter((s) => !s.pending)
+    .map((s) => s.id)
+    .join(',')
   useEffect(() => {
     let stillHere = true
     for (const id of ids ? ids.split(',') : []) {

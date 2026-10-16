@@ -81,6 +81,7 @@ export type Status = {
   thumb?: string
   postedAt: Timestamp | null
   audience?: string[]
+  pending?: boolean // (yours, still on its way to the database: nobody can have seen it yet)
 }
 
 export type StatusView = { uid: string; name: string; at: Timestamp | null; liked?: boolean }
@@ -196,8 +197,9 @@ export function listenToMine(uid: string, onList: (list: Status[]) => void) {
   const tidied = new Set<string>()
   return onSnapshot(
     query(collection(db, 'statuses'), where('owner', '==', uid)),
+    { includeMetadataChanges: true }, // (so we hear when a new one has reached the database)
     (snap) => {
-      const all = snap.docs.map(toStatus)
+      const all = snap.docs.map((d) => ({ ...toStatus(d), pending: d.metadata.hasPendingWrites }))
       onList(all.filter((s) => isLive(s)))
       for (const s of all) {
         if (isLive(s) || tidied.has(s.id)) continue

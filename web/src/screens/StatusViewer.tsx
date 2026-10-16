@@ -108,6 +108,7 @@ export default function StatusViewer({ me, groups, order, startItem, muted, onCl
 
   // ----- its photo or video -----
   const sid = s?.id
+  const pending = !!s?.pending
   const skind = s?.kind
   const smedia = s?.mediaId
   useEffect(() => {
@@ -186,9 +187,9 @@ export default function StatusViewer({ me, groups, order, startItem, muted, onCl
 
   // Your own status: who saw it, live.
   useEffect(() => {
-    if (!mine || !sid) return
+    if (!mine || !sid || pending) return // (a new one still uploading has no views yet)
     return listenToViews(sid, (views) => setSeenBy({ id: sid, views }))
-  }, [mine, sid])
+  }, [mine, sid, pending])
   const views = seenBy && seenBy.id === sid ? seenBy.views : []
 
   useEffect(() => {

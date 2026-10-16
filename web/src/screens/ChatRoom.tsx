@@ -292,7 +292,7 @@ export default function ChatRoom(props: Props) {
   // Esc closes the photo you're looking at, the search, or else the chat (like WhatsApp Web).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .emoji-picker, .photo-sender')) return
+      if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .emoji-picker, .photo-sender, .settings-window, .call-screen')) return
       if (viewing) setViewing(null)
       else if (searching) setSearching(false)
       else if (!showInfo && !replyTo && !editing) onBack()
