@@ -42,7 +42,7 @@ import {
   gathered,
   getMedia,
   getScreen,
-  ICE_SERVERS,
+  iceServers,
   limitVideo,
   onACall,
   pictureSender,
@@ -148,7 +148,9 @@ export async function startCall(me: Person, peer: Person, video: boolean) {
     const local = await getMedia(video)
     if (live !== session) return stopTracks(local) // you hung up while the browser was asking
     show({ local })
-    const pc = connect(session, local)
+    const servers = await iceServers()
+    if (live !== session) return stopTracks(local)
+    const pc = connect(session, local, servers)
     addPictureSlot(pc, local) // (for sharing your screen in a voice call)
     await pc.setLocalDescription(await pc.createOffer())
     await gathered(pc)
@@ -245,7 +247,9 @@ export async function acceptCall() {
     const local = await getMedia(call.video)
     if (live !== session) return stopTracks(local)
     show({ local })
-    const pc = connect(session, local)
+    const servers = await iceServers()
+    if (live !== session) return stopTracks(local)
+    const pc = connect(session, local, servers)
     await pc.setRemoteDescription(session.offer)
     takePictureSlot(pc, local)
     await pc.setLocalDescription(await pc.createAnswer())
@@ -384,8 +388,8 @@ export async function recentCalls(uid: string) {
 
 // ---------- The connection itself (WebRTC) ----------
 
-function connect(session: Live, local: MediaStream) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+function connect(session: Live, local: MediaStream, servers: RTCIceServer[]) {
+  const pc = new RTCPeerConnection({ iceServers: servers })
   session.pc = pc
   if (import.meta.env.DEV) Object.assign(window, { pakchatCall: pc }) // (only while testing: lets tests measure the sound)
   local.getTracks().forEach((track) => pc.addTrack(track, local))

@@ -142,7 +142,7 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
 
   // The parts, with words to find them by (the search box looks at these too).
   const parts: [Section, IconName, string, string[]][] = [
-    ['privacy', 'lock', t.privacy, [t.showLastSeen, t.readReceipts, t.blockedContacts, t.statusPrivacy]],
+    ['privacy', 'lock', t.privacy, [t.showLastSeen, t.readReceipts, t.blockedContacts, t.statusPrivacy, t.linkPreviews]],
     ['notifications', 'bell', t.notifications, [t.desktopAlerts, t.sounds, t.messageTone, t.groupTone]],
     ['calls', 'phone', t.calls, [t.lowDataCalls]],
     ['chats', 'palette', t.chatsSettings, [t.theme, t.wallpaper, t.conversationTones, t.textSize, t.enterSends, t.language, t.photoQuality, t.transcripts]],
@@ -229,6 +229,7 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
           disabled={busy}
           onChange={(on) => attempt(() => setPrivacy(me.uid, { readReceipts: on }))}
         />
+        <Switch label={t.linkPreviews} hint={t.linkPreviewsHint} on={settings.linkPreviews} onChange={(on) => setSetting('linkPreviews', on)} />
         <button className="setting" onClick={() => setStatusPrivacy(true)}>
           <span className="setting-text">
             <span>{t.status}</span>

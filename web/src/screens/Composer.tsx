@@ -1,20 +1,23 @@
 // Composer.tsx: the bar at the bottom of a chat.
-//   smiley: emojis and stickers    paperclip: photos & videos, camera, document, location, contact, poll
+//   smiley: emojis, GIFs and stickers    paperclip: photos & videos, camera, document, location, contact, poll
 //   microphone: voice note (① makes it view once)    round camera: a round video message    paper plane: send
 // In a group, typing @ shows the people in it: pick one to mention them (mentions.ts).
 // Enter sends and Shift+Enter starts a new line (you can switch this in Settings).
 // What you type is kept as a draft if you leave the chat before sending (drafts.ts).
-// Above it, a strip shows the message you're replying to, or editing.
+// Above it, a strip shows the message you're replying to, or editing,
+// and a card for the web address you typed (links.ts), with an X to leave it out.
 import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { shortText, type Content, type Extras, type Message, type Person, type ReplyTo } from '../chats'
 import { getDraft, saveDraft } from '../drafts'
 import { useT } from '../lang'
+import { fetchPreview, firstLink, type LinkPreview } from '../links'
 import { isPhotoOrVideo, MAX_VOICE_SECONDS, startRecording, type Recording } from '../media'
 import { findMentions, mentionQuery } from '../mentions'
 import { useSettings } from '../settings'
 import { duration, useNow } from '../time'
 import { canTranscribe } from '../transcribe'
 import { PersonAvatar } from './Avatar'
+import { LinkCard } from './Gifs'
 import Icon from './Icon'
 import { EmojiPicker, VideoNoteRecorder } from './lazy' // (the emoji panel and the video recorder load the first time you open them)
 import Popover, { type PopoverItem } from './Popover'
@@ -47,7 +50,7 @@ const touchScreen = window.matchMedia('(pointer: coarse)').matches
 export default function Composer(props: Props) {
   const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, onPoll, canOnce, people, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
   const { t } = useT()
-  const { enterSends, transcripts, transcriptLang } = useSettings()
+  const { enterSends, transcripts, transcriptLang, linkPreviews } = useSettings()
   const [text, setText] = useState(() => getDraft(chatId))
   const [error, setError] = useState('')
   const [recording, setRecording] = useState<Recording | null>(null)
@@ -74,6 +77,21 @@ export default function Composer(props: Props) {
   useEffect(() => {
     box.current?.focus()
   }, [editing])
+
+  // A web address in the box: fetch its card a moment after you stop typing (links.ts).
+  const link = linkPreviews && !editing ? firstLink(text) : null
+  const [preview, setPreview] = useState<LinkPreview | null>(null)
+  const [noPreview, setNoPreview] = useState<string | null>(null) // the address you pressed X on
+  useEffect(() => {
+    if (!link || link === noPreview) return
+    let stale = false
+    const timer = setTimeout(() => fetchPreview(link).then((card) => !stale && setPreview(card)), 500)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
+  }, [link, noPreview])
+  const card = preview && preview.url === link && link !== noPreview ? preview : null
 
   // Replying: put the cursor in the box.
   useEffect(() => {
@@ -146,7 +164,7 @@ export default function Composer(props: Props) {
     }
     if (!clean) return
     change('') // clear the box straight away, like WhatsApp
-    send({ kind: 'text', text: clean }, clean, people ? findMentions(clean, people) : [])
+    send({ kind: 'text', text: clean, ...(card ? { preview: card } : {}) }, clean, people ? findMentions(clean, people) : [])
   }
 
   function keyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -282,6 +300,7 @@ export default function Composer(props: Props) {
           </button>
         </div>
       )}
+      {card && !recording && <LinkCard preview={card} onRemove={() => setNoPreview(link)} />}
       {recording ? (
         <RecordingBar recording={recording} onDone={finishVoice} once={canOnce ? once : null} onOnce={() => setOnce(!once)} />
       ) : (
@@ -350,6 +369,14 @@ export default function Composer(props: Props) {
                     : (picked) => {
                         setEmojis(false)
                         send({ kind: 'sticker', ...picked })
+                      }
+                }
+                onGif={
+                  editing
+                    ? undefined
+                    : (gif) => {
+                        setEmojis(false)
+                        send({ kind: 'gif', gif })
                       }
                 }
               />

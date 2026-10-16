@@ -132,6 +132,8 @@ async function contentOf(chatId: string, m: Message): Promise<Content> {
       return { kind: 'contact', contact: m.contact ?? { name: '?' } }
     case 'sticker':
       return m.sticker ? { kind: 'sticker', sticker: m.sticker } : { kind: 'sticker', data: await media() }
+    case 'gif':
+      if (m.gif) return { kind: 'gif', gif: m.gif }
   }
-  return { kind: 'text', text: m.text ?? '' }
+  return { kind: 'text', text: m.text ?? '', ...(m.preview ? { preview: m.preview } : {}) }
 }

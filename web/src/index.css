@@ -5204,6 +5204,173 @@ button.setting:disabled {
   color: var(--accent-ink);
 }
 
+/* ----- GIFs (Gifs.tsx) ----- */
+.gif-word {
+  padding: 1px 4px;
+  border: 1.5px solid currentColor;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.gif-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The search box keeps its own height. (A .field normally stretches to fill its row; in this
+   up-and-down panel that would make it tall. If the panel sits in the message box, the
+   message box's own .field look is put back to a plain search box too.) */
+.gif-panel .gif-search {
+  flex: 0 0 auto;
+  min-height: 0;
+  margin: 8px 8px 4px;
+  padding: 0 6px 0 12px;
+  align-items: center;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  background: var(--soft);
+}
+.gif-panel .gif-search:focus-within {
+  border-color: var(--accent);
+  background: var(--field-bg);
+}
+.gif-panel .gif-search input:not([type='checkbox']) {
+  padding: 9px 4px;
+}
+.gif-grid {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 8px 8px;
+  overflow-y: auto;
+  columns: 2;
+  column-gap: 6px;
+  scrollbar-width: thin;
+}
+.gif-pick {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--soft);
+  break-inside: avoid;
+}
+.gif-pick img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.gif-pick:hover {
+  outline: 2px solid var(--accent);
+}
+.gif-panel .empty {
+  margin: 0 12px 12px;
+}
+/* A GIF in the chat */
+.gif-msg {
+  position: relative;
+  display: block;
+  width: 260px;
+  max-width: 100%;
+  max-height: 340px;
+  border-radius: calc(var(--radius) - 4px);
+  overflow: hidden;
+  background: var(--soft);
+}
+.gif-msg video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gif-badge {
+  position: absolute;
+  top: 8px;
+  inset-inline-start: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.5);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* ----- A link's card (links.ts): in a message, and above the message box ----- */
+.link-card {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+  max-width: 340px;
+  margin: 0 0 4px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgb(0 0 0 / 0.06);
+  color: inherit;
+  text-decoration: none;
+}
+.bubble.mine .link-card {
+  background: rgb(0 0 0 / 0.08);
+}
+/* (not blue and underlined like the other links in a message: the whole card is the link) */
+.bubble a.link-card,
+.bubble.mine a.link-card {
+  color: inherit;
+  text-decoration: none;
+}
+.link-card img {
+  flex-shrink: 0;
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+}
+.link-words {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px 8px 0;
+}
+.link-card:not(:has(img)) .link-words {
+  padding-inline-start: 10px;
+}
+.link-words strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.link-words small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.link-words .link-site {
+  -webkit-line-clamp: 1;
+}
+.link-card.draft {
+  max-width: none;
+  margin: 8px 14px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  animation: rise 0.15s ease-out;
+}
+.link-card.draft .icon {
+  align-self: center;
+  flex-shrink: 0;
+  margin-inline: auto 6px;
+}
+
 /* @mentions: the list of people while you type "@", and the coloured names in messages */
 .mention-list {
   position: absolute;

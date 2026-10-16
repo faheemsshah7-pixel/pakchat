@@ -750,7 +750,7 @@ service cloud.firestore {
       function newMessageOk(m) {
         return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt',
             'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact', 'startsAt', 'callId',
-            'options', 'multi', 'sticker', 'mentions', 'once', 'round', 'hd', 'transcript'])
+            'options', 'multi', 'sticker', 'mentions', 'once', 'round', 'hd', 'transcript', 'gif', 'preview'])
           && m.get('forwarded', false) is bool
           && expiryOk(m)
           && mentionsOk(m)
@@ -758,6 +758,7 @@ service cloud.firestore {
           && m.get('round', false) is bool && (!m.get('round', false) || m.kind == 'video')
           && m.get('hd', false) is bool && (!m.get('hd', false) || m.kind == 'photo')
           && transcriptOk(m)
+          && previewOk(m)
           && (!('replyTo' in m)
             || (m.replyTo is map
               && m.replyTo.keys().hasOnly(['id', 'senderId', 'senderName', 'kind', 'text', 'from'])
@@ -802,6 +803,28 @@ service cloud.firestore {
         return (m.get('sticker', '') is string && m.get('sticker', '').size() > 0 && m.get('sticker', '').size() <= 40 && !('mediaId' in m))
           || (m.get('mediaId', null) is string && !('sticker' in m));
       }
+      // A GIF: its addresses at KLIPY (and only there), and its size. (See gifs.ts.)
+      function klipyOk(url) {
+        return url is string && url.size() <= 300 && url.matches('https://static[.]klipy[.]com/[^ ]+');
+      }
+      function gifOk(g) {
+        return g is map && g.keys().hasOnly(['mp4', 'preview', 'width', 'height'])
+          && klipyOk(g.mp4) && klipyOk(g.preview)
+          && g.width is number && g.height is number && g.width > 0 && g.height > 0;
+      }
+      // A link's card (see links.ts): only on words, with a small picture inside it (not an address).
+      function previewOk(m) {
+        return !('preview' in m)
+          || (m.kind == 'text' && m.preview is map
+            && m.preview.keys().hasOnly(['url', 'title', 'description', 'site', 'image'])
+            && m.preview.url is string && m.preview.url.size() <= 2000 && m.preview.url.matches('https?://.+')
+            && m.preview.title is string && m.preview.title.size() > 0 && m.preview.title.size() <= 200
+            && m.preview.get('description', '') is string && m.preview.get('description', '').size() <= 300
+            && m.preview.get('site', '') is string && m.preview.get('site', '').size() <= 100
+            && (!('image' in m.preview)
+              || (m.preview.image is string && m.preview.image.size() <= 40000
+                && m.preview.image.matches('data:image/(jpeg|png|webp|gif);base64,.*'))));
+      }
       function textOk(text) {
         return text is string && text.size() > 0 && text.size() <= 4000;
       }
@@ -828,6 +851,7 @@ service cloud.firestore {
           // A contact card: a name, and a phone number, Gmail or PakChat id
           || (m.kind == 'poll' && pollOk(m))
           || (m.kind == 'sticker' && stickerOk(m))
+          || (m.kind == 'gif' && gifOk(m.gif))
           || (m.kind == 'contact' && m.contact is map
             && m.contact.keys().hasOnly(['name', 'phone', 'email', 'uid'])
             && m.contact.name is string && m.contact.name.size() > 0 && m.contact.name.size() <= 60

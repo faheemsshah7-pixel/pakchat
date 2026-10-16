@@ -886,3 +886,70 @@ writes `aliveAt` every 2 minutes, and a call that's been quiet for 5 minutes cou
 ### Try this
 - In `groupCalls.ts`, change `MAX_IN_CALL` to 3, and see "This call is full" when a 4th person joins.
 - In a call on your computer, share a browser tab with a YouTube video in it.
+
+## Step 21: Link previews, GIFs, a relay for calls, and locking the key
+
+| Part | Files | Saved as |
+|---|---|---|
+| Link previews | `links.ts` (new), `Composer.tsx`, `Gifs.tsx` (`LinkCard`) | `preview` in the message |
+| GIFs | `gifs.ts` (new), `Gifs.tsx` (new), `EmojiPicker.tsx` | a message with `kind: 'gif'` |
+| A relay for calls | `rtc.ts` (`iceServers`), `web/.env.example` | nothing: it's a setting on your computer |
+| The switch | Settings > Privacy > **Link previews** (`settings.ts`) | this device only |
+
+### Link previews
+Type or paste a web address and a card appears above the message box: the page's picture,
+title and website. **X** leaves it out. Send, and the card goes inside the message.
+
+A browser isn't allowed to read other websites by itself, so two free services help:
+**microlink.io** reads the page (its title, a line about it, and its picture) and **wsrv.nl**
+shrinks the picture to a small square. Only the *sender's* browser asks them. The thumbnail is
+saved inside the message (a few KB), so the people you send it to don't contact anyone until
+they tap the card. Settings > Privacy > **Link previews** turns it off.
+
+### GIFs
+The smiley panel now has **Emoji · GIFs · Stickers** at the bottom, like WhatsApp. GIFs come
+from **KLIPY**, a free GIF library. (WhatsApp used Google's Tenor, but Google closed Tenor to apps
+in 2026.) Search "eid mubarak" or "cricket", tap one, and it's sent.
+It plays as a small silent video on a loop, which is much smaller than a real .gif file.
+The message keeps only KLIPY's addresses for it, and the rules allow only KLIPY's addresses
+(`static.klipy.com`), so nobody can slip a tracking picture from some other website into a chat.
+KLIPY needs a key of PakChat's own (free). Until you add one, the GIF tab simply isn't there.
+KLIPY asks that the search box says "Search KLIPY", so it does.
+
+### A relay for calls
+On some mobile networks and office Wi-Fi, two browsers can't reach each other directly, and a
+call says "Couldn't connect". A **relay** (a "TURN server") fixes that: it passes the sound and
+picture along. Relays cost money to run, but some have a free plan.
+PakChat uses one only if you set it up (see "Things to do on other websites" below).
+Without one, calls work as before.
+
+### New rules
+- A GIF message: its two addresses must be at `https://static.klipy.com/`, plus its size.
+- A link's card: only on a text message, with a short title and description, and its picture
+  must be *inside* it (`data:image/...`), never a web address.
+
+### Things to do on other websites (once)
+1. **GIFs: get a KLIPY key.** Sign up at https://partner.klipy.com/ , go to **API Keys** and
+   create your platform (a website called PakChat). Copy the key. On your Mac, copy
+   `web/.env.example` to `web/.env.local` (if you haven't yet) and put the key after
+   `VITE_KLIPY_KEY=`. Build and deploy again, and the GIF tab appears.
+   A new key is a *test* key: 100 GIF searches an hour for everyone together. When it works,
+   press **request production access** in the same Partner Panel to lift that limit.
+   (The key ends up inside the website, which is how it's meant to be used. Don't paste it in chat.)
+2. **Lock the key.** The `apiKey` in `firebase.ts` is meant to be public, but anyone could
+   copy it into their own website. Lock it to yours:
+   - Open https://console.cloud.google.com/apis/credentials?project=pakchat-f89d8
+   - Click the key called **Browser key (auto created by Firebase)**.
+   - Under **Application restrictions** pick **Websites**, and add these three:
+     `https://pakchat-f89d8.web.app/*`, `https://pakchat-f89d8.firebaseapp.com/*`, `http://localhost:5173/*`
+   - Leave **API restrictions** as they are, and press **Save**.
+   - After a few minutes, open PakChat and log in, to check it all still works.
+3. **A relay (if people get "Couldn't connect").** Make a free account at metered.ca, make an
+   app, and copy its **TURN credentials** address (it ends with `?apiKey=...`). On your Mac, copy
+   `web/.env.example` to `web/.env.local` and put the address after `VITE_TURN_CREDENTIALS_URL=`.
+   Build and deploy again. (`.env.local` stays on your Mac: git ignores it. The address does end
+   up inside the website, which is how these relays are meant to be used. Don't paste it in chat.)
+
+### Try this
+- Send yourself a YouTube link in "Message yourself" and see its card.
+- In `gifs.ts`, change `contentfilter: 'medium'` to `'high'` for an even safer GIF search.

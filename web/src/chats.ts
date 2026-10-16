@@ -55,6 +55,8 @@ import {
 } from 'firebase/firestore'
 import { isExpired, timerLabel } from './disappearing'
 import { db } from './firebase'
+import type { Gif } from './gifs'
+import type { LinkPreview } from './links'
 import { saveMedia } from './media'
 import { contactKey } from './phone'
 import type { ChatPrefs } from './prefs'
@@ -140,7 +142,7 @@ export type SharedContact = { name: string; uid?: string; phone?: string; email?
 
 export type Message = {
   id: string
-  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'poll' | 'sticker' | 'call' | 'scheduledCall' | 'system' // step 2 messages have no kind: they're text
+  kind?: 'text' | 'photo' | 'video' | 'voice' | 'file' | 'location' | 'contact' | 'poll' | 'sticker' | 'gif' | 'call' | 'scheduledCall' | 'system' // step 2 messages have no kind: they're text
   text?: string
   senderId: string
   senderName?: string
@@ -167,6 +169,8 @@ export type Message = {
   multi?: boolean // polls: people may pick more than one answer
   votes?: Record<string, number[]> // polls: { uid: [answer numbers] }
   sticker?: string // stickers that come with PakChat, like "pk:salam" (stickers you make have a mediaId)
+  gif?: Gif // a GIF from KLIPY (gifs.ts)
+  preview?: LinkPreview // the card for the web address in it (links.ts)
   mentions?: string[] // the people it @mentions
   once?: boolean // view once: a photo, video or voice note that can be opened once (once.ts)
   openedBy?: Record<string, Timestamp | null> // view once: who opened it, and when
@@ -191,7 +195,7 @@ export type Message = {
 
 // What you can send. Photos, videos, voice notes and documents arrive as text ("data URLs"), see media.ts.
 export type Content =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; preview?: LinkPreview }
   | { kind: 'photo'; data: string; width: number; height: number; caption?: string; hd?: boolean; once?: boolean }
   // (A view once video has no poster. A round one is a video message, recorded in the chat.)
   | { kind: 'video'; data: string; poster?: string; width: number; height: number; seconds: number; caption?: string; once?: boolean; round?: boolean }
@@ -201,6 +205,7 @@ export type Content =
   | { kind: 'contact'; contact: SharedContact }
   | { kind: 'poll'; question: string; options: string[]; multi: boolean } // polls.ts
   | { kind: 'sticker'; sticker?: string; data?: string } // a PakChat sticker by name, or one you made (a picture)
+  | { kind: 'gif'; gif: Gif } // gifs.ts
   | { kind: 'call'; video: boolean; seconds: number; missed: boolean } // written by calls.ts when a call ends
   | { kind: 'scheduledCall'; title: string; startsAt: Date; video: boolean; callId: string } // callExtras.ts
 
@@ -292,6 +297,9 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
 
   if (content.kind === 'text') {
     message.text = content.text
+    if (content.preview) message.preview = content.preview
+  } else if (content.kind === 'gif') {
+    message.gif = content.gif
   } else if (content.kind === 'call') {
     Object.assign(message, { video: content.video, seconds: content.seconds, missed: content.missed })
   } else if (content.kind === 'location') {
@@ -441,6 +449,8 @@ export function shortText(m: Short, myUid: string, t: Strings) {
       return `📊 ${m.text ?? ''}`
     case 'sticker':
       return t.stickerLabel
+    case 'gif':
+      return '🎞️ ' + t.gif
     case 'status': // a reply to someone's status (status.ts)
       return `${t.statusWord} · ${words ?? ''}`
   }

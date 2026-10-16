@@ -1,5 +1,5 @@
 // MessageBubble.tsx: one message in a chat: who sent it (in groups), what it answers,
-// the words / photo / video / voice note / document / location / contact / poll / sticker / call / scheduled call,
+// the words (with a link's card) / photo / video / voice note / document / location / contact / poll / sticker / GIF / call / scheduled call,
 // (or for "view once", just ① until it's opened, and a round video message in a circle),
 // the time and ticks, and any emoji reactions under it.
 // Right-click it (or hold your finger on it on a phone, or use the little arrow) for its menu.
@@ -13,6 +13,7 @@ import { useT } from '../lang'
 import { clock, duration } from '../time'
 import Icon from './Icon'
 import { ContactBubble, LocationBubble, ScheduledCallBubble } from './CardBubbles'
+import { GifBubble, LinkCard } from './Gifs'
 import { FileBubble, OnceBubble, PhotoBubble, RoundVideoBubble, VideoBubble, VoiceBubble } from './MediaBubbles'
 import { PollBubble } from './Polls'
 import RichText from './RichText'
@@ -52,7 +53,7 @@ export default memo(function MessageBubble(props: Props) {
   const once = !!m.once && !m.deleted // view once: only ① until it's opened
   const round = kind === 'video' && !!m.round && !m.deleted && !once // a round video message
   // Photos, videos and maps fill the bubble, with a thin edge.
-  const big = ['photo', 'video', 'location'].includes(kind) && !m.deleted && !once && !round
+  const big = ['photo', 'video', 'location', 'gif'].includes(kind) && !m.deleted && !once && !round
   // A sticker (or a round video) has no bubble around it (like a big emoji).
   const sticker = kind === 'sticker' && !m.deleted
   const classes = ['bubble', mine && 'mine', first && 'first', big && 'has-photo', (jumbo || sticker || round) && 'jumbo', sticker && 'is-sticker', round && 'is-round', once && 'is-once', kind === 'poll' && 'is-poll', kind === 'call' && 'is-call', m.fresh && 'fresh']
@@ -133,6 +134,8 @@ export default memo(function MessageBubble(props: Props) {
           {kind === 'scheduledCall' && <ScheduledCallBubble m={m} onCall={onCall} />}
           {kind === 'poll' && <PollBubble chatId={chatId} m={m} myUid={myUid} canVote={canVote} nameOf={nameOf} onVotes={onVotes} />}
           {kind === 'sticker' && <StickerBubble chatId={chatId} m={m} />}
+          {kind === 'gif' && m.gif && <GifBubble gif={m.gif} />}
+          {kind === 'text' && m.preview && <LinkCard preview={m.preview} />}
           {kind === 'call' && (
             // "Voice call 2:13" / "Missed video call". Tap it to call back.
             <button type="button" className={m.missed && !mine ? 'call-bubble missed' : 'call-bubble'} disabled={!onCall} onClick={() => onCall?.(!!m.video)}>

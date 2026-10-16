@@ -4,12 +4,37 @@
 import { getSetting } from './settings'
 
 // STUN servers tell each browser its address on the internet, so the two can find each other.
-// They're free. (On some mobile networks two phones can't reach each other directly; a paid
-// "TURN" relay server fixes that, and it would go in this list too.)
-export const ICE_SERVERS: RTCIceServer[] = [
+// They're free.
+const STUN: RTCIceServer[] = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
   { urls: 'stun:stun.cloudflare.com:3478' },
 ]
+
+// On some mobile networks and office Wi-Fi, two browsers can't reach each other directly. A relay
+// (a "TURN" server) passes the sound and picture along for them. It's off until you set one up
+// (see LEARN.md, Step 21): VITE_TURN_CREDENTIALS_URL in web/.env.local is an address that answers
+// with a list of relay servers and a password for them, like Metered's free relay does.
+// The list is asked for when a call starts, and kept for half an hour.
+const TURN_URL: string = import.meta.env.VITE_TURN_CREDENTIALS_URL ?? ''
+let relay: { at: number; servers: RTCIceServer[] } | null = null
+
+export async function iceServers(): Promise<RTCIceServer[]> {
+  // (Tests can try a relay without building PakChat again.)
+  const url = (import.meta.env.DEV && (window as { pakchatTurnUrl?: string }).pakchatTurnUrl) || TURN_URL
+  if (!url) return STUN
+  if (!relay || Date.now() - relay.at > 30 * 60_000) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) })
+      const list: unknown = await res.json()
+      const servers = (Array.isArray(list) ? list : []).filter((s) => typeof s?.urls === 'string' || Array.isArray(s?.urls))
+      relay = { at: Date.now(), servers }
+    } catch (err) {
+      console.warn('No call relay this time:', err) // (the call still tries without one)
+      return STUN
+    }
+  }
+  return [...STUN, ...relay.servers]
+}
 
 // How much data the sound and picture may use, in kbit/s. "Use less data for calls" (Settings)
 // picks the lower picture. A group call sends to everyone in it separately, so it uses less each.

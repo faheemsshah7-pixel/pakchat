@@ -55,7 +55,7 @@ import {
   gathered,
   getMedia,
   getScreen,
-  ICE_SERVERS,
+  iceServers,
   limitVideo,
   onACall,
   pictureSender,
@@ -180,6 +180,7 @@ type Session = {
   links: Map<string, Link> // by their uid
   firstSeen: Map<string, number> // when I first saw each of them in the call (to give up on ones I can't reach)
   doc: GroupCallDoc | null
+  servers: RTCIceServer[] // the STUN servers, and the relay if there is one (rtc.ts)
   unwatch: (() => void)[]
   timers: number[]
   stopSound: () => void
@@ -189,7 +190,7 @@ const declined = new Set<string>() // calls you said no to (so they don't ring a
 
 function begin(call: Omit<GroupCall, 'joinedAt' | 'micOff' | 'cameraOff' | 'local' | 'screen' | 'canShare' | 'peers' | 'end'>, ref: DocumentReference) {
   current = { ...call, joinedAt: null, micOff: false, cameraOff: false, local: null, screen: null, canShare: false, peers: [], end: null }
-  live = { ref, links: new Map(), firstSeen: new Map(), doc: null, unwatch: [], timers: [], stopSound: () => {} }
+  live = { ref, links: new Map(), firstSeen: new Map(), doc: null, servers: [], unwatch: [], timers: [], stopSound: () => {} }
   if (import.meta.env.DEV) Object.assign(window, { pakchatGroupLinks: live.links }) // (only while testing)
   listeners.forEach((listener) => listener())
   return live
@@ -212,6 +213,7 @@ export async function startGroupCall(me: Person, chat: Chat, video: boolean) {
   const session = begin({ id: ref.id, chatId: chat.id, title: chat.title ?? '', video, me, by: me, phase: 'joining' }, ref)
   try {
     const local = await getMedia(video, true)
+    session.servers = await iceServers()
     if (live !== session) return stopTracks(local)
     show({ local })
     await setDoc(ref, {
@@ -254,6 +256,7 @@ export async function joinGroupCall(me: Person, call: GroupCallDoc) {
   try {
     if (Object.keys(call.joined).filter((uid) => uid !== me.uid).length >= MAX_IN_CALL) return finish('full')
     const local = await getMedia(call.video, true)
+    session.servers = await iceServers()
     if (live !== session) return stopTracks(local)
     show({ local })
     await updateDoc(session.ref, { [`joined.${me.uid}`]: serverTimestamp() })
@@ -346,7 +349,7 @@ function update(session: Session) {
 function newLink(session: Session, uid: string, offerer: boolean, round: string) {
   const call = current!
   const local = call.local!
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const pc = new RTCPeerConnection({ iceServers: session.servers })
   const link: Link = { uid, pc, round, offerer, stream: null, connected: false, theirs: { sharing: false, cameraOff: !call.video, micOff: false }, signal: () => {}, timers: [] }
   session.links.get(uid)?.pc.close()
   session.links.set(uid, link)
