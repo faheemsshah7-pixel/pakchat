@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { collection, doc, getDoc, type DocumentReference, type Timestamp, type WriteBatch } from 'firebase/firestore'
 import { db } from './firebase'
+import { startTranscript, type Language } from './transcribe'
 
 export const MAX_MEDIA = 900_000 // characters in one document
 export const MAX_PARTS = 8 // documents for one voice note (a 5-minute note needs about 4)
@@ -23,23 +24,37 @@ export const MAX_VIDEO_SECONDS = 180 // 3 minutes
 
 // ---------- Photos ----------
 
-// Shrink a photo until it fits: first try big and sharp, then smaller and softer.
-export async function shrinkPhoto(file: File) {
+// [longest side in pixels, JPEG quality]: first try big and sharp, then smaller and softer.
+const STANDARD: [number, number][] = [
+  [1280, 0.75],
+  [1024, 0.65],
+  [800, 0.55],
+  [640, 0.45],
+]
+// HD photos are about twice as sharp, and can take up to 3 parts (about 2 MB).
+export const HD_SIDE = 2560
+const HD: [number, number][] = [
+  [HD_SIDE, 0.85],
+  [2048, 0.82],
+  [1600, 0.8],
+]
+const HD_PARTS = 3
+
+// Shrink a photo until it fits. hd: try the HD sizes first.
+// Returns hd: true only if it really came out in HD.
+export async function shrinkPhoto(file: Blob, hd = false) {
   const image = await createImageBitmap(file)
-  const tries: [number, number][] = [
-    [1280, 0.75], // [longest side in pixels, JPEG quality]
-    [1024, 0.65],
-    [800, 0.55],
-    [640, 0.45],
-  ]
-  for (const [maxSide, quality] of tries) {
+  const tries = [...(hd ? HD.map(([side, quality]) => [side, quality, MAX_MEDIA * HD_PARTS, 1]) : []), ...STANDARD.map(([side, quality]) => [side, quality, MAX_MEDIA, 0])]
+  for (const [maxSide, quality, room, isHD] of tries) {
+    // (A small photo isn't made bigger, so "HD" only counts if it's bigger than the standard size.)
+    if (isHD && Math.max(image.width, image.height) <= STANDARD[0][0]) continue
     const scale = Math.min(1, maxSide / Math.max(image.width, image.height))
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(image.width * scale)
     canvas.height = Math.round(image.height * scale)
     canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height)
     const data = canvas.toDataURL('image/jpeg', quality)
-    if (data.length < MAX_MEDIA) return { data, width: canvas.width, height: canvas.height }
+    if (data.length < room) return { data, width: canvas.width, height: canvas.height, hd: !!isHD }
   }
   throw new Error('too-big')
 }
@@ -57,7 +72,8 @@ export async function shrinkAvatar(file: File) {
 // ---------- Voice notes ----------
 
 // Starts recording from the microphone. Call stop() to get the recording back.
-export async function startRecording() {
+// transcribe: also write out the words, in this language (transcribe.ts).
+export async function startRecording(transcribe?: Language) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: 1, // one voice, so mono
@@ -74,6 +90,7 @@ export async function startRecording() {
   recorder.ondataavailable = (e) => chunks.push(e.data)
   const started = Date.now()
   recorder.start()
+  const words = transcribe ? startTranscript(transcribe) : null
 
   function finish() {
     return new Promise<Blob>((resolve) => {
@@ -87,15 +104,17 @@ export async function startRecording() {
 
   return {
     started,
-    // Stop and return the voice note as text, and how long it was.
+    // Stop and return the voice note as text, how long it was, and its words (if any).
     async stop() {
-      const blob = await finish()
+      const seconds = (Date.now() - started) / 1000
+      const [blob, transcript] = await Promise.all([finish(), words?.stop() ?? ''])
       const data = await blobToDataUrl(blob)
       if (data.length > MAX_MEDIA * MAX_PARTS) throw new Error('too-long')
-      return { data, seconds: (Date.now() - started) / 1000 }
+      return { data, seconds, transcript } // (transcript is '' if there are no words)
     },
     // Stop and throw it away.
     async cancel() {
+      words?.cancel()
       await finish()
     },
   }
@@ -103,13 +122,26 @@ export async function startRecording() {
 
 export type Recording = Awaited<ReturnType<typeof startRecording>>
 
+// (A recording's type can have a comma in it, like "video/webm;codecs=vp8,opus". A comma ends the
+// type part of a data URL, so the video would come back broken. So only "video/webm" is kept:
+// the video file itself says which codecs it uses.)
 export function blobToDataUrl(blob: Blob) {
+  const plain = blob.type.includes(';') ? new Blob([blob], { type: blob.type.split(';')[0] }) : blob
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
     reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(blob)
+    reader.readAsDataURL(plain)
   })
+}
+
+// Videos sent before that fix start "data:video/mp4;codecs=avc1.42E01E,mp4a.40.2;base64,".
+// This mends them, so they play: "data:video/mp4;base64,".
+function mendType(data: string) {
+  const start = data.slice(0, 120)
+  const at = start.indexOf(';base64,')
+  if (at < 0 || !start.slice(0, at).includes(',')) return data
+  return start.slice(0, start.indexOf(';')) + data.slice(at)
 }
 
 // ---------- Videos ----------
@@ -262,8 +294,9 @@ function partRef(place: string, mediaId: string, part: number) {
 
 // Adds a photo or voice note to a batch of writes, cut into parts if needed. Returns its id.
 // expireAt: it's in a disappearing message, so it goes when the message does.
-export function saveMedia(batch: WriteBatch, chatRef: DocumentReference, data: string, senderId: string, expireAt?: Timestamp) {
-  return saveParts(batch, chatRef, data, expireAt ? { senderId, expireAt } : { senderId })
+// onceIn: it's "view once", in this message (once.ts). The rules then stop people loading it after they open it.
+export function saveMedia(batch: WriteBatch, chatRef: DocumentReference, data: string, senderId: string, expireAt?: Timestamp, onceIn?: string) {
+  return saveParts(batch, chatRef, data, { senderId, ...(expireAt ? { expireAt } : {}), ...(onceIn ? { onceIn } : {}) })
 }
 
 // The same, for anything: `fields` go in every part (who it belongs to, so the rules can check).
@@ -304,6 +337,7 @@ export async function loadParts(place: string, mediaId: string) {
     const rest = await Promise.all(Array.from({ length: parts - 1 }, (_, i) => getDoc(partRef(place, mediaId, i + 2))))
     data += rest.map((snap) => snap.get('data') as string).join('')
   }
+  if (data) data = mendType(data) // (no data: it's been deleted)
   loaded.set(mediaId, data)
   return data
 }
@@ -312,6 +346,14 @@ export async function loadParts(place: string, mediaId: string) {
 // a long data URL. Made once for each file.
 const blobUrls = new Map<string, string>()
 const blobTypes = new Map<string, string>() // blob URL -> what kind of file it is ("video/mp4")
+
+// Forget a file we loaded (a "view once" photo, after it's been seen), so it can't be shown again.
+export function forgetMedia(mediaId: string) {
+  loaded.delete(mediaId)
+  const url = blobUrls.get(mediaId)
+  if (url) URL.revokeObjectURL(url)
+  blobUrls.delete(mediaId)
+}
 export function loadMediaUrl(chatId: string, mediaId: string) {
   return loadPartsUrl(`chats/${chatId}`, mediaId)
 }

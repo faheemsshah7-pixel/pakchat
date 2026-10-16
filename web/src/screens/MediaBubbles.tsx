@@ -1,21 +1,45 @@
 // MediaBubbles.tsx: how photos, videos, voice notes and documents look inside a chat bubble.
 // Photos and voice notes download when they appear on screen (see media.ts).
 // A video shows its first picture; the video itself downloads when you tap it. Same for documents.
+// Also: round video messages (videoNotes.ts), and "view once" ones, which show only ① until opened (once.ts).
 import { useRef, useState, useSyncExternalStore } from 'react'
 import type { Message } from '../chats'
 import { useT } from '../lang'
 import { loadMediaUrl, sizeText, useMedia } from '../media'
+import { anyoneOpened, canOpenOnce, openedBy } from '../once'
 import { duration } from '../time'
 import Icon from './Icon'
 
-type PhotoProps = { chatId: string; mediaId?: string; width?: number; height?: number; onView: (data: string) => void }
+type PhotoProps = { chatId: string; mediaId?: string; width?: number; height?: number; hd?: boolean; onView: (data: string) => void }
 
-export function PhotoBubble({ chatId, mediaId, width = 4, height = 3, onView }: PhotoProps) {
+export function PhotoBubble({ chatId, mediaId, width = 4, height = 3, hd, onView }: PhotoProps) {
+  const { t } = useT()
   const data = useMedia(chatId, mediaId)
   // Keep the right shape while it loads, so the chat doesn't jump around.
   const style = { aspectRatio: `${width} / ${height}` }
   if (!data) return <div className="photo loading" style={style} />
-  return <img className="photo" style={style} src={data} alt="" onClick={() => onView(data)} />
+  return (
+    <span className="photo-wrap">
+      <img className="photo" style={style} src={data} alt="" onClick={() => onView(data)} />
+      {hd && <span className="hd-badge">{t.hd}</span>}
+    </span>
+  )
+}
+
+// "View once": no picture, just ① and what it is. Tap to open it (only once).
+// Once it's been opened, it says "Opened" (for the sender too, when the other person has opened it).
+export function OnceBubble({ m, myUid, onOpen }: { m: Message; myUid: string; onOpen: (m: Message) => void }) {
+  const { t } = useT()
+  const what = m.kind === 'video' ? t.onceVideo : m.kind === 'voice' ? t.onceVoice : t.oncePhoto
+  const done = m.senderId === myUid ? anyoneOpened(m) : openedBy(m, myUid)
+  const can = canOpenOnce(m, myUid)
+  return (
+    <button type="button" className={done ? 'once-bubble opened' : 'once-bubble'} disabled={!can} onClick={() => onOpen(m)} aria-label={`${t.viewOnce}: ${what}`}>
+      <Icon name={done ? 'onceOpened' : 'once'} size={22} />
+      <span>{done ? t.opened : what}</span>
+      {m.kind === 'voice' && !done && <small>{duration(m.seconds ?? 0)}</small>}
+    </button>
+  )
 }
 
 // A video: its first picture, a play button and how long it is. Tap it to load and watch it.
@@ -93,9 +117,66 @@ function fileColour(type: string) {
 
 const SPEEDS = [1, 1.5, 2]
 
-// The voice note playing right now, in any chat. Only one plays at a time, like WhatsApp:
+// The voice note (or round video) playing right now, in any chat. Only one plays at a time, like WhatsApp:
 // pressing play on another one pauses this one first.
-let nowPlaying: HTMLAudioElement | null = null
+let nowPlaying: HTMLMediaElement | null = null
+function playingNow(el: HTMLMediaElement) {
+  if (nowPlaying && nowPlaying !== el) nowPlaying.pause()
+  nowPlaying = el
+}
+function stoppedNow(el: HTMLMediaElement) {
+  if (nowPlaying === el) nowPlaying = null
+}
+
+// A round video message: a circle with its first picture. Tap to play it with sound (a ring
+// shows how far along it is), tap again to pause.
+const RING = 2 * Math.PI * 48
+export function RoundVideoBubble({ chatId, m }: { chatId: string; m: Message }) {
+  const { t } = useT()
+  const poster = useMedia(chatId, m.posterId)
+  const [src, setSrc] = useState('')
+  const [state, setState] = useState<'ready' | 'loading' | 'playing' | 'failed'>('ready')
+  const [at, setAt] = useState(0)
+  const video = useRef<HTMLVideoElement>(null)
+  async function tap() {
+    if (state === 'loading') return
+    const el = video.current
+    if (src && el) return el.paused ? void el.play().catch(console.error) : el.pause()
+    if (!m.mediaId) return
+    setState('loading')
+    try {
+      setSrc(await loadMediaUrl(chatId, m.mediaId)) // (it starts playing when it's loaded: autoPlay)
+    } catch (err) {
+      console.error(err)
+      setState('failed')
+    }
+  }
+  const seconds = m.seconds ?? 0
+  return (
+    <button type="button" className="round-note" onClick={tap} aria-label={t.videoNote}>
+      {poster && <img src={poster} alt="" />}
+      {src && (
+        <video
+          ref={video}
+          src={src}
+          autoPlay
+          playsInline
+          onPlay={(e) => (playingNow(e.currentTarget), setState('playing'))}
+          onPause={(e) => (stoppedNow(e.currentTarget), setState('ready'))}
+          onEnded={(e) => (stoppedNow(e.currentTarget), setState('ready'), setAt(0), (e.currentTarget.currentTime = 0))}
+          onTimeUpdate={(e) => setAt(e.currentTarget.currentTime)}
+        />
+      )}
+      <svg viewBox="0 0 100 100" aria-hidden>
+        <circle className="note-ring" cx="50" cy="50" r="48" strokeDasharray={RING} strokeDashoffset={RING * (1 - (seconds ? Math.min(1, at / seconds) : 0))} />
+      </svg>
+      {state !== 'playing' && (
+        <span className="play-big">{state === 'loading' ? <span className="spinner" /> : <Icon name={state === 'failed' ? 'download' : 'play'} size={26} />}</span>
+      )}
+      <span className="video-length">{duration(state === 'playing' || at ? at : seconds)}</span>
+    </button>
+  )
+}
 
 // The speed is ONE setting for all voice notes, like WhatsApp: pick 1.5× on one, and the next
 // one plays at 1.5× too. It's saved on this device, so it's still 1.5× tomorrow.
@@ -133,11 +214,14 @@ function useSpeed() {
   )
 }
 
-export function VoiceBubble({ chatId, mediaId, seconds = 0 }: { chatId: string; mediaId?: string; seconds?: number }) {
+// transcript: the voice note's words (transcribe.ts), shown when you tap "Show transcript".
+export function VoiceBubble({ chatId, mediaId, seconds = 0, transcript }: { chatId: string; mediaId?: string; seconds?: number; transcript?: string }) {
+  const { t } = useT()
   const data = useMedia(chatId, mediaId)
   const audio = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [position, setPosition] = useState(0)
+  const [words, setWords] = useState(false)
   const speed = useSpeed()
 
   function toggle() {
@@ -156,37 +240,46 @@ export function VoiceBubble({ chatId, mediaId, seconds = 0 }: { chatId: string; 
   }
 
   return (
-    <div className="voice">
-      <button type="button" className="play" disabled={!data} onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-        <Icon name={playing ? 'pause' : 'play'} size={18} />
-      </button>
-      <progress max={seconds || 1} value={position} onClick={seek} />
-      <span className="voice-time">{duration(playing || position ? position : seconds)}</span>
-      <button type="button" className="speed" onClick={nextSpeed} aria-label="Speed">
-        {speed}×
-      </button>
-      {data && (
-        <audio
-          ref={audio}
-          src={data}
-          onPlay={(e) => {
-            if (nowPlaying && nowPlaying !== e.currentTarget) nowPlaying.pause()
-            nowPlaying = e.currentTarget
-            e.currentTarget.playbackRate = speed
-            setPlaying(true)
-          }}
-          onPause={(e) => {
-            if (nowPlaying === e.currentTarget) nowPlaying = null
-            setPlaying(false)
-          }}
-          onEnded={(e) => {
-            if (nowPlaying === e.currentTarget) nowPlaying = null
-            setPlaying(false)
-            setPosition(0)
-          }}
-          onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
-        />
+    <>
+      <div className="voice">
+        <button type="button" className="play" disabled={!data} onClick={toggle} aria-label={playing ? t.pause : t.play}>
+          <Icon name={playing ? 'pause' : 'play'} size={18} />
+        </button>
+        <progress max={seconds || 1} value={position} onClick={seek} />
+        <span className="voice-time">{duration(playing || position ? position : seconds)}</span>
+        <button type="button" className="speed" onClick={nextSpeed} aria-label="Speed">
+          {speed}×
+        </button>
+        {data && (
+          <audio
+            ref={audio}
+            src={data}
+            onPlay={(e) => {
+              playingNow(e.currentTarget)
+              e.currentTarget.playbackRate = speed
+              setPlaying(true)
+            }}
+            onPause={(e) => {
+              stoppedNow(e.currentTarget)
+              setPlaying(false)
+            }}
+            onEnded={(e) => {
+              stoppedNow(e.currentTarget)
+              setPlaying(false)
+              setPosition(0)
+            }}
+            onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+          />
+        )}
+      </div>
+      {transcript && (
+        <div className="transcript">
+          <button type="button" className="link" aria-expanded={words} onClick={() => setWords(!words)}>
+            {words ? t.hideTranscript : t.showTranscript}
+          </button>
+          {words && <p dir="auto">{transcript}</p>}
+        </div>
       )}
-    </div>
+    </>
   )
 }

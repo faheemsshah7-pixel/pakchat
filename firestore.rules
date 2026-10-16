@@ -447,8 +447,8 @@ service cloud.firestore {
           && newMessageOk(request.resource.data)
           && mayTalk(request.resource.data);
         // Changing a message: a reaction, an edit, "delete for everyone", a live location moving,
-        // cancelling a call you scheduled, or voting in a poll.
-        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall() || voting());
+        // cancelling a call you scheduled, voting in a poll, or opening a "view once" photo.
+        allow update: if canPost() && (reacting() || editing() || unsending() || movingLive() || cancellingCall() || voting() || opening());
         // Disappearing messages: once a message's time is up, anyone in the chat can delete it for good.
         allow delete: if canRead() && expired(resource.data);
       }
@@ -465,10 +465,14 @@ service cloud.firestore {
       function newMessageOk(m) {
         return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt',
             'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact', 'startsAt', 'callId',
-            'options', 'multi', 'sticker', 'mentions'])
+            'options', 'multi', 'sticker', 'mentions', 'once', 'round', 'hd', 'transcript'])
           && m.get('forwarded', false) is bool
           && expiryOk(m)
           && mentionsOk(m)
+          && onceOk(m)
+          && m.get('round', false) is bool && (!m.get('round', false) || m.kind == 'video')
+          && m.get('hd', false) is bool && (!m.get('hd', false) || m.kind == 'photo')
+          && transcriptOk(m)
           && (!('replyTo' in m)
             || (m.replyTo is map
               && m.replyTo.keys().hasOnly(['id', 'senderId', 'senderName', 'kind', 'text', 'from'])
@@ -478,6 +482,17 @@ service cloud.firestore {
               && m.replyTo.get('from', '') is string
               && m.replyTo.get('from', '').size() <= 50))
           && contentOk(m);
+      }
+      // View once: a photo, video or voice note that can be opened once. It can't be forwarded,
+      // and has no caption or transcript (they would stay readable after it's opened).
+      function onceOk(m) {
+        return m.get('once', false) is bool
+          && (!m.get('once', false)
+            || (m.kind in ['photo', 'video', 'voice'] && !m.get('forwarded', false) && !('caption' in m) && !('transcript' in m)));
+      }
+      // A voice note's words, written out while it was recorded (see transcribe.ts).
+      function transcriptOk(m) {
+        return !('transcript' in m) || (m.kind == 'voice' && m.transcript is string && m.transcript.size() <= 4000);
       }
       // @mentions: the ids of the people a message names (at most 50).
       function mentionsOk(m) {
@@ -512,8 +527,9 @@ service cloud.firestore {
         return (m.kind == 'text' && textOk(m.text))
           || (m.kind == 'photo' && m.mediaId is string && captionOk(m))
           || (m.kind == 'voice' && m.mediaId is string)
-          // A video, with its first picture (the poster) saved separately
-          || (m.kind == 'video' && m.mediaId is string && m.posterId is string && captionOk(m)
+          // A video, with its first picture (the poster) saved separately.
+          // (A view once video has no poster: the picture would give it away.)
+          || (m.kind == 'video' && m.mediaId is string && (m.get('posterId', null) is string || m.get('once', false) == true) && captionOk(m)
             && m.seconds is number && m.width is number && m.height is number)
           // A document: its name, size and type
           || (m.kind == 'file' && m.mediaId is string && captionOk(m)
@@ -607,6 +623,21 @@ service cloud.firestore {
           && picked.hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11][0:poll.options.size()])
           && picked.toSet().size() == picked.size();
       }
+      // Opening a "view once" photo, video or voice note: openedBy = { uid: when }.
+      // Only the people it was sent to, only once each, only their own name, with the server's time.
+      function opening() {
+        let was = resource.data;
+        let old = was.get('openedBy', {});
+        let now = request.resource.data.get('openedBy', {});
+        return was.get('once', false) == true
+          && was.senderId != me()
+          && !was.get('deleted', false)
+          && !(me() in old)
+          && request.resource.data.diff(was).affectedKeys().hasOnly(['openedBy'])
+          && now is map
+          && now.diff(old).affectedKeys().hasOnly([me()])
+          && now[me()] == request.time;
+      }
       // Cancel a call you scheduled: the card in the chat then says "Cancelled".
       function cancellingCall() {
         return resource.data.senderId == me()
@@ -638,19 +669,39 @@ service cloud.firestore {
 
       // ----- photos and voice notes (see media.ts) -----
       // A long voice note is cut into parts; the first one says how many (at most 8).
+      // A "view once" photo's parts say which message they belong to (onceIn).
       match /media/{mediaId} {
-        allow read: if canRead();
+        // (resource == null: it's been deleted. Then the app is just told it isn't there.)
+        allow read: if canRead() && (resource == null || notOpenedYet(resource.data));
         allow create: if canPost()
-          && request.resource.data.keys().hasOnly(['data', 'senderId', 'parts', 'expireAt'])
+          && request.resource.data.keys().hasOnly(['data', 'senderId', 'parts', 'expireAt', 'onceIn'])
           && request.resource.data.senderId == me()
           && request.resource.data.data is string
           && expiryOk(request.resource.data)
+          && request.resource.data.get('onceIn', '') is string
           && request.resource.data.get('parts', 2) is int
           && request.resource.data.get('parts', 2) >= 2
           && request.resource.data.get('parts', 2) <= 8;
         // The person who sent it can delete it (when they delete the message for everyone).
-        // Anyone in the chat can delete it once its time is up (disappearing messages).
-        allow delete: if canRead() && (resource.data.senderId == me() || expired(resource.data));
+        // Anyone in the chat can delete it once its time is up (disappearing messages),
+        // or, for view once, once everyone it was sent to has opened it.
+        allow delete: if canRead() && (resource.data.senderId == me() || expired(resource.data) || everyoneOpened(resource.data));
+      }
+      function messagePath(messageId) {
+        return /databases/$(database)/documents/chats/$(chatId)/messages/$(messageId);
+      }
+      // View once: you can load it until you've opened it. (The sender can always load it, to delete it.)
+      function notOpenedYet(d) {
+        return !('onceIn' in d) || d.senderId == me()
+          || !(me() in get(messagePath(d.onceIn)).data.get('openedBy', {}));
+      }
+      // Everyone in the chat but the sender has opened it. ("After": it reads the message as it
+      // will be after this write, so it also works if marking it opened and deleting it are one batch.)
+      function everyoneOpened(d) {
+        let others = (isDirectId() ? ids() : getAfter(chatPath()).data.members).removeAll([d.senderId]);
+        return 'onceIn' in d
+          && existsAfter(messagePath(d.onceIn))
+          && getAfter(messagePath(d.onceIn)).data.get('openedBy', {}).keys().hasAll(others);
       }
 
       // ----- "typing…" (see typing.ts) -----

@@ -2,7 +2,7 @@
 //
 // Without this, the browser downloads ALL of PakChat before showing anything (about 1 MB).
 // With it, the first download is the chat list and chats; Settings, Status, the call screen,
-// the emoji panel and the photo viewer come in their own small files ("chunks").
+// the emoji panel, the photo viewer and editor, and the video message recorder come in their own small files ("chunks").
 // A moment after PakChat opens, warmUp() fetches them quietly, so they're ready before you tap.
 //
 // When a new version is put online, the old chunk files are gone. Someone who had PakChat open
@@ -48,6 +48,9 @@ const files = {
   emoji: () => import('./EmojiPicker'),
   photoViewer: () => import('./PhotoViewer'),
   videoViewer: () => import('./VideoViewer'),
+  photoEditor: () => import('./PhotoEditor'),
+  videoNote: () => import('./VideoNoteRecorder'),
+  onceViewer: () => import('./OnceViewer'),
 }
 
 export const Settings = screen<ComponentProps<typeof import('./Settings').default>>(files.settings)
@@ -57,6 +60,9 @@ export const CallScreen = screen<ComponentProps<typeof import('./CallScreen').de
 export const EmojiPicker = screen<ComponentProps<typeof import('./EmojiPicker').default>>(files.emoji)
 export const PhotoViewer = screen<ComponentProps<typeof import('./PhotoViewer').default>>(files.photoViewer)
 export const VideoViewer = screen<ComponentProps<typeof import('./VideoViewer').default>>(files.videoViewer)
+export const PhotoEditor = screen<ComponentProps<typeof import('./PhotoEditor').default>>(files.photoEditor)
+export const VideoNoteRecorder = screen<ComponentProps<typeof import('./VideoNoteRecorder').default>>(files.videoNote)
+export const OnceViewer = screen<ComponentProps<typeof import('./OnceViewer').default>>(files.onceViewer)
 type CallDialogs = typeof import('./CallDialogs')
 export const StartCallDialog = screen<ComponentProps<CallDialogs['StartCallDialog']>>(files.callDialogs, 'StartCallDialog')
 export const DialDialog = screen<ComponentProps<CallDialogs['DialDialog']>>(files.callDialogs, 'DialDialog')
@@ -69,7 +75,7 @@ export const JoinCallDialog = screen<ComponentProps<CallDialogs['JoinCallDialog'
 // (Most important first: the call screen, so a call that comes in shows straight away.)
 export function warmUp() {
   const go = () => {
-    const order = [files.callScreen, files.emoji, files.photoViewer, files.videoViewer, files.statusViewer, files.statusComposer, files.callDialogs, files.settings]
+    const order = [files.callScreen, files.emoji, files.photoViewer, files.videoViewer, files.onceViewer, files.statusViewer, files.statusComposer, files.callDialogs, files.settings, files.photoEditor, files.videoNote]
     order.reduce((before, load) => before.then(() => load().then(() => undefined, () => undefined)), Promise.resolve())
   }
   if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 4000 })

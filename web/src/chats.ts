@@ -24,6 +24,9 @@
 //     mentions:  [uid, ...] the people it @mentions (groups)
 //     reactions: { uidA: '👍' }
 //     votes:     { uidA: [0, 2] } polls: which answers each person picked (see polls.ts)
+//     once:      true = "view once" (photos, videos, voice notes)   openedBy: { uidA: time }  (see once.ts)
+//     round:     true = a round video message (videoNotes.ts)    hd: true = an HD photo
+//     transcript: a voice note's words, written out while it was recorded (transcribe.ts)
 //     editedAt, deleted, forwarded
 //     expireAt:  when it disappears (only in chats with disappearing messages on)
 //   chats/<chatId>/media/<id>       the photo, video, voice note or document itself (see media.ts)
@@ -34,6 +37,7 @@
 // Group chat ids are random, picked by Firestore.
 import {
   collection,
+  deleteField,
   doc,
   getDocs,
   limit,
@@ -43,6 +47,7 @@ import {
   updateDoc,
   where,
   writeBatch,
+  type DocumentReference,
   type WriteBatch,
 } from 'firebase/firestore'
 import { isExpired, timerLabel } from './disappearing'
@@ -85,6 +90,8 @@ export type LastMessage = {
   fileName?: string
   live?: boolean
   mentions?: string[] // who it @mentions, so the chat list can show "@"
+  once?: boolean // view once: the chat list says "① Photo", not its caption
+  round?: boolean // a round video message
 }
 
 export type Chat = {
@@ -148,6 +155,11 @@ export type Message = {
   votes?: Record<string, number[]> // polls: { uid: [answer numbers] }
   sticker?: string // stickers that come with PakChat, like "pk:salam" (stickers you make have a mediaId)
   mentions?: string[] // the people it @mentions
+  once?: boolean // view once: a photo, video or voice note that can be opened once (once.ts)
+  openedBy?: Record<string, Timestamp | null> // view once: who opened it, and when
+  round?: boolean // a round video message (videoNotes.ts)
+  hd?: boolean // an HD photo
+  transcript?: string // a voice note's words (transcribe.ts)
   video?: boolean // calls: a video call (or else a voice call)
   missed?: boolean // calls: nobody picked up
   startsAt?: Timestamp | null // a scheduled call: when (its name is in text)
@@ -166,9 +178,10 @@ export type Message = {
 // What you can send. Photos, videos, voice notes and documents arrive as text ("data URLs"), see media.ts.
 export type Content =
   | { kind: 'text'; text: string }
-  | { kind: 'photo'; data: string; width: number; height: number; caption?: string }
-  | { kind: 'video'; data: string; poster: string; width: number; height: number; seconds: number; caption?: string }
-  | { kind: 'voice'; data: string; seconds: number }
+  | { kind: 'photo'; data: string; width: number; height: number; caption?: string; hd?: boolean; once?: boolean }
+  // (A view once video has no poster. A round one is a video message, recorded in the chat.)
+  | { kind: 'video'; data: string; poster?: string; width: number; height: number; seconds: number; caption?: string; once?: boolean; round?: boolean }
+  | { kind: 'voice'; data: string; seconds: number; once?: boolean; transcript?: string }
   | { kind: 'file'; data: string; fileName: string; fileSize: number; mime: string; caption?: string }
   | { kind: 'location'; lat: number; lng: number; accuracy: number; liveMinutes?: number } // see location.ts
   | { kind: 'contact'; contact: SharedContact }
@@ -248,6 +261,7 @@ export async function findUser(input: string): Promise<Person | null> {
 // Either all of them are saved or none are. Returns the new message's id.
 export async function sendMessage(me: Person, target: Target, content: Content, extras: Extras = {}) {
   const chatRef = doc(db, 'chats', target.chatId)
+  const messageRef = doc(collection(chatRef, 'messages')) // a new random id (view once media needs it)
   const batch = writeBatch(db)
   const message: Record<string, unknown> = { kind: content.kind, senderId: me.uid, senderName: me.name }
   if (extras.replyTo) message.replyTo = extras.replyTo
@@ -276,19 +290,27 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
     message.mediaId = saveMedia(batch, chatRef, content.data ?? '', me.uid, expireAt) // a sticker you made: a small picture
   } else {
     // The photo, video, voice note or document goes in its own document(s), so the message list stays small.
-    message.mediaId = saveMedia(batch, chatRef, content.data, me.uid, expireAt)
+    // View once: no caption or transcript, and the media says which message it's in.
+    const once = 'once' in content && !!content.once
+    message.mediaId = saveMedia(batch, chatRef, content.data, me.uid, expireAt, once ? messageRef.id : undefined)
+    if (once) message.once = true
     if (content.kind === 'photo') {
       Object.assign(message, { width: content.width, height: content.height })
+      if (content.hd) message.hd = true
     } else if (content.kind === 'video') {
-      message.posterId = saveMedia(batch, chatRef, content.poster, me.uid, expireAt)
+      if (content.poster && !once) message.posterId = saveMedia(batch, chatRef, content.poster, me.uid, expireAt)
       Object.assign(message, { width: content.width, height: content.height, seconds: Math.round(content.seconds) })
+      if (content.round) message.round = true
     } else if (content.kind === 'file') {
       Object.assign(message, { fileName: content.fileName, fileSize: content.fileSize, mime: content.mime })
-    } else message.seconds = content.seconds
-    if ('caption' in content && content.caption) message.caption = content.caption
+    } else {
+      message.seconds = content.seconds
+      if (content.transcript && !once) message.transcript = content.transcript
+    }
+    if ('caption' in content && content.caption && !once) message.caption = content.caption
   }
 
-  const id = addMessage(batch, target, message, me, target.other ? directChatFields(me, target.other, !!target.isNew) : {})
+  const id = addMessage(batch, target, message, me, target.other ? directChatFields(me, target.other, !!target.isNew) : {}, messageRef)
   await batch.commit()
   return id
 }
@@ -304,17 +326,20 @@ function directChatFields(me: Person, other: Person, isNew: boolean) {
 
 // Adds a message to a batch, and updates the chat's lastMessage to match. Returns the message's id.
 // Used for normal messages and for "Ali added Sara" system messages (groups.ts).
-export function addMessage(batch: WriteBatch, target: Target, message: Record<string, unknown>, me: Person, chatFields: object) {
+// messageRef: where to save it (a new random id if not given).
+export function addMessage(batch: WriteBatch, target: Target, message: Record<string, unknown>, me: Person, chatFields: object, messageRef?: DocumentReference) {
   const chatRef = doc(db, 'chats', target.chatId)
-  const messageRef = doc(collection(chatRef, 'messages')) // a new random id
+  messageRef ??= doc(collection(chatRef, 'messages')) // a new random id
   batch.set(messageRef, { ...message, sentAt: serverTimestamp() }) // the server's clock
-  const { kind, senderId, senderName, event, targetName, video, missed, expireAt, fileName, live, mentions } = message
+  const { kind, senderId, senderName, event, targetName, video, missed, expireAt, fileName, live, mentions, once, round } = message
   // The chat list shows a photo's caption as its text, and a contact card's name.
   const text = message.text ?? message.caption ?? (message.contact as SharedContact | undefined)?.name
   const seconds = kind === 'system' ? message.seconds : undefined // "turned on disappearing messages for 7 days"
-  const lastMessage = Object.fromEntries(
-    Object.entries({ kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live, mentions }).filter(([, v]) => v !== undefined),
-  )
+  // Every field the chat list's preview can have. The ones this message doesn't have are deleted
+  // (deleteField). Without that, merge: true below would KEEP them from the message before,
+  // so a photo after "Delete for everyone" would still say "This message was deleted".
+  const values: Record<string, unknown> = { kind, text, senderId, senderName, event, targetName, video, missed, seconds, expireAt, fileName, live, mentions, once, round }
+  const lastMessage = Object.fromEntries([...Object.keys(values), 'deleted'].map((key) => [key, values[key] ?? deleteField()]))
   // Sending a message means you've read the chat, so it isn't "unread" for you.
   const receipts = myPrivacy.readReceipts || !isDirectId(target.chatId)
   const read = receipts ? { readAt: { [me.uid]: serverTimestamp() } } : {}
@@ -361,10 +386,15 @@ type Short = {
   fileName?: string
   live?: boolean
   contact?: SharedContact
+  once?: boolean
+  round?: boolean
 }
 export function shortText(m: Short, myUid: string, t: Strings) {
   if (m.deleted) return m.senderId === myUid ? t.youDeleted : t.wasDeleted
   const words = m.caption ?? m.text
+  // "① Photo": a view once message never shows what's in it.
+  if (m.once) return `① ${m.kind === 'video' ? t.onceVideo : m.kind === 'voice' ? t.onceVoice : t.oncePhoto}`
+  if (m.kind === 'video' && m.round) return t.videoNoteLabel
   switch (m.kind) {
     case 'call':
       return (m.video ? '📹 ' : '📞 ') + callTitle(m, myUid, t)
@@ -392,9 +422,9 @@ export function shortText(m: Short, myUid: string, t: Strings) {
   return m.text ?? ''
 }
 
-// All the words in a message, for searching: its text, caption, file name or contact's name.
+// All the words in a message, for searching: its text, caption, file name, contact's name, poll answers or voice note's words.
 export function searchText(m: Message) {
-  return [m.text, m.caption, m.fileName, m.contact?.name, ...(m.options ?? [])].filter(Boolean).join(' ')
+  return [m.text, m.caption, m.fileName, m.contact?.name, ...(m.options ?? []), m.transcript].filter(Boolean).join(' ')
 }
 
 // "Voice call", "Video call", or (for the person who was called) "Missed voice call".

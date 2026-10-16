@@ -4,11 +4,11 @@
 //   Privacy        last seen, read receipts, who sees your status, blocked people
 //   Notifications  alerts and sounds
 //   Calls          using less data
-//   Chats          the look, text size, the Enter key, language
+//   Chats          the look, text size, the Enter key, photo quality (HD), voice message transcripts, language
 //   App            installing PakChat
 // On a phone the window fills the screen: first the list, then the part you tap (Back returns).
 // Profile and privacy are saved in the database (users/<you>), so they follow you to any device.
-// Sounds, text size, the Enter key and call data are saved on this device only (settings.ts).
+// Sounds, text size, the Enter key, photo quality, transcripts and call data are saved on this device only (settings.ts).
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { signOut } from 'firebase/auth'
@@ -24,6 +24,7 @@ import { install, isInstalled, useCanInstall } from '../pwa'
 import { unblock } from '../safety'
 import { setSetting, useSettings, type TextSize } from '../settings'
 import { fill } from '../strings'
+import { canTranscribe } from '../transcribe'
 import Avatar, { PersonAvatar } from './Avatar'
 import Icon, { type IconName } from './Icon'
 import { StatusPrivacyDialog } from './StatusList'
@@ -135,7 +136,7 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
     ['privacy', 'lock', t.privacy, [t.showLastSeen, t.readReceipts, t.blockedContacts, t.statusPrivacy]],
     ['notifications', 'bell', t.notifications, [t.desktopAlerts, t.sounds]],
     ['calls', 'phone', t.calls, [t.lowDataCalls]],
-    ['chats', 'palette', t.chatsSettings, [t.theme, t.textSize, t.enterSends, t.language]],
+    ['chats', 'palette', t.chatsSettings, [t.theme, t.textSize, t.enterSends, t.language, t.photoQuality, t.transcripts]],
     ['app', 'install', t.app, [t.installApp]],
   ]
   const q = search.trim().toLowerCase()
@@ -287,6 +288,43 @@ export default function Settings({ me, profile, blocked, statusPrefs, people, st
           </span>
         </div>
         <Switch label={t.enterSends} hint={t.enterSendsHint} on={settings.enterSends} onChange={(on) => setSetting('enterSends', on)} />
+        <div className="setting static">
+          <span className="setting-text">
+            <span>{t.photoQuality}</span>
+            <small>{t.photoQualityHint}</small>
+          </span>
+          <span className="segmented" role="radiogroup" aria-label={t.photoQuality}>
+            <button role="radio" aria-checked={!settings.photoHD} className={settings.photoHD ? '' : 'on'} onClick={() => setSetting('photoHD', false)}>
+              {t.standard}
+            </button>
+            <button role="radio" aria-checked={settings.photoHD} className={settings.photoHD ? 'on' : ''} onClick={() => setSetting('photoHD', true)}>
+              {t.hd}
+            </button>
+          </span>
+        </div>
+        {/* Voice message transcripts: only where the browser can do it (transcribe.ts). */}
+        <Switch
+          label={t.transcripts}
+          hint={canTranscribe() ? t.transcriptsHint : t.transcriptsUnsupported}
+          on={settings.transcripts && canTranscribe()}
+          disabled={!canTranscribe()}
+          onChange={(on) => setSetting('transcripts', on)}
+        />
+        {settings.transcripts && canTranscribe() && (
+          <div className="setting static">
+            <span className="setting-text">
+              <span>{t.transcriptLanguage}</span>
+            </span>
+            <span className="segmented" role="radiogroup" aria-label={t.transcriptLanguage}>
+              <button role="radio" aria-checked={settings.transcriptLang === 'en'} className={settings.transcriptLang === 'en' ? 'on' : ''} onClick={() => setSetting('transcriptLang', 'en')}>
+                English
+              </button>
+              <button role="radio" aria-checked={settings.transcriptLang === 'ur'} className={settings.transcriptLang === 'ur' ? 'on' : ''} onClick={() => setSetting('transcriptLang', 'ur')}>
+                اردو
+              </button>
+            </span>
+          </div>
+        )}
         <div className="setting static">
           <span className="setting-text">
             <span>{t.language}</span>

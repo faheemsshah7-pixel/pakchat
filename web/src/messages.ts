@@ -74,7 +74,7 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
     [
       ...['text', 'caption', 'mediaId', 'posterId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'],
       ...['fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'movedAt', 'contact'],
-      ...['options', 'multi', 'votes', 'sticker', 'mentions'],
+      ...['options', 'multi', 'votes', 'sticker', 'mentions', 'once', 'openedBy', 'round', 'hd', 'transcript'],
     ].map((key) => [
       key,
       deleteField(),
@@ -91,7 +91,7 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
 }
 
 // Forward a message to other chats. Photos, videos, voice notes, documents and stickers are copied into each chat.
-// (A live location is forwarded as a plain location: where it was. Polls aren't forwarded.)
+// (A live location is forwarded as a plain location: where it was. Polls and "view once" messages aren't forwarded.)
 export async function forwardMessage(me: Person, fromChatId: string, m: Message, targets: Target[]) {
   const content = await contentOf(fromChatId, m)
   // One chat at a time, so a problem with one doesn't stop the others.
@@ -110,7 +110,7 @@ async function contentOf(chatId: string, m: Message): Promise<Content> {
   const media = () => loadMedia(chatId, m.mediaId ?? '')
   switch (m.kind ?? 'text') {
     case 'photo':
-      return { kind: 'photo', data: await media(), width: m.width ?? 4, height: m.height ?? 3, caption: m.caption }
+      return { kind: 'photo', data: await media(), width: m.width ?? 4, height: m.height ?? 3, caption: m.caption, hd: m.hd }
     case 'video':
       return {
         kind: 'video',
@@ -120,9 +120,10 @@ async function contentOf(chatId: string, m: Message): Promise<Content> {
         height: m.height ?? 9,
         seconds: m.seconds ?? 0,
         caption: m.caption,
+        round: m.round,
       }
     case 'voice':
-      return { kind: 'voice', data: await media(), seconds: m.seconds ?? 0 }
+      return { kind: 'voice', data: await media(), seconds: m.seconds ?? 0, transcript: m.transcript }
     case 'file':
       return { kind: 'file', data: await media(), fileName: m.fileName ?? 'file', fileSize: m.fileSize ?? 0, mime: m.mime ?? '', caption: m.caption }
     case 'location':

@@ -8,9 +8,12 @@ export type Settings = {
   textSize: TextSize // how big messages are written
   enterSends: boolean // Enter sends; Shift+Enter makes a new line
   lowDataCalls: boolean // lower picture quality in video calls, to save mobile data (calls.ts)
+  photoHD: boolean // send photos in HD (sharper, but bigger) unless you switch it off for one
+  transcripts: boolean // write out your voice notes while you record them (transcribe.ts)
+  transcriptLang: 'en' | 'ur' // the language you speak in your voice notes
 }
 
-const DEFAULTS: Settings = { sounds: true, textSize: 'medium', enterSends: true, lowDataCalls: false }
+const DEFAULTS: Settings = { sounds: true, textSize: 'medium', enterSends: true, lowDataCalls: false, photoHD: false, transcripts: false, transcriptLang: 'en' }
 const listeners = new Set<() => void>()
 let current: Settings = load()
 

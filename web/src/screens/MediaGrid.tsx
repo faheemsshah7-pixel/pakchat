@@ -1,5 +1,6 @@
 // MediaGrid.tsx: the photos, videos and documents shared in a chat (in contact and group info).
 // It shows them from the messages already loaded, newest first.
+// (Not "view once" ones, which can't be seen again, or round video messages, which are more like voice notes.)
 import { useState } from 'react'
 import type { Message } from '../chats'
 import { useT } from '../lang'
@@ -11,7 +12,7 @@ type Props = { chatId: string; messages: Message[]; onView: (m: Message, data: s
 
 export default function MediaGrid({ chatId, messages, onView }: Props) {
   const { t } = useT()
-  const shared = messages.filter((m) => !m.deleted && m.mediaId).reverse()
+  const shared = messages.filter((m) => !m.deleted && m.mediaId && !m.once && !m.round).reverse()
   const media = shared.filter((m) => m.kind === 'photo' || m.kind === 'video')
   const docs = shared.filter((m) => m.kind === 'file')
   return (

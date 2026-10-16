@@ -502,6 +502,59 @@ const PATHS = {
       <path d="M16 13h-2" />
     </>
   ),
+  // View once: a "1" in a circle (dashed once it's been opened)
+  once: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M10.5 9 12.5 7.5V16.5" />
+    </>
+  ),
+  onceOpened: (
+    <>
+      <circle cx="12" cy="12" r="10" strokeDasharray="3 3" />
+      <path d="M10.5 9 12.5 7.5V16.5" />
+    </>
+  ),
+  // A round video message: a camera inside a circle
+  videoNote: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M14 10.5 17 9v6l-3-1.5" />
+      <rect x="7" y="9" width="7" height="6" rx="1" />
+    </>
+  ),
+  crop: (
+    <>
+      <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+      <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+    </>
+  ),
+  rotate: (
+    <>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </>
+  ),
+  pen: (
+    <>
+      <path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z" />
+      <path d="m15 5 4 4" />
+    </>
+  ),
+  text: (
+    <>
+      <path d="M4 7V4h16v3" />
+      <path d="M9 20h6" />
+      <path d="M12 4v16" />
+    </>
+  ),
+  undo: (
+    <>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </>
+  ),
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />,
 }
 
 export type IconName = keyof typeof PATHS

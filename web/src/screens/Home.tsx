@@ -359,7 +359,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
     }
     setWorking('')
   }
-  async function postMedia(picked: PickedPhoto[]) {
+  async function postMedia(picked: PickedPhoto[], hd: boolean) {
     setStatusFiles(null)
     if (picked.some(({ file }) => file.type.startsWith('video/'))) warmUpSound() // (sound needs a tap, and this is right after one)
     let failed = ''
@@ -375,7 +375,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
           await post({ kind: 'video', ...video, thumb: await makeThumb(video.poster), ...words })
         } else {
           setWorking(t.postingStatus)
-          const photo = await shrinkPhoto(file)
+          const photo = await shrinkPhoto(file, hd)
           await post({ kind: 'photo', ...photo, thumb: await makeThumb(photo.data), ...words })
         }
       } catch (err) {
@@ -607,7 +607,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
           if (files.length) setStatusFiles(files)
         }}
       />
-      {statusFiles && <PhotoSender files={statusFiles} onClose={() => setStatusFiles(null)} onSend={postMedia} />}
+      {statusFiles && <PhotoSender files={statusFiles} canOnce={false} onClose={() => setStatusFiles(null)} onSend={postMedia} />}
       {writing && <StatusComposer privacy={statusWho()} onPost={postWords} onClose={() => setWriting(false)} />}
       {statusPrivacy && <StatusPrivacyDialog me={me} prefs={statusPrefs} people={people} onClose={() => setStatusPrivacy(false)} />}
       {viewer && (

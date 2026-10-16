@@ -617,3 +617,79 @@ build printed a yellow warning about it. Now:
   words, and a colour.
 - In `polls.ts`, change `MAX_OPTIONS` from 12 to 6 (the rules still allow up to 12).
 - Send a poll in a group, vote from two devices at once, and watch the bars move.
+
+## Step 17: View once, video messages, photo editing, HD, transcripts
+
+Four WhatsApp features, and two older bugs fixed.
+
+| Feature | Files | Saved as |
+|---|---|---|
+| View once | `once.ts`, `OnceViewer.tsx`, `MediaBubbles.tsx` | `once: true` on the message, `openedBy: { uid: time }`, `onceIn` on the media |
+| Round video messages | `videoNotes.ts`, `VideoNoteRecorder.tsx` | a video message with `round: true` |
+| Photo editing | `photoEdit.ts`, `PhotoEditor.tsx`, `PhotoSender.tsx` | (a normal photo: the edit is drawn into it) |
+| HD photos | `media.ts` (`shrinkPhoto`), Settings > Chats | `hd: true` on the photo message |
+| Voice message transcripts | `transcribe.ts`, `Composer.tsx`, Settings > Chats | `transcript: "..."` on the voice message |
+
+### View once
+Before sending a photo or video, tap **①** next to the caption (for a voice note: ① while
+recording). The people you send it to see just "① Photo". They can open it **one time**:
+1. Opening it loads it, then saves `openedBy.<their uid>` with the server's time.
+2. From then on the **rules** stop them loading it again (`notOpenedYet()` in `firestore.rules`).
+   That's why each part of the photo says which message it belongs to (`onceIn`).
+3. When everyone it was sent to has opened it, the photo itself is **deleted** from the
+   database (`everyoneOpened()` lets them). In a group, the app asks the server who has
+   opened it, not its own copy, which can be a moment behind.
+
+It has no caption, can't be forwarded, starred or downloaded, and a view once video saves no
+first picture (the picture would give it away). Honest limit: a website can't stop
+screenshots, and a changed copy of the app could keep what it loaded. WhatsApp says the same:
+only send view once to people you trust.
+
+### Round video messages
+The round camera button next to the microphone records your front camera in a circle, up
+to a minute. A ring fills up as you go. **■** stops so you can watch it back, **➤** sends,
+the bin throws it away. It's saved like any other video (with a small first picture), at a
+low bit rate so a minute fits: 550,000 bits a second for the picture, 48,000 for the sound.
+
+### Photo editing (crop, rotate, draw, text)
+The tools at the top of the photo window open the editor. The clever part is in
+`photoEdit.ts`: an edit is a **list of changes**, not a new picture:
+`{ turns, crop, strokes, labels }`. Every position is a fraction of the photo (0 to 1), so the
+same edit fits the small picture on screen and the big one that's sent. Undo just goes back
+to the list before. Turning left moves a point at (x, y) to (y, 1 − x). Only when you press
+✓ is the photo drawn for real, at full size (`renderEdit`).
+
+### HD photos
+Normal photos are made at most 1280 pixels wide. HD keeps up to 2560, so they're sharper but
+a few times bigger (they're cut into up to 3 parts in the database). Switch it on for one
+photo with **HD** at the top, or for all of them in **Settings > Chats > Photo quality**.
+A photo that's small already isn't marked HD, since there's nothing to make sharper.
+
+### Voice message transcripts
+**Settings > Chats > Voice message transcripts** (off at first). While you record, the
+browser's own speech recognition (the "Web Speech API") writes down your words, in English or
+Urdu. They're saved with the voice note, and the people you send it to tap **Show transcript**.
+Search finds them too. Chrome, Edge and Safari can do it, Firefox can't (the switch says so).
+It's off at first because Chrome sends your voice to Google to work out the words.
+
+### Two older bugs, fixed
+- **The chat list kept old bits of the last message.** Saving the chat with `merge: true` also
+  merged *inside* `lastMessage`, so fields from the message before stayed. After "Delete for
+  everyone", every new message in that chat still said "This message was deleted". Now
+  `addMessage` (`chats.ts`) deletes the fields the new message doesn't have (`deleteField()`).
+- **Some videos didn't play.** A recorded video's type can have a comma in it
+  (`video/webm;codecs=vp8,opus`), and a comma ends the type part of a data URL, so the video
+  came back broken. That hit videos PakChat made smaller before sending. Now only
+  `video/webm` is kept (`blobToDataUrl`), and videos saved the old way are mended when they
+  load (`mendType` in `media.ts`), so old ones play too.
+
+### New rules
+`firestore.rules` accepts `once`, `round`, `hd` and `transcript`, has the new `opening()` rule
+(marking it opened: only the people it was sent to, only once, only for themselves, at the
+server's time), and the view once checks on media. So this update deploys the rules too.
+
+### Try this
+- In `videoNotes.ts`, change `MAX_NOTE_SECONDS` to 30.
+- In `photoEdit.ts`, add a colour to `COLOURS` (like `'#01411c'`, Pakistan green).
+- Send a friend a view once photo (it isn't offered in Message yourself), and watch it say
+  "Opened" on your side when they open it.

@@ -38,6 +38,7 @@ import { startSharing, type Spot } from '../location'
 import { blobToDataUrl, isPhotoOrVideo, loadMedia, prepareVideo, shrinkPhoto, videoExtension, warmUpSound } from '../media'
 import { findMentions } from '../mentions'
 import { canEdit, captionKind, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
+import { closeOnce, openOnce } from '../once'
 import { activePins, pinMessage, unpinMessage } from '../pins'
 import { clearChat, deleteChat, hideMessage, isMuted, setPrefs, starMessage, type ChatPrefs } from '../prefs'
 import { presenceText } from '../presence'
@@ -67,7 +68,7 @@ import {
 import GroupInfo from './GroupInfo'
 import Icon from './Icon'
 // These load the first time they're needed, so opening PakChat is quicker (lazy.ts).
-import { EmojiPicker, PhotoViewer, VideoViewer } from './lazy'
+import { EmojiPicker, OnceViewer, PhotoViewer, VideoViewer } from './lazy'
 import Menu, { type MenuItem } from './Menu'
 import MessageBubble from './MessageBubble'
 import PhotoSender, { type PickedPhoto } from './PhotoSender'
@@ -104,6 +105,7 @@ export default function ChatRoom(props: Props) {
   const [showInfo, setShowInfo] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
   const [viewing, setViewing] = useState<{ m: Message; data: string } | null>(null) // a photo or video, full screen
+  const [onceShown, setOnceShown] = useState<{ m: Message; src: string } | null>(null) // a "view once" photo, open (once.ts)
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number } | null>(null)
   const [reactingTo, setReactingTo] = useState<Message | null>(null) // the full emoji picker, for a reaction
   const [dialog, setDialog] = useState<Dialog | null>(null)
@@ -130,6 +132,20 @@ export default function ChatRoom(props: Props) {
     setFocusFrom(focusProp)
     if (focusProp) setFocus(focusProp.id)
   }
+
+  // A "view once" photo, video or voice note: open it (only once), and forget it when it's closed.
+  const viewOnce = useStable(async (m: Message) => {
+    try {
+      setOnceShown({ m, src: await openOnce(chat, chatId, m, me.uid) })
+    } catch (err) {
+      console.error(err)
+      setToast(t.onceGone)
+    }
+  })
+  const closeOnceShown = useStable(() => {
+    if (onceShown) closeOnce(onceShown.m)
+    setOnceShown(null)
+  })
 
   // The phone's Back button closes these first (back.ts), then the chat itself (Home.tsx).
   useBack(showInfo, LEVEL.panel, () => setShowInfo(false))
@@ -314,14 +330,15 @@ export default function ChatRoom(props: Props) {
   // Esc closes the photo you're looking at, the search, or else the chat (like WhatsApp Web).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .menu-items, .emoji-picker, .photo-sender, .settings-window, .call-screen')) return
-      if (viewing) setViewing(null)
+      if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .menu-items, .emoji-picker, .photo-sender, .photo-editor, .settings-window, .call-screen, .note-recorder')) return
+      if (onceShown) closeOnceShown()
+      else if (viewing) setViewing(null)
       else if (searching) setSearching(false)
       else if (!showInfo && !replyTo && !editing) onBack()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [viewing, searching, showInfo, replyTo, editing, onBack])
+  }, [viewing, onceShown, closeOnceShown, searching, showInfo, replyTo, editing, onBack])
 
   // New message from someone else while this chat is on screen? Mark it read (blue ✓✓).
   useEffect(() => {
@@ -387,12 +404,13 @@ export default function ChatRoom(props: Props) {
 
   // Photos and videos picked, pasted or dropped: shrink and send them one by one.
   // (Only the first one is the reply, like WhatsApp.)
-  async function sendPhotos(picked: PickedPhoto[]) {
+  // hd: send photos in HD (PhotoSender.tsx). once: that one is "view once" (once.ts).
+  async function sendPhotos(picked: PickedPhoto[], hd: boolean) {
     setPhotos(null)
     if (picked.some(({ file }) => file.type.startsWith('video/'))) warmUpSound() // (sound needs a tap, and this is right after one)
     const extras = takeReply()
-    for (const [i, { file, caption }] of picked.entries()) {
-      const words = caption ? { caption } : {}
+    for (const [i, { file, caption, once }] of picked.entries()) {
+      const words = { ...(caption ? { caption } : {}), ...(once ? { once } : {}) }
       const isVideo = file.type.startsWith('video/')
       try {
         if (isVideo) {
@@ -403,7 +421,7 @@ export default function ChatRoom(props: Props) {
           setWorking('')
           await send({ kind: 'video', ...video, ...words }, i === 0 ? extras : {})
         } else {
-          const photo = await shrinkPhoto(file)
+          const photo = await shrinkPhoto(file, hd)
           await send({ kind: 'photo', ...photo, ...words }, i === 0 ? extras : {})
         }
       } catch (err) {
@@ -520,7 +538,8 @@ export default function ChatRoom(props: Props) {
         onClick: () => navigator.clipboard.writeText(text).then(() => setToast(t.copied), console.error),
       })
     }
-    if (m.kind !== 'poll') items.push({ label: t.forward, icon: 'forward', onClick: () => setDialog({ kind: 'forward', m }) })
+    // (Polls and "view once" messages can't be forwarded.)
+    if (m.kind !== 'poll' && !m.once) items.push({ label: t.forward, icon: 'forward', onClick: () => setDialog({ kind: 'forward', m }) })
     // A sticker someone made: keep it in your stickers (on this device).
     if (m.kind === 'sticker' && m.mediaId) {
       const mediaId = m.mediaId
@@ -533,8 +552,8 @@ export default function ChatRoom(props: Props) {
             .catch(oops),
       })
     }
-    // Pin for everyone (if you can send messages here), and star just for you.
-    if (chat && canTalk && !iBlockedThem) {
+    // Pin for everyone (if you can send messages here), and star just for you. (Not "view once" ones.)
+    if (chat && canTalk && !iBlockedThem && !m.once) {
       items.push(
         pinnedIds.has(m.id)
           ? { label: t.unpinMsg, icon: 'pinOff', onClick: () => unpinMessage(chatId, m.id).catch(oops) }
@@ -542,7 +561,7 @@ export default function ChatRoom(props: Props) {
       )
     }
     const starred = starredIds.has(m.id)
-    items.push({ label: starred ? t.unstar : t.star, icon: starred ? 'starOff' : 'star', onClick: () => starMessage(me.uid, chatId, m.id, !starred).catch(oops) })
+    if (!m.once) items.push({ label: starred ? t.unstar : t.star, icon: starred ? 'starOff' : 'star', onClick: () => starMessage(me.uid, chatId, m.id, !starred).catch(oops) })
     if (canEdit(m, me.uid)) items.push({ label: t.edit, icon: 'edit', onClick: () => (setReplyTo(null), setEditing(m)) })
     if (m.senderId === me.uid && chat && !self) items.push({ label: t.info, icon: 'info', onClick: () => setDialog({ kind: 'info', m }) })
     items.push({ label: t.delete, icon: 'trash', danger: true, onClick: () => setDialog({ kind: 'delete', m }) })
@@ -844,6 +863,7 @@ export default function ChatRoom(props: Props) {
                     nameOf={nameOf}
                     onVotes={showVotes}
                     onMention={openMention}
+                    onOpenOnce={viewOnce}
                   />
                 )}
               </Fragment>
@@ -887,6 +907,7 @@ export default function ChatRoom(props: Props) {
           onLocation={() => setDialog({ kind: 'location' })}
           onContact={() => setDialog({ kind: 'contact' })}
           onPoll={() => setDialog({ kind: 'poll' })}
+          canOnce={!self}
           people={people}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
@@ -999,10 +1020,20 @@ export default function ChatRoom(props: Props) {
       )}
       {chatDialogs}
 
-      {photos && <PhotoSender files={photos} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
+      {photos && <PhotoSender files={photos} canOnce={!self} onClose={() => setPhotos(null)} onSend={sendPhotos} />}
       {documents && <DocumentSender files={documents} onClose={() => setDocuments(null)} onSend={sendDocuments} />}
 
       {viewer}
+      {onceShown && (
+        <Suspense fallback={null}>
+          <OnceViewer
+            kind={onceShown.m.kind === 'video' ? 'video' : onceShown.m.kind === 'voice' ? 'voice' : 'photo'}
+            src={onceShown.src}
+            who={onceShown.m.senderName ?? ''}
+            onClose={closeOnceShown}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

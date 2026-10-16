@@ -1,5 +1,6 @@
 // MessageBubble.tsx: one message in a chat: who sent it (in groups), what it answers,
 // the words / photo / video / voice note / document / location / contact / poll / sticker / call / scheduled call,
+// (or for "view once", just ① until it's opened, and a round video message in a circle),
 // the time and ticks, and any emoji reactions under it.
 // Right-click it (or hold your finger on it on a phone, or use the little arrow) for its menu.
 // memo (at the bottom): a bubble is only drawn again when ITS message changed. A chat shows
@@ -12,7 +13,7 @@ import { useT } from '../lang'
 import { clock, duration } from '../time'
 import Icon from './Icon'
 import { ContactBubble, LocationBubble, ScheduledCallBubble } from './CardBubbles'
-import { FileBubble, PhotoBubble, VideoBubble, VoiceBubble } from './MediaBubbles'
+import { FileBubble, OnceBubble, PhotoBubble, RoundVideoBubble, VideoBubble, VoiceBubble } from './MediaBubbles'
 import { PollBubble } from './Polls'
 import RichText from './RichText'
 import { StickerBubble } from './Stickers'
@@ -38,20 +39,23 @@ type Props = {
   nameOf: (uid: string) => string // someone's name in this chat (for @mentions and poll votes)
   onVotes: (m: Message) => void // polls: "View votes"
   onMention: (uid: string) => void // tapping an @mention
+  onOpenOnce: (m: Message) => void // tapping a "view once" photo, video or voice note
 }
 
 export default memo(function MessageBubble(props: Props) {
-  const { m, tick, chatId, myUid, group, first, highlight, starred, pinned, onMenu, onReactions, onJump, onView, onContact, onCall, canVote, nameOf, onVotes, onMention } = props
+  const { m, tick, chatId, myUid, group, first, highlight, starred, pinned, onMenu, onReactions, onJump, onView, onContact, onCall, canVote, nameOf, onVotes, onMention, onOpenOnce } = props
   const { t } = useT()
   const mine = m.senderId === myUid
   const kind = m.kind ?? 'text'
   const text = kind === 'text' ? m.text : m.caption // (photos, videos and documents can have a caption)
   const jumbo = kind === 'text' && !m.deleted && !m.replyTo && isJumboEmoji(m.text ?? '')
+  const once = !!m.once && !m.deleted // view once: only ① until it's opened
+  const round = kind === 'video' && !!m.round && !m.deleted && !once // a round video message
   // Photos, videos and maps fill the bubble, with a thin edge.
-  const big = ['photo', 'video', 'location'].includes(kind) && !m.deleted
-  // A sticker has no bubble around it (like a big emoji).
+  const big = ['photo', 'video', 'location'].includes(kind) && !m.deleted && !once && !round
+  // A sticker (or a round video) has no bubble around it (like a big emoji).
   const sticker = kind === 'sticker' && !m.deleted
-  const classes = ['bubble', mine && 'mine', first && 'first', big && 'has-photo', (jumbo || sticker) && 'jumbo', sticker && 'is-sticker', kind === 'poll' && 'is-poll', kind === 'call' && 'is-call', m.fresh && 'fresh']
+  const classes = ['bubble', mine && 'mine', first && 'first', big && 'has-photo', (jumbo || sticker || round) && 'jumbo', sticker && 'is-sticker', round && 'is-round', once && 'is-once', kind === 'poll' && 'is-poll', kind === 'call' && 'is-call', m.fresh && 'fresh']
   const tagged = m.mentions?.map((uid) => ({ uid, name: nameOf(uid) }))
 
   // Holding a finger on the message opens its menu (phones don't have right-click).
@@ -116,11 +120,13 @@ export default memo(function MessageBubble(props: Props) {
               <span dir="auto">{shortText(m.replyTo, myUid, t)}</span>
             </button>
           )}
-          {kind === 'photo' && (
-            <PhotoBubble chatId={chatId} mediaId={m.mediaId} width={m.width} height={m.height} onView={(data) => onView(m, data)} />
+          {once && <OnceBubble m={m} myUid={myUid} onOpen={onOpenOnce} />}
+          {kind === 'photo' && !once && (
+            <PhotoBubble chatId={chatId} mediaId={m.mediaId} width={m.width} height={m.height} hd={m.hd} onView={(data) => onView(m, data)} />
           )}
-          {kind === 'video' && <VideoBubble chatId={chatId} m={m} onView={(url) => onView(m, url)} />}
-          {kind === 'voice' && <VoiceBubble chatId={chatId} mediaId={m.mediaId} seconds={m.seconds} />}
+          {round && <RoundVideoBubble chatId={chatId} m={m} />}
+          {kind === 'video' && !once && !round && <VideoBubble chatId={chatId} m={m} onView={(url) => onView(m, url)} />}
+          {kind === 'voice' && !once && <VoiceBubble chatId={chatId} mediaId={m.mediaId} seconds={m.seconds} transcript={m.transcript} />}
           {kind === 'file' && <FileBubble chatId={chatId} m={m} />}
           {kind === 'location' && <LocationBubble chatId={chatId} m={m} mine={mine} />}
           {kind === 'contact' && m.contact && <ContactBubble contact={m.contact} onMessage={onContact} />}

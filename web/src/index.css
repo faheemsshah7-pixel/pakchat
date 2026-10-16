@@ -5088,6 +5088,579 @@ button.setting:disabled {
   color: var(--mine-meta);
 }
 
+/* ================= 8j. View once, video messages, photo editing, HD, transcripts ================= */
+
+/* HD photos: a small "HD" in the corner */
+.photo-wrap {
+  position: relative;
+  display: block;
+}
+.hd-badge {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.5);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+/* "View once": just ① and what it is, until it's opened (once.ts) */
+.once-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+  padding: 6px 4px;
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-align: start;
+}
+.bubble.mine .once-bubble {
+  color: inherit;
+}
+.once-bubble small {
+  margin-inline-start: auto;
+  color: var(--meta);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.once-bubble:disabled {
+  cursor: default;
+}
+/* Opened: grey, with a dashed circle */
+.once-bubble.opened {
+  color: var(--meta);
+  font-weight: 400;
+  font-style: italic;
+}
+
+/* A round video message in a chat: a circle, no bubble around it (videoNotes.ts) */
+.bubble.is-round {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.3;
+}
+.bubble.mine.is-round {
+  align-items: flex-end;
+}
+.bubble.is-round time {
+  float: none;
+  top: 0;
+  margin: 2px 0 0;
+}
+.bubble.is-round .quote,
+.bubble.is-round .forwarded,
+.bubble.is-round .sender {
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: var(--bubble);
+}
+.round-note {
+  position: relative;
+  display: block;
+  width: 240px;
+  height: 240px;
+  max-width: 62vw;
+  max-height: 62vw;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--soft);
+  box-shadow: var(--bubble-shadow);
+  cursor: pointer;
+}
+.round-note img,
+.round-note video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.round-note svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg); /* the ring starts at the top */
+  pointer-events: none;
+}
+.round-note .video-length {
+  bottom: 14px;
+  left: 50%;
+  inset-inline-start: auto;
+  transform: translateX(-50%);
+}
+.round-note:hover .play-big {
+  background: rgb(0 0 0 / 0.68);
+}
+/* The ring that fills up (while it plays, and while you record) */
+.note-ring,
+.note-ring-back {
+  fill: none;
+  stroke-width: 3;
+}
+.note-ring {
+  stroke: #ffffff;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.25s linear;
+}
+.note-ring-back {
+  stroke: rgb(255 255 255 / 0.25);
+}
+
+/* Recording a round video message: the camera in a big circle in the middle */
+.note-recorder {
+  position: fixed;
+  inset: 0;
+  z-index: 66;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+  background: rgb(10 12 16 / 0.92);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  animation: fade-in 0.15s;
+}
+.note-circle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(340px, 80vw, 60vh);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #000000;
+}
+.note-circle video {
+  position: absolute;
+  inset: 6px;
+  width: calc(100% - 12px);
+  height: calc(100% - 12px);
+  border-radius: 50%;
+  object-fit: cover;
+  cursor: pointer;
+}
+/* Your own camera shows like a mirror, the way you expect to see yourself */
+.note-circle video.mirror {
+  transform: scaleX(-1);
+  cursor: default;
+}
+.note-circle svg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.note-circle .note-ring {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+.note-circle .spinner {
+  position: relative;
+  z-index: 1;
+}
+.note-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.note-time small {
+  opacity: 0.6;
+  font-weight: 400;
+}
+.note-problem {
+  max-width: 320px;
+  text-align: center;
+  color: #ffb4ab;
+}
+.note-buttons {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.note-recorder button.icon,
+.photo-editor button.icon {
+  color: #ffffff;
+}
+.note-recorder button.icon:hover,
+.photo-editor button.icon:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+.round-btn:disabled {
+  opacity: 0.45;
+  transform: none;
+  cursor: default;
+}
+
+/* The round camera button in the bottom bar (next to the microphone) */
+.composer .note-btn {
+  margin-bottom: 5px;
+  color: var(--muted);
+}
+.composer .note-btn:hover {
+  color: var(--accent-ink);
+}
+
+/* ① in the bottom bar while recording a voice note, and next to the caption before sending a photo.
+   Green when it's on. */
+.once-toggle {
+  color: var(--muted);
+}
+button.icon.once-toggle.on,
+button.icon.once-toggle.on:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.photo-sender .once-toggle {
+  color: rgb(255 255 255 / 0.85);
+}
+
+/* Before sending photos: the tools at the top, the note under them, and the caption line */
+.photo-sender .sender-count {
+  flex: 1;
+  padding-inline-start: 6px;
+  font-size: 15px;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.sender-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sender-tools button.icon {
+  color: #ffffff;
+}
+.hd-toggle {
+  height: 30px;
+  padding: 0 9px;
+  margin-inline-end: 6px;
+  border: 1.5px solid rgb(255 255 255 / 0.7);
+  border-radius: 8px;
+  color: rgb(255 255 255 / 0.85);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.hd-toggle.on {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #0a0c10;
+}
+/* (It floats over the photo, so the photo doesn't jump when it comes and goes.) */
+.sender-hint {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  z-index: 1;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 6px 12px;
+  text-align: center;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.7);
+  font-size: 13.5px;
+  animation: fade-in 0.15s;
+}
+/* The photo always fits between the bar and the caption, however tall it is.
+   (minmax(0, 1fr): the grid's one cell is exactly the room there is, so max-height: 100% works.) */
+.photo-sender .stage {
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+.photo-sender .stage img,
+.photo-sender .stage video {
+  justify-self: center;
+}
+.caption-line {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.caption-row .caption-line input:not([type='checkbox']) {
+  flex: 1;
+  min-width: 0;
+}
+.caption-row .caption-line input:disabled {
+  opacity: 0.6;
+}
+
+/* The photo editor (PhotoEditor.tsx): always dark, the photo in the middle, tools on top,
+   colours and ✓ along the bottom */
+.photo-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 68;
+  display: flex;
+  flex-direction: column;
+  background: #0a0c10;
+  color: #ffffff;
+  animation: fade-in 0.12s;
+}
+.photo-editor header,
+.photo-editor footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 60px;
+  padding: 8px 14px;
+}
+.photo-editor footer {
+  gap: 12px;
+  padding-bottom: 16px;
+}
+.photo-editor .spacer {
+  flex: 1;
+}
+.photo-editor button.icon.on {
+  background: #ffffff;
+  color: #0a0c10;
+}
+.photo-editor button.icon:disabled {
+  opacity: 0.35;
+  background: none;
+  cursor: default;
+}
+.photo-editor button.link {
+  color: #ffffff;
+}
+.photo-editor button.link:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+.editor-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  margin: 0 16px;
+  overflow: hidden;
+}
+.editor-photo {
+  position: relative;
+  /* (its size is set in PhotoEditor.tsx, to fit the room the photo has) */
+}
+.editor-photo canvas {
+  display: block;
+  border-radius: 4px;
+  touch-action: none; /* a finger moving on the photo draws, it doesn't scroll the page */
+  user-select: none;
+}
+.editor-photo canvas.drawing {
+  cursor: crosshair;
+}
+/* The crop box: the part outside it is darkened (a huge shadow), and it has four corners to drag */
+.crop-box {
+  position: absolute;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.55);
+  cursor: move;
+  touch-action: none;
+}
+/* The rule-of-thirds lines inside it, like a camera */
+.crop-box::before,
+.crop-box::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  border: 0 solid rgb(255 255 255 / 0.4);
+}
+.crop-box::before {
+  inset: 0 33.333%;
+  border-inline-width: 1px;
+}
+.crop-box::after {
+  inset: 33.333% 0;
+  border-block-width: 1px;
+}
+.crop-handle {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 0 solid #ffffff;
+  touch-action: none;
+}
+.crop-handle.nw {
+  top: -5px;
+  left: -5px;
+  border-width: 4px 0 0 4px;
+  cursor: nwse-resize;
+}
+.crop-handle.ne {
+  top: -5px;
+  right: -5px;
+  border-width: 4px 4px 0 0;
+  cursor: nesw-resize;
+}
+.crop-handle.sw {
+  bottom: -5px;
+  left: -5px;
+  border-width: 0 0 4px 4px;
+  cursor: nesw-resize;
+}
+.crop-handle.se {
+  bottom: -5px;
+  right: -5px;
+  border-width: 0 4px 4px 0;
+  cursor: nwse-resize;
+}
+.crop-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The colours to pick from */
+.colour-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.colour-dots button {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.5);
+  transition: transform 0.12s;
+}
+.colour-dots button.on {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px #0a0c10, 0 0 0 4px #ffffff;
+  transform: scale(1.1);
+}
+/* Writing words on the photo: a big box over it */
+.text-entry {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+  background: rgb(0 0 0 / 0.7);
+  animation: fade-in 0.12s;
+}
+.text-entry textarea {
+  width: min(560px, 100%);
+  padding: 8px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: inherit;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.55);
+}
+.text-entry textarea::placeholder {
+  color: rgb(255 255 255 / 0.5);
+}
+.text-entry .colour-dots {
+  justify-content: center;
+}
+.text-entry-buttons {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.text-entry-buttons button.link {
+  color: #ffffff;
+}
+
+/* Voice note words: "Show transcript" under the play bar */
+.transcript {
+  max-width: 300px;
+  margin-top: 2px;
+}
+.transcript button.link {
+  padding: 2px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.transcript button.link:hover {
+  background: none;
+  text-decoration: underline;
+}
+.bubble.mine .transcript button.link {
+  color: var(--mine-meta);
+}
+.transcript p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+/* Opening a view once photo, video or voice note (OnceViewer.tsx) */
+.once-viewer .viewer-stage img {
+  cursor: default;
+  -webkit-touch-callout: none; /* no "Save image" when you hold a finger on it (iPhone) */
+}
+.once-viewer .viewer-who small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.once-voice {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(420px, 100%);
+  padding: 18px 22px;
+  border-radius: 20px;
+  background: rgb(255 255 255 / 0.1);
+  color: #ffffff;
+}
+.once-voice .round-btn {
+  width: 64px;
+  height: 64px;
+}
+.once-voice progress {
+  flex: 1;
+  height: 5px;
+  appearance: none;
+  border: 0;
+  border-radius: 5px;
+  background: rgb(255 255 255 / 0.25);
+  overflow: hidden;
+}
+.once-voice progress::-webkit-progress-bar {
+  background: rgb(255 255 255 / 0.25);
+}
+.once-voice progress::-webkit-progress-value {
+  background: #ffffff;
+}
+.once-voice progress::-moz-progress-bar {
+  background: #ffffff;
+}
+.once-voice span {
+  min-width: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ================= 9. Phones ================= */
 @media (max-width: 899px) {
   .bar {

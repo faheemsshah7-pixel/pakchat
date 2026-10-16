@@ -1,6 +1,6 @@
 // Composer.tsx: the bar at the bottom of a chat.
 //   smiley: emojis and stickers    paperclip: photos & videos, camera, document, location, contact, poll
-//   microphone: voice note    paper plane: send
+//   microphone: voice note (① makes it view once)    round camera: a round video message    paper plane: send
 // In a group, typing @ shows the people in it: pick one to mention them (mentions.ts).
 // Enter sends and Shift+Enter starts a new line (you can switch this in Settings).
 // What you type is kept as a draft if you leave the chat before sending (drafts.ts).
@@ -13,9 +13,10 @@ import { isPhotoOrVideo, MAX_VOICE_SECONDS, startRecording, type Recording } fro
 import { findMentions, mentionQuery } from '../mentions'
 import { useSettings } from '../settings'
 import { duration, useNow } from '../time'
+import { canTranscribe } from '../transcribe'
 import { PersonAvatar } from './Avatar'
 import Icon from './Icon'
-import { EmojiPicker } from './lazy' // (the emoji and sticker panel loads the first time you open it)
+import { EmojiPicker, VideoNoteRecorder } from './lazy' // (the emoji panel and the video recorder load the first time you open them)
 import Popover, { type PopoverItem } from './Popover'
 
 type Props = {
@@ -28,6 +29,7 @@ type Props = {
   onLocation: () => void // "Location" in the paperclip menu
   onContact: () => void // "Contact" in the paperclip menu
   onPoll: () => void // "Poll" in the paperclip menu
+  canOnce: boolean // "view once" voice notes are offered (not in "Message yourself")
   people?: Person[] // a group's other members, to @mention (missing in chats with one person)
   replyTo: ReplyTo | null
   onCancelReply: () => void
@@ -43,12 +45,14 @@ const MAX_SHOWN = 8
 const touchScreen = window.matchMedia('(pointer: coarse)').matches
 
 export default function Composer(props: Props) {
-  const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, onPoll, people, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
+  const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, onPoll, canOnce, people, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
   const { t } = useT()
-  const { enterSends } = useSettings()
+  const { enterSends, transcripts, transcriptLang } = useSettings()
   const [text, setText] = useState(() => getDraft(chatId))
   const [error, setError] = useState('')
   const [recording, setRecording] = useState<Recording | null>(null)
+  const [once, setOnce] = useState(false) // the voice note being recorded is "view once"
+  const [filming, setFilming] = useState(false) // recording a round video message
   const [emojis, setEmojis] = useState(false)
   const [attach, setAttach] = useState<{ x: number; y: number } | null>(null) // the paperclip menu
   const [caret, setCaret] = useState(0) // where the cursor is (for @mentions)
@@ -215,8 +219,10 @@ export default function Composer(props: Props) {
 
   async function startVoice() {
     setError('')
+    setOnce(false)
     try {
-      setRecording(await startRecording())
+      // Settings > Chats > Voice message transcripts: write out the words while recording.
+      setRecording(await startRecording(transcripts && canTranscribe() ? transcriptLang : undefined))
     } catch (err) {
       setError(t.micBlocked) // the person said no, or there's no microphone
       console.error(err)
@@ -228,8 +234,9 @@ export default function Composer(props: Props) {
     setRecording(null)
     try {
       if (!keep) return await recording.cancel()
-      const voice = await recording.stop()
-      await send({ kind: 'voice', ...voice })
+      const { transcript, ...voice } = await recording.stop()
+      // (View once voice notes have no transcript: the words would stay after it's been heard.)
+      await send(once ? { kind: 'voice', ...voice, once } : { kind: 'voice', ...voice, ...(transcript ? { transcript } : {}) })
     } catch (err) {
       setError(t.voiceTooLong)
       console.error(err)
@@ -276,7 +283,7 @@ export default function Composer(props: Props) {
         </div>
       )}
       {recording ? (
-        <RecordingBar recording={recording} onDone={finishVoice} />
+        <RecordingBar recording={recording} onDone={finishVoice} once={canOnce ? once : null} onOnce={() => setOnce(!once)} />
       ) : (
         <form className="composer" onSubmit={submit}>
           <div className="field">
@@ -315,6 +322,12 @@ export default function Composer(props: Props) {
               autoFocus
             />
           </div>
+          {/* With nothing typed: the round camera, for a video message. */}
+          {!text.trim() && !editing && (
+            <button type="button" className="icon note-btn" aria-label={t.recordVideoNote} title={t.recordVideoNote} onClick={() => (setError(''), setFilming(true))}>
+              <Icon name="videoNote" />
+            </button>
+          )}
           {/* One round button: Send (or Save) when there's text, the microphone when there isn't. */}
           {text.trim() || editing ? (
             <button className="round-btn" aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
@@ -345,12 +358,25 @@ export default function Composer(props: Props) {
         </form>
       )}
       {attach && <Popover x={attach.x} y={attach.y} items={attachItems} onClose={() => setAttach(null)} />}
+      {filming && (
+        <Suspense fallback={null}>
+          <VideoNoteRecorder
+            onClose={() => setFilming(false)}
+            onSend={(note) => {
+              setFilming(false)
+              send(note)
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
 
-// While recording: a bin to cancel, a red dot, the time so far, a moving sound wave, and Send.
-function RecordingBar({ recording, onDone }: { recording: Recording; onDone: (keep: boolean) => void }) {
+// While recording: a bin to cancel, a red dot, the time so far, a moving sound wave, ① (view once), and Send.
+// once: null = view once isn't offered here.
+type BarProps = { recording: Recording; onDone: (keep: boolean) => void; once: boolean | null; onOnce: () => void }
+function RecordingBar({ recording, onDone, once, onOnce }: BarProps) {
   const { t } = useT()
   const now = useNow(250)
   const seconds = (now - recording.started) / 1000
@@ -387,6 +413,11 @@ function RecordingBar({ recording, onDone }: { recording: Recording; onDone: (ke
             <i key={i} style={{ animationDelay: `${(i % 6) * 0.12}s` }} />
           ))}
         </span>
+        {once !== null && (
+          <button type="button" className={once ? 'icon once-toggle on' : 'icon once-toggle'} aria-pressed={once} aria-label={t.viewOnce} title={once ? t.viewOnceOn : t.viewOnce} onClick={onOnce}>
+            <Icon name="once" />
+          </button>
+        )}
       </div>
       <button type="button" className="round-btn" aria-label={t.send} title={t.send} onClick={() => onDone(true)}>
         <Icon name="send" />
