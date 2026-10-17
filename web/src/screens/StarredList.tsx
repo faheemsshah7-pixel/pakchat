@@ -58,7 +58,7 @@ export default function StarredList({ me, items, chats, onBack, onOpen }: Props)
   }
 
   return (
-    <div className="pane info-pane">
+    <div className="pane info-pane drawer">
       <header className="bar">
         <button className="icon back-always" onClick={onBack} aria-label={t.back}>
           <Icon name="back" />

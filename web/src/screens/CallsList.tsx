@@ -2,18 +2,31 @@
 //   Search      find someone in your calls, or type a number to call it
 //   Favourites  people you call a lot: call them with one tap ("Add favourite" to add more)
 //   Upcoming    calls you scheduled (or someone scheduled with you)
-//   Recent      your last calls. Calls in a row with the same person on the same day share
-//               one line: "Maaz (3)". A red name is a call you missed. Tap one for its details.
+//   Recent      your last calls, with one person or in a group. Calls in a row with the same person
+//               (or group) on the same day share one line: "Maaz (3)". A red name is a call you missed.
+//               Tap one for its details.
 // On a computer the big buttons (Start call, Call link, Call a number, Schedule call) are on the
 // right (CallsMain.tsx); on a phone they're at the top of this list.
 import { useEffect, useState } from 'react'
-import { recentCalls, startCall, type CallRecord } from '../calls'
-import { cancelScheduledCall, directionText, groupCalls, isUpcoming, removeFavourite, scheduledWith, type CallGroup, type ScheduledCall } from '../callExtras'
-import { findUser, type Person } from '../chats'
+import { recentCalls, startCall } from '../calls'
+import {
+  cancelScheduledCall,
+  directionText,
+  fromGroupCall,
+  groupCalls,
+  isUpcoming,
+  removeFavourite,
+  scheduledWith,
+  type CallGroup,
+  type RecentCall,
+  type ScheduledCall,
+} from '../callExtras'
+import { findUser, type Chat, type Person } from '../chats'
+import { recentGroupCalls } from '../groupCalls'
 import { useT } from '../lang'
 import type { CallPrefs } from '../private'
 import { dayAndTime, dayOrTime, useNow } from '../time'
-import { PersonAvatar } from './Avatar'
+import Avatar, { GroupAvatar, PersonAvatar } from './Avatar'
 import Icon from './Icon'
 
 // What the big buttons do (Home.tsx opens the window for each).
@@ -21,6 +34,7 @@ export type CallAction = 'start' | 'link' | 'dial' | 'schedule'
 
 type Props = {
   me: Person
+  chats: Chat[] // (for a group call's picture)
   prefs: CallPrefs
   plans: ScheduledCall[]
   reload: number // goes up when a call ends, so the list loads again
@@ -30,19 +44,24 @@ type Props = {
   onAddFavourite: () => void
 }
 
-export default function CallsList({ me, prefs, plans, reload, selected, onSelect, onAction, onAddFavourite }: Props) {
+export default function CallsList({ me, chats, prefs, plans, reload, selected, onSelect, onAction, onAddFavourite }: Props) {
   const { t } = useT()
-  const [calls, setCalls] = useState<CallRecord[] | null>(null) // null = still loading
+  const [calls, setCalls] = useState<RecentCall[] | null>(null) // null = still loading
   const [failed, setFailed] = useState(false)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const now = useNow(60_000)
 
   // Loaded when you open the tab and after each call (not live), to keep the free plan's reads low.
+  // Calls with one person and group calls, together, newest first.
   useEffect(() => {
     let stillHere = true
-    recentCalls(me.uid)
-      .then((list) => stillHere && setCalls(list))
+    Promise.all([recentCalls(me.uid), recentGroupCalls(me.uid)])
+      .then(([direct, inGroups]) => {
+        const all: RecentCall[] = [...direct, ...inGroups.map(fromGroupCall)]
+        all.sort((a, b) => (b.startedAt?.toMillis() ?? 0) - (a.startedAt?.toMillis() ?? 0))
+        if (stillHere) setCalls(all.slice(0, 60))
+      })
       .catch((err) => {
         console.error(err)
         if (stillHere) setFailed(true)
@@ -201,20 +220,21 @@ export default function CallsList({ me, prefs, plans, reload, selected, onSelect
         {!calls && !failed && <p className="empty">{t.loading}</p>}
         {calls?.length === 0 && <p className="empty">{t.noCalls}</p>}
         {groups.map((group) => (
-          <CallRow key={group.key} group={group} active={group.key === selected} onSelect={onSelect} />
+          <CallRow key={group.key} group={group} chat={group.inGroup ? chats.find((c) => c.id === group.peer.uid) : undefined} active={group.key === selected} onSelect={onSelect} />
         ))}
       </div>
     </div>
   )
 }
 
-function CallRow({ group, active, onSelect }: { group: CallGroup; active: boolean; onSelect: (group: CallGroup) => void }) {
+type RowProps = { group: CallGroup; chat?: Chat; active: boolean; onSelect: (group: CallGroup) => void }
+function CallRow({ group, chat, active, onSelect }: RowProps) {
   const { t } = useT()
   const first = group.calls[0] // (the newest)
   const classes = ['row', 'call-row', group.missed && 'missed', active && 'active'].filter(Boolean).join(' ')
   return (
     <button className={classes} onClick={() => onSelect(group)}>
-      <PersonAvatar uid={group.peer.uid} name={group.peer.name} size={46} />
+      <CallAvatar group={group} chat={chat} size={46} />
       <span className="row-main">
         <strong dir="auto">
           {group.peer.name}
@@ -229,4 +249,10 @@ function CallRow({ group, active, onSelect }: { group: CallGroup; active: boolea
       <time>{dayOrTime(first.startedAt?.toDate(), t.locale, t.yesterday)}</time>
     </button>
   )
+}
+
+// The person's picture, or the group's (a grey one if you're not in the group any more).
+export function CallAvatar({ group, chat, size }: { group: CallGroup; chat?: Chat; size: number }) {
+  if (!group.inGroup) return <PersonAvatar uid={group.peer.uid} name={group.peer.name} size={size} />
+  return chat ? <GroupAvatar chat={chat} size={size} /> : <Avatar name={group.peer.name} group size={size} />
 }

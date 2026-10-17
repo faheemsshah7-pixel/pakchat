@@ -77,7 +77,7 @@ export default function NewGroup({ me, chats, broadcast = false, community = fal
   }
 
   return (
-    <div className="pane">
+    <div className="pane drawer">
       <header className="bar">
         <button className="icon back" onClick={onCancel} aria-label={t.back}>
           <Icon name="back" />

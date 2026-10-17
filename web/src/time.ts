@@ -62,6 +62,14 @@ export function dayOrTime(date: Date | undefined, locale: string[], yesterday: s
   return shortDate(date, locale)
 }
 
+// "Today", "Yesterday", or a date like "12 October 2026" (the labels between days in a chat).
+export function dayLabel(date: Date | undefined, t: Strings) {
+  if (!date) return ''
+  if (isToday(date)) return t.today
+  if (isYesterday(date)) return t.yesterday
+  return date.toLocaleDateString(t.locale, { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 // "Fri 17 Oct, 3:00 PM": a day and time that might be in the future (scheduled calls).
 export function dayAndTime(date: Date, locale: string[]) {
   return `${date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock(date, locale)}`

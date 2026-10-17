@@ -7,9 +7,10 @@ import { timerLabel } from '../disappearing'
 import { useT } from '../lang'
 import { useProfile } from '../profiles'
 import { fill } from '../strings'
+import type { SharedTab } from '../shared'
 import { PersonAvatar } from './Avatar'
 import Icon, { type IconName } from './Icon'
-import MediaGrid from './MediaGrid'
+import MediaGrid, { type ViewMedia } from './MediaGrid'
 
 export type ChatActions = {
   mute: () => void
@@ -38,10 +39,11 @@ type Props = {
   actions: ChatActions
   onCall?: (video: boolean) => void // missing when you blocked them
   onBack: () => void
-  onView: (m: Message, data: string) => void
+  onView: ViewMedia // a photo or video, full screen
+  onOpenMedia: (tab: SharedTab) => void // Media, links and docs (MediaPage.tsx)
 }
 
-export default function ContactInfo({ chatId, self, person, messages, muted, blocked, starred, timer, looks, actions, onCall, onBack, onView }: Props) {
+export default function ContactInfo({ chatId, self, person, messages, muted, blocked, starred, timer, looks, actions, onCall, onBack, onView, onOpenMedia }: Props) {
   const { t } = useT()
   const profile = useProfile(person.uid)
   return (
@@ -76,7 +78,7 @@ export default function ContactInfo({ chatId, self, person, messages, muted, blo
             {profile?.about || t.defaultAbout}
           </p>
         </section>
-        <MediaGrid chatId={chatId} messages={messages} onView={onView} />
+        <MediaGrid chatId={chatId} messages={messages} onView={onView} onOpenMedia={onOpenMedia} />
         <ChatExtras starred={starred} timer={timer} looks={self ? { wallpaper: looks.wallpaper } : looks} actions={actions} />
         <section className="info-section actions">
           <ActionRow icon={muted ? 'bell' : 'bellOff'} label={muted ? t.unmute : t.muteNotifications} onClick={actions.mute} />

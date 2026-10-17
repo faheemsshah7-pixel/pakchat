@@ -587,6 +587,33 @@ const PATHS = {
       <path d="m9 10 3-3 3 3M12 7v6" />
     </>
   ),
+  window: (
+    <>
+      <rect x="6" y="2" width="16" height="14" rx="2" />
+      <path d="M6 6h16" />
+      <path d="M18 20H4a2 2 0 0 1-2-2V8" />
+    </>
+  ),
+  unread: (
+    <>
+      <path d="M13.6 3.1A9 9 0 1 0 20.9 10.4" />
+      <path d="M4 16.1 2 22l5.9-2" />
+      <circle cx="19" cy="5" r="2.6" fill="currentColor" stroke="none" />
+    </>
+  ),
+  share: (
+    <>
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <path d="m16 6-4-4-4 4" />
+      <path d="M12 2v13" />
+    </>
+  ),
+  circleX: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6M9 9l6 6" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

@@ -5,6 +5,7 @@ import { deleteField, doc, serverTimestamp, updateDoc, writeBatch } from 'fireba
 import { db } from './firebase'
 import { sendMessage, type Content, type Message, type Person, type ReplyTo, type Target } from './chats'
 import { deleteMedia, loadMedia } from './media'
+import { firstLink } from './links'
 
 export const EDIT_MINUTES = 15
 export const UNSEND_HOURS = 60
@@ -57,7 +58,8 @@ export async function editMessage(chatId: string, me: Person, m: Message, text: 
   const batch = writeBatch(db)
   const field = captionKind(m) ? 'caption' : 'text'
   const tags = mentions === undefined ? {} : { mentions: mentions.length ? mentions : deleteField() }
-  batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp(), ...tags })
+  const link = firstLink(text) ? true : deleteField() // (does it have a web address in it now? shared.ts)
+  batch.update(doc(db, 'chats', chatId, 'messages', m.id), { [field]: text, editedAt: serverTimestamp(), link, ...tags })
   if (isLast) {
     batch.update(doc(db, 'chats', chatId), {
       lastMessage: { id: m.id, kind: m.kind ?? 'text', text, senderId: me.uid, senderName: me.name, ...expiry(m), ...(mentions?.length ? { mentions } : {}) },
@@ -75,6 +77,7 @@ export async function unsendMessage(chatId: string, me: Person, m: Message, isLa
       ...['text', 'caption', 'mediaId', 'posterId', 'width', 'height', 'seconds', 'replyTo', 'forwarded', 'reactions', 'editedAt'],
       ...['fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'movedAt', 'contact'],
       ...['options', 'multi', 'votes', 'sticker', 'mentions', 'once', 'openedBy', 'round', 'hd', 'transcript', 'copies'],
+      ...['gif', 'preview', 'link', 'startsAt', 'video', 'callId'], // (GIFs, link cards and planned calls: Batch 9 missed these, so unsending them failed)
     ].map((key) => [
       key,
       deleteField(),

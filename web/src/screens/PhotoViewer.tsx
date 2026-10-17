@@ -3,7 +3,8 @@
 //   the + and − buttons at the top, the mouse wheel (or pinching on a trackpad),
 //   double-clicking (or double-tapping) a spot, or pinching with two fingers on a phone.
 // Zoomed in, drag the photo to look around. Esc, ✕, or a click beside the photo closes it.
-import { useEffect, useRef, useState } from 'react'
+// MediaViewer.tsx adds ‹ › and a strip of the chat's other photos and videos (`extra`).
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { LEVEL, useBack } from '../back'
 import { useT } from '../lang'
@@ -16,12 +17,19 @@ const STEP = 1.6 // one press of + or −
 type View = { scale: number; x: number; y: number; smooth?: boolean }
 const FITTED: View = { scale: 1, x: 0, y: 0, smooth: true }
 
-type Props = { src: string; who: string; when: string; caption?: string; fileName: string; onClose: () => void }
+// loading: the photo is still on its way (a spinner instead).
+type Props = { src: string; who: string; when: string; caption?: string; fileName: string; onClose: () => void; extra?: ReactNode; loading?: boolean }
 
-export default function PhotoViewer({ src, who, when, caption, fileName, onClose }: Props) {
+export default function PhotoViewer({ src, who, when, caption, fileName, onClose, extra, loading }: Props) {
   const { t } = useT()
   useBack(true, LEVEL.cover, onClose)
   const [view, setView] = useState<View>(FITTED)
+  // Moved on to another photo: it starts fitted again.
+  const [shown, setShown] = useState(src)
+  if (shown !== src) {
+    setShown(src)
+    setView(FITTED)
+  }
   const viewer = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const photo = useRef<HTMLImageElement>(null)
@@ -52,8 +60,9 @@ export default function PhotoViewer({ src, who, when, caption, fileName, onClose
   // Zoom by `factor`, keeping the spot under the pointer where it is (or the middle, for buttons).
   function zoomAt(factor: number, smooth: boolean, clientX?: number, clientY?: number) {
     setView((v) => {
-      const img = photo.current!
-      const box = stage.current!.getBoundingClientRect()
+      const img = photo.current
+      if (!img || !stage.current) return v // (still loading)
+      const box = stage.current.getBoundingClientRect()
       // The pointer (or the middle of the screen), measured from where the photo's middle starts
       const px = (clientX ?? box.left + box.width / 2) - (box.left + img.offsetLeft + img.offsetWidth / 2)
       const py = (clientY ?? box.top + box.height / 2) - (box.top + img.offsetTop + img.offsetHeight / 2)
@@ -135,7 +144,7 @@ export default function PhotoViewer({ src, who, when, caption, fileName, onClose
 
   const zoomed = view.scale > 1
   return createPortal(
-    <div className={['viewer', zoomed && 'zoomed', caption && 'has-caption'].filter(Boolean).join(' ')} ref={viewer} tabIndex={-1} role="dialog" aria-label={who}>
+    <div className={['viewer', zoomed && 'zoomed', caption && 'has-caption', extra && 'has-strip'].filter(Boolean).join(' ')} ref={viewer} tabIndex={-1} role="dialog" aria-label={who}>
       <div
         className="viewer-stage"
         ref={stage}
@@ -144,29 +153,36 @@ export default function PhotoViewer({ src, who, when, caption, fileName, onClose
         onPointerUp={up}
         onPointerCancel={(e) => fingers.current.delete(e.pointerId)}
       >
-        <img
-          ref={photo}
-          className={view.smooth ? 'smooth' : ''}
-          src={src}
-          alt=""
-          draggable={false}
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-        />
+        {loading ? (
+          <span className="spinner" />
+        ) : (
+          <img
+            key={src} // (a new photo: it fades in, index.css)
+            ref={photo}
+            className={view.smooth ? 'smooth' : ''}
+            src={src}
+            alt=""
+            draggable={false}
+            style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+          />
+        )}
       </div>
       <header>
         <span className="viewer-who">
           <strong dir="auto">{who}</strong>
           <small>{when}</small>
         </span>
-        <button className="icon" aria-label={t.zoomOut} title={t.zoomOut} disabled={!zoomed} onClick={() => zoomAt(1 / STEP, true)}>
+        <button className="icon" aria-label={t.zoomOut} title={t.zoomOut} disabled={!zoomed || loading} onClick={() => zoomAt(1 / STEP, true)}>
           <Icon name="zoomOut" />
         </button>
-        <button className="icon" aria-label={t.zoomIn} title={t.zoomIn} disabled={view.scale >= MAX} onClick={() => zoomAt(STEP, true)}>
+        <button className="icon" aria-label={t.zoomIn} title={t.zoomIn} disabled={view.scale >= MAX || loading} onClick={() => zoomAt(STEP, true)}>
           <Icon name="zoomIn" />
         </button>
-        <a className="icon" href={src} download={fileName} aria-label={t.download} title={t.download}>
-          <Icon name="download" />
-        </a>
+        {!loading && (
+          <a className="icon" href={src} download={fileName} aria-label={t.download} title={t.download}>
+            <Icon name="download" />
+          </a>
+        )}
         <button className="icon" aria-label={t.close} title={t.close} onClick={onClose}>
           <Icon name="close" />
         </button>
@@ -176,6 +192,7 @@ export default function PhotoViewer({ src, who, when, caption, fileName, onClose
           {caption}
         </p>
       )}
+      {extra}
     </div>,
     document.body,
   )

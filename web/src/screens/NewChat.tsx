@@ -49,7 +49,7 @@ export default function NewChat({ me, profile, chats, onBack, onOpen, onNewGroup
   }
 
   return (
-    <div className="pane">
+    <div className="pane drawer">
       <header className="bar">
         <button className="icon back-always" onClick={onBack} aria-label={t.back}>
           <Icon name="back" />

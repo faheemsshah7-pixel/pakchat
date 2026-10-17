@@ -347,14 +347,15 @@ export default function Composer(props: Props) {
               <Icon name="videoNote" />
             </button>
           )}
-          {/* One round button: Send (or Save) when there's text, the microphone when there isn't. */}
+          {/* One round button: Send (or Save) when there's text, the microphone when there isn't.
+              (key: the new icon pops in when it changes, index.css) */}
           {text.trim() || editing ? (
             <button className="round-btn" aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
-              <Icon name={editing ? 'check' : 'send'} />
+              <Icon key={editing ? 'check' : 'send'} name={editing ? 'check' : 'send'} />
             </button>
           ) : (
             <button type="button" className="round-btn" aria-label={t.recordVoice} title={t.recordVoice} onClick={startVoice}>
-              <Icon name="mic" />
+              <Icon key="mic" name="mic" />
             </button>
           )}
           {emojis && (

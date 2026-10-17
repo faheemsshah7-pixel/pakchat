@@ -105,16 +105,23 @@ import Welcome from './Welcome'
 
 // Which chat is open. `other` is set for direct chats (the chat may not exist yet).
 // focus: go to this message when it opens (from "Starred messages").
+// info: open its contact or group info too (from the chat list's menu; a new number each time).
 // reply: start answering this message (from "Reply privately" in a group).
-export type Open = { chatId: string; other?: Person; focus?: { id: string }; reply?: ReplyTo }
+export type Open = { chatId: string; other?: Person; focus?: { id: string }; reply?: ReplyTo; info?: number }
 type View = 'chats' | 'archived' | 'starred' | 'newChat' | 'newGroup' | 'newBroadcast' | 'calls' | 'status' | 'communities' | 'newCommunity'
 const CHAT_VIEWS: View[] = ['chats', 'archived', 'starred', 'newChat', 'newGroup', 'newBroadcast'] // (the open chat shows next to these)
+
+// "Open in new window" (the chat list's menu) opens PakChat with ?chat=<id>: start with that chat open.
+function chatFromAddress(): Open | null {
+  const chatId = new URLSearchParams(location.search).get('chat')
+  return chatId ? { chatId } : null
+}
 
 export default function Home({ user, profile }: { user: User; profile: Profile }) {
   const { t } = useT()
   // (useMemo: the same object until your name changes, so screens can tell nothing changed.)
   const me: Person = useMemo(() => ({ uid: user.uid, name: profile.name }), [user.uid, profile.name])
-  const [open, setOpen] = useState<Open | null>(null)
+  const [open, setOpen] = useState<Open | null>(chatFromAddress)
   const [view, setView] = useState<View>('chats')
   const [chats, setChats] = useState<Chat[]>([])
   const [counts, setCounts] = useState<Map<string, number>>(new Map())
@@ -243,6 +250,11 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
   // 5. Heartbeat for "online" / "last seen". Off if you hid your last seen.
   const hideLastSeen = !!profile.hideLastSeen
   useEffect(() => (hideLastSeen ? undefined : startHeartbeat(user.uid)), [user.uid, hideLastSeen])
+
+  // (and ?chat=<id> out of the address bar, once that chat is open)
+  useEffect(() => {
+    if (location.search.includes('chat=')) history.replaceState(history.state, '', '/')
+  }, [])
 
   // 6. Done with the invite link: take it out of the address bar.
   const closeJoin = useCallback(() => {
@@ -444,6 +456,9 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
     )
   })
 
+  // The chat's info was opened (from the chat list's menu): forget the ask (see ChatRoom's onInfoShown).
+  const infoShown = useCallback(() => setOpen((o) => (o?.info ? { ...o, info: undefined } : o)), [])
+
   function openChat(next: Open) {
     setOpen(next)
     if (view !== 'archived' && view !== 'starred') setView('chats')
@@ -525,6 +540,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
         ) : view === 'calls' ? (
           <CallsList
             me={me}
+            chats={chats}
             prefs={callPrefs}
             plans={plans}
             reload={callsReload}
@@ -559,6 +575,7 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             archived={view === 'archived'}
             onArchived={(show) => setView(show ? 'archived' : 'chats')}
             onOpen={openChat}
+            onClose={() => setOpen(null)}
             onNewChat={() => setView('newChat')}
             onNewGroup={() => setView('newGroup')}
             onNewBroadcast={() => setView('newBroadcast')}
@@ -589,12 +606,14 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             <CallInfo
               me={me}
               group={callGroup}
+              chats={chats}
               prefs={callPrefs}
               onBack={() => setCallGroup(null)}
               onMessage={(person) => {
                 setCallGroup(null)
                 setView('chats')
-                setOpen({ chatId: chatIdFor(user.uid, person.uid), other: person })
+                // (a group call: "person" is the group, and its id is the chat's)
+                setOpen(callGroup.inGroup ? { chatId: person.uid } : { chatId: chatIdFor(user.uid, person.uid), other: person })
               }}
             />
           ) : (
@@ -629,6 +648,8 @@ export default function Home({ user, profile }: { user: User; profile: Profile }
             onReplyPrivately={(person, reply) => openChat({ chatId: chatIdFor(user.uid, person.uid), other: person, reply })}
             focus={showing.focus}
             reply={showing.reply}
+            info={showing.info}
+            onInfoShown={infoShown}
           />
         ) : (
           <Welcome />

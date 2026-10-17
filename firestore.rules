@@ -280,7 +280,7 @@ service cloud.firestore {
       // Starting one: as yourself, in a group you're in (where you can send, if only admins can),
       // for everyone in the group, with only you in it so far.
       allow create: if signedIn()
-        && next().keys().hasOnly(['chatId', 'title', 'by', 'byName', 'video', 'members', 'names', 'joined', 'state', 'startedAt', 'aliveAt'])
+        && next().keys().hasOnly(['chatId', 'title', 'by', 'byName', 'video', 'members', 'names', 'joined', 'came', 'state', 'startedAt', 'aliveAt'])
         && next().by == me()
         && next().byName == get(/databases/$(database)/documents/users/$(me())).data.name
         && next().video is bool
@@ -290,18 +290,22 @@ service cloud.firestore {
         && next().startedAt == request.time
         && next().aliveAt == request.time
         && next().joined.keys().hasOnly([me()]) && next().joined[me()] == request.time
+        && next().get('came', [me()]) == [me()]
         && isGroupChat(groupOf(next().chatId))
         && me() in groupOf(next().chatId).members
         && next().members == groupOf(next().chatId).members
         && (groupOf(next().chatId).get('onlyAdmins', false) != true || adminIn(groupOf(next().chatId), me()));
       allow update: if signedIn() && me() in call().members && (joining() || stillOn() || leaving() || ending());
-      // Joining (only yourself, at the server's time, while it's on, up to 8 people)
+      // Joining (only yourself, at the server's time, while it's on, up to 8 people).
+      // "came" (everyone who was ever in it, for the Calls list) gets you added, and nothing else.
       function joining() {
         return call().state == 'active'
-          && changes().hasOnly(['joined'])
+          && changes().hasOnly(['joined', 'came'])
           && joinedChanges().hasOnly([me()])
           && next().joined[me()] == request.time
-          && next().joined.size() <= 8;
+          && next().joined.size() <= 8
+          && (!changes().hasAny(['came'])
+            || (next().came is list && next().came.toSet() == call().get('came', []).toSet().union([me()].toSet())));
       }
       // "Still on" (someone in the call, every 2 minutes)
       function stillOn() {
@@ -750,8 +754,9 @@ service cloud.firestore {
       function newMessageOk(m) {
         return m.keys().hasOnly(['kind', 'text', 'senderId', 'senderName', 'sentAt', 'mediaId', 'width', 'height', 'seconds', 'caption', 'replyTo', 'forwarded', 'event', 'targetName', 'video', 'missed', 'expireAt',
             'posterId', 'fileName', 'fileSize', 'mime', 'lat', 'lng', 'accuracy', 'live', 'liveUntil', 'contact', 'startsAt', 'callId',
-            'options', 'multi', 'sticker', 'mentions', 'once', 'round', 'hd', 'transcript', 'gif', 'preview'])
+            'options', 'multi', 'sticker', 'mentions', 'once', 'round', 'hd', 'transcript', 'gif', 'preview', 'link'])
           && m.get('forwarded', false) is bool
+          && m.get('link', false) is bool // "it has a web address in it" (for Media, links and docs)
           && expiryOk(m)
           && mentionsOk(m)
           && onceOk(m)
@@ -973,8 +978,9 @@ service cloud.firestore {
         return resource.data.senderId == me()
           && !resource.data.get('deleted', false)
           && request.time < resource.data.sentAt + duration.value(15, 'm')
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'caption', 'editedAt', 'mentions'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'caption', 'editedAt', 'mentions', 'link'])
           && request.resource.data.editedAt == request.time
+          && request.resource.data.get('link', false) is bool
           && mentionsOk(request.resource.data)
           && ((resource.data.get('kind', 'text') == 'text' && textOk(request.resource.data.text))
             || (resource.data.get('kind', 'text') in ['photo', 'video', 'file'] && captionOk(request.resource.data)));

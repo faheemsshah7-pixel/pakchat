@@ -42,7 +42,7 @@ import {
 import { deleteExpired, isExpired, setTimer, useClockAt } from '../disappearing'
 import { useT } from '../lang'
 import { shareFor, type Spot } from '../location'
-import { blobToDataUrl, isPhotoOrVideo, loadMedia, prepareVideo, shrinkPhoto, videoExtension, warmUpSound } from '../media'
+import { blobToDataUrl, isPhotoOrVideo, loadMedia, prepareVideo, shrinkPhoto, warmUpSound } from '../media'
 import { findMentions } from '../mentions'
 import { canEdit, captionKind, editMessage, QUICK_REACTIONS, react, replySnapshot, unsendMessage } from '../messages'
 import { closeOnce, openOnce } from '../once'
@@ -55,10 +55,11 @@ import { leaveGroup } from '../groups'
 import type { Community } from '../communities'
 import { getSetting } from '../settings'
 import { playConversationTone } from '../sound'
+import { viewable, type SharedTab } from '../shared'
 import { useStable } from '../stable'
 import { keepSticker } from '../stickers'
-import { fill, type Strings } from '../strings'
-import { clock, dayNumber, isToday, isYesterday, useNow } from '../time'
+import { fill } from '../strings'
+import { clock, dayLabel, dayNumber, useNow } from '../time'
 import { markTyping, typingText, useTypingVersion } from '../typing'
 import { setWallpaper, useWallpaper, useWallStyle, wallLabel } from '../wallpaper'
 import Avatar, { GroupAvatar, PersonAvatar, TimerBadge } from './Avatar'
@@ -81,7 +82,10 @@ import {
 import GroupInfo from './GroupInfo'
 import Icon from './Icon'
 // These load the first time they're needed, so opening PakChat is quicker (lazy.ts).
-import { EmojiPicker, OnceViewer, PhotoViewer, VideoViewer } from './lazy'
+import { EmojiPicker, OnceViewer } from './lazy'
+import type { ViewMedia } from './MediaGrid'
+import MediaPage from './MediaPage'
+import MediaViewer from './MediaViewer'
 import Menu, { type MenuItem } from './Menu'
 import MessageBubble from './MessageBubble'
 import PhotoSender, { type PickedPhoto } from './PhotoSender'
@@ -107,6 +111,8 @@ type Props = {
   onReplyPrivately: (person: Person, reply: ReplyTo) => void // answer a group's message in your chat with its sender
   focus?: { id: string } // go to this message (from "Starred messages")
   reply?: ReplyTo // start with this reply ready (from "Reply privately")
+  info?: number // open the contact or group info (from the chat list's menu; a new number each time)
+  onInfoShown?: () => void // (then Home forgets it, so coming back to this chat later doesn't open it again)
 }
 
 type Dialog =
@@ -116,14 +122,16 @@ const PAGE = 50 // messages loaded at a time (a few screens' worth; fewer = fast
 const LOOK_BACK = 1000 // going to an old message loads at most this many
 
 export default function ChatRoom(props: Props) {
-  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, people: everyone, blocked, community, onBack, onOpenPerson, onOpenCommunity, onReplyPrivately, focus: focusProp } = props
+  const { me, myProfile, chatId, chat, other: otherProp, prefs, chats, people: everyone, blocked, community, onBack, onOpenPerson, onOpenCommunity, onReplyPrivately, focus: focusProp, info: infoProp, onInfoShown } = props
   const { t } = useT()
   const [limit, setLimit] = useState(PAGE)
   const [raw, setRaw] = useState<Message[]>([]) // what the database sent
   const [hasMore, setHasMore] = useState(false)
-  const [showInfo, setShowInfo] = useState(false)
+  const [showInfo, setShowInfo] = useState(!!infoProp)
+  const [infoFrom, setInfoFrom] = useState(infoProp)
   const [showStarred, setShowStarred] = useState(false)
-  const [viewing, setViewing] = useState<{ m: Message; data: string } | null>(null) // a photo or video, full screen
+  const [viewing, setViewing] = useState<{ m: Message; list?: Message[] } | null>(null) // a photo or video, full screen (and the ones you can move to)
+  const [mediaTab, setMediaTab] = useState<SharedTab | null>(null) // "Media, links and docs" is open (MediaPage.tsx)
   const [onceShown, setOnceShown] = useState<{ m: Message; src: string } | null>(null) // a "view once" photo, open (once.ts)
   const [menu, setMenu] = useState<{ m: Message; x: number; y: number } | null>(null)
   const [reactingTo, setReactingTo] = useState<Message | null>(null) // the full emoji picker, for a reaction
@@ -151,6 +159,14 @@ export default function ChatRoom(props: Props) {
     setFocusFrom(focusProp)
     if (focusProp) setFocus(focusProp.id)
   }
+  // Asked for its info while it's open (from the chat list's menu).
+  if (infoProp !== infoFrom) {
+    setInfoFrom(infoProp)
+    if (infoProp) setShowInfo(true)
+  }
+  useEffect(() => {
+    if (infoProp) onInfoShown?.()
+  }, [infoProp, onInfoShown])
 
   // A "view once" photo, video or voice note: open it (only once), and forget it when it's closed.
   const viewOnce = useStable(async (m: Message) => {
@@ -369,12 +385,13 @@ export default function ChatRoom(props: Props) {
       if (e.key !== 'Escape' || document.querySelector('.modal, .popover, .menu-items, .emoji-picker, .photo-sender, .photo-editor, .settings-window, .call-screen, .note-recorder')) return
       if (onceShown) closeOnceShown()
       else if (viewing) setViewing(null)
+      else if (mediaTab) setMediaTab(null)
       else if (searching) setSearching(false)
       else if (!showInfo && !replyTo && !editing) onBack()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [viewing, onceShown, closeOnceShown, searching, showInfo, replyTo, editing, onBack])
+  }, [viewing, mediaTab, onceShown, closeOnceShown, searching, showInfo, replyTo, editing, onBack])
 
   // New message from someone else while this chat is on screen? Mark it read (blue ✓✓).
   useEffect(() => {
@@ -563,6 +580,7 @@ export default function ChatRoom(props: Props) {
   const menuItems: MenuItem[] = [
     { label: group ? t.groupInfo : broadcast ? t.listInfo : t.contactInfo, icon: 'info', onClick: () => setShowInfo(true) },
     { label: t.searchMessages, icon: 'search', onClick: () => setSearching(true) },
+    { label: t.mediaLinksDocs, icon: 'image', onClick: () => setMediaTab('media') },
   ]
   if (!broadcast) menuItems.push({ label: muted ? t.unmute : t.mute, icon: muted ? 'bell' : 'bellOff', onClick: actions.mute })
   menuItems.push({ label: t.wallpaper, icon: 'image', onClick: actions.wallpaper })
@@ -636,7 +654,7 @@ export default function ChatRoom(props: Props) {
   // The same functions for every bubble, every time (see stable.ts), so memo() in MessageBubble works.
   const openMenu = useStable((m: Message, x: number, y: number) => setMenu({ m, x, y }))
   const showReactions = useStable((m: Message) => setDialog({ kind: 'reactions', m }))
-  const viewPhoto = useStable((m: Message, data: string) => setViewing({ m, data }))
+  const viewPhoto = useStable((m: Message) => setViewing({ m }))
   // "Message" on a contact card: open a chat with them, if they're on PakChat.
   const openContact = useStable(async (contact: SharedContact) => {
     const number = contact.phone ?? contact.email
@@ -663,22 +681,21 @@ export default function ChatRoom(props: Props) {
     if (foundId) jumpTo(foundId)
   }, [foundId, jumpTo])
 
-  // A photo or video opened full screen (from the chat, or from the media in the contact or group info).
-  const seen = viewing && {
-    src: viewing.data,
-    who: viewing.m.senderId === me.uid ? t.you : (viewing.m.senderName ?? ''),
-    when: viewing.m.sentAt ? `${dayLabel(viewing.m.sentAt.toDate(), t)}, ${clock(viewing.m.sentAt.toDate(), t.locale)}` : '',
-    caption: viewing.m.caption,
-    onClose: () => setViewing(null),
-  }
-  const viewer = seen && (
-    <Suspense fallback={null}>
-      {viewing.m.kind === 'video' ? (
-        <VideoViewer {...seen} fileName={`PakChat video ${viewing.m.id}.${videoExtension(seen.src)}`} />
-      ) : (
-        <PhotoViewer {...seen} fileName={`PakChat photo ${viewing.m.id}.jpg`} />
-      )}
-    </Suspense>
+  // A photo or video opened full screen (from the chat, the info panel, or Media, links and docs).
+  // ‹ › and the strip move through the chat's other photos and videos (MediaViewer.tsx).
+  const viewMedia: ViewMedia = (m, list) => setViewing({ m, list })
+  const viewer = viewing && (
+    <MediaViewer
+      chatId={chatId}
+      start={viewing.m}
+      list={viewing.list ?? messages.filter(viewable)}
+      describe={(m) => ({
+        who: m.senderId === me.uid ? t.you : (m.senderName ?? ''),
+        when: m.sentAt ? `${dayLabel(m.sentAt.toDate(), t)}, ${clock(m.sentAt.toDate(), t.locale)}` : '',
+      })}
+      onClose={() => setViewing(null)}
+      onAllMedia={() => (setViewing(null), setMediaTab('media'))}
+    />
   )
 
   // Windows about the whole chat. They can open from the chat's menu or its info panel.
@@ -722,6 +739,24 @@ export default function ChatRoom(props: Props) {
     </>
   )
 
+  if (mediaTab) {
+    return (
+      <>
+        <MediaPage
+          chatId={chatId}
+          title={title}
+          myUid={me.uid}
+          clearedAt={clearedAt}
+          hidden={hidden}
+          loaded={messages}
+          startTab={mediaTab}
+          onBack={() => setMediaTab(null)}
+          onView={viewMedia}
+        />
+        {viewer}
+      </>
+    )
+  }
   if (showStarred) {
     return (
       <StarredList
@@ -746,7 +781,8 @@ export default function ChatRoom(props: Props) {
           actions={actions}
           onBack={() => setShowInfo(false)}
           onOpenPerson={onOpenPerson}
-          onView={(m, data) => setViewing({ m, data })}
+          onView={viewMedia}
+          onOpenMedia={setMediaTab}
         />
         {infoDialogs}
         {viewer}
@@ -768,7 +804,8 @@ export default function ChatRoom(props: Props) {
           onBack={() => setShowInfo(false)}
           onOpenPerson={onOpenPerson}
           onOpenCommunity={() => community && onOpenCommunity(community.id)}
-          onView={(m, data) => setViewing({ m, data })}
+          onView={viewMedia}
+          onOpenMedia={setMediaTab}
         />
         {infoDialogs}
         {viewer}
@@ -792,7 +829,8 @@ export default function ChatRoom(props: Props) {
           actions={actions}
           onCall={call}
           onBack={() => setShowInfo(false)}
-          onView={(m, data) => setViewing({ m, data })}
+          onView={viewMedia}
+          onOpenMedia={setMediaTab}
         />
         {infoDialogs}
         {viewer}
@@ -1180,14 +1218,6 @@ function GroupCallBar({ me, chatId }: { me: Person; chatId: string }) {
       </button>
     </div>
   )
-}
-
-// "Today", "Yesterday", or a date like "12 October 2026", for the labels between days.
-function dayLabel(date: Date | undefined, t: Strings) {
-  if (!date) return ''
-  if (isToday(date)) return t.today
-  if (isYesterday(date)) return t.yesterday
-  return date.toLocaleDateString(t.locale, { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
 // The small line under the name: "typing…", "online", "last seen…", or the group's members.

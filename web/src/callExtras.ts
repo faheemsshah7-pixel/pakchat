@@ -26,6 +26,7 @@ import {
 import { db } from './firebase'
 import type { CallRecord } from './calls'
 import { chatIdFor, sendMessage, type Person } from './chats'
+import type { GroupCallDoc } from './groupCalls'
 import { newCode } from './invites'
 import { setPrivate, type CallPrefs } from './private'
 import type { Strings } from './strings'
@@ -67,27 +68,41 @@ export function markCallsSeen(uid: string) {
 
 // ---------- The Recent list ----------
 
-// Calls in a row with the same person, the same way (made, received, missed), on the same day.
-export type CallGroup = { key: string; peer: Person; outgoing: boolean; missed: boolean; video: boolean; calls: CallRecord[] }
+// One call in the Recent list: with one person (calls.ts), or in a group (then `group` is set, groupCalls.ts).
+export type RecentCall = CallRecord & { group?: GroupCallDoc }
+
+// A group call, written like a call with one person: "from" who started it, "to" the group.
+// (Its length is from when it started to when it ended.)
+export function fromGroupCall(call: GroupCallDoc): RecentCall {
+  const { id, by, byName, chatId, title, video, startedAt, endedAt } = call
+  return { id, from: by, fromName: byName, to: chatId, toName: title, video, state: 'ended', startedAt, answeredAt: startedAt, endedAt, group: call }
+}
+
+// Calls in a row with the same person (or group), the same way (made, received, missed), on the same day.
+// inGroup: they're group calls, and peer is the group ({ uid: its chat's id, name: its name }).
+export type CallGroup = { key: string; peer: Person; outgoing: boolean; missed: boolean; video: boolean; inGroup: boolean; calls: RecentCall[] }
 
 export function directionText(c: { outgoing: boolean; missed: boolean }, t: Strings) {
   return c.missed ? t.missed : c.outgoing ? t.outgoing : t.incoming
 }
 
 // Calls (newest first) in groups: the same person, the same way, the same day.
-export function groupCalls(calls: CallRecord[], myUid: string): CallGroup[] {
+// A group call you didn't start and never joined is a missed one. (Ones from before Batch 10 don't say who joined.)
+export function groupCalls(calls: RecentCall[], myUid: string): CallGroup[] {
   const groups: CallGroup[] = []
   for (const call of calls) {
     const outgoing = call.from === myUid
-    const peer = outgoing ? { uid: call.to, name: call.toName } : { uid: call.from, name: call.fromName }
-    const missed = !outgoing && isMissed(call)
+    const inGroup = !!call.group
+    const peer = inGroup || outgoing ? { uid: call.to, name: call.toName } : { uid: call.from, name: call.fromName }
+    const came = call.group?.came
+    const missed = !outgoing && (inGroup ? !!came && !came.includes(myUid) : isMissed(call))
     const day = call.startedAt?.toDate().toDateString()
     const last = groups[groups.length - 1]
     const lastDay = last?.calls[0].startedAt?.toDate().toDateString()
     if (last && last.peer.uid === peer.uid && last.outgoing === outgoing && last.missed === missed && lastDay === day) {
       last.calls.push(call)
       last.video ||= call.video
-    } else groups.push({ key: call.id, peer, outgoing, missed, video: call.video, calls: [call] })
+    } else groups.push({ key: call.id, peer, outgoing, missed, video: call.video, inGroup, calls: [call] })
   }
   return groups
 }

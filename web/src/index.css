@@ -1050,9 +1050,14 @@ label.row:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* Only messages that arrive while you're looking slide in (not the 100 already there when a chat opens). */
+/* Only messages that arrive while you're looking slide in (not the 100 already there when a chat opens):
+   up from the message box, growing from their corner, like WhatsApp. */
 .bubble.fresh {
-  animation: bubble-in 0.12s ease-out;
+  animation: bubble-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: bottom left;
+}
+.bubble.mine.fresh {
+  transform-origin: bottom right;
 }
 .bubble.mine {
   align-self: flex-end;
@@ -1422,7 +1427,7 @@ label.row:hover {
   color: var(--text);
   border: 1px solid var(--border);
   box-shadow: 0 30px 80px -10px rgb(0 0 0 / 0.5);
-  animation: rise 0.2s ease-out;
+  animation: modal-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); /* grows in softly from the middle */
 }
 .modal-head {
   display: flex;
@@ -6257,6 +6262,423 @@ button.icon.once-toggle.on:hover {
   text-align: right; /* English names still line up on the right in Urdu */
 }
 
+/* ================= 10b. Media, links and docs (Batch 10) ================= */
+/* In contact and group info: the row that opens the full page, and the newest 6 under it */
+.row.media-row {
+  font-weight: 600;
+}
+.row.media-row > svg:last-child {
+  color: var(--muted);
+}
+.media-grid.strip {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+@media (max-width: 520px) {
+  .media-grid.strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .media-grid.strip > :nth-child(n + 4) {
+    display: none;
+  }
+}
+/* One square: a video's length at the bottom, "GIF" at the top, and the one you're looking at (in the viewer) */
+.thumb-box {
+  display: block;
+  width: 100%;
+  padding: 0;
+  cursor: pointer;
+}
+.thumb-box img {
+  animation: fade-in 0.2s ease-out;
+}
+.thumb-box .thumb-play {
+  width: 28px;
+  height: 28px;
+}
+.thumb-time {
+  position: absolute;
+  bottom: 4px;
+  inset-inline-end: 6px;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.8);
+  pointer-events: none;
+}
+.thumb-box .gif-badge {
+  top: 5px;
+  inset-inline-start: 5px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+/* The full page: a bar, three tabs with a sliding line under the one that's on, and the list */
+.media-tabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.media-tabs button {
+  padding: 14px 8px 12px;
+  color: var(--muted);
+  font-weight: 600;
+  transition: color 0.2s;
+}
+.media-tabs button.on {
+  color: var(--accent-ink);
+}
+.media-tabs button:hover {
+  background: var(--hover);
+}
+.tab-line {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: calc(100% / 3);
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
+  transform: translateX(calc(var(--tab) * 100%));
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+[dir='rtl'] .tab-line {
+  left: auto;
+  right: 0;
+  transform: translateX(calc(var(--tab) * -100%));
+}
+.media-list {
+  padding-top: 4px;
+  animation: fade-in 0.18s ease-out;
+}
+.media-page .media-grid,
+.media-page .doc-shelf,
+.media-page .link-list {
+  padding-inline: 0;
+}
+.month-title {
+  margin: 16px 6px 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.media-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 64px;
+}
+.media-empty svg {
+  opacity: 0.5;
+}
+.media-count {
+  padding: 16px 8px 28px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.load-more {
+  display: grid;
+  place-items: center;
+  min-height: 8px;
+  padding: 8px;
+  color: var(--muted);
+}
+.skeleton-row {
+  display: block;
+  height: 62px;
+  border-radius: 12px;
+}
+.skeleton-row.loading {
+  animation: shimmer 1.2s linear infinite;
+  background: linear-gradient(90deg, var(--soft), var(--hover), var(--soft));
+  background-size: 200% 100%;
+}
+/* Docs: the document, and who sent it when */
+.doc-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.doc-item > small {
+  padding-inline: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* Links: a picture (or a link sign), the title, the address, the words, who and when */
+.link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.link-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 14px;
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.12s;
+}
+.link-row:hover {
+  background: var(--hover);
+}
+.link-thumb {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 54px;
+  height: 54px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--soft);
+  color: var(--muted);
+}
+.link-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.link-words {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+}
+.link-words strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-url {
+  overflow: hidden;
+  color: var(--accent-ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-words small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text);
+  font-size: 13px;
+}
+.link-words small.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The viewer: ‹ › at the sides, and the strip of small squares at the bottom, like WhatsApp */
+.viewer.has-strip .viewer-stage {
+  padding-bottom: 104px;
+}
+.viewer.has-strip.has-caption .viewer-stage {
+  padding-bottom: 160px;
+}
+.viewer.has-strip .viewer-caption {
+  bottom: 104px;
+}
+.viewer-step {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.35);
+  color: #ffffff;
+  transform: translateY(-50%);
+  transition: background 0.15s, transform 0.15s;
+}
+.viewer-step:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+.viewer-step:active {
+  transform: translateY(-50%) scale(0.92);
+}
+.viewer-step.back {
+  inset-inline-start: 16px;
+}
+.viewer-step.next {
+  inset-inline-end: 16px;
+}
+[dir='rtl'] .viewer-step svg {
+  transform: scaleX(-1);
+}
+.viewer-strip {
+  position: absolute;
+  z-index: 1;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 14px;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.55));
+}
+.btn.all-media {
+  flex-shrink: 0;
+  width: auto;
+  margin: 0;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.14);
+  color: #ffffff;
+  font-size: 13.5px;
+  box-shadow: none;
+}
+.btn.all-media:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.24);
+  transform: none;
+}
+.viewer-thumbs {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.viewer-thumbs::-webkit-scrollbar {
+  display: none;
+}
+/* (in the middle, like WhatsApp; the auto margins still let a long strip scroll from its start) */
+.viewer-thumbs > :first-child {
+  margin-inline-start: auto;
+}
+.viewer-thumbs > :last-child {
+  margin-inline-end: auto;
+}
+.viewer-thumbs .thumb-time {
+  display: none; /* (too small here: the ▶ is enough) */
+}
+.viewer-thumbs .thumb-box {
+  flex: 0 0 64px;
+  width: 64px;
+  border-radius: 8px;
+  opacity: 0.6;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: opacity 0.15s, outline-color 0.15s, transform 0.15s;
+}
+.viewer-thumbs .thumb-box:hover {
+  opacity: 0.9;
+}
+.viewer-thumbs .thumb-box.active {
+  opacity: 1;
+  outline-color: #ffffff;
+  transform: scale(1.06);
+}
+.viewer-thumbs .thumb-box:hover img {
+  transform: none;
+}
+@media (max-width: 899px) {
+  .viewer-step {
+    display: none; /* on a phone: tap the squares at the bottom */
+  }
+  .viewer-strip {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .viewer.has-strip .viewer-stage {
+    padding-bottom: 150px;
+  }
+  .viewer.has-strip .viewer-caption {
+    bottom: 150px;
+  }
+  .viewer-thumbs .thumb-box {
+    flex-basis: 52px;
+    width: 52px;
+  }
+}
+
+/* Menus: a line between groups of items, and an item with its own small menu (Mute ›) */
+.menu-items button.divider {
+  position: relative;
+  margin-top: 13px;
+}
+.menu-items button.divider::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 10px;
+  right: 10px;
+  border-top: 1px solid var(--border);
+}
+.menu-items button.has-sub > svg:last-child {
+  margin-inline-start: auto; /* (the › at the far end) */
+  color: var(--muted);
+}
+.menu-items button.on {
+  background: var(--hover);
+}
+.popover.sub-menu {
+  min-width: 160px;
+  transform-origin: top left;
+}
+
+/* Calls list: who joined a group call */
+.call-detail .who-joined {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* ================= 10c. Smoother, like WhatsApp (Batch 10) =================
+   Short and soft: only position (transform) and see-through-ness (opacity) move,
+   which the graphics chip draws on its own, so nothing gets slower. */
+:root {
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* Panels: contact and group info, Media, Starred, call info slide in from the side */
+.main > .info-pane,
+.main > .call-info {
+  animation: panel-in 0.24s var(--ease-out);
+}
+/* The left side: switching between Chats, Calls, Status and Communities fades;
+   New chat and New group slide in from the left */
+.side > .pane {
+  animation: fade-in 0.16s ease-out;
+}
+.side > .pane.drawer {
+  animation: drawer-in 0.24s var(--ease-out);
+}
+/* Phone: a chat slides in from the right, and the list comes back from the left */
+@media (max-width: 899px) {
+  .app.has-chat > .main {
+    animation: page-in 0.26s var(--ease-out);
+  }
+  .app:not(.has-chat) > .side {
+    animation: page-back 0.22s var(--ease-out);
+  }
+}
+/* Send ↔ microphone: the new one pops in */
+.round-btn svg {
+  animation: icon-pop 0.2s var(--ease-out);
+}
+/* The unread count and the "go down" button: pop in */
+.chat-row .badge,
+.jump-down {
+  animation: pop-in 0.22s var(--ease-out);
+}
+/* The full-screen photo or video: grows in a little (also when you move to the next one) */
+.viewer-stage img,
+.viewer-stage video {
+  animation: viewer-in 0.24s var(--ease-out);
+}
+/* The small menu next to "Mute" */
+.popover.sub-menu {
+  animation: menu-in 0.12s ease-out;
+}
+
 /* ================= 11. Movement ================= */
 @keyframes bubble-in {
   from {
@@ -6308,6 +6730,94 @@ button.icon.once-toggle.on:hover {
 @keyframes shimmer {
   to {
     background-position: -200% 0;
+  }
+}
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+@keyframes page-in {
+  from {
+    opacity: 0.4;
+    transform: translateX(40%);
+  }
+}
+@keyframes page-back {
+  from {
+    opacity: 0.4;
+    transform: translateX(-12%);
+  }
+}
+@keyframes icon-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.5) rotate(-20deg);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+@keyframes viewer-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+/* (Urdu reads right to left, so panels come from the other side) */
+[dir='rtl'] .main > .info-pane,
+[dir='rtl'] .main > .call-info {
+  animation-name: panel-in-rtl;
+}
+[dir='rtl'] .side > .pane.drawer {
+  animation-name: drawer-in-rtl;
+}
+@media (max-width: 899px) {
+  [dir='rtl'] .app.has-chat > .main {
+    animation-name: page-in-rtl;
+  }
+  [dir='rtl'] .app:not(.has-chat) > .side {
+    animation-name: page-back-rtl;
+  }
+}
+@keyframes page-in-rtl {
+  from {
+    opacity: 0.4;
+    transform: translateX(-40%);
+  }
+}
+@keyframes page-back-rtl {
+  from {
+    opacity: 0.4;
+    transform: translateX(12%);
+  }
+}
+@keyframes panel-in-rtl {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+@keyframes drawer-in-rtl {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
   }
 }
 /* People who asked their device for less motion get none. */

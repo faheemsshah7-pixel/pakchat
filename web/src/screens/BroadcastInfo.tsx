@@ -6,11 +6,12 @@ import { MAX_RECIPIENTS, renameList, setRecipients } from '../broadcasts'
 import { chatTitle, findUser, type Chat, type Message, type Person } from '../chats'
 import { useT } from '../lang'
 import { fill } from '../strings'
+import type { SharedTab } from '../shared'
 import Avatar, { PersonAvatar } from './Avatar'
 import { ActionRow, ChatExtras, type ChatActions, type Looks } from './ContactInfo'
 import { PeopleDialog } from './Dialogs'
 import Icon from './Icon'
-import MediaGrid from './MediaGrid'
+import MediaGrid, { type ViewMedia } from './MediaGrid'
 
 type Props = {
   me: Person
@@ -22,10 +23,11 @@ type Props = {
   actions: ChatActions
   onBack: () => void
   onOpenPerson: (person: Person) => void // your chat with someone on the list
-  onView: (m: Message, data: string) => void
+  onView: ViewMedia // a photo or video, full screen
+  onOpenMedia: (tab: SharedTab) => void // Media, links and docs (MediaPage.tsx)
 }
 
-export default function BroadcastInfo({ me, chat, people, messages, starred, looks, actions, onBack, onOpenPerson, onView }: Props) {
+export default function BroadcastInfo({ me, chat, people, messages, starred, looks, actions, onBack, onOpenPerson, onView, onOpenMedia }: Props) {
   const { t } = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -124,7 +126,7 @@ export default function BroadcastInfo({ me, chat, people, messages, starred, loo
           <p className="about-text">{t.listNote}</p>
         </section>
 
-        <MediaGrid chatId={chat.id} messages={messages} onView={onView} />
+        <MediaGrid chatId={chat.id} messages={messages} onView={onView} onOpenMedia={onOpenMedia} />
         <ChatExtras starred={starred} looks={looks} actions={actions} />
 
         <section className="info-section">

@@ -56,7 +56,7 @@ import {
 import { isExpired, timerLabel } from './disappearing'
 import { db } from './firebase'
 import type { Gif } from './gifs'
-import type { LinkPreview } from './links'
+import { firstLink, type LinkPreview } from './links'
 import { saveMedia } from './media'
 import { contactKey } from './phone'
 import type { ChatPrefs } from './prefs'
@@ -177,6 +177,7 @@ export type Message = {
   round?: boolean // a round video message (videoNotes.ts)
   hd?: boolean // an HD photo
   transcript?: string // a voice note's words (transcribe.ts)
+  link?: boolean // it has a web address in it (for "Media, links and docs", shared.ts)
   video?: boolean // calls: a video call (or else a voice call)
   missed?: boolean // calls: nobody picked up
   startsAt?: Timestamp | null // a scheduled call: when (its name is in text)
@@ -336,6 +337,9 @@ export async function sendMessage(me: Person, target: Target, content: Content, 
     }
     if ('caption' in content && content.caption && !once) message.caption = content.caption
   }
+  // It has a web address in it (its words or a caption): so "Media, links and docs" can find it (shared.ts).
+  const words = content.kind === 'text' ? content.text : message.caption
+  if (typeof words === 'string' && firstLink(words)) message.link = true
 
   const id = addMessage(batch, target, message, me, target.other ? directChatFields(me, target.other, !!target.isNew) : {}, messageRef)
   await batch.commit()

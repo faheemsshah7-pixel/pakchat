@@ -12,6 +12,7 @@
 //     members                 everyone in the group when it started (they're the ones who can join)
 //     names                   { uid: 'Ali' }
 //     joined                  { uid: when they joined }   who's in the call right now
+//     came                    everyone who was in it at some point (for the Calls list: "Joined: Ali, Sara")
 //     state                   'active', then 'ended'
 //     startedAt, aliveAt, endedAt
 //   groupCalls/<id>/links/<from>_<to>   the connection between two of them:
@@ -31,11 +32,15 @@
 // says "still on" every 2 minutes (aliveAt); a call that's been quiet for 5 minutes is over.
 import { useSyncExternalStore } from 'react'
 import {
+  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
   doc,
+  getDocs,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -85,9 +90,11 @@ export type GroupCallDoc = {
   members: string[]
   names: Record<string, string>
   joined: Record<string, Timestamp | null>
+  came?: string[] // (calls from before Batch 10 don't have it)
   state: 'active' | 'ended'
   startedAt: Timestamp | null
   aliveAt?: Timestamp | null
+  endedAt?: Timestamp | null
 }
 
 // Is it still on? (Not ended, and someone in it said so in the last 5 minutes.)
@@ -225,6 +232,7 @@ export async function startGroupCall(me: Person, chat: Chat, video: boolean) {
       members: chat.members,
       names: chat.names,
       joined: { [me.uid]: serverTimestamp() },
+      came: [me.uid],
       state: 'active',
       startedAt: serverTimestamp(),
       aliveAt: serverTimestamp(),
@@ -259,7 +267,7 @@ export async function joinGroupCall(me: Person, call: GroupCallDoc) {
     session.servers = await iceServers()
     if (live !== session) return stopTracks(local)
     show({ local })
-    await updateDoc(session.ref, { [`joined.${me.uid}`]: serverTimestamp() })
+    await updateDoc(session.ref, { [`joined.${me.uid}`]: serverTimestamp(), came: arrayUnion(me.uid) })
     if (live === session) enter(session)
   } catch (err) {
     giveUp(err)
@@ -585,4 +593,12 @@ function giveUp(err: unknown) {
   if (name === 'NotAllowedError' || name === 'NotFoundError' || name === 'NotReadableError') return finish('micBlocked')
   console.error(err)
   finish('failed')
+}
+
+// ---------- The Calls list ----------
+
+// Your last calls in groups (made and received), newest first, for the Calls tab's Recent list.
+export async function recentGroupCalls(uid: string) {
+  const snap = await getDocs(query(collection(db, 'groupCalls'), where('members', 'array-contains', uid), orderBy('startedAt', 'desc'), limit(30)))
+  return snap.docs.map((d) => fromDoc(d.id, d.data()))
 }

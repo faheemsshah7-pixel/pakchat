@@ -354,6 +354,8 @@ export function forgetMedia(mediaId: string) {
   if (url) URL.revokeObjectURL(url)
   blobUrls.delete(mediaId)
 }
+// A video's address, if it's already loaded (else undefined: use loadMediaUrl).
+export const knownMediaUrl = (mediaId: string | undefined) => (mediaId ? blobUrls.get(mediaId) : undefined)
 export function loadMediaUrl(chatId: string, mediaId: string) {
   return loadPartsUrl(`chats/${chatId}`, mediaId)
 }
@@ -374,10 +376,12 @@ export function videoExtension(url: string) {
 }
 
 // A photo or voice note for a screen: null while it's loading.
+// (One we already have is there straight away, with no blank moment: scrolling back, or opening it again.)
 export function useMedia(chatId: string, mediaId: string | undefined) {
   const [data, setData] = useState<{ id: string; data: string } | null>(null)
+  const known = mediaId ? loaded.get(mediaId) : undefined
   useEffect(() => {
-    if (!mediaId) return
+    if (!mediaId || loaded.has(mediaId)) return
     let stillHere = true
     loadMedia(chatId, mediaId)
       .then((loaded) => stillHere && setData({ id: mediaId, data: loaded }))
@@ -387,5 +391,5 @@ export function useMedia(chatId: string, mediaId: string | undefined) {
     }
   }, [chatId, mediaId])
   // (If the photo changed, don't show the old one while the new one loads.)
-  return mediaId && data?.id === mediaId ? data.data : null
+  return known ?? (mediaId && data?.id === mediaId ? data.data : null)
 }

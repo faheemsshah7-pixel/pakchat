@@ -13,10 +13,11 @@ import { shrinkAvatar } from '../media'
 import { isMuted, type ChatPrefs } from '../prefs'
 import { useProfile } from '../profiles'
 import { fill } from '../strings'
+import type { SharedTab } from '../shared'
 import Avatar, { GroupAvatar, PersonAvatar } from './Avatar'
 import { ActionRow, ChatExtras, type ChatActions, type Looks } from './ContactInfo'
 import Icon from './Icon'
-import MediaGrid from './MediaGrid'
+import MediaGrid, { type ViewMedia } from './MediaGrid'
 import Popover, { type PopoverItem } from './Popover'
 import Switch from './Switch'
 
@@ -32,10 +33,11 @@ type Props = {
   onBack: () => void
   onOpenPerson: (person: Person) => void
   onOpenCommunity: () => void
-  onView: (m: Message, data: string) => void
+  onView: ViewMedia // a photo or video, full screen
+  onOpenMedia: (tab: SharedTab) => void // Media, links and docs (MediaPage.tsx)
 }
 
-export default function GroupInfo({ me, chat, messages, prefs, starred, looks, actions, community, onBack, onOpenPerson, onOpenCommunity, onView }: Props) {
+export default function GroupInfo({ me, chat, messages, prefs, starred, looks, actions, community, onBack, onOpenPerson, onOpenCommunity, onView, onOpenMedia }: Props) {
   const { t } = useT()
   const [number, setNumber] = useState('')
   const [error, setError] = useState('')
@@ -220,7 +222,7 @@ export default function GroupInfo({ me, chat, messages, prefs, starred, looks, a
           </section>
         )}
 
-        <MediaGrid chatId={chat.id} messages={messages} onView={onView} />
+        <MediaGrid chatId={chat.id} messages={messages} onView={onView} onOpenMedia={onOpenMedia} />
         <ChatExtras starred={starred} timer={chat.timer ?? 0} looks={looks} actions={actions} />
 
         {managing && (

@@ -953,3 +953,70 @@ Without one, calls work as before.
 ### Try this
 - Send yourself a YouTube link in "Message yourself" and see its card.
 - In `gifs.ts`, change `contentfilter: 'medium'` to `'high'` for an even safer GIF search.
+
+## Step 22: Media, links and docs, group calls in Calls, the chat menu, smoother movement
+
+| Part | Files | Saved as |
+|---|---|---|
+| Media, links and docs | `shared.ts` (new), `MediaPage.tsx` (new), `MediaGrid.tsx` | nothing new (`link: true` on messages with a web address) |
+| The viewer's strip | `MediaViewer.tsx` (new), `PhotoViewer.tsx`, `VideoViewer.tsx` | nothing |
+| Group calls in Calls | `groupCalls.ts` (`recentGroupCalls`), `callExtras.ts`, `CallsList.tsx`, `CallsMain.tsx` | `came` in a group call |
+| The chat menu | `ChatList.tsx`, `Popover.tsx`, `exportChat.ts` (new), `Home.tsx` (`?chat=`) | nothing new |
+| Smoother movement | `index.css` (part 10c), `ChatList.tsx` (`slideRows`) | nothing |
+| A fix | `messages.ts` (`unsendMessage`) | |
+
+### Media, links and docs
+Open a chat's info: the **Media, links and docs** row opens a page with three tabs, like WhatsApp.
+**Media** shows the photos, videos and GIFs in small squares, by month ("This month", "September"),
+**Links** every message with a web address (with its card), **Docs** the documents.
+At the end it counts them: "12 photos, 3 videos".
+
+It doesn't only look at the messages the chat has loaded: `shared.ts` asks the database for just
+those messages, 48 at a time, and the next 48 load as you scroll down. Asking for "messages
+with a web address" needs the message to *say* it has one, so from now on a message with a link
+gets `link: true` (`chats.ts`). Older ones don't, so the Links tab adds the ones the chat has loaded.
+
+New **indexes** (`firestore.indexes.json`): the database needs one for each new kind of question,
+like "this chat's messages whose kind is photo, video or GIF, newest first".
+
+### The viewer
+Tap a photo: **‹ ›** at the sides (or the ← → keys) go to the one before or after, and a **strip**
+of small squares at the bottom shows them all (the one you're on is lit). **All media** opens the page.
+A photo you've already seen opens straight away now, with no grey moment (`useMedia` remembers).
+
+### Group calls in Calls
+The Calls tab lists group calls too, with the group's picture: **Outgoing** (you started it),
+**Incoming** (you joined), or **Missed** in red (you didn't join). Tap one for its details:
+"Group voice call", how long it lasted, and who joined ("Joined: Ali, Sara").
+To know who joined, a group call now keeps `came`: everyone who was in it at some point. The
+rules let you add only yourself to it. (Calls from before Batch 10 don't say who joined.)
+
+### The chat menu
+Hover over a chat in the list and click its little arrow (or right-click it). The menu is in
+WhatsApp's order: Open in new window, Mark as unread, Archive, Pin, Mute ›, then (after a line)
+Contact info or Group info, Export chat, Clear chat, Delete chat or Leave group.
+- **Mute ›** opens a small menu beside it: 8 hours, 1 week, Always (`sub` in `Popover.tsx`).
+- **Open in new window** opens PakChat again in a small window at `/?chat=<id>`, and `Home.tsx`
+  starts with that chat open.
+- **Export chat** saves a text file, like WhatsApp's "without media":
+  `17/10/2026, 8:52 pm - Ali: Salam!`. Photos and files say `<media not included>`.
+
+### Smoother movement
+Like WhatsApp: panels slide in from the side, New chat and New group slide in from the left,
+on a phone a chat slides in from the right (and the list comes back from the left), a new message
+grows up from its corner, windows grow in softly, the send button's icon pops when it changes, and
+a full-screen photo grows in. When a new message moves a chat to the top, the other rows **slide**
+down instead of jumping. That's a trick called FLIP (`slideRows` in `ChatList.tsx`): note where each
+row was, let React move it, then animate it from the old place to the new one.
+
+All of it is short (a fifth of a second) and only moves things or fades them, which the graphics
+chip does by itself, so nothing gets slower. If someone turns on **Reduce motion** in their phone or
+computer's settings, nothing moves at all.
+
+### The fix
+Batch 9's link cards and GIFs broke **Delete for everyone** on those messages: the rules only allow a
+deleted message to keep a few plain fields, and the card (or GIF) was left in it. Now they're wiped too.
+
+### Try this
+- In `shared.ts`, change `PAGE = 48` to `12`, and watch the next page load as you scroll.
+- In `index.css`, find `panel-in` and change `0.24s` to `1s`, to see the slide in slow motion.

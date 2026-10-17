@@ -2,11 +2,13 @@
 // The search box finds a chat by name or message, or starts a new chat with a number or Gmail.
 // All / Unread / Groups filter the list. Archived chats wait in their own list (on a phone the
 // "Archived" row at the top opens it; on a computer it's on the left bar, Rail.tsx).
-// Right-click a chat (or use its little arrow) to pin, mute, archive, mark unread or delete it.
+// Right-click a chat (or use its little arrow) for WhatsApp's menu: open it in a new window, mark it unread,
+// archive, pin or mute it, see its info, export or clear it, leave the group or delete the chat.
 // The menu at the top makes a new group or broadcast list (broadcasts.ts).
 // The chats themselves come from Home.tsx, which listens to the database.
 // Each row is drawn again only when something in it changed (memo, at the bottom).
-import { memo, useState } from 'react'
+// When a new message moves a chat up, the rows slide to their new places, like WhatsApp (slideRows).
+import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { signOut } from 'firebase/auth'
 import { auth } from '../firebase'
 import { alertsState, turnOnAlerts } from '../alerts'
@@ -28,17 +30,17 @@ import {
 } from '../chats'
 import { isExpired } from '../disappearing'
 import { getDraft, useDraftsVersion } from '../drafts'
+import { exportChat } from '../exportChat'
 import { leaveGroup } from '../groups'
 import { useT } from '../lang'
 import { contactKey } from '../phone'
-import { deleteChat, isHidden, isMuted, MAX_PINNED, setPrefs, type ChatPrefs } from '../prefs'
+import { clearChat, deleteChat, HOUR, isHidden, isMuted, MAX_PINNED, MUTE_ALWAYS, setPrefs, type ChatPrefs } from '../prefs'
 import type { Profile } from '../profiles'
 import { install, useCanInstall } from '../pwa'
 import { useStable } from '../stable'
 import { formatTime, useNow } from '../time'
 import { typingText, useTypingVersion } from '../typing'
 import { ChatAvatar } from './Avatar'
-import { MuteDialog } from './Dialogs'
 import type { Open } from './Home'
 import Icon from './Icon'
 import Logo from './Logo'
@@ -59,6 +61,7 @@ type Props = {
   archived: boolean // showing the "Archived" list
   onArchived: (show: boolean) => void
   onOpen: (open: Open) => void
+  onClose: () => void // close the open chat
   onNewChat: () => void
   onNewGroup: () => void
   onNewBroadcast: () => void
@@ -67,7 +70,7 @@ type Props = {
 }
 
 export default function ChatList(props: Props) {
-  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onNewChat, onNewGroup, onNewBroadcast, onSettings, onStarred } = props
+  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onClose, onNewChat, onNewGroup, onNewBroadcast, onSettings, onStarred } = props
   const { t, lang, setLang } = useT()
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
@@ -76,11 +79,12 @@ export default function ChatList(props: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [picking, setPicking] = useState(false) // the "Choose a look" window
   const [rowMenu, setRowMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
-  const [muting, setMuting] = useState<string | null>(null) // chat id for the "Mute" window
   const canInstall = useCanInstall()
   useDraftsVersion() // re-draw when a draft appears or goes
   useTypingVersion() // re-draw when someone starts typing
   const now = useNow(2000) // re-check "typing…" every 2 seconds
+  const list = useRef<HTMLDivElement>(null)
+  const places = useRef<{ view: string; tops: Map<string, number> }>({ view: '', tops: new Map() })
 
   const q = search.trim().toLowerCase()
   // Does the search look like a phone number or a Gmail? Then offer to start a chat with it.
@@ -145,44 +149,75 @@ export default function ChatList(props: Props) {
     ['groups', t.filterGroups],
   ]
 
+  // After each change: rows that moved slide from where they were to where they are now.
+  // (Not when you change the filter or search: then it's a different list, not a move.)
+  const view = `${archived}|${filter}|${q}`
+  useLayoutEffect(() => {
+    if (list.current) places.current = slideRows(list.current, places.current, view)
+  })
+
   // The same two functions for every row, every time (see stable.ts), so memo() works.
-  const openRow = useStable((chat: Chat) => onOpen(isDirect(chat) ? { chatId: chat.id, other: otherPerson(chat, me.uid) } : { chatId: chat.id }))
+  const openFor = (chat: Chat): Open => (isDirect(chat) ? { chatId: chat.id, other: otherPerson(chat, me.uid) } : { chatId: chat.id })
+  const openRow = useStable((chat: Chat) => onOpen(openFor(chat)))
   const rowMenuAt = useStable((chat: Chat, x: number, y: number) => setRowMenu({ chat, x, y }))
 
-  // The menu on one chat.
+  // The menu on one chat, in WhatsApp's order.
   function rowItems(chat: Chat): PopoverItem[] {
     const p = prefs.get(chat.id)
     const unread = isUnread(chat, me.uid, p)
+    const set = (fields: Record<string, unknown>) => setPrefs(me.uid, chat.id, fields).catch(console.error)
+    const muteFor = (until: number) => set({ mutedUntil: until })
     const items: PopoverItem[] = [
-      p?.archived
-        ? { label: t.unarchive, icon: 'archive', onClick: () => setPrefs(me.uid, chat.id, { archived: false }) }
-        : { label: t.archive, icon: 'archive', onClick: () => setPrefs(me.uid, chat.id, { archived: true, pinnedAt: null }) },
-      isMuted(p)
-        ? { label: t.unmute, icon: 'bell', onClick: () => setPrefs(me.uid, chat.id, { mutedUntil: null }) }
-        : { label: t.mute, icon: 'bellOff', onClick: () => setMuting(chat.id) },
-    ]
-    if (!p?.archived) {
-      if (p?.pinnedAt) items.push({ label: t.unpin, icon: 'pin', onClick: () => setPrefs(me.uid, chat.id, { pinnedAt: null }) })
-      else {
-        items.push({
-          label: t.pin,
-          icon: 'pin',
-          onClick: () => (pinnedCount >= MAX_PINNED ? alert(t.pinLimit) : setPrefs(me.uid, chat.id, { pinnedAt: Date.now() })),
-        })
-      }
-    }
-    items.push(
+      // Open in new window: PakChat again, in a small window with just this chat (Home.tsx reads ?chat=).
+      { label: t.openInNewWindow, icon: 'window', onClick: () => window.open(`/?chat=${encodeURIComponent(chat.id)}`, '_blank', 'popup,width=560,height=820') },
       unread
         ? { label: t.markRead, icon: 'checks', onClick: () => markRead(chat.id, me.uid, true) }
-        : { label: t.markUnread, icon: 'chatPlus', onClick: () => setPrefs(me.uid, chat.id, { unread: true }) },
+        : {
+            label: t.markUnread,
+            icon: 'unread',
+            onClick: () => {
+              if (chat.id === activeId) onClose() // (like WhatsApp: the open chat closes, or it would be read again at once)
+              set({ unread: true })
+            },
+          },
+      p?.archived
+        ? { label: t.unarchive, icon: 'archive', onClick: () => set({ archived: false }) }
+        : { label: t.archive, icon: 'archive', onClick: () => set({ archived: true, pinnedAt: null }) },
+    ]
+    if (!p?.archived) {
+      items.push(
+        p?.pinnedAt
+          ? { label: t.unpin, icon: 'pin', onClick: () => set({ pinnedAt: null }) }
+          : { label: t.pin, icon: 'pin', onClick: () => (pinnedCount >= MAX_PINNED ? alert(t.pinLimit) : set({ pinnedAt: Date.now() })) },
+      )
+    }
+    items.push(
+      isMuted(p)
+        ? { label: t.unmute, icon: 'bell', onClick: () => set({ mutedUntil: null }) }
+        : {
+            label: t.mute,
+            icon: 'bellOff',
+            sub: [
+              { label: t.mute8Hours, onClick: () => muteFor(Date.now() + 8 * HOUR) },
+              { label: t.mute1Week, onClick: () => muteFor(Date.now() + 7 * 24 * HOUR) },
+              { label: t.muteAlways, onClick: () => muteFor(MUTE_ALWAYS) },
+            ],
+          },
+    )
+    // (a line above these)
+    const info = isGroup(chat) ? t.groupInfo : isBroadcast(chat) ? t.listInfo : t.contactInfo
+    items.push(
+      { label: info, icon: 'info', divider: true, onClick: () => onOpen({ ...openFor(chat), info: Date.now() }) },
+      { label: t.exportChat, icon: 'share', onClick: () => exportChat(chat, me.uid, p, t).catch(() => alert(t.somethingWrong)) },
+      { label: t.clearChat, icon: 'circleX', onClick: () => confirm(t.confirmClear) && clearChat(me.uid, chat.id).catch(console.error) },
     )
     if (isGroup(chat)) {
       // (A community's announcements: you leave the community instead, in the Communities tab.)
-      if (!chat.announcements) items.push({ label: t.leaveGroup, icon: 'logout', danger: true, onClick: () => confirm(t.confirmLeave) && leaveGroup(me, chat) })
+      if (!chat.announcements) items.push({ label: t.leaveGroup, icon: 'logout', onClick: () => confirm(t.confirmLeave) && leaveGroup(me, chat) })
     } else if (isBroadcast(chat)) {
-      items.push({ label: t.deleteList, icon: 'trash', danger: true, onClick: () => confirm(t.confirmDeleteList) && deleteList(chat).catch(console.error) })
+      items.push({ label: t.deleteList, icon: 'trash', onClick: () => confirm(t.confirmDeleteList) && deleteList(chat).catch(console.error) })
     } else {
-      items.push({ label: t.deleteChat, icon: 'trash', danger: true, onClick: () => confirm(t.confirmDeleteChat) && deleteChat(me.uid, chat.id) })
+      items.push({ label: t.deleteChat, icon: 'trash', onClick: () => confirm(t.confirmDeleteChat) && deleteChat(me.uid, chat.id) })
     }
     return items
   }
@@ -239,7 +274,7 @@ export default function ChatList(props: Props) {
         </>
       )}
 
-      <div className="list">
+      <div className="list" ref={list}>
         {looksLikeContact && !archived && (
           <button className="row new-group" onClick={() => startChat()} disabled={busy}>
             <span className="avatar accent">
@@ -285,7 +320,6 @@ export default function ChatList(props: Props) {
 
       {picking && <ThemePicker onClose={() => setPicking(false)} />}
       {rowMenu && <Popover x={rowMenu.x} y={rowMenu.y} onClose={() => setRowMenu(null)} items={rowItems(rowMenu.chat)} />}
-      {muting && <MuteDialog onClose={() => setMuting(null)} onMute={(until) => setPrefs(me.uid, muting, { mutedUntil: until })} />}
     </div>
   )
 }
@@ -316,6 +350,7 @@ const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, 
   return (
     <div
       className={classes}
+      data-id={chat.id}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(chat)}
@@ -369,3 +404,19 @@ const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, 
     </div>
   )
 })
+
+// Slide the rows that moved (FLIP: see where each row was, where it is now, and animate the difference).
+// Only transform is animated, which the graphics chip does on its own, so it stays smooth.
+const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+function slideRows(box: HTMLElement, before: { view: string; tops: Map<string, number> }, view: string) {
+  const tops = new Map<string, number>()
+  for (const row of box.querySelectorAll<HTMLElement>('.chat-row[data-id]')) {
+    const top = row.offsetTop
+    tops.set(row.dataset.id!, top)
+    const was = before.tops.get(row.dataset.id!)
+    if (before.view === view && was !== undefined && was !== top && !still()) {
+      row.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' })
+    }
+  }
+  return { view, tops }
+}
