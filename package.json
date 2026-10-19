@@ -1,0 +1,13 @@
+{
+  "name": "pakchat",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PakChat monorepo: web (today's site), shared (protocol + chat logic), app (phone). server/ is Elixir, so it is not an npm package.",
+  "workspaces": ["shared"],
+  "scripts": {
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "app:start": "npm --prefix app run start",
+    "server:start": "cd server && mix phx.server"
+  }
+}
