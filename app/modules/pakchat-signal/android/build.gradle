@@ -17,6 +17,8 @@ android {
   defaultConfig {
     versionCode 1
     versionName '0.1.0'
+    // These rules are passed on to the app's release build.
+    consumerProguardFiles 'proguard-rules.pro'
   }
   testOptions {
     unitTests.returnDefaultValues = true

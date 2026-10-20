@@ -1071,6 +1071,13 @@ refused, and a message delivered twice shows once.
 The same test also runs on a computer (`spike-check`), using Signal's library for Node. That's how
 it was checked in the cloud before you got the APK.
 
+### The shrinker
+The first APK failed 9 of 10 steps on the phone. A release build runs a **shrinker** (R8) that deletes
+code nothing seems to call, to make the app smaller. But libsignal's Rust core calls back into its
+own Java code (for example to load a session's keys), and the shrinker can't see those calls, so it
+deleted them. `modules/pakchat-signal/android/proguard-rules.pro` now tells it to keep all of
+libsignal. The computer tests didn't catch this because they don't shrink anything.
+
 ### Why an APK, not Expo Go
 Expo Go only has the native code Expo ships with. libsignal is native code, so the app needs its own
 build: the APK. From now on we use our own builds.

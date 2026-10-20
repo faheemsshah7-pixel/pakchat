@@ -347,6 +347,9 @@ and the website, and phases 9 to 11 test it with real people, move users across 
     and desktop native libraries from the APK.
   - Every bundle includes a Kyber (post-quantum) pre-key; libsignal requires one now.
   - Watch out: `SessionBuilder(store, remote, local)` but `SessionCipher(store, local, remote)`.
+  - Release builds shrink code with R8, which deleted libsignal's JNI callbacks (the stores) even with
+    libsignal's own rules. `modules/pakchat-signal/android/proguard-rules.pro` keeps all of
+    `org.signal.libsignal.**`. Always test the release APK, not only the unit tests.
   - JavaScript talks to it through the `SignalApi` interface (`app/src/spike/types.ts`). Phase 3's
     shared core should keep that interface, so the same logic runs on the phone and in tests.
   - Tests: Kotlin unit tests (`./gradlew :pakchat-signal:testDebugUnitTest`, need Java 21) and the
