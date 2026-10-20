@@ -1020,3 +1020,64 @@ deleted message to keep a few plain fields, and the card (or GIF) was left in it
 ### Try this
 - In `shared.ts`, change `PAGE = 48` to `12`, and watch the next page load as you scroll.
 - In `index.css`, find `panel-in` and change `0.24s` to `1s`, to see the slide in slow motion.
+
+## Step 23: Phase 1, the encryption test
+
+| Part | Files |
+|---|---|
+| Our Signal module (Kotlin) | `app/modules/pakchat-signal/` (new): `SignalDevice.kt`, `PakchatSignalModule.kt`, `index.ts` |
+| The pretend server and phones | `app/src/spike/relay.ts`, `phone.ts`, `types.ts` (new) |
+| The test, and its screen | `app/src/spike/scenario.ts`, `SpikeScreen.tsx` (new), `App.tsx` |
+| Keeping the APK small | `app/plugins/withSignalPackaging.js` (new), `app.json` |
+| The same test on a computer | `app/spike-check/` (new, not part of the app) |
+
+Before building the server, we checked the hardest part: can our app do real end-to-end
+encryption, like WhatsApp? **Yes.** The test passes with Signal's own library.
+
+### End-to-end encryption, in short
+Each phone makes its own **keys**. The secret half never leaves the phone; the public half goes
+to the server so others can find it. To message Sara, Ali's phone takes one of Sara's public key
+**bundles** from the server, and with it locks the message so only Sara's phone can open it. The
+server only carries locked bytes and can't read them.
+
+This is the **Signal Protocol**, the same one WhatsApp uses. We don't write any of the maths
+ourselves: we use **libsignal**, Signal's own library (version 0.105.1). It's written in Rust, and
+Signal ships it ready-made for Android, so we wrap it in a small **Expo module** in Kotlin.
+- `SignalDevice.kt` is one phone: its keys, and lock and unlock.
+- `PakchatSignalModule.kt` lets JavaScript call it. JavaScript only ever gets a name like
+  `"Ali:1"`, never a key.
+- Every bundle also has a **Kyber** key. That's the new "post-quantum" lock Signal added, so even a
+  future quantum computer can't open today's messages.
+
+### Groups
+Locking a group message once for every member would be slow in a big group. So groups use
+**sender keys**: each member makes one key for the group and sends it to the others inside a
+normal 1-to-1 locked message. After that, a group message is locked once, and the server copies it
+to everyone (`sendGroup` in `phone.ts`).
+
+### Offline and catching up
+`relay.ts` is a pretend server that lives inside the app, and behaves like the real one will in
+phase 2: if Sara is online it pushes the envelope straight away, and if not, it **holds** it. When
+she reconnects she gets everything, oldest first. Only when her phone says "got it" (`ack`) does the
+server **delete** it.
+
+### What the test checks
+Tap **Run the test** and it goes through 10 steps: three phones make keys, Ali and Sara chat,
+the study group works, Sara goes offline while the others send 5 messages (including Bilal's first
+ever message to her), Sara reconnects and opens all 5 in order, the server is left with nothing,
+the server never saw the words, both phones show the same **safety number**, a changed message is
+refused, and a message delivered twice shows once.
+
+The same test also runs on a computer (`spike-check`), using Signal's library for Node. That's how
+it was checked in the cloud before you got the APK.
+
+### Why an APK, not Expo Go
+Expo Go only has the native code Expo ships with. libsignal is native code, so the app needs its own
+build: the APK. From now on we use our own builds.
+
+### Try this
+- In the app, under **Try it yourself**, switch Sara off, send her a few messages from Ali and
+  Bilal, and watch "3 waiting". Switch her on and they arrive.
+- Look at **What the server saw last**: who it's from, who it's for, and gibberish.
+- In `scenario.ts`, change `'Are you there?'` in `whileAway` to something else, and run the computer
+  test (`cd app/spike-check && npm install && npm test`, it's a big download) to watch it fail.

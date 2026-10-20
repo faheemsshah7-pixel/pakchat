@@ -1,0 +1,15 @@
+{
+  "name": "pakchat-spike-check",
+  "private": true,
+  "description": "Runs the phase 1 encryption test on a computer, with Signal's official library for Node. Not part of the app.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@signalapp/libsignal-client": "0.105.1",
+    "@types/node": "^22.20.5",
+    "typescript": "^6.0.3",
+    "vitest": "5.0.5"
+  }
+}

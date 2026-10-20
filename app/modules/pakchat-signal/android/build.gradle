@@ -1,0 +1,38 @@
+// The Android side of our Signal module. It pulls in Signal's own library
+// (libsignal), which does all the real encryption. We never write crypto ourselves.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.pakchat'
+version = '0.1.0'
+
+// libsignal's version. Signal publishes it on their own Maven server, not Maven Central;
+// plugins/withSignal.js adds that server to the app's build.
+def libsignalVersion = '0.105.1'
+
+android {
+  namespace 'expo.modules.pakchatsignal'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
+}
+
+dependencies {
+  // libsignal for Android: the Java code plus the compiled Rust core for phones.
+  implementation "org.signal:libsignal-android:${libsignalVersion}"
+
+  // The tests run on a computer, so they use the desktop build of the same library.
+  testImplementation "org.signal:libsignal-client:${libsignalVersion}"
+  testImplementation 'junit:junit:4.13.2'
+}
+
+// The desktop build of libsignal needs Java 21 to run its tests.
+tasks.withType(Test).configureEach {
+  javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
