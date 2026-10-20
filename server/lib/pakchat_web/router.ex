@@ -12,6 +12,7 @@ defmodule PakchatWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug :allow_other_sites
   end
 
   scope "/", PakchatWeb do
@@ -41,5 +42,13 @@ defmodule PakchatWeb.Router do
 
       live_dashboard "/dashboard", metrics: PakchatWeb.Telemetry
     end
+  end
+
+  # Browsers block a page from reading answers from a different address unless
+  # the server says it is allowed. The app's web preview runs on port 8081 and
+  # this server on 4000, which counts as different. The phone app itself does
+  # not need this. Phase 2 narrows it down to PakChat's own addresses.
+  defp allow_other_sites(conn, _opts) do
+    put_resp_header(conn, "access-control-allow-origin", "*")
   end
 end
