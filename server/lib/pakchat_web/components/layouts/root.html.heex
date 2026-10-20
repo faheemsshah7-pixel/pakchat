@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <title>{assigns[:page_title] || "PakChat server"}</title>
+    <%!-- The styles live right here on purpose. The server has almost no pages of
+          its own, so it does not need a whole build step for CSS. --%>
+    <style>
+      :root { --green: #128C7E; --dark: #075E54; --ink: #111b21; --muted: #667781; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: var(--ink);
+        background: #f7f8fa;
+      }
+      header { background: var(--dark); color: #fff; padding: 16px 24px; }
+      header strong { font-size: 18px; letter-spacing: .3px; }
+      main { max-width: 640px; margin: 0 auto; padding: 32px 24px 64px; }
+      h1 { font-size: 26px; margin: 0 0 8px; }
+      p { line-height: 1.6; color: var(--muted); }
+      .ok { display: inline-block; background: #e7f6f1; color: var(--green);
+            border-radius: 999px; padding: 6px 14px; font-weight: 600; font-size: 14px; }
+      ul { line-height: 1.9; padding-left: 20px; }
+      code { background: #eceff1; border-radius: 4px; padding: 2px 6px; font-size: 13px; }
+      a { color: var(--green); }
+      .flash { background: #fff; border-left: 4px solid var(--green);
+               padding: 12px 16px; margin: 0 0 16px; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <header><strong>PakChat</strong></header>
+    {@inner_content}
+  </body>
+</html>

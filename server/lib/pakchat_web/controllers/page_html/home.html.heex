@@ -1,0 +1,22 @@
+<Layouts.app flash={@flash}>
+  <span class="ok">Server running</span>
+  <h1>PakChat server</h1>
+  <p>
+    This is the relay. It holds a message only until the other phone picks it up,
+    then deletes it. The chats themselves live on the phone, not here.
+  </p>
+
+  <h2>What is wired up so far</h2>
+  <ul>
+    <li>Phoenix is serving this page.</li>
+    <li>Postgres is connected (the page would not load if it were not).</li>
+    <li><code>/api/health</code> answers with JSON, for the host to check later.</li>
+    <li><code>/dev/dashboard</code> shows live memory, processes and requests.</li>
+  </ul>
+
+  <h2>Next</h2>
+  <p>
+    Phase 1 is the encryption spike, then phase 2 turns this into the real relay:
+    accounts, devices, channels and the waiting-message table.
+  </p>
+</Layouts.app>
