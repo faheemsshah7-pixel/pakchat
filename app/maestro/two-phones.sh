@@ -24,6 +24,13 @@ n=$RANDOM
 ALI="Ali$n"
 SARA="Sara$n"
 
+echo "== The app opens and really draws its sign-in screen"
+for phone in "$A" "$B"; do
+  run "$phone" starts.yaml
+  adb -s "$phone" exec-out screencap -p > "/tmp/pakchat-start-$phone.png"
+  python3 looks-alive.py "/tmp/pakchat-start-$phone.png"
+done
+
 echo "== Both phones sign in"
 run "$A" -e NAME="$ALI" sign-in.yaml
 run "$B" -e NAME="$SARA" sign-in.yaml

@@ -4,11 +4,11 @@
 // splash screen up until we know whether you're signed in, and then shows
 // either the sign-in screens or the app. Screens slide in from the right
 // (from the left in Urdu, which reads right to left).
-import { SplashScreen, Stack } from 'expo-router';
+import { SplashScreen, Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
-import { useEffect } from 'react';
-import { View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -35,19 +35,44 @@ function App() {
   const { theme, rtl } = useLook();
   const { state } = useAuth();
 
-  useEffect(() => {
-    void core.init().catch(() => {});
-  }, []);
+  // If starting up fails, or takes far too long, say so on screen instead of staying blank.
+  const [problem, setProblem] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
-    if (state !== 'loading') void SplashScreen.hideAsync().catch(() => {});
-  }, [state]);
+    core.init().catch((err: unknown) => setProblem(describe(err)));
+    const id = setTimeout(() => setSlow(true), 10_000);
+    return () => clearTimeout(id);
+  }, []);
+
+  const stuck = state === 'loading' && (problem !== null || slow);
+
+  useEffect(() => {
+    console.log(`[pakchat] screen: ${state}${stuck ? ' (stuck)' : ''}${problem ? ` ${problem}` : ''}`);
+  }, [state, stuck, problem]);
+
+  useEffect(() => {
+    if (state !== 'loading' || stuck) void SplashScreen.hideAsync().catch(() => {});
+  }, [state, stuck]);
 
   // The window behind the screens matches the look, so nothing flashes white in Graphite.
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(theme.bg).catch(() => {});
   }, [theme.bg]);
 
+  if (stuck) {
+    return (
+      <Problem
+        text={problem ?? `Still ${core.step}…`}
+        onRetry={() => {
+          setProblem(null);
+          setSlow(false);
+          core.retry().catch((err: unknown) => setProblem(describe(err)));
+          setTimeout(() => setSlow(true), 10_000);
+        }}
+      />
+    );
+  }
   if (state === 'loading') return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
 
   return (
@@ -83,6 +108,39 @@ function App() {
         </Stack.Protected>
       </Stack>
       <ToastHost />
+    </View>
+  );
+}
+
+/** Shown if a screen crashes while drawing, instead of a blank screen. */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return <Problem text={describe(error)} onRetry={() => void retry()} />;
+}
+
+function describe(err: unknown): string {
+  if (err instanceof Error) return [`${err.name}: ${err.message}`, ...(err.stack ?? '').split('\n').slice(1, 6)].join('\n');
+  return String(err);
+}
+
+/**
+ * "PakChat couldn't start", with what went wrong in words you can copy and
+ * send. Plain colours on purpose: it must work even if the rest of the app doesn't.
+ */
+function Problem({ text, onRetry }: { text: string; onRetry: () => void }) {
+  const dark = useColorScheme() === 'dark';
+  const ink = dark ? '#ECEEF2' : '#0B1B36';
+  return (
+    <View style={{ flex: 1, backgroundColor: dark ? '#111214' : '#EAF2FE', padding: 24, paddingTop: 80, gap: 14 }}>
+      <Text style={{ color: ink, fontSize: 22, fontWeight: '700' }}>PakChat couldn&apos;t start</Text>
+      <Text style={{ color: ink, fontSize: 15, opacity: 0.75 }}>Take a screenshot of this and send it, then tap Try again.</Text>
+      <ScrollView style={{ maxHeight: 320, borderRadius: 14, backgroundColor: dark ? '#1E2026' : '#FFFFFF' }} contentContainerStyle={{ padding: 14 }}>
+        <Text selectable style={{ color: ink, fontSize: 13, fontFamily: 'monospace' }} testID="start-problem">
+          {text}
+        </Text>
+      </ScrollView>
+      <Pressable onPress={onRetry} accessibilityRole="button" style={{ height: 50, borderRadius: 16, backgroundColor: '#2F6BFF', alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>Try again</Text>
+      </Pressable>
     </View>
   );
 }

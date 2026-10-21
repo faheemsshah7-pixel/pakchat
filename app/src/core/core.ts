@@ -20,7 +20,7 @@ import * as Crypto from 'expo-crypto';
 import * as Device from 'expo-device';
 import KV from 'expo-sqlite/kv-store';
 
-import Signal from '../../modules/pakchat-signal';
+import { loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
 import { openStorage } from './db';
 
@@ -106,13 +106,36 @@ class Core {
     return this.ready;
   }
 
+  /** What starting up is doing right now, so a stuck start can say where it stuck. */
+  step = 'starting';
+
+  // Each step also goes to the phone's log (adb logcat, tag ReactNativeJS), so a
+  // stuck start can be traced even when nothing shows on screen.
+  private at(step: string) {
+    this.step = step;
+    console.log(`[pakchat] start: ${step}`);
+  }
+
+  /** Starting up failed: forget it, so init() tries again from the beginning. */
+  retry() {
+    this.ready = null;
+    this.step = 'starting';
+    return this.init();
+  }
+
   private async start() {
+    this.at('opening the database');
     this.storage = await openStorage();
+    this.at('reading saved names and settings');
     this.people = (await this.storage.getValue<Record<string, Person>>('app:people')) ?? {};
     this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
     this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
+    this.at('loading the encryption');
     this.makeClient();
-    if (await this.client.load()) {
+    this.at('opening your keys');
+    const signedIn = await this.client.load();
+    this.at('ready');
+    if (signedIn) {
       this.state = 'signedIn';
       this.afterSignIn();
     } else {
@@ -124,7 +147,7 @@ class Core {
   private makeClient() {
     this.server = new HttpServer(serverUrl());
     this.client = new PakChat({
-      signal: Signal,
+      signal: loadSignal(),
       storage: this.storage,
       server: this.server,
       connect: phoenixConnection(socketUrl(serverUrl())),

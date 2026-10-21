@@ -4,4 +4,13 @@
 import type { SignalApi } from '@pakchat/shared';
 import { requireNativeModule } from 'expo';
 
-export default requireNativeModule<SignalApi>('PakchatSignal');
+let signal: SignalApi | null = null;
+
+/**
+ * Finds the Kotlin module the first time it's asked for, not when the app
+ * loads, so if it's missing the app can show the error instead of a blank screen.
+ */
+export function loadSignal(): SignalApi {
+  signal ??= requireNativeModule<SignalApi>('PakchatSignal');
+  return signal;
+}

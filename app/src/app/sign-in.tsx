@@ -46,6 +46,8 @@ export default function SignIn() {
   const [testOn, setTestOn] = useState(false);
   const [testName, setTestName] = useState('');
 
+  useEffect(() => console.log('[pakchat] sign-in screen drawn'), []);
+
   // Pretend accounts only show when the Mac's server was started for the emulator tests.
   useEffect(() => {
     let alive = true;

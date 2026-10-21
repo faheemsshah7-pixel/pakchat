@@ -19,6 +19,12 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.pakchat.app",
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
       "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
@@ -96,7 +102,11 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "buildArchs": ["arm64-v8a"],
+            "useLegacyPackaging": true,
+            "enableMinifyInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false
           }
         }
       ]

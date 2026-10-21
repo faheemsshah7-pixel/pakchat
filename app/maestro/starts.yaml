@@ -1,0 +1,11 @@
+# Opens the app fresh and waits for the sign-in screen. two-phones.sh then takes
+# a screenshot and checks it isn't one flat colour (see looks-alive.py), because
+# Maestro can "see" buttons that are on screen but drawn invisible.
+appId: com.pakchat.app
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: google-sign-in
+    timeout: 15000
