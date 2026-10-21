@@ -92,6 +92,7 @@ function App() {
           <Stack.Screen name="verify/[id]" />
           <Stack.Screen name="new-chat" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="new-group" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="list" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="search" options={{ animation: 'fade' }} />
           <Stack.Screen name="archived" />
           <Stack.Screen name="starred" />

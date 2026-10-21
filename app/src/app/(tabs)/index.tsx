@@ -11,7 +11,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { core } from '../../core/core';
-import { useAllTyping, useAuth, useChatList, useConnected, type ChatRow as Row } from '../../core/hooks';
+import { useAllTyping, useAuth, useChatList, useConnected, useLists, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { ChatRow } from '../../ui/ChatRow';
@@ -20,13 +20,15 @@ import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../
 import { listLayout, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 
-type Filter = 'all' | 'unread' | 'favourites' | 'groups';
+// The chips above the chats. `list:<id>` is one of your own lists.
+type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
 
 export default function Chats() {
   const t = useT();
   const { theme } = useLook();
   const { myId } = useAuth();
   const rows = useChatList();
+  const lists = useLists();
   const typing = useAllTyping();
   const connected = useConnected();
   const [filter, setFilter] = useState<Filter>('all');
@@ -34,6 +36,9 @@ export default function Chats() {
   const [menu, setMenu] = useState(false);
   const [pickMenu, setPickMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // The list whose chip you held down (for Edit / Delete), and the one being deleted.
+  const [heldList, setHeldList] = useState<string | null>(null);
+  const [deletingList, setDeletingList] = useState<string | null>(null);
   const selecting = picked.size > 0;
 
   // The first time on this phone, a quick "what should people call you?".
@@ -56,8 +61,12 @@ export default function Chats() {
     if (filter === 'unread') return live.filter((r) => r.chat.unread > 0 || r.prefs.markedUnread);
     if (filter === 'favourites') return live.filter((r) => r.prefs.favourite);
     if (filter === 'groups') return live.filter((r) => r.chat.kind === 'group');
+    if (filter.startsWith('list:')) {
+      const list = lists.find((l) => `list:${l.id}` === filter);
+      return list ? live.filter((r) => list.chatIds.includes(r.chat.id)) : live;
+    }
     return live;
-  }, [rows, filter]);
+  }, [rows, filter, lists]);
 
   const archivedCount = (rows ?? []).filter((r) => r.prefs.archived).length;
   const unreadCount = (rows ?? []).filter((r) => !r.prefs.archived && (r.chat.unread > 0 || r.prefs.markedUnread)).length;
@@ -159,6 +168,21 @@ export default function Chats() {
         <Chip label={t.unread} on={filter === 'unread'} onPress={() => setFilter('unread')} count={unreadCount} testID="filter-unread" />
         <Chip label={t.favourites} on={filter === 'favourites'} onPress={() => setFilter('favourites')} testID="filter-favourites" />
         <Chip label={t.groups} on={filter === 'groups'} onPress={() => setFilter('groups')} testID="filter-groups" />
+        {lists.map((l) => (
+          <Chip
+            key={l.id}
+            label={l.name}
+            on={filter === `list:${l.id}`}
+            onPress={() => setFilter(`list:${l.id}`)}
+            onLongPress={() => {
+              thud();
+              setHeldList(l.id);
+            }}
+            testID={`filter-list-${l.name}`}
+          />
+        ))}
+        {/* ＋ makes a new list, like WhatsApp's Lists. */}
+        <Chip label={t.newList} icon="plus" on={false} onPress={() => router.push('/list')} testID="new-list" />
       </ScrollView>
 
       {!connected && (
@@ -170,22 +194,8 @@ export default function Chats() {
         </Animated.View>
       )}
 
-      <View
-        style={{
-          flex: 1,
-          marginHorizontal: 10,
-          padding: 6,
-          paddingBottom: 0,
-          borderTopLeftRadius: 26,
-          borderTopRightRadius: 26,
-          backgroundColor: theme.dark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.78)',
-          borderWidth: 1,
-          borderBottomWidth: 0,
-          borderColor: theme.glassLine,
-          boxShadow: theme.dark ? undefined : `0 10px 30px -18px ${theme.shadow}`,
-          overflow: 'hidden',
-        }}
-      >
+      {/* The chats run edge to edge, like WhatsApp, so they line up with the tab bar below. */}
+      <View style={{ flex: 1, paddingHorizontal: 4 }}>
         <Animated.FlatList
           data={visible}
           keyExtractor={(r) => r.chat.id}
@@ -272,6 +282,49 @@ export default function Chats() {
           }}
         />
       </Popup>
+
+      <Popup visible={heldList !== null} onClose={() => setHeldList(null)} top={200}>
+        <MenuItem
+          icon="edit"
+          label={t.editList}
+          onPress={() => {
+            const id = heldList;
+            setHeldList(null);
+            if (id) router.push({ pathname: '/list', params: { id } });
+          }}
+          testID="edit-list"
+        />
+        <MenuItem
+          icon="trash"
+          label={t.deleteList}
+          danger
+          onPress={() => {
+            setDeletingList(heldList);
+            setHeldList(null);
+          }}
+          testID="delete-list"
+        />
+      </Popup>
+
+      <Dialog
+        visible={deletingList !== null}
+        onClose={() => setDeletingList(null)}
+        title={t.deleteList}
+        text={t.deleteListNote}
+        buttons={[
+          {
+            label: t.delete,
+            danger: true,
+            testID: 'confirm-delete-list',
+            onPress: () => {
+              if (deletingList) core.deleteList(deletingList);
+              if (filter === `list:${deletingList}`) setFilter('all');
+              setDeletingList(null);
+            },
+          },
+          { label: t.cancel, onPress: () => setDeletingList(null) },
+        ]}
+      />
 
       <Dialog
         visible={confirmDelete}

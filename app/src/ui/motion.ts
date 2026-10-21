@@ -5,6 +5,7 @@
 // carries on from that speed. And if "Remove animations" is on in the phone's
 // settings, Reanimated jumps straight to the end (ReduceMotion.System, the default).
 import * as Haptics from 'expo-haptics';
+import { Platform } from 'react-native';
 import { Easing, FadeIn, FadeOut, LinearTransition, ReduceMotion, type WithSpringConfig, type WithTimingConfig } from 'react-native-reanimated';
 
 /** Buttons pressing in and out, chips, switches. */
@@ -25,12 +26,20 @@ export const listLayout = LinearTransition.springify().damping(24).stiffness(210
 export const fadeIn = FadeIn.duration(180);
 export const fadeOut = FadeOut.duration(140);
 
+// On Android these use the phone's own system taps (the crisp ones the keyboard
+// and Pixel's own apps use), not the motor buzz, which felt rough.
+
 /** A light tap you can feel: crossing a swipe's line, picking a reaction. */
 export function tick() {
-  void Haptics.selectionAsync().catch(() => {});
+  const feel = Platform.OS === 'android' ? Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Clock_Tick) : Haptics.selectionAsync();
+  void feel.catch(() => {});
 }
 
 /** A firmer tap: a long press starting selection. */
 export function thud() {
-  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  const feel =
+    Platform.OS === 'android'
+      ? Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Long_Press)
+      : Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  void feel.catch(() => {});
 }

@@ -52,4 +52,7 @@ run "$B" caught-up.yaml
 echo "== Looks and Urdu on Ali's phone"
 run "$A" look-and-urdu.yaml
 
+echo "== Ali makes a list with Sara in it, then deletes it"
+run "$A" -e NAME="$SARA" lists.yaml
+
 echo "All passed."

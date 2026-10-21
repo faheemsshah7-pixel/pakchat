@@ -380,7 +380,24 @@ export function Avatar({ id, name, size = 50, online, group }: { id: string; nam
 // ---- Filters and switches ----
 
 /** A filter chip. Picking it fills it with the accent gradient, smoothly. */
-export function Chip({ label, on, onPress, count, testID }: { label: string; on: boolean; onPress: () => void; count?: number; testID?: string }) {
+export function Chip({
+  label,
+  on,
+  onPress,
+  onLongPress,
+  count,
+  icon,
+  testID,
+}: {
+  label: string;
+  on: boolean;
+  onPress: () => void;
+  onLongPress?: () => void;
+  count?: number;
+  /** Shows this icon instead of the words (the words are still read out by screen readers). */
+  icon?: IconName;
+  testID?: string;
+}) {
   const { theme, lang } = useLook();
   const v = useSharedValue(on ? 1 : 0);
   useEffect(() => {
@@ -389,7 +406,7 @@ export function Chip({ label, on, onPress, count, testID }: { label: string; on:
   const fill = useAnimatedStyle(() => ({ opacity: v.value }));
   const words = useAnimatedStyle(() => ({ color: interpolateColor(v.value, [0, 1], [theme.text, theme.onAcc]) }));
   return (
-    <Pressy onPress={onPress} label={label} testID={testID} scale={0.94}>
+    <Pressy onPress={onPress} onLongPress={onLongPress} label={label} testID={testID} scale={0.94}>
       <View
         style={{
           height: 36,
@@ -407,7 +424,7 @@ export function Chip({ label, on, onPress, count, testID }: { label: string; on:
         <Animated.View style={[StyleSheet.absoluteFill, fill]}>
           <LinearGradient colors={theme.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
         </Animated.View>
-        <Animated.Text style={[fontStyle(label, lang, 13, '600'), words]}>{label}</Animated.Text>
+        {icon ? <Icon name={icon} size={18} color={on ? theme.onAcc : theme.text} /> : <Animated.Text style={[fontStyle(label, lang, 13, '600'), words]}>{label}</Animated.Text>}
         {!!count && (
           <View
             style={{

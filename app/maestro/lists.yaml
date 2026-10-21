@@ -1,0 +1,26 @@
+# One phone: make a list with the ＋ chip, see it filter the chats, then delete it.
+# NAME is a chat that should go in the list.
+appId: com.pakchat.app
+---
+- tapOn:
+    id: tab-index
+- tapOn:
+    id: new-list
+- tapOn:
+    id: list-name
+- inputText: Family
+- hideKeyboard
+- tapOn: ${NAME}
+- tapOn:
+    id: save-list
+- tapOn:
+    id: filter-list-Family
+- assertVisible: ${NAME}
+- longPressOn:
+    id: filter-list-Family
+- tapOn:
+    id: delete-list
+- tapOn:
+    id: confirm-delete-list
+- assertNotVisible:
+    id: filter-list-Family

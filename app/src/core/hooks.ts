@@ -196,6 +196,11 @@ export function useStarred() {
   return useCore(['prefs'], () => core.starred);
 }
 
+/** Your own chat lists (the chips after Groups). */
+export function useLists() {
+  return useCore(['prefs'], () => core.lists);
+}
+
 // ---- Search ----
 
 /** Searches the messages on this phone as you type (a short wait so every key isn't a search). */

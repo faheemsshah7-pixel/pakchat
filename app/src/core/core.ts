@@ -36,6 +36,9 @@ export type ChatPrefs = {
   draft?: string;
 };
 
+/** A list you made yourself (like "Family" or "Work"), shown as a chip above the chats. */
+export type ChatList = { id: string; name: string; chatIds: string[] };
+
 export type Presence = { online: boolean; lastSeen: string | null };
 
 type Topic = 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | 'presence' | 'blocked' | `messages:${string}`;
@@ -79,6 +82,7 @@ class Core {
   people: Record<string, Person> = {};
   prefs: Record<string, ChatPrefs> = {};
   starred: Record<string, true> = {};
+  lists: ChatList[] = [];
   /** chatId → userId → when they started typing. */
   typing: Record<string, Record<string, number>> = {};
   presence: Record<string, Presence> = {};
@@ -130,6 +134,7 @@ class Core {
     this.people = (await this.storage.getValue<Record<string, Person>>('app:people')) ?? {};
     this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
     this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
+    this.lists = (await this.storage.getValue<ChatList[]>('app:lists')) ?? [];
     this.at('loading the encryption');
     this.makeClient();
     this.at('opening your keys');
@@ -235,6 +240,7 @@ class Core {
       this.people = {};
       this.prefs = {};
       this.starred = {};
+      this.lists = [];
     }
     await this.storage.setValue('app:lastUser', session.userId);
     this.remember({ id: session.userId, name: session.me.name, about: session.me.about, photo: session.me.photo });
@@ -392,6 +398,21 @@ class Core {
     for (const k of Object.keys(next) as (keyof ChatPrefs)[]) if (next[k] === undefined || next[k] === false) delete next[k];
     this.prefs = { ...this.prefs, [chatId]: next };
     void this.storage.setValue('app:prefs', this.prefs);
+    this.emit('prefs');
+  }
+
+  /** Adds a new list, or changes one (same id). Lists are only on this phone. */
+  saveList(list: ChatList) {
+    const others = this.lists.filter((l) => l.id !== list.id);
+    const at = this.lists.findIndex((l) => l.id === list.id);
+    this.lists = at === -1 ? [...others, list] : [...others.slice(0, at), list, ...others.slice(at)];
+    void this.storage.setValue('app:lists', this.lists);
+    this.emit('prefs');
+  }
+
+  deleteList(id: string) {
+    this.lists = this.lists.filter((l) => l.id !== id);
+    void this.storage.setValue('app:lists', this.lists);
     this.emit('prefs');
   }
 

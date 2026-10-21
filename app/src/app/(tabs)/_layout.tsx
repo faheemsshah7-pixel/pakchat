@@ -13,7 +13,7 @@ import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon, type IconName } from '../../ui/icons';
 import { Pressy, Txt } from '../../ui/kit';
-import { smooth, tick } from '../../ui/motion';
+import { smooth } from '../../ui/motion';
 
 const TABS: { name: string; icon: IconName; label: 'chats' | 'status' | 'calls' | 'you' }[] = [
   { name: 'index', icon: 'chat', label: 'chats' },
@@ -68,8 +68,8 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
               label={t[tab.label]}
               scale={0.9}
               onPress={() => {
+                // No vibration here: like WhatsApp, switching tabs is silent.
                 if (on) return;
-                tick();
                 navigateToTab(state.routes[i].key);
               }}
             >
