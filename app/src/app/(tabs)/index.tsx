@@ -6,7 +6,7 @@
 import KV from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BackHandler, View } from 'react-native';
+import { BackHandler, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -147,12 +147,19 @@ export default function Chats() {
         </Glass>
       </Pressy>
 
-      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}>
+      {/* The chips slide sideways when they don't all fit (big text, or Urdu),
+          instead of the last one being cut off at the edge. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{ gap: 8, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}
+      >
         <Chip label={t.all} on={filter === 'all'} onPress={() => setFilter('all')} testID="filter-all" />
         <Chip label={t.unread} on={filter === 'unread'} onPress={() => setFilter('unread')} count={unreadCount} testID="filter-unread" />
         <Chip label={t.favourites} on={filter === 'favourites'} onPress={() => setFilter('favourites')} testID="filter-favourites" />
         <Chip label={t.groups} on={filter === 'groups'} onPress={() => setFilter('groups')} testID="filter-groups" />
-      </View>
+      </ScrollView>
 
       {!connected && (
         <Animated.View entering={FadeInDown.springify().damping(20)} exiting={FadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>

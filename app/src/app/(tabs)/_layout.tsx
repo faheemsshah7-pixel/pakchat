@@ -4,7 +4,7 @@
 // when you pick another one (the other way in Urdu).
 import { Tabs, type BottomTabBarProps } from 'expo-router/tabs';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -42,16 +42,14 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
     <View
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
       style={{
+        // Edge to edge, with one thin line on top: a bar with gaps at the sides
+        // and rounded corners looked uneven against the chat list behind it.
         flexDirection: 'row',
-        marginHorizontal: 10,
         paddingTop: 9,
         paddingBottom: insets.bottom + 10,
-        backgroundColor: theme.dark ? 'rgba(22,23,26,0.94)' : 'rgba(255,255,255,0.9)',
-        borderTopWidth: 1,
+        backgroundColor: theme.dark ? 'rgb(22,23,26)' : 'rgb(255,255,255)',
+        borderTopWidth: StyleSheet.hairlineWidth,
         borderColor: theme.glassLine,
-        borderTopLeftRadius: 22,
-        borderTopRightRadius: 22,
-        boxShadow: theme.dark ? undefined : `0 -10px 30px -18px ${theme.shadow}`,
       }}
     >
       {width > 0 && (
