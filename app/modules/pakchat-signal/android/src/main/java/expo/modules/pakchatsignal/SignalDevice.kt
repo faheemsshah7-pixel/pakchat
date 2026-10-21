@@ -21,19 +21,28 @@ import org.signal.libsignal.protocol.state.KyberPreKeyRecord
 import org.signal.libsignal.protocol.state.PreKeyBundle
 import org.signal.libsignal.protocol.state.PreKeyRecord
 import org.signal.libsignal.protocol.state.SignedPreKeyRecord
-import org.signal.libsignal.protocol.state.impl.InMemorySignalProtocolStore
 import org.signal.libsignal.protocol.util.KeyHelper
+import java.nio.ByteBuffer
 import java.util.UUID
 
+/** A signed public key, ready for the server. */
+class SignedKey(val keyId: Int, val publicKey: ByteArray, val signature: ByteArray)
+
+/** A one-time public key, ready for the server. */
+class OneTimeKey(val keyId: Int, val publicKey: ByteArray)
+
+/** What a device puts on the server once, when it signs in. */
+class DeviceKeys(val registrationId: Int, val identityKey: ByteArray, val signedPreKey: SignedKey, val kyberLastResort: SignedKey)
+
 /**
- * The public half of a device's keys: what the server hands out so someone can
- * start a chat with this device. It holds no secrets.
+ * The public half of another device's keys, from the server. `preKeyId` and
+ * `preKey` are missing when that device's one-time keys have run out.
  */
 class PublicBundle(
   val registrationId: Int,
   val deviceId: Int,
-  val preKeyId: Int,
-  val preKey: ByteArray,
+  val preKeyId: Int?,
+  val preKey: ByteArray?,
   val signedPreKeyId: Int,
   val signedPreKey: ByteArray,
   val signedPreKeySignature: ByteArray,
@@ -49,124 +58,152 @@ class Sealed(val type: Int, val body: ByteArray)
 /**
  * One phone (or linked device) and its Signal keys.
  *
- * Every call here goes straight to Signal's own library (libsignal). We only
- * glue the pieces together; the library does all the maths. The secret keys
- * stay inside this object and never go back to JavaScript.
+ * Every call goes straight to Signal's own library (libsignal); we only glue
+ * the pieces together. The secret keys stay in the store and never go back to
+ * JavaScript. Since phase 4 the store is saved (SavedStore), so the keys
+ * survive the app closing.
  *
- * For the spike the keys live in memory (InMemorySignalProtocolStore), so they
- * are lost when the app closes. Phase 3 saves them on the phone.
+ * `name` is the user id and `deviceId` the device number, as the server knows them.
  */
-class SignalDevice(val name: String, val deviceId: Int) {
-  private val identity: IdentityKeyPair = IdentityKeyPair.generate()
-  private val registrationId: Int = KeyHelper.generateRegistrationId(false)
-  private val store = InMemorySignalProtocolStore(identity, registrationId)
-  private val address = SignalProtocolAddress(name, deviceId)
+class SignalDevice private constructor(
+  private val backend: KeyBackend,
+  val uid: String,
+  var name: String,
+  var deviceId: Int,
+  identity: IdentityKeyPair,
+  registrationId: Int,
+) {
+  private val store = SavedStore(backend, uid, identity, registrationId)
+  private val address get() = SignalProtocolAddress(name, deviceId)
 
-  // The signed pre-key is medium-term: one per device, renewed now and then (not in the spike).
-  private val signedPreKey: SignedPreKeyRecord
+  /** Puts this device's real address on it (after signing in). */
+  fun rename(newName: String, newDeviceId: Int) {
+    backend.transaction {
+      // An older device on this phone with the same address (signed in before) is forgotten.
+      val info = "$newName\n$newDeviceId"
+      for (other in backend.keys(DEVICES, "")) {
+        if (other != uid && backend.get(DEVICES, other)?.let { String(it) } == info) backend.delete(DEVICES, other)
+      }
+      name = newName
+      deviceId = newDeviceId
+      saveInfo()
+    }
+  }
 
-  // Each bundle gets fresh one-time keys, numbered from 1.
-  private var nextPreKeyId = 1
+  private fun saveInfo() {
+    backend.put(DEVICES, uid, "$name\n$deviceId".toByteArray())
+  }
 
-  init {
-    val keyPair = ECKeyPair.generate()
-    val signature = identity.privateKey.calculateSignature(keyPair.publicKey.serialize())
-    signedPreKey = SignedPreKeyRecord(1, System.currentTimeMillis(), keyPair, signature)
-    store.storeSignedPreKey(1, signedPreKey)
+  /** The keys the server needs once, when this device signs in. */
+  fun deviceKeys(): DeviceKeys {
+    val signed = store.loadSignedPreKey(SavedStore.SIGNED_PRE_KEY_ID)
+    val kyber = store.loadKyberPreKey(SavedStore.LAST_RESORT_KYBER_ID)
+    return DeviceKeys(
+      registrationId = store.localRegistrationId,
+      identityKey = store.identityKeyPair.publicKey.serialize(),
+      signedPreKey = SignedKey(signed.id, signed.keyPair.publicKey.serialize(), signed.signature),
+      kyberLastResort = SignedKey(kyber.id, kyber.keyPair.publicKey.serialize(), kyber.signature),
+    )
   }
 
   /**
-   * Makes a new bundle with fresh one-time keys: a normal one, and a post-quantum
-   * (Kyber) one. The server gives each bundle out once, then it's used up.
+   * Makes `count` new one-time keys of each kind (a normal one and a Kyber one).
+   * The server hands each out once. Numbers count up from 1 and wrap before the
+   * last-resort Kyber key's number.
    */
-  fun newBundle(): PublicBundle {
-    val id = nextPreKeyId++
+  fun newPreKeys(count: Int): Pair<List<OneTimeKey>, List<SignedKey>> =
+    backend.transaction {
+      var next = backend.get(META, "$uid/nextPreKeyId")?.let { ByteBuffer.wrap(it).int } ?: 1
+      val ec = mutableListOf<OneTimeKey>()
+      val kyber = mutableListOf<SignedKey>()
+      repeat(count) {
+        val id = next
+        next = if (id + 1 >= SavedStore.LAST_RESORT_KYBER_ID) 1 else id + 1
 
-    val preKey = ECKeyPair.generate()
-    store.storePreKey(id, PreKeyRecord(id, preKey))
+        val pre = ECKeyPair.generate()
+        store.storePreKey(id, PreKeyRecord(id, pre))
+        ec += OneTimeKey(id, pre.publicKey.serialize())
 
-    val kyber = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
-    val kyberSignature = identity.privateKey.calculateSignature(kyber.publicKey.serialize())
-    store.storeKyberPreKey(id, KyberPreKeyRecord(id, System.currentTimeMillis(), kyber, kyberSignature))
-
-    return PublicBundle(
-      registrationId = registrationId,
-      deviceId = deviceId,
-      preKeyId = id,
-      preKey = preKey.publicKey.serialize(),
-      signedPreKeyId = signedPreKey.id,
-      signedPreKey = signedPreKey.keyPair.publicKey.serialize(),
-      signedPreKeySignature = signedPreKey.signature,
-      identityKey = identity.publicKey.serialize(),
-      kyberPreKeyId = id,
-      kyberPreKey = kyber.publicKey.serialize(),
-      kyberPreKeySignature = kyberSignature,
-    )
-  }
+        val k = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
+        val sig = store.identityKeyPair.privateKey.calculateSignature(k.publicKey.serialize())
+        store.storeKyberPreKey(id, KyberPreKeyRecord(id, System.currentTimeMillis(), k, sig))
+        kyber += SignedKey(id, k.publicKey.serialize(), sig)
+      }
+      backend.put(META, "$uid/nextPreKeyId", ByteBuffer.allocate(4).putInt(next).array())
+      ec to kyber
+    }
 
   /** Starts a session with another device, from the bundle the server gave us. */
-  fun startSession(theirName: String, theirDeviceId: Int, bundle: PublicBundle) {
-    val them = SignalProtocolAddress(theirName, theirDeviceId)
-    val preKeyBundle = PreKeyBundle(
-      bundle.registrationId,
-      bundle.deviceId,
-      bundle.preKeyId,
-      ECPublicKey(bundle.preKey),
-      bundle.signedPreKeyId,
-      ECPublicKey(bundle.signedPreKey),
-      bundle.signedPreKeySignature,
-      IdentityKey(bundle.identityKey),
-      bundle.kyberPreKeyId,
-      KEMPublicKey(bundle.kyberPreKey),
-      bundle.kyberPreKeySignature,
+  fun startSession(theirName: String, theirDeviceId: Int, b: PublicBundle) {
+    val hasPreKey = b.preKeyId != null && b.preKey != null
+    val bundle = PreKeyBundle(
+      b.registrationId,
+      b.deviceId,
+      if (hasPreKey) b.preKeyId!! else PreKeyBundle.NULL_PRE_KEY_ID,
+      if (hasPreKey) ECPublicKey(b.preKey!!) else null,
+      b.signedPreKeyId,
+      ECPublicKey(b.signedPreKey),
+      b.signedPreKeySignature,
+      IdentityKey(b.identityKey),
+      b.kyberPreKeyId,
+      KEMPublicKey(b.kyberPreKey),
+      b.kyberPreKeySignature,
     )
     // The library checks the signatures and refuses a bundle that was tampered with.
     // Careful: SessionBuilder takes (them, us), but SessionCipher takes (us, them).
-    SessionBuilder(store, them, address).process(preKeyBundle)
+    backend.transaction { SessionBuilder(store, SignalProtocolAddress(theirName, theirDeviceId), address).process(bundle) }
   }
 
   fun hasSession(theirName: String, theirDeviceId: Int): Boolean =
     store.containsSession(SignalProtocolAddress(theirName, theirDeviceId))
 
-  /** Locks a message for one other device. */
-  fun encrypt(toName: String, toDeviceId: Int, plaintext: ByteArray): Sealed {
-    val them = SignalProtocolAddress(toName, toDeviceId)
-    val message = SessionCipher(store, address, them).encrypt(plaintext)
-    return Sealed(message.type, message.serialize())
+  fun deleteSession(theirName: String, theirDeviceId: Int) {
+    store.deleteSession(SignalProtocolAddress(theirName, theirDeviceId))
   }
 
+  /** Their identity key as we last saw it, or null if we never talked. */
+  fun identityKey(theirName: String, theirDeviceId: Int): ByteArray? =
+    store.getIdentity(SignalProtocolAddress(theirName, theirDeviceId))?.serialize()
+
+  /** Locks a message for one other device. */
+  fun encrypt(toName: String, toDeviceId: Int, plaintext: ByteArray): Sealed =
+    backend.transaction {
+      val message = SessionCipher(store, address, SignalProtocolAddress(toName, toDeviceId)).encrypt(plaintext)
+      Sealed(message.type, message.serialize())
+    }
+
   /** Unlocks a message from another device. Throws if it was changed, repeated or isn't for us. */
-  fun decrypt(fromName: String, fromDeviceId: Int, sealed: Sealed): ByteArray {
-    val them = SignalProtocolAddress(fromName, fromDeviceId)
-    val cipher = SessionCipher(store, address, them)
-    return when (sealed.type) {
-      CiphertextMessage.PREKEY_TYPE -> cipher.decrypt(PreKeySignalMessage(sealed.body))
-      CiphertextMessage.WHISPER_TYPE -> cipher.decrypt(SignalMessage(sealed.body))
-      else -> throw IllegalArgumentException("Unknown message type ${sealed.type}")
+  fun decrypt(fromName: String, fromDeviceId: Int, sealed: Sealed): ByteArray =
+    backend.transaction {
+      val cipher = SessionCipher(store, address, SignalProtocolAddress(fromName, fromDeviceId))
+      when (sealed.type) {
+        CiphertextMessage.PREKEY_TYPE -> cipher.decrypt(PreKeySignalMessage(sealed.body))
+        CiphertextMessage.WHISPER_TYPE -> cipher.decrypt(SignalMessage(sealed.body))
+        else -> throw IllegalArgumentException("Unknown message type ${sealed.type}")
+      }
+    }
+
+  /**
+   * Groups use "sender keys": each device makes one key per group and sends it
+   * to the others inside normal 1-to-1 locked messages. After that, a group
+   * message is locked once and the server copies it to everyone.
+   * `distributionId` (a UUID) names the key; a new one means a new key.
+   */
+  fun createGroupKey(distributionId: String): ByteArray =
+    backend.transaction { GroupSessionBuilder(store).create(address, UUID.fromString(distributionId)).serialize() }
+
+  /** Saves another device's group key, so we can read its group messages. */
+  fun acceptGroupKey(fromName: String, fromDeviceId: Int, groupKey: ByteArray) {
+    backend.transaction {
+      GroupSessionBuilder(store).process(SignalProtocolAddress(fromName, fromDeviceId), SenderKeyDistributionMessage(groupKey))
     }
   }
 
-  /**
-   * Groups use "sender keys": each member makes one key for the group and sends it
-   * to the others (inside normal 1-to-1 encrypted messages). After that, a group
-   * message is locked once and the server copies it to everyone.
-   */
-  fun createGroupKey(groupId: String): ByteArray =
-    GroupSessionBuilder(store).create(address, UUID.fromString(groupId)).serialize()
-
-  /** Saves another member's group key, so we can read their group messages. */
-  fun acceptGroupKey(fromName: String, fromDeviceId: Int, groupKey: ByteArray) {
-    GroupSessionBuilder(store).process(
-      SignalProtocolAddress(fromName, fromDeviceId),
-      SenderKeyDistributionMessage(groupKey),
-    )
-  }
-
-  fun groupEncrypt(groupId: String, plaintext: ByteArray): ByteArray =
-    GroupCipher(store, address).encrypt(UUID.fromString(groupId), plaintext).serialize()
+  fun groupEncrypt(distributionId: String, plaintext: ByteArray): ByteArray =
+    backend.transaction { GroupCipher(store, address).encrypt(UUID.fromString(distributionId), plaintext).serialize() }
 
   fun groupDecrypt(fromName: String, fromDeviceId: Int, body: ByteArray): ByteArray =
-    GroupCipher(store, SignalProtocolAddress(fromName, fromDeviceId)).decrypt(body)
+    backend.transaction { GroupCipher(store, SignalProtocolAddress(fromName, fromDeviceId)).decrypt(body) }
 
   /**
    * The safety number for a chat, like WhatsApp's "Verify security code".
@@ -174,10 +211,52 @@ class SignalDevice(val name: String, val deviceId: Int) {
    */
   fun safetyNumber(theirName: String, theirDeviceId: Int): String {
     val theirKey = store.getIdentity(SignalProtocolAddress(theirName, theirDeviceId))
-      ?: throw IllegalStateException("No session with $theirName yet")
+      ?: throw org.signal.libsignal.protocol.NoSessionException("No session with $theirName yet")
     return NumericFingerprintGenerator(5200)
-      .createFor(2, name.toByteArray(), identity.publicKey, theirName.toByteArray(), theirKey)
+      .createFor(2, name.toByteArray(), store.identityKeyPair.publicKey, theirName.toByteArray(), theirKey)
       .displayableFingerprint
       .displayText
+  }
+
+  companion object {
+    private const val DEVICES = "devices"
+    private const val SELF = "self"
+    private const val META = "meta"
+
+    /** Makes a brand-new device with fresh keys, and saves it. */
+    fun create(backend: KeyBackend, name: String, deviceId: Int): SignalDevice =
+      backend.transaction {
+        val uid = UUID.randomUUID().toString()
+        val identity = IdentityKeyPair.generate()
+        val registrationId = KeyHelper.generateRegistrationId(false)
+        backend.put(SELF, "$uid/identity", identity.serialize())
+        backend.put(SELF, "$uid/registrationId", ByteBuffer.allocate(4).putInt(registrationId).array())
+
+        val device = SignalDevice(backend, uid, name, deviceId, identity, registrationId)
+        // The signed pre-key, and the "last resort" Kyber key for when the one-time ones run out.
+        val signed = ECKeyPair.generate()
+        val signedSig = identity.privateKey.calculateSignature(signed.publicKey.serialize())
+        device.store.storeSignedPreKey(
+          SavedStore.SIGNED_PRE_KEY_ID,
+          SignedPreKeyRecord(SavedStore.SIGNED_PRE_KEY_ID, System.currentTimeMillis(), signed, signedSig),
+        )
+        val kyber = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
+        val kyberSig = identity.privateKey.calculateSignature(kyber.publicKey.serialize())
+        device.store.storeKyberPreKey(
+          SavedStore.LAST_RESORT_KYBER_ID,
+          KyberPreKeyRecord(SavedStore.LAST_RESORT_KYBER_ID, System.currentTimeMillis(), kyber, kyberSig),
+        )
+        device.saveInfo()
+        device
+      }
+
+    /** Finds a device made earlier with this address, or null. */
+    fun open(backend: KeyBackend, name: String, deviceId: Int): SignalDevice? {
+      val uid = backend.keys(DEVICES, "").firstOrNull { String(backend.get(DEVICES, it) ?: return@firstOrNull false) == "$name\n$deviceId" }
+        ?: return null
+      val identity = backend.get(SELF, "$uid/identity")?.let { IdentityKeyPair(it) } ?: return null
+      val registrationId = backend.get(SELF, "$uid/registrationId")?.let { ByteBuffer.wrap(it).int } ?: return null
+      return SignalDevice(backend, uid, name, deviceId, identity, registrationId)
+    }
   }
 }

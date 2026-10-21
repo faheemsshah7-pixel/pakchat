@@ -46,6 +46,48 @@ defmodule PakchatWeb.AuthController do
 
   def google(_conn, _params), do: {:error, :bad_request}
 
+  @doc """
+  `POST /api/auth/test` with `{"email": "ali@test.pakchat", "name": "Ali", "device": ..., ...}`:
+  a pretend account for the emulator tests. Answers 404 unless the server was
+  started with PAKCHAT_TEST_SIGN_IN=1 (see Pakchat.Accounts.sign_in_for_test/3).
+  `GET /api/auth/test` says whether it is switched on, so the app knows to show it.
+  """
+  def test(conn, %{"email" => email, "name" => name, "device" => device} = params)
+      when is_binary(email) and is_binary(name) do
+    with :ok <- test_sign_in_on(),
+         {:ok, device_attrs} <- Params.device(device),
+         {:ok, keys} <- Params.key_upload(params) do
+      case Accounts.sign_in_for_test(email, String.slice(name, 0, 25), device_attrs) do
+        {:ok, %{user: user, device: device, token: token}} ->
+          {:ok, _} = Keys.add_pre_keys(device, keys.ec, keys.kyber)
+
+          json(conn, %{
+            token: token,
+            user: Wire.me(user),
+            device_id: device.device_id,
+            device_uuid: device.id
+          })
+
+        {:error, %Ecto.Changeset{}} = error ->
+          error
+
+        {:error, _why} ->
+          conn |> put_status(:forbidden) |> json(%{error: "not_allowed"})
+      end
+    end
+  end
+
+  # A sign-in with something missing, or the GET that asks "is it on?".
+  def test(conn, params) do
+    with :ok <- test_sign_in_on() do
+      if Map.has_key?(params, "device"), do: {:error, :bad_request}, else: json(conn, %{on: true})
+    end
+  end
+
+  defp test_sign_in_on do
+    if Application.get_env(:pakchat, :test_sign_in, false), do: :ok, else: {:error, :not_found}
+  end
+
   @doc "Signs this device out. Signing out the phone signs out its linked devices too."
   def sign_out(conn, _params) do
     :ok = Accounts.sign_out(conn.assigns.device)

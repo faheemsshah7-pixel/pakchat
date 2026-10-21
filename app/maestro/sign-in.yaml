@@ -1,0 +1,30 @@
+# Signs in a pretend test account on this emulator (the server must be started
+# with PAKCHAT_TEST_SIGN_IN=1). NAME is who this phone is, e.g. Ali.
+# 10.0.2.2 is how an Android emulator reaches the Mac it runs on.
+appId: com.pakchat.app
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: server-address
+- eraseText: 60
+- inputText: http://10.0.2.2:4000
+- tapOn:
+    id: server-save
+- extendedWaitUntil:
+    visible:
+      id: test-name
+    timeout: 10000
+- tapOn:
+    id: test-name
+- inputText: ${NAME}
+- tapOn:
+    id: test-sign-in
+- extendedWaitUntil:
+    visible:
+      id: profile-continue
+    timeout: 20000
+- tapOn:
+    id: profile-continue
+- assertVisible:
+    id: new-chat

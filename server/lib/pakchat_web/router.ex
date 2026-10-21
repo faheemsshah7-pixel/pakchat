@@ -31,6 +31,8 @@ defmodule PakchatWeb.Router do
 
     get "/health", HealthController, :show
     post "/auth/google", AuthController, :google
+    get "/auth/test", AuthController, :test
+    post "/auth/test", AuthController, :test
   end
 
   scope "/api", PakchatWeb do

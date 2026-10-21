@@ -1,0 +1,6 @@
+# In an open chat: waits until TEXT arrives.
+appId: com.pakchat.app
+---
+- extendedWaitUntil:
+    visible: ${TEXT}
+    timeout: 40000

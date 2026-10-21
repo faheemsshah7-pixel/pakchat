@@ -1,0 +1,4 @@
+# Turns this emulator's network off (ON=true) or back on (ON=false).
+appId: com.pakchat.app
+---
+- setAirplaneMode: ${MODE}

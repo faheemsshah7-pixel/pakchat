@@ -1,0 +1,211 @@
+// sqliteStorage.ts: where the phone keeps its chats and messages, in SQLite.
+//
+// It does exactly what the shared core's Storage interface asks
+// (shared/src/storage.ts), and passes the same checks as the in-memory one
+// (test/sqliteStorage.test.ts runs storageContract on it). On top of that it
+// has a search index, so finding an old message is instant and never leaves
+// the phone.
+//
+// It talks to the database through the small `Db` interface below, so the
+// tests can run it on a computer with Node's own SQLite, and the app with
+// expo-sqlite (see db.ts).
+import type { Chat, Message, OutboxItem, Storage } from '@pakchat/shared';
+
+export type SqlValue = string | number | null;
+
+export interface Db {
+  exec(sql: string): Promise<void>;
+  run(sql: string, params?: SqlValue[]): Promise<void>;
+  all<T>(sql: string, params?: SqlValue[]): Promise<T[]>;
+  first<T>(sql: string, params?: SqlValue[]): Promise<T | null>;
+}
+
+/** One search result. */
+export type Found = { chatId: string; author: string; id: string; text: string; sentAt: number };
+
+// Each change to the tables gets the next number here, so an old phone's
+// database is brought up to date step by step.
+const MIGRATIONS = [
+  `
+  CREATE TABLE chats (id TEXT PRIMARY KEY, last_activity INTEGER NOT NULL, json TEXT NOT NULL);
+  CREATE TABLE messages (
+    chat_id TEXT NOT NULL, author TEXT NOT NULL, id TEXT NOT NULL,
+    seq INTEGER, ord NUMERIC NOT NULL, sent_at INTEGER NOT NULL, json TEXT NOT NULL,
+    PRIMARY KEY (chat_id, author, id)
+  );
+  CREATE INDEX messages_by_order ON messages (chat_id, ord);
+  CREATE INDEX messages_by_seq ON messages (chat_id, seq);
+  CREATE TABLE outbox (id TEXT PRIMARY KEY, added INTEGER NOT NULL, json TEXT NOT NULL);
+  CREATE TABLE seen (id INTEGER PRIMARY KEY);
+  CREATE TABLE kv (key TEXT PRIMARY KEY, json TEXT NOT NULL);
+  CREATE VIRTUAL TABLE search USING fts5(
+    text, chat_id UNINDEXED, author UNINDEXED, msg_id UNINDEXED, sent_at UNINDEXED,
+    tokenize = 'unicode61 remove_diacritics 2'
+  );
+  `,
+];
+
+export class SqliteStorage implements Storage {
+  private depth = 0;
+
+  private constructor(private db: Db) {}
+
+  /** Opens the storage, creating or updating the tables first. */
+  static async open(db: Db): Promise<SqliteStorage> {
+    await db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    const row = await db.first<{ user_version: number }>('PRAGMA user_version');
+    for (let v = row?.user_version ?? 0; v < MIGRATIONS.length; v++) {
+      await db.exec(`BEGIN; ${MIGRATIONS[v]} PRAGMA user_version = ${v + 1}; COMMIT;`);
+    }
+    return new SqliteStorage(db);
+  }
+
+  // ---- Chats ----
+
+  async getChat(id: string) {
+    const r = await this.db.first<{ json: string }>('SELECT json FROM chats WHERE id = ?', [id]);
+    return r ? (JSON.parse(r.json) as Chat) : null;
+  }
+
+  async putChat(chat: Chat) {
+    await this.db.run('INSERT OR REPLACE INTO chats (id, last_activity, json) VALUES (?, ?, ?)', [chat.id, chat.lastActivity, JSON.stringify(chat)]);
+  }
+
+  async listChats() {
+    const rows = await this.db.all<{ json: string }>('SELECT json FROM chats ORDER BY last_activity DESC');
+    return rows.map((r) => JSON.parse(r.json) as Chat);
+  }
+
+  // ---- Messages ----
+
+  async getMessage(chatId: string, author: string, id: string) {
+    const r = await this.db.first<{ json: string }>('SELECT json FROM messages WHERE chat_id = ? AND author = ? AND id = ?', [chatId, author, id]);
+    return r ? (JSON.parse(r.json) as Message) : null;
+  }
+
+  async getMessageBySeq(chatId: string, seq: number) {
+    const r = await this.db.first<{ json: string }>('SELECT json FROM messages WHERE chat_id = ? AND seq = ?', [chatId, seq]);
+    return r ? (JSON.parse(r.json) as Message) : null;
+  }
+
+  async putMessage(m: Message) {
+    await this.transaction(async () => {
+      await this.db.run('INSERT OR REPLACE INTO messages (chat_id, author, id, seq, ord, sent_at, json) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+        m.chatId,
+        m.author,
+        m.id,
+        m.seq,
+        m.order,
+        m.sentAt,
+        JSON.stringify(m),
+      ]);
+      // Keep the search index in step: deleted messages and polls' answers aren't searchable.
+      await this.db.run('DELETE FROM search WHERE chat_id = ? AND author = ? AND msg_id = ?', [m.chatId, m.author, m.id]);
+      const words = m.deleted ? '' : m.kind === 'poll' ? [m.poll?.question, ...(m.poll?.options ?? [])].join(' ') : (m.text ?? '');
+      if (words.trim() && m.kind !== 'system') {
+        await this.db.run('INSERT INTO search (text, chat_id, author, msg_id, sent_at) VALUES (?, ?, ?, ?, ?)', [words, m.chatId, m.author, m.id, m.sentAt]);
+      }
+    });
+  }
+
+  async deleteMessage(chatId: string, author: string, id: string) {
+    await this.transaction(async () => {
+      await this.db.run('DELETE FROM messages WHERE chat_id = ? AND author = ? AND id = ?', [chatId, author, id]);
+      await this.db.run('DELETE FROM search WHERE chat_id = ? AND author = ? AND msg_id = ?', [chatId, author, id]);
+    });
+  }
+
+  async listMessages(chatId: string, options: { beforeOrder?: number; limit?: number } = {}) {
+    const limit = options.limit ?? 50;
+    const rows =
+      options.beforeOrder === undefined
+        ? await this.db.all<{ json: string }>('SELECT json FROM messages WHERE chat_id = ? ORDER BY ord DESC, sent_at DESC LIMIT ?', [chatId, limit])
+        : await this.db.all<{ json: string }>('SELECT json FROM messages WHERE chat_id = ? AND ord < ? ORDER BY ord DESC, sent_at DESC LIMIT ?', [
+            chatId,
+            options.beforeOrder,
+            limit,
+          ]);
+    return rows.reverse().map((r) => JSON.parse(r.json) as Message);
+  }
+
+  // ---- The outbox ----
+
+  async putOutbox(item: OutboxItem) {
+    await this.db.run('INSERT OR REPLACE INTO outbox (id, added, json) VALUES (?, ?, ?)', [item.id, item.added, JSON.stringify(item)]);
+  }
+
+  async listOutbox() {
+    const rows = await this.db.all<{ json: string }>('SELECT json FROM outbox ORDER BY added');
+    return rows.map((r) => JSON.parse(r.json) as OutboxItem);
+  }
+
+  async deleteOutbox(id: string) {
+    await this.db.run('DELETE FROM outbox WHERE id = ?', [id]);
+  }
+
+  // ---- Envelopes already handled ----
+
+  async hasSeen(envelopeId: number) {
+    return (await this.db.first('SELECT 1 FROM seen WHERE id = ?', [envelopeId])) !== null;
+  }
+
+  async markSeen(envelopeId: number) {
+    await this.db.run('INSERT OR IGNORE INTO seen (id) VALUES (?)', [envelopeId]);
+  }
+
+  // ---- Small values ----
+
+  async getValue<T>(key: string) {
+    const r = await this.db.first<{ json: string }>('SELECT json FROM kv WHERE key = ?', [key]);
+    return r ? (JSON.parse(r.json) as T) : undefined;
+  }
+
+  async setValue<T>(key: string, value: T) {
+    await this.db.run('INSERT OR REPLACE INTO kv (key, json) VALUES (?, ?)', [key, JSON.stringify(value)]);
+  }
+
+  async deleteValue(key: string) {
+    await this.db.run('DELETE FROM kv WHERE key = ?', [key]);
+  }
+
+  // ---- All or nothing ----
+
+  // A transaction inside a transaction becomes a "savepoint", so it can be undone on its own.
+  async transaction<T>(work: () => Promise<T>): Promise<T> {
+    const name = `t${this.depth}`;
+    await this.db.exec(this.depth === 0 ? 'BEGIN' : `SAVEPOINT ${name}`);
+    this.depth++;
+    try {
+      const result = await work();
+      this.depth--;
+      await this.db.exec(this.depth === 0 ? 'COMMIT' : `RELEASE ${name}`);
+      return result;
+    } catch (err) {
+      this.depth--;
+      await this.db.exec(this.depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${name}; RELEASE ${name}`);
+      throw err;
+    }
+  }
+
+  // ---- Search (the phone's own, never the server's) ----
+
+  /** Finds messages containing every word typed, newest first. "not" finds "notes" too. */
+  async search(query: string, limit = 50): Promise<Found[]> {
+    const words = query
+      .split(/\s+/)
+      .map((w) => w.replace(/["*]/g, ''))
+      .filter(Boolean);
+    if (words.length === 0) return [];
+    const match = words.map((w) => `"${w}"*`).join(' ');
+    const rows = await this.db.all<{ text: string; chat_id: string; author: string; msg_id: string; sent_at: number }>(
+      'SELECT text, chat_id, author, msg_id, sent_at FROM search WHERE search MATCH ? ORDER BY sent_at DESC LIMIT ?',
+      [match, limit],
+    );
+    return rows.map((r) => ({ chatId: r.chat_id, author: r.author, id: r.msg_id, text: r.text, sentAt: Number(r.sent_at) }));
+  }
+
+  /** Forgets everything (signing in as someone else on this phone). */
+  async wipe() {
+    await this.db.exec('DELETE FROM chats; DELETE FROM messages; DELETE FROM outbox; DELETE FROM seen; DELETE FROM kv; DELETE FROM search;');
+  }
+}

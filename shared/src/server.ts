@@ -200,6 +200,29 @@ export class HttpServer implements ServerApi {
     return { token: r.token, user: meFromWire(r.user), deviceId: r.device_id, deviceUuid: r.device_uuid };
   }
 
+  /**
+   * Emulator tests only: signs in a pretend `…@test.pakchat` account. Works only
+   * when the server on the Mac was started with PAKCHAT_TEST_SIGN_IN=1.
+   */
+  async signInForTest(email: string, name: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
+    const r = await this.call<{ token: string; user: WireMe; device_id: number; device_uuid: string }>('POST', '/auth/test', {
+      email,
+      name,
+      device: deviceToWire(device),
+      ...keysToWire(keys),
+    });
+    return { token: r.token, user: meFromWire(r.user), deviceId: r.device_id, deviceUuid: r.device_uuid };
+  }
+
+  /** Is pretend sign-in switched on (so the app shows it)? */
+  async testSignInOn(): Promise<boolean> {
+    try {
+      return (await this.call<{ on?: boolean }>('GET', '/auth/test')).on === true;
+    } catch {
+      return false;
+    }
+  }
+
   async signOut() {
     await this.call('DELETE', '/auth/session');
   }

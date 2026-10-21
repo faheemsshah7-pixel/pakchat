@@ -21,10 +21,34 @@ defmodule Pakchat.Accounts do
   sends with every request. The server only keeps a hash of it.
   """
   def sign_in_with_google(id_token, device_attrs) do
+    with {:ok, claims} <- GoogleToken.verify(id_token) do
+      sign_in_as(claims, device_attrs)
+    end
+  end
+
+  @doc """
+  Signs in a pretend test account, for the Maestro tests on emulators (which
+  have no Google account). Only on a Mac that started the server with
+  PAKCHAT_TEST_SIGN_IN=1, never on the live server, and only for made-up
+  addresses ending in `@test.pakchat`, so it can never sign in as a real person.
+  """
+  def sign_in_for_test(email, name, device_attrs) when is_binary(email) and is_binary(name) do
+    email = String.downcase(String.trim(email))
+
+    if Application.get_env(:pakchat, :test_sign_in, false) and
+         String.ends_with?(email, "@test.pakchat") do
+      sign_in_as(%{"sub" => "test:" <> email, "email" => email, "name" => name}, device_attrs)
+    else
+      {:error, :not_allowed}
+    end
+  end
+
+  # Both ways of signing in end here: this phone takes over the account and
+  # the old devices are told to sign out.
+  defp sign_in_as(claims, device_attrs) do
     token = new_token()
 
-    with {:ok, claims} <- GoogleToken.verify(id_token),
-         {:ok, {user, device, old}} <-
+    with {:ok, {user, device, old}} <-
            Repo.transaction(fn -> take_over(claims, device_attrs, token) end) do
       Enum.each(old, &disconnect/1)
       {:ok, %{user: user, device: device, token: token}}

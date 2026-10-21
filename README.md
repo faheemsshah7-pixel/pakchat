@@ -3,6 +3,7 @@
 A WhatsApp-style chat app for Pakistan, on the web: https://pakchat-f89d8.web.app
 
 - `web/`: the web app (React + TypeScript + Vite)
+- `app/`: the new Android app (see its README)
 - `server/`: the new Phoenix server (see its README)
 - `shared/`: the new shared core for the app and the website (see its README)
 - `firestore.rules`: who can read and write what in the database

@@ -1,57 +1,65 @@
 # app — the PakChat phone app
 
-React Native with Expo, in TypeScript. This becomes the main PakChat: the chats
-live here on the phone, not on the server.
+React Native with Expo, in TypeScript. This is the main PakChat: your chats
+live here on the phone (in SQLite), and the server only passes locked
+messages along.
 
-## Run it
+## Run it on an emulator or a plugged-in phone
 
-```
-npm install      # first time only
-npx expo start
-```
-
-Then press:
-
-- `a` to open it in an Android emulator,
-- or scan the QR code with the **Expo Go** app on a real phone,
-- or `w` to open it in the browser for a quick look.
-
-Stop it with Ctrl+C.
-
-## What the starter screen does
-
-It shows the PakChat header and checks whether the Phoenix server is reachable.
-If the server is not running it says "Not reachable" — that is correct, not a bug.
-
-On a **real phone** `localhost` means the phone itself, so the check will fail
-until you put the Mac's wifi address in `src/server.ts`:
+The server must be running first (see `../server/README.md`).
 
 ```
-ipconfig getifaddr en0      # e.g. 192.168.1.5
+npm install              # first time, and after an update
+npx expo run:android     # builds the app and opens it
 ```
+
+Expo Go can't open this app: it has its own native parts (Signal's encryption
+in `modules/pakchat-signal`, Google sign-in), so it needs a real build.
+
+## Which server it talks to
+
+On the sign-in screen, tap **Server address**:
+
+- an emulator: `http://10.0.2.2:4000` (that's "this Mac", seen from the emulator)
+- a real phone on the same Wi-Fi: `http://<your Mac's address>:4000`
+  (find it with `ipconfig getifaddr en0`)
+
+## Checks (run all of them before handing anything over)
+
+```
+npm run typecheck
+npm run lint
+npm test                 # Vitest: the phone's database
+```
+
+## The two-phone test (Maestro)
+
+Two emulators sign in with test accounts, chat, one goes offline, comes back
+and catches up. Start the server with test sign-in on, start two emulators,
+install the APK on both, then:
+
+```
+bash maestro/two-phones.sh
+```
+
+Test sign-in only works when the server was started with
+`PAKCHAT_TEST_SIGN_IN=1`, on your Mac, for made-up `@test.pakchat` names.
 
 ## The files
 
 ```
-index.ts          the entry point; hands over to App.tsx
-App.tsx           the first screen
-src/server.ts     where the server is, and the health check
-app.json          the app's name, icons, Android package name
-assets/           icons and the splash image (still Expo's defaults)
+src/app/          the screens (every file is one; _layout.tsx files hold them together)
+src/core/         core.ts runs the PakChat client; hooks.ts gives screens their data
+src/data/         sqliteStorage.ts: everything saved on the phone, and search
+src/ui/           the building blocks: kit.tsx, icons, overlays (menus, sheets), motion
+src/theme/        Sky and Graphite looks, the accent colours
+src/i18n/         every word on screen, in English and Urdu
+modules/          pakchat-signal: Signal's encryption, in Kotlin
+plugins/          small changes Expo makes to the Android project
+maestro/          the emulator tests
+test/             Vitest tests
+app.json          the app's name, icons, fonts, Android package name
 AGENTS.md         notes for AI agents working in this folder
 ```
 
-## Words you will keep seeing
-
-- **Expo** is the toolkit around React Native. It runs the app without Android
-  Studio or Xcode in the way.
-- **Expo Go** is the app you install on a phone to open your project while
-  building it. Later we make a real installable APK instead.
-- **Metro** is the bundler, React Native's version of Vite.
-- **A View** is a `div`. **Text** is the only way to show words. There is no
-  CSS file: styles are plain objects in `StyleSheet.create`.
-
-## Next
-
-Phase 1 is the encryption spike, which is a throwaway app, not this one.
-Phase 4 builds the real chat screens here, carried over from the website's design.
+The `android/` folder is made by `npx expo prebuild` and isn't saved in git.

@@ -1,0 +1,15 @@
+# In an open chat: sends three messages one after another.
+appId: com.pakchat.app
+---
+- tapOn:
+    id: composer
+- inputText: Library at 4pm then
+- tapOn:
+    id: send
+- inputText: Bring chapter 3
+- tapOn:
+    id: send
+- inputText: Don't be late
+- tapOn:
+    id: send
+- assertVisible: Don't be late

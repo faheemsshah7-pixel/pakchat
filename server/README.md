@@ -31,10 +31,17 @@ Copy `.env.example` to `.env` and fill in `GOOGLE_CLIENT_IDS` (from Google Cloud
 APIs & Services, Credentials). Git ignores `.env`, so it never leaves your Mac.
 Without it the server runs fine, but nobody can sign in.
 
+The server listens on your Wi-Fi too (port 4000), so your phone can reach it at
+your Mac's Wi-Fi address (`ipconfig getifaddr en0` prints it).
+
+For the emulator tests (`app/maestro`), start it with pretend accounts allowed:
+`PAKCHAT_TEST_SIGN_IN=1 mix phx.server`. They only work for made-up
+`@test.pakchat` addresses, and never in production.
+
 ## Test it
 
 ```
-mix test            # all the tests (57 of them)
+mix test            # all the tests (60 of them)
 mix credo           # style checks
 mix format          # tidies the code
 ```

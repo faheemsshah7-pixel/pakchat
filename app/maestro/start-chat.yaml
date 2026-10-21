@@ -1,0 +1,18 @@
+# Starts a chat with OTHER (their test address) and sends TEXT.
+appId: com.pakchat.app
+---
+- tapOn:
+    id: new-chat
+- tapOn:
+    id: find-field
+- inputText: ${OTHER}@test.pakchat
+- tapOn:
+    id: find
+- tapOn:
+    id: found-person
+- tapOn:
+    id: composer
+- inputText: ${TEXT}
+- tapOn:
+    id: send
+- assertVisible: ${TEXT}

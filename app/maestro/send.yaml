@@ -1,0 +1,9 @@
+# In an open chat: sends TEXT.
+appId: com.pakchat.app
+---
+- tapOn:
+    id: composer
+- inputText: ${TEXT}
+- tapOn:
+    id: send
+- assertVisible: ${TEXT}

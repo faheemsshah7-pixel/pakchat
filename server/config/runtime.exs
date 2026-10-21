@@ -46,6 +46,10 @@ if config_env() != :test do
 end
 
 if config_env() == :dev do
+  # Pretend accounts for the emulator tests (app/maestro). Off unless you start
+  # the server with PAKCHAT_TEST_SIGN_IN=1. Never on in production.
+  config :pakchat, :test_sign_in, System.get_env("PAKCHAT_TEST_SIGN_IN") == "1"
+
   # Reload browser tabs when matching files change.
   config :pakchat, PakchatWeb.Endpoint,
     live_reload: [

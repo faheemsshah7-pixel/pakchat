@@ -1,7 +1,13 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": "expo/tsconfig.base.json",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // The shared core (../shared) imports these; the type checker finds them in the app's own
+    // node_modules. (Only for checking: app.json turns tsconfigPaths off so Metro ignores this.)
+    "paths": {
+      "phoenix": ["./node_modules/@types/phoenix"],
+      "vitest": ["./node_modules/vitest"]
+    }
   },
   "exclude": [
     "node_modules",

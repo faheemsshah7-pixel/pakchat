@@ -1268,3 +1268,73 @@ example from RFC 7748.
 - In `test/chat.test.ts`, find `chaos = { shuffle: true, duplicate: true }`. That's the pretend
   server jumbling and doubling everything. The test still passes, because of the lane and the
   remembered ids.
+
+## Step 26: Phase 4, the Android app
+
+| Part | Files |
+|---|---|
+| The screens | `app/src/app/` (new): `sign-in.tsx`, `(tabs)/`, `chat/[id].tsx`, `info/[id].tsx`, `new-chat.tsx`, `new-group.tsx`, `search.tsx`, `settings/`… |
+| Building blocks and movement | `app/src/ui/` (new): `kit.tsx`, `icons.tsx`, `motion.ts`, `overlays.tsx`, `ChatRow.tsx`, `chat/` |
+| Talking to the shared core | `app/src/core/core.ts`, `app/src/core/hooks.ts` (new) |
+| Chats kept on the phone, and search | `app/src/data/sqliteStorage.ts`, `app/test/sqliteStorage.test.ts` (new) |
+| Keys kept on the phone | `app/modules/pakchat-signal/android/` (`AndroidKeyBackend.kt`, `SavedStore.kt`, `SignalDevice.kt`) |
+| Look and words | `app/src/theme/`, `app/src/i18n/strings.ts` |
+| Emulator tests | `app/maestro/` (new) |
+| Server | `config/dev.exs` (listens on Wi-Fi), test sign-in in `accounts.ex` and `auth_controller.ex` |
+| Gone | the Phase 1 test screen: `App.tsx`, `index.ts`, `src/server.ts`, `src/spike/`, `spike-check/` (the real app replaced it, and its checks now live in `shared/`) |
+
+Phase 3 built the chat app without screens. This step gives it screens, on Android, in
+**React Native** with **Expo**.
+
+### Screens are files
+With **Expo Router**, every file in `app/src/app/` is a screen, and its path is its address:
+`chat/[id].tsx` is the screen for `/chat/123`, and `[id]` means "any chat id". `_layout.tsx` files
+wrap the screens inside them: the top one decides whether you see the sign-in screen or the app,
+and `(tabs)/_layout.tsx` draws the four tabs at the bottom.
+
+### The phone's database answers first
+Every screen reads from **SQLite** on the phone (`sqliteStorage.ts`), never from the network. So
+the chat list shows straight away, even in a lift. When something new arrives, the core saves it
+and calls `emit('chats')` or `emit('messages:<chat>')`; the hooks in `hooks.ts` hear that, read
+the database again, and the screen updates. Search uses SQLite's **FTS5**, a ready-made word index:
+it finds "notes" when you type "not", works in Urdu too, and never leaves the phone.
+
+### The keys stay safe
+Signal's keys live in the Kotlin module, in their own database that Android keeps out of backups.
+Each value is locked with a key held by the **Android Keystore**, a safe inside the phone that even
+the app can't read out. The app only ever asks it "lock this" or "unlock this".
+
+### Signing in with Google
+The phone shows its Google accounts (Android's **Credential Manager**). You pick one and Google
+hands the app a signed **ID token**. The app sends it to our server, which checks Google's
+signature and that the token was made for PakChat (`GOOGLE_CLIENT_IDS` in `server/.env`).
+No password ever touches PakChat.
+
+### How things move
+Everything that moves uses **Reanimated springs** (`motion.ts`) instead of fixed-time animations.
+A spring keeps your finger's speed: let go of a swipe and the row carries on and settles, rather
+than jumping. Gestures (`usePanGesture`) run on the phone's UI thread, so they don't stutter even
+while the JavaScript is busy. If "Remove animations" is on in the phone's settings, Reanimated jumps
+straight to the end.
+
+### Urdu, right to left
+Pick اردو and every screen flips at once, without restarting. The layout engine (**Yoga**) has a
+`direction: 'rtl'` switch: rows run from the right, `start` and `end` swap sides, and arrows are
+turned around by hand (`<Icon flip />`). Urdu words use **Noto Nastaliq Urdu**, built into the app,
+which needs much taller lines than English. Each bit of text picks its font from its own letters, so
+an Urdu message in an English chat still looks right.
+
+### Testing on two emulators
+**Maestro** drives the app like a person: tap this, type that, wait until that shows. The emulators
+have no Google account, so the server can make pretend `…@test.pakchat` accounts, but only when you
+start it with `PAKCHAT_TEST_SIGN_IN=1`, and never for real Gmail addresses. `two-phones.sh` signs
+in Ali and Sara, has them chat, turns Sara's network off, has Ali send three messages, turns it back
+on, and checks they arrive in order.
+
+### Try this
+- In `app/src/ui/motion.ts`, change `smooth`'s `damping: 24` to `8`, rebuild, and swipe a chat.
+  It wobbles like jelly. Change it back.
+- In `app/src/i18n/strings.ts`, change `quickOk: 'Theek hai'` to your own phrase. It shows up in
+  the one-tap answers in every chat.
+- Open the app, go to You > Language > اردو, and watch the tabs, the swipe arrows and the switches
+  turn round.

@@ -119,8 +119,12 @@ describe.each(WAYS)('groups (%s)', (_label, a, b) => {
   test('offline in a group: catches up, in order, even when it arrives jumbled', async () => {
     const { ali, sara, bilal, group } = await study();
     sara.client.stop();
+    // Each one reaches the server before the next is written (sending happens in
+    // the background, so without the waits Ali's second could beat Bilal's).
     await ali.client.sendText(group.id, 'Library at 4pm then');
+    await w.settle();
     await bilal.client.sendText(group.id, 'Done, see you there');
+    await w.settle();
     await ali.client.sendText(group.id, 'Bring chapter 3');
     await w.settle();
     // The group keys and the messages come back to front.
@@ -128,6 +132,8 @@ describe.each(WAYS)('groups (%s)', (_label, a, b) => {
     sara.client.start();
     await w.settle();
     expect(await w.texts(sara, group.id)).toEqual(['Ali: Library at 4pm then', 'Bilal: Done, see you there', 'Ali: Bring chapter 3']);
+    // And in the same order as everyone else.
+    expect(await w.texts(ali, group.id)).toEqual(await w.texts(sara, group.id));
   });
 
   test('a reinstalled member asks for what they missed, and gets it', async () => {

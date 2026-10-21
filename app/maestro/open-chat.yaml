@@ -1,0 +1,10 @@
+# Opens the chat with OTHER from the chat list and waits until TEXT shows.
+appId: com.pakchat.app
+---
+- extendedWaitUntil:
+    visible: ${OTHER}
+    timeout: 30000
+- tapOn: ${OTHER}
+- extendedWaitUntil:
+    visible: ${TEXT}
+    timeout: 30000

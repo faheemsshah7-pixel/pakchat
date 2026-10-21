@@ -1,0 +1,16 @@
+# After coming back online: all three arrived, in the order they were sent.
+appId: com.pakchat.app
+---
+- extendedWaitUntil:
+    visible: Don't be late
+    timeout: 60000
+- assertVisible: Library at 4pm then
+- assertVisible: Bring chapter 3
+- assertVisible:
+    text: Library at 4pm then
+    above:
+      text: Bring chapter 3
+- assertVisible:
+    text: Bring chapter 3
+    above:
+      text: Don't be late

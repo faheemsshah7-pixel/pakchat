@@ -1,0 +1,33 @@
+# One phone: Graphite look, a green accent, then Urdu (every screen right to left), and back.
+appId: com.pakchat.app
+---
+- tapOn:
+    id: tab-you
+- tapOn:
+    id: mode-graphite
+- tapOn:
+    id: accent-green
+- tapOn:
+    id: open-language
+- tapOn:
+    id: lang-ur
+- assertVisible: زبان
+- tapOn:
+    id: back
+- assertVisible: سیٹنگز
+- tapOn:
+    id: tab-index
+- assertVisible: پاک چیٹ
+- tapOn:
+    id: tab-you
+- tapOn:
+    id: open-language
+- tapOn:
+    id: lang-en
+- tapOn:
+    id: back
+- tapOn:
+    id: mode-sky
+- tapOn:
+    id: accent-blue
+- assertVisible: Settings
