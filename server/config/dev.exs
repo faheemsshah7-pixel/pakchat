@@ -52,6 +52,13 @@ config :pakchat, PakchatWeb.Endpoint,
 # configured to run both http and https servers on
 # different ports.
 
+# On the Mac, the website runs on 5173 (Vite) and the app's web preview on 8081 (Expo).
+config :pakchat, :allowed_origins, [
+  "http://localhost:5173",
+  "http://localhost:4173",
+  "http://localhost:8081"
+]
+
 # Enable dev routes for dashboard and mailbox
 config :pakchat, dev_routes: true
 

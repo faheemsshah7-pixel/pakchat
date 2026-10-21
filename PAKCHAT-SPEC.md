@@ -339,7 +339,7 @@ and the website, and phases 9 to 11 test it with real people, move users across 
 - **Done when:** messages decrypt on both phones and in the group after a reconnect.
 - **If it can't be made to work:** stop and tell the owner. The fallback is to launch with
   transport encryption first and add end-to-end encryption in a later release.
-- **Result (20 Oct): it works in the cloud tests**, and the owner checks it on their Pixel with the APK. What the next agents need to know:
+- **Result (20 Oct): it works.** All 10 steps passed on the owner's Pixel (release APK) and in the cloud tests. What the next agents need to know:
   - We use Signal's official **libsignal 0.105.1**, wrapped in a local Expo module
     (`app/modules/pakchat-signal`, Kotlin). Signal now publishes it on its own Maven server
     (`build-artifacts.signal.org/libraries/maven`), not Maven Central; `app/plugins/withSignal.js` adds
@@ -372,6 +372,31 @@ and the website, and phases 9 to 11 test it with real people, move users across 
   - ExUnit tests prove that nobody can send to, or read for, a chat or device they don't belong to.
   - They prove that envelopes vanish once they're delivered.
   - They prove the privacy settings are obeyed.
+- **Result (21 Oct): done.** 55 ExUnit tests pass, `mix format` and `mix credo --strict` are clean, and a
+  real WebSocket test (Phoenix's JS client) sent, received and acked an envelope. What the next agents need to know:
+  - `server/README.md` lists every address. JSON uses snake_case and base64 for bytes. A key bundle has the
+    same fields as the spike's `Bundle` type, in snake_case (`pre_key_id`, `kyber_pre_key`…); `pre_key` is
+    null when the one-time keys run out, and the Kyber key falls back to the last-resort one.
+  - Sign-in: `POST /api/auth/google` with `id_token`, `device` (public keys) and optional `pre_keys` /
+    `kyber_pre_keys`. It returns a session token (only its SHA-256 is stored). Signing in again replaces
+    every device. The server needs `GOOGLE_CLIENT_IDS` in `server/.env`; phase 4 must create the Android
+    OAuth client (and use the web client id as the token's audience).
+  - Linked devices: `Accounts.add_linked_device/2` exists (max 4, device ids 2 to 127), but has no address yet.
+    Phase 8 puts the QR flow in front of it.
+  - The live connection: `/socket/websocket?token=…`, join `device:<device uuid>` with optional
+    `{after: {chat_id: N}}`. Events in: `send`, `ack {ids}`, `sync {after}`, `receipt`, `typing`, `watch`,
+    `unwatch`. Events out: `envelopes`, `typing`, `presence`. See the top of `device_channel.ex`.
+  - `send` takes `{chat_id, kind, envelopes: [{user_id, device_id, type, body}], group: {type, body}}`.
+    One-to-one chats must cover every device of both people except the sender's own; otherwise the reply is
+    `stale_devices` with `missing` and `extra`. Groups send one `group` body (type 7) that the server copies.
+  - An envelope can arrive twice (live and from the waiting list, around a reconnect). The shared core must
+    drop envelope ids it has seen.
+  - Receipts and group notes come as `data` (plain JSON the server already knows); messages come as `body`.
+  - "Only admins can send" lets `kind: "reaction"` through. The server can't check that a "reaction" really is
+    one, so phase 3 must also ignore non-reactions from non-admins in those groups.
+  - Push is a stub (`Pakchat.Push.Notify` only logs). Phase 5 sends real FCM alerts there.
+  - In the cloud: Erlang and Elixir come prebuilt from builds.hex.pm (Ubuntu 24.04, OTP 28, Elixir 1.19), and
+    Postgres 16 is preinstalled (`service postgresql start`, password `postgres`).
 
 ### Phase 3: The shared core
 - The Signal Protocol: one-to-one sessions, several devices per person, and sender keys for groups.
@@ -519,7 +544,7 @@ plus the same three steps.
 | Web address | Keep pakchat-f89d8.web.app. A custom domain is optional |
 | Store name and app ID | "PakChat", `com.pakchat.app` (check it's free) |
 | Channels | Later, after launch |
-| First audience | Students and friend groups (the owner decides) |
+| First audience | **Decided 21 Oct: everyone** (the public, not just students) |
 | If the phase 1 encryption test fails | Launch with transport encryption first and add end-to-end later (ask the owner) |
 
 ---

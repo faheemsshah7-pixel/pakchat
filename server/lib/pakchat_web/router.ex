@@ -12,7 +12,11 @@ defmodule PakchatWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug :allow_other_sites
+  end
+
+  # Everything after sign-in: needs a device's session token.
+  pipeline :signed_in do
+    plug PakchatWeb.Plugs.Auth
   end
 
   scope "/", PakchatWeb do
@@ -26,6 +30,46 @@ defmodule PakchatWeb.Router do
     pipe_through :api
 
     get "/health", HealthController, :show
+    post "/auth/google", AuthController, :google
+  end
+
+  scope "/api", PakchatWeb do
+    pipe_through [:api, :signed_in]
+
+    delete "/auth/session", AuthController, :sign_out
+
+    get "/me", MeController, :show
+    patch "/me", MeController, :update
+    put "/me/push", MeController, :push
+
+    get "/keys", KeyController, :count
+    post "/keys", KeyController, :upload
+
+    get "/users/lookup", UserController, :lookup
+    get "/users/:id", UserController, :show
+    get "/users/:id/presence", UserController, :presence
+    get "/users/:id/devices", KeyController, :devices
+    post "/users/:id/bundles", KeyController, :bundles
+
+    get "/chats", ChatController, :index
+    post "/chats/direct", ChatController, :direct
+    get "/chats/:id", ChatController, :show
+
+    post "/groups", GroupController, :create
+    patch "/groups/:id", GroupController, :update
+    post "/groups/:id/members", GroupController, :add_members
+    delete "/groups/:id/members/:user_id", GroupController, :remove_member
+    put "/groups/:id/admins/:user_id", GroupController, :make_admin
+    delete "/groups/:id/admins/:user_id", GroupController, :remove_admin
+    post "/groups/:id/invite", GroupController, :reset_invite
+    delete "/groups/:id/invite", GroupController, :remove_invite
+
+    get "/invites/:code", InviteController, :show
+    post "/invites/:code/join", InviteController, :join
+
+    get "/blocks", BlockController, :index
+    put "/blocks/:user_id", BlockController, :create
+    delete "/blocks/:user_id", BlockController, :delete
   end
 
   # Enable LiveDashboard in development
@@ -42,13 +86,5 @@ defmodule PakchatWeb.Router do
 
       live_dashboard "/dashboard", metrics: PakchatWeb.Telemetry
     end
-  end
-
-  # Browsers block a page from reading answers from a different address unless
-  # the server says it is allowed. The app's web preview runs on port 8081 and
-  # this server on 4000, which counts as different. The phone app itself does
-  # not need this. Phase 2 narrows it down to PakChat's own addresses.
-  defp allow_other_sites(conn, _opts) do
-    put_resp_header(conn, "access-control-allow-origin", "*")
   end
 end

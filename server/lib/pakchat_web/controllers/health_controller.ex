@@ -7,9 +7,10 @@ defmodule PakchatWeb.HealthController do
   server that cannot reach Postgres reports itself as unhealthy.
   """
   use PakchatWeb, :controller
+  alias Ecto.Adapters.SQL
 
   def show(conn, _params) do
-    case Ecto.Adapters.SQL.query(Pakchat.Repo, "SELECT 1", []) do
+    case SQL.query(Pakchat.Repo, "SELECT 1", []) do
       {:ok, _} -> json(conn, %{status: "ok", database: "ok"})
       {:error, _} -> conn |> put_status(503) |> json(%{status: "error", database: "down"})
     end

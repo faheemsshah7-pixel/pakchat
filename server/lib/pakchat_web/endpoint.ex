@@ -11,6 +11,16 @@ defmodule PakchatWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # The always-open connection each phone and website keeps (see
+  # channels/device_socket.ex). It is opened with a session token, never a
+  # cookie, so another website can't use it on someone's behalf, and we
+  # don't need to check which website it comes from. (The phone app's
+  # connection library also sends the server's own address as its "origin",
+  # which a strict check would wrongly refuse.)
+  socket "/socket", PakchatWeb.DeviceSocket,
+    websocket: [check_origin: false],
+    longpoll: false
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
@@ -48,6 +58,8 @@ defmodule PakchatWeb.Endpoint do
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
 
+  # Lets PakChat's own websites call /api (see plugs/cors.ex).
+  plug PakchatWeb.Plugs.CORS
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options

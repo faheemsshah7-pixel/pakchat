@@ -12,8 +12,12 @@ defmodule Pakchat.Application do
       Pakchat.Repo,
       {DNSCluster, query: Application.get_env(:pakchat, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Pakchat.PubSub},
-      # Start a worker by calling: Pakchat.Worker.start_link(arg)
-      # {Pakchat.Worker, arg},
+      # Who's online.
+      Pakchat.Presence,
+      # Background jobs: push alerts and the hourly clean-up.
+      {Oban, Application.fetch_env!(:pakchat, Oban)},
+      # Counts for the rate limits.
+      Pakchat.RateLimit,
       # Start to serve requests, typically the last entry
       PakchatWeb.Endpoint
     ]

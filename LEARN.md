@@ -1088,3 +1088,91 @@ build: the APK. From now on we use our own builds.
 - Look at **What the server saw last**: who it's from, who it's for, and gibberish.
 - In `scenario.ts`, change `'Are you there?'` in `whileAway` to something else, and run the computer
   test (`cd app/spike-check && npm install && npm test`, it's a big download) to watch it fail.
+
+## Step 24: Phase 2, the Phoenix server
+
+| Part | Files |
+|---|---|
+| Signing in and devices | `server/lib/pakchat/accounts.ex`, `accounts/google_token.ex`, `accounts/google_keys.ex` (new) |
+| Signal's public keys | `server/lib/pakchat/keys.ex` (new) |
+| Chats and groups | `server/lib/pakchat/chats.ex`, `chats/` (new) |
+| The relay | `server/lib/pakchat/relay.ex`, `relay/` (new) |
+| Online, last seen, privacy | `server/lib/pakchat/presence.ex`, `privacy.ex` (new) |
+| Push alerts (pretend for now), rate limits | `server/lib/pakchat/push.ex`, `push/notify.ex`, `rate_limit.ex` (new) |
+| The addresses the app calls | `server/lib/pakchat_web/router.ex`, `controllers/` |
+| The live connection | `server/lib/pakchat_web/channels/` (new) |
+| The tables | `server/priv/repo/migrations/` (new) |
+| The tests | `server/test/` |
+
+The server the app will talk to is built. It does as little as it can: it knows who people are
+and which chats they're in, and it passes along locked messages it can't read.
+
+### Signing in
+The app signs in with Google and gets a **token** from Google: a few facts (your Gmail, name and
+Google id) signed by Google. The server checks the signature with Google's public key, that Google
+made it for PakChat, and that it hasn't run out (`google_token.ex`). Then it gives that phone its
+own **session token**, which the phone sends with everything after (`Authorization: Bearer …`).
+The server only keeps a **hash** of it (a fingerprint), so even someone who copied the database
+couldn't use it.
+
+Signing in on a new phone takes the account over, like WhatsApp: the old phone and any linked
+devices are signed out.
+
+### Devices and keys
+Each phone or website is a **device** with its own Signal keys (step 23). The server keeps only
+the public halves. Starting a chat with Sara means taking one of her **bundles**
+(`POST /api/users/:id/bundles`). Each one-time key in it is handed out once and deleted
+(`keys.ex`), and two people asking at the same moment never get the same one (that's what
+`FOR UPDATE SKIP LOCKED` does). When the Kyber ones run out, her "last resort" Kyber key is used.
+
+### Envelopes: hold until delivered, then delete
+This is the heart of it (`relay.ex`):
+1. Ali's phone locks the message once **for each device** that should get it: Sara's phone, Sara's
+   website, and Ali's own website (so it stays in sync). Each locked copy is an **envelope**.
+2. The chat's **counter** gives it the next number (`seq`). Every message in a chat gets one.
+3. Each envelope is saved in the `pending_envelopes` table and pushed straight away to devices
+   that are online. An offline phone gets a push alert with **nothing in it**, which just wakes the
+   app up to collect (pretend for now; real ones come in phase 5).
+4. The device says "got it" (`ack`) and the envelope is **deleted**. Anything never collected is
+   deleted after 30 days by a background job (**Oban**) that runs every hour.
+
+If Ali's phone forgets a device (Sara just linked her website), the server says **stale devices**
+and lists the missing one. The phone fetches its keys and sends again. That's how no device is
+ever left out.
+
+When a phone reconnects on a weak network, it can say "I already have chat X up to 41". The
+server deletes those and sends only 42 onwards. Nothing is downloaded twice.
+
+### Groups
+A group message is locked **once** with the sender's group key (step 23) and the server copies it
+to every member's devices. The server knows who's in each group, so it enforces the rules: only
+admins can change the group, add or remove people, or make links; "only admins can send" (but
+everyone can still react); and a group always keeps an admin. Each change also goes to everyone as
+a small **system note** ("Ali added Sara"), numbered in the same counter as the messages.
+
+### Ticks, typing and online
+- **Ticks** are tiny envelopes with no words: "Sara has read numbers 5 and 6". With read receipts
+  off, neither side gets blue ticks in one-to-one chats, as in WhatsApp (groups always do).
+- **Typing…** goes straight to the others' open connections and is **never saved**.
+- **Online** comes from **Phoenix Presence**: each open connection registers itself, and it's
+  removed the moment the connection drops. **Last seen** is saved when it closes.
+- Privacy (`privacy.ex`): last seen for everyone, my contacts (people I have a chat with) or nobody;
+  online for everyone or "same as last seen". If you hide your last seen, you can't see other
+  people's. People who blocked each other see neither.
+
+### Block and rate limits
+Someone who blocked you never gets your messages, typing or ticks. Your phone isn't told; it just
+stays on one tick. **Rate limits** (`rate_limit.ex`) stop anyone from trying thousands of Gmail
+addresses, using up someone's keys, or flooding a chat. The limits are in `config/config.exs`.
+
+### "Not yours" looks like "doesn't exist"
+Ask for a chat you're not in and the answer is 404, the same as for a chat that doesn't exist. So
+nobody can even find out which chats are real.
+
+### Try this
+- Run the tests: `cd server && mix test`. Then open
+  `test/pakchat_web/channels/device_channel_test.exs` and read the test names: each one is a rule.
+- In `config/config.exs`, change `lookup: {30, 60_000}` to `{3, 60_000}` and run the tests. Watch
+  "looking up too many people is stopped" fail, because it expects 30. Change it back.
+- Start the server (`mix phx.server`) and open http://localhost:4000/dev/dashboard. Under
+  **Processes** you can see Oban and Presence running.

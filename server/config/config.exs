@@ -11,6 +11,38 @@ config :pakchat,
   ecto_repos: [Pakchat.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Background jobs (Oban). "push" sends alerts; Cron runs the hourly clean-up
+# that deletes envelopes nobody collected in 30 days.
+config :pakchat, Oban,
+  engine: Oban.Engines.Basic,
+  repo: Pakchat.Repo,
+  queues: [default: 10, push: 20],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 86_400},
+    {Oban.Plugins.Cron, crontab: [{"@hourly", Pakchat.Relay.Cleanup}]}
+  ]
+
+# Rate limits: {how many, per how many milliseconds}.
+config :pakchat, :rate_limits,
+  # Sign-ins, per internet address.
+  sign_in: {10, 60_000},
+  # Finding people by Gmail, per person.
+  lookup: {30, 60_000},
+  # Taking someone's keys to start a chat, per person.
+  keys: {60, 60_000},
+  # Sending messages, per device.
+  send: {100, 10_000},
+  # Making groups, per person.
+  groups: {20, 60_000},
+  # Looking up and using invite links, per person.
+  invites: {20, 60_000}
+
+# Websites allowed to talk to the server (the phone app doesn't need this).
+config :pakchat, :allowed_origins, [
+  "https://pakchat-f89d8.web.app",
+  "https://pakchat-f89d8.firebaseapp.com"
+]
+
 # Configure the endpoint
 config :pakchat, PakchatWeb.Endpoint,
   url: [host: "localhost"],

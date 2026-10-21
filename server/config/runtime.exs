@@ -16,12 +16,34 @@ import Config
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
+# On the Mac, read settings from server/.env (KEY=value, one per line), so
+# secrets live in a file git ignores instead of in the code.
+if config_env() == :dev and File.exists?(".env") do
+  for line <- File.read!(".env") |> String.split("\n", trim: true),
+      not String.starts_with?(String.trim(line), "#"),
+      [key, value] <- [String.split(line, "=", parts: 2)],
+      System.get_env(String.trim(key)) == nil do
+    System.put_env(String.trim(key), String.trim(value))
+  end
+end
+
 if System.get_env("PHX_SERVER") do
   config :pakchat, PakchatWeb.Endpoint, server: true
 end
 
 config :pakchat, PakchatWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+
+# PakChat's Google client ids, comma separated (from Google Cloud's
+# "Credentials" page). Sign-in tokens made for any other app are refused.
+# On the Mac, put GOOGLE_CLIENT_IDS=... in server/.env (git ignores it).
+if config_env() != :test do
+  config :pakchat,
+         :google_client_ids,
+         System.get_env("GOOGLE_CLIENT_IDS", "")
+         |> String.split(",", trim: true)
+         |> Enum.map(&String.trim/1)
+end
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.

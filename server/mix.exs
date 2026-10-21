@@ -54,7 +54,15 @@ defmodule Pakchat.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      # Background jobs: push alerts and clearing out old envelopes.
+      {:oban, "~> 2.24"},
+      # Checks the signature on Google's sign-in tokens.
+      {:jose, "~> 1.11"},
+      # Fetches Google's public keys.
+      {:req, "~> 0.7.5"},
+      # Style checks: `mix credo`.
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -70,7 +78,13 @@ defmodule Pakchat.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "credo --strict",
+        "test"
+      ]
     ]
   end
 end

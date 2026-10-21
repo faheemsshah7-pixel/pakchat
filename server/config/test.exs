@@ -36,3 +36,14 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Background jobs don't run by themselves in tests; tests check they were queued.
+config :pakchat, Oban, testing: :manual
+
+# Tests sign their own pretend Google tokens (see test/support/google_fake.ex).
+config :pakchat, :google_keys, Pakchat.GoogleFake
+config :pakchat, :google_client_ids, ["pakchat-test.apps.googleusercontent.com"]
+config :pakchat, :allowed_origins, ["http://localhost:5173"]
+
+# Every test signs in from the same address, so allow more sign-ins here.
+config :pakchat, :rate_limits, sign_in: {1000, 60_000}
