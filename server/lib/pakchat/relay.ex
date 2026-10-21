@@ -34,14 +34,22 @@ defmodule Pakchat.Relay do
 
   `params`:
     * `kind`: "message", or "reaction" (reactions are still allowed when only
-      admins can send, as in today's app).
+      admins can send, as in today's app), or "control".
     * `envelopes`: `[%{user_id, device_id, type, body}]`, locked for one device each.
     * `group`: `%{type, body}`, locked once with the sender's group key and
       copied to every device in the group. Groups only.
+    * `devices`: groups only, optional. `[%{user_id, device_id}]`: every device
+      the sender thinks is in the group. If that's out of date, the reply is
+      `stale_devices`, so the sender learns about a new phone or website.
 
   For a one-to-one chat the sender must cover every device exactly. If the
   list is out of date (someone linked a new device), it gets back
   `{:stale_devices, %{missing, extra}}`, fetches the new keys and tries again.
+
+  "control" is the app's own housekeeping, for just a few devices: "I can't
+  open your message, please send it again", or a group key. It needs no group
+  copy and doesn't have to cover every device, and anyone in the chat may send
+  it, even when only admins can send. Each app checks what's inside.
   """
   def send_message(%Device{} = sender, chat_id, params) do
     kind = params[:kind] || "message"
@@ -52,7 +60,7 @@ defmodule Pakchat.Relay do
          :ok <- validate(kind, envelopes, group),
          :ok <- may_send(chat, sender.user_id, kind),
          devices = recipients(chat.id, sender),
-         :ok <- check_devices(chat, devices, envelopes, group) do
+         :ok <- check_devices(chat, kind, devices, envelopes, group, params[:devices]) do
       # In a one-to-one chat, someone who blocked you never gets your
       # messages. You aren't told, as in WhatsApp: it just stays on one tick.
       blocked = blocked_by(chat, sender.user_id)
@@ -93,12 +101,17 @@ defmodule Pakchat.Relay do
     end
   end
 
+  # The kinds a device may send. A control message ("please send that
+  # again", a resend) goes to named devices only, never as a group copy.
+  defp valid_kind("control", envelopes, group), do: group == nil and envelopes != []
+  defp valid_kind(kind, _envelopes, _group), do: kind in ["message", "reaction"]
+
   defp validate(kind, envelopes, group) do
     sealed = if group, do: [group | envelopes], else: envelopes
     targets = Enum.map(envelopes, &{&1.user_id, &1.device_id})
 
     cond do
-      kind not in ["message", "reaction"] -> {:error, :bad_request}
+      not valid_kind(kind, envelopes, group) -> {:error, :bad_request}
       Enum.any?(sealed, &(byte_size(&1.body) > @max_body)) -> {:error, :too_big}
       Enum.any?(sealed, &(&1.type not in @signal_types)) -> {:error, :bad_request}
       length(Enum.uniq(targets)) != length(targets) -> {:error, :bad_request}
@@ -120,24 +133,35 @@ defmodule Pakchat.Relay do
   end
 
   # A one-to-one message has no group copy. A group message needs something to send.
-  defp check_devices(%Chat{kind: "direct"}, _devices, _envelopes, group) when group != nil,
+  defp check_devices(%Chat{kind: "direct"}, _kind, _devices, _envelopes, group, _known)
+       when group != nil,
+       do: {:error, :bad_request}
+
+  defp check_devices(%Chat{kind: "group"}, _kind, _devices, [], nil, _known),
     do: {:error, :bad_request}
 
-  defp check_devices(%Chat{kind: "group"}, _devices, [], nil), do: {:error, :bad_request}
-
-  defp check_devices(chat, devices, envelopes, _group) do
+  defp check_devices(chat, kind, devices, envelopes, _group, known) do
     expected = MapSet.new(devices, fn {user, dev, _} -> {user, dev} end)
     given = MapSet.new(envelopes, &{&1.user_id, &1.device_id})
-    missing = MapSet.difference(expected, given)
     extra = MapSet.difference(given, expected)
 
-    cond do
-      # Locked for a device that isn't in the chat (any more).
-      MapSet.size(extra) > 0 -> stale(missing, extra)
-      # One-to-one: every device must be covered. (Groups get the group copy.)
-      chat.kind == "direct" and MapSet.size(missing) > 0 -> stale(missing, extra)
-      true -> :ok
-    end
+    # What the sender should have covered: every device for a one-to-one
+    # message, the devices it named for a group (if it named any).
+    missing =
+      cond do
+        kind == "control" -> MapSet.new()
+        chat.kind == "direct" -> MapSet.difference(expected, given)
+        is_list(known) -> MapSet.difference(expected, MapSet.new(known))
+        true -> MapSet.new()
+      end
+
+    # A group device the sender named that isn't there any more.
+    extra =
+      if chat.kind == "group" and is_list(known) and kind != "control",
+        do: MapSet.union(extra, MapSet.difference(MapSet.new(known), expected)),
+        else: extra
+
+    if MapSet.size(missing) + MapSet.size(extra) > 0, do: stale(missing, extra), else: :ok
   end
 
   defp stale(missing, extra) do

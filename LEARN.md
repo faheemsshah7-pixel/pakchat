@@ -1176,3 +1176,95 @@ nobody can even find out which chats are real.
   "looking up too many people is stopped" fail, because it expects 30. Change it back.
 - Start the server (`mix phx.server`) and open http://localhost:4000/dev/dashboard. Under
   **Processes** you can see Oban and Presence running.
+
+## Step 25: Phase 3, the shared core
+
+| Part | Files |
+|---|---|
+| The core, used by the app and the website | `shared/src/` (new): `client.ts`, `signal.ts`, `storage.ts`, `content.ts`, `rules.ts`, `server.ts`, `connection.ts` |
+| Signal for the website | `shared/signal-wasm/` (new, Rust), `shared/src/web/` (new) |
+| The tests | `shared/test/` (new) |
+| Small server additions | `server/lib/pakchat/relay.ex`, `server/lib/pakchat_web/params.ex`, `controllers/auth_controller.ex`, `server/test/e2e_server.exs` (new) |
+
+The app and the website will look different, but underneath they do the same things: lock and
+unlock messages, keep the chat list, send in order, retry when the network drops, handle groups,
+edits and reactions. All of that is written **once**, here, in TypeScript. The screens come later.
+
+### One class: `PakChat`
+`client.ts` is the whole chat app without screens. You give it four things:
+- **signal**: something that can lock and unlock (`SignalApi` in `signal.ts`). On the phone that's
+  our Kotlin module from step 23. On the website it's the WebAssembly build below.
+- **storage**: somewhere to keep chats and messages (`Storage` in `storage.ts`). On the phone that
+  will be SQLite, on the website IndexedDB. The tests use `MemoryStorage`.
+- **server** and **connect**: the web addresses and the live WebSocket from step 24.
+
+Then the screens just call `sendText`, `react`, `markRead`… and listen with `on('message', …)`.
+
+### What's inside a locked message
+Before locking, a message is a small piece of JSON (`content.ts`), for example
+`{"v":1,"id":"…","chat":"…","t":"text","text":"Hi"}`. `t` says what it is: a text, a poll, an
+edit, a delete, a reaction, a vote, a pin, a timer change, or a group key. The server never sees
+any of it. When one arrives, `parseContent` checks it strictly (the right fields, not too long) and
+throws away anything odd. The chat id inside must match the envelope, so a server can't move a
+message to a different chat.
+
+### The rules live on every phone
+The server can't read edits or deletes, so it can't check them. Every phone checks for itself
+(`rules.ts`): you can edit your own message for 15 minutes and delete it for everyone for 60 hours;
+a group admin can delete anyone's. A message from a tampered app that breaks a rule is ignored.
+
+### Sending: the outbox
+`sendText` saves the message (one grey tick, "queued") and puts it in the **outbox**. The outbox
+sends one at a time, in order. If the network is down, it waits; if the server says "stale
+devices", it fetches the new device's keys and tries again. So a message written in a lift
+still goes, and in the right order.
+
+### Receiving: once, in order
+Everything that touches Signal or storage goes through one **lane**: one thing at a time. That
+matters because Signal's keys change with every message. Each envelope's id is remembered, so one
+that arrives twice is shown once. Only after it's saved does the phone say "got it" (`ack`), and
+the server deletes it. An edit or reaction that arrives before its message waits, and is applied
+when the message comes.
+
+### Groups: keys when people join and leave
+A group message is locked once with your **group key** (step 23). Your phone sends that key, inside
+normal locked 1-to-1 messages, to every device in the group that hasn't got it yet, in the same
+send as the message. When someone **leaves or is removed**, everyone throws their group key away
+and makes a new one, so the person who left can't read anything after. Someone added later never
+gets the old keys, so they can't read old messages.
+
+If a phone can't open something (it was reinstalled, so its keys are new), it sends back an
+unlocked "please send that again". The sender starts a fresh session and resends it.
+
+### The website gets Signal too
+The website is a linked device, like WhatsApp Web, so it needs real end-to-end encryption too.
+Signal's library is written in **Rust** and has no ready-made browser version. So we built one:
+`signal-wasm/` is a small Rust wrapper that compiles libsignal (the same 0.105.1 as the phone) to
+**WebAssembly**, a format browsers can run at nearly full speed. It's about 1 MB.
+
+To be sure it's right, the tests lock on one library and unlock on the other, every way round,
+and check two published test values: Signal's own safety-number example, and the standard X25519
+example from RFC 7748.
+
+### The tests
+- `npm test` runs 108 tests against a **pretend server** that can be nasty on purpose: it sends
+  things twice, out of order, or back to front. Every chat test runs three ways: all phones, all
+  websites, and mixed.
+- `npm run test:server` runs 5 more against the **real** Phoenix server and Postgres (see
+  `shared/README.md`). One of them found a real bug: after reconnecting, a send left over from the
+  old connection held everything up for 10 seconds. Now a dropped connection gives up on its
+  unanswered sends at once (`connection.ts`).
+
+### What changed on the server
+- A new kind, `control`, for "please send that again" and the resend.
+- Group sends can list the devices they think are in the group, and get "stale devices" if that's
+  out of date, the same as 1-to-1.
+- Sign-in also returns the device's id for the live connection (`device_uuid`).
+
+### Try this
+- `cd shared && npm install && npm test`. Then open `test/chat.test.ts` and read the test names.
+- In `src/rules.ts`, change `EDIT_MINUTES = 15` to `25` and run `npm test`. Watch "the time limits"
+  fail, because a 20-minute-old edit now gets through. Change it back.
+- In `test/chat.test.ts`, find `chaos = { shuffle: true, duplicate: true }`. That's the pretend
+  server jumbling and doubling everything. The test still passes, because of the lane and the
+  remembered ids.

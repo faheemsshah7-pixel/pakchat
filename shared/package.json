@@ -1,14 +1,31 @@
 {
   "name": "@pakchat/shared",
+  "version": "0.1.0",
   "private": true,
-  "version": "0.0.0",
+  "description": "PakChat's shared core: Signal encryption, messages, the send queue and talking to the server. Used by the app and the website.",
   "type": "module",
   "main": "src/index.ts",
-  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./web": "./src/web/index.ts",
+    "./testing": "./test/storageContract.ts"
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run",
+    "test:server": "PAKCHAT_E2E=1 vitest run test/e2e",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "dependencies": {
+    "phoenix": "1.8.15"
   },
   "devDependencies": {
-    "typescript": "~6.0.2"
+    "@signalapp/libsignal-client": "0.105.1",
+    "@types/node": "^22.20.5",
+    "@types/phoenix": "^1.6.8",
+    "oxlint": "1.81.0",
+    "typescript": "~6.0.3",
+    "vitest": "5.0.5"
   }
 }

@@ -15,6 +15,8 @@ defmodule PakchatWeb.AuthControllerTest do
   test "signing in with Google gives a token that works", %{conn: conn} do
     body = conn |> sign_in(google_token("Ali")) |> json_response(200)
     assert %{"token" => token, "device_id" => 1, "user" => %{"name" => "Ali"}} = body
+    # The live connection needs the device's own id.
+    assert body["device_uuid"] == Pakchat.Accounts.device_by_token(token).id
 
     me = build_conn() |> put_req_header("authorization", "Bearer " <> token) |> get(~p"/api/me")
     assert json_response(me, 200)["name"] == "Ali"

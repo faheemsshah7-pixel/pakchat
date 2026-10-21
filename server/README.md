@@ -34,9 +34,17 @@ Without it the server runs fine, but nobody can sign in.
 ## Test it
 
 ```
-mix test            # all the tests (55 of them)
+mix test            # all the tests (57 of them)
 mix credo           # style checks
 mix format          # tidies the code
+```
+
+The shared core (`../shared`) also has tests that use this server for real.
+Start a test copy with its own empty database, then run them from `shared`:
+
+```
+MIX_ENV=test mix run --no-start test/e2e_server.exs   # port 4002, plus a helper on 4003
+cd ../shared && npm run test:server                   # in a second terminal
 ```
 
 ## What the server does
@@ -66,6 +74,14 @@ mix format          # tidies the code
 | `/dev/dashboard` | Live memory, processes and requests (dev only) |
 
 Everything except health and sign-in needs `Authorization: Bearer <token>`.
+Sign-in gives back `device_uuid` too: that's the id in `device:<your device id>`.
+
+Sending on the live connection (`"send"`) takes a `kind`:
+- `message` and `reaction`: a normal send. A group send can list the devices it
+  thinks are in the group (`devices`), and gets `stale_devices` back if that
+  list is out of date.
+- `control`: "please send that again", or the resend itself. It goes only to
+  the devices named, and isn't held back by "only admins can send".
 
 ## The files, in plain words
 
@@ -105,4 +121,4 @@ test/                         the tests
 - **Oban** runs background jobs (push alerts, clean-up) from a table in Postgres.
 - **A supervisor** restarts anything that crashes. `application.ex` sets that up.
 
-See step 24 in `LEARN.md` for how it all fits together.
+See steps 24 and 25 in `LEARN.md` for how it all fits together.

@@ -70,8 +70,15 @@ defmodule PakchatWeb.Params do
   @doc "What a device sends with a message (see `Pakchat.Relay.send_message/3`)."
   def message(%{"chat_id" => chat_id} = p) when is_binary(chat_id) do
     with {:ok, envelopes} <- list(p["envelopes"], &envelope/1),
-         {:ok, group} <- optional(p["group"], &sealed/1) do
-      {:ok, chat_id, %{kind: Map.get(p, "kind", "message"), envelopes: envelopes, group: group}}
+         {:ok, group} <- optional(p["group"], &sealed/1),
+         {:ok, devices} <- optional(p["devices"], &device_list/1) do
+      {:ok, chat_id,
+       %{
+         kind: Map.get(p, "kind", "message"),
+         envelopes: envelopes,
+         group: group,
+         devices: devices
+       }}
     end
   end
 
@@ -87,6 +94,20 @@ defmodule PakchatWeb.Params do
   end
 
   defp envelope(_), do: {:error, :bad_request}
+
+  # `[%{"user_id" => …, "device_id" => 1}]` into `[{user_id, 1}]`.
+  defp device_list(items) when is_list(items) and length(items) <= 5000 do
+    list(items, fn
+      %{"user_id" => user_id, "device_id" => device_id}
+      when is_binary(user_id) and is_integer(device_id) ->
+        with {:ok, user_id} <- Ecto.UUID.cast(user_id), do: {:ok, {user_id, device_id}}
+
+      _ ->
+        {:error, :bad_request}
+    end)
+  end
+
+  defp device_list(_), do: {:error, :bad_request}
 
   defp sealed(%{"type" => type, "body" => body}) when is_integer(type) do
     with {:ok, bytes} <- bytes(body), do: {:ok, %{type: type, body: bytes}}

@@ -268,6 +268,83 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert {:ok, _} = send_msg(a, group.id, [], %{"group" => body})
   end
 
+  test "groups: a sender's device list that's out of date gets stale_devices", ctx do
+    %{ali: ali, sara: sara, bilal: bilal} = ctx
+
+    {:ok, group} =
+      Chats.create_group(ali.user, %{"title" => "Study"}, [sara.user.id, bilal.user.id])
+
+    a = online(ali.token, ali.device)
+    body = %{"type" => 7, "body" => Base.encode64("locked once")}
+    dev = fn who -> %{"user_id" => who.user.id, "device_id" => who.device.device_id} end
+
+    # Right: everyone's devices except the one sending.
+    assert {:ok, _} =
+             send_msg(a, group.id, [], %{"group" => body, "devices" => [dev.(sara), dev.(bilal)]})
+
+    # Sara links the website. Ali doesn't know yet, so he's told.
+    web = linked(sara.user)
+
+    assert {:error, %{reason: "stale_devices", missing: [missing], extra: []}} =
+             send_msg(a, group.id, [], %{"group" => body, "devices" => [dev.(sara), dev.(bilal)]})
+
+    assert missing == %{user_id: sara.user.id, device_id: web.device.device_id}
+
+    # Bilal leaves. A list that still has him is out of date too.
+    {:ok, _} = Chats.remove_member(bilal.user, group.id, bilal.user.id)
+    all = [dev.(sara), %{"user_id" => sara.user.id, "device_id" => 2}, dev.(bilal)]
+
+    assert {:error, %{reason: "stale_devices", missing: [], extra: [extra]}} =
+             send_msg(a, group.id, [], %{"group" => body, "devices" => all})
+
+    assert extra == %{user_id: bilal.user.id, device_id: 1}
+
+    # Without a list, the server doesn't check (as before).
+    assert {:ok, _} = send_msg(a, group.id, [], %{"group" => body})
+
+    # A bad list is refused.
+    assert {:error, %{reason: :bad_request}} =
+             send_msg(a, group.id, [], %{"group" => body, "devices" => [%{"user_id" => "x"}]})
+  end
+
+  test "control messages: just a few devices, and allowed when only admins can send", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    web = linked(sara.user)
+    a = online(ali.token, ali.device)
+    online(sara.token, sara.device)
+    s_web = online(web.token, web.device)
+
+    # "Please send that again", from Sara's website to Ali's phone only. A normal
+    # message would have to cover every device; a control one doesn't.
+    retry = [sealed(ali, "please resend")]
+    assert {:error, %{reason: "stale_devices"}} = send_msg(s_web, chat.id, retry)
+    assert {:ok, _} = send_msg(s_web, chat.id, retry, %{"kind" => "control"})
+    assert [%{kind: "control", from_device: 2}] = envelopes_for(ali.device)
+    refute_envelopes(sara.device)
+
+    # Still only for devices in the chat.
+    assert {:error, %{reason: "stale_devices", extra: [_]}} =
+             send_msg(a, chat.id, [sealed(ctx.bilal)], %{"kind" => "control"})
+
+    # No group copy, and something to send.
+    {:ok, news} =
+      Chats.create_group(ali.user, %{"title" => "News", "only_admins_send" => true}, [
+        sara.user.id
+      ])
+
+    group_body = %{"type" => 7, "body" => Base.encode64("x")}
+
+    assert {:error, %{reason: :bad_request}} =
+             send_msg(s_web, news.id, [], %{"kind" => "control", "group" => group_body})
+
+    assert {:error, %{reason: :bad_request}} =
+             send_msg(s_web, news.id, [], %{"kind" => "control"})
+
+    # In an admins-only group, Sara can't send a message but can send a control one.
+    assert {:error, %{reason: :admins_only}} = send_msg(s_web, news.id, [sealed(ali)])
+    assert {:ok, _} = send_msg(s_web, news.id, [sealed(ali)], %{"kind" => "control"})
+  end
+
   ## Blocking
 
   test "someone who blocked you never gets your messages, and you can't tell", ctx do

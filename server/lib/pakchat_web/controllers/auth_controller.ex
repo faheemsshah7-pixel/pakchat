@@ -8,7 +8,7 @@ defmodule PakchatWeb.AuthController do
        "device": {<public keys, see PakchatWeb.Params.device/1>},
        "pre_keys": [...], "kyber_pre_keys": [...]}
 
-  gives back `{"token": "...", "user": {...}, "device_id": 1}`.
+  gives back `{"token": "...", "user": {...}, "device_id": 1, "device_uuid": "..."}`.
   """
   use PakchatWeb, :controller
   alias Pakchat.{Accounts, Keys, RateLimit}
@@ -25,7 +25,14 @@ defmodule PakchatWeb.AuthController do
       case Accounts.sign_in_with_google(id_token, device_attrs) do
         {:ok, %{user: user, device: device, token: token}} ->
           {:ok, _} = Keys.add_pre_keys(device, keys.ec, keys.kyber)
-          json(conn, %{token: token, user: Wire.me(user), device_id: device.device_id})
+
+          json(conn, %{
+            token: token,
+            user: Wire.me(user),
+            device_id: device.device_id,
+            # The live connection joins "device:<this>".
+            device_uuid: device.id
+          })
 
         {:error, %Ecto.Changeset{}} = error ->
           error
