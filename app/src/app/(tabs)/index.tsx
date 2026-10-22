@@ -11,7 +11,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { core } from '../../core/core';
-import { useAllTyping, useAuth, useChatList, useConnected, useLists, type ChatRow as Row } from '../../core/hooks';
+import { useAllPresence, useAllTyping, useAuth, useChatList, useConnected, useLists, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { ChatRow } from '../../ui/ChatRow';
@@ -30,6 +30,7 @@ export default function Chats() {
   const rows = useChatList();
   const lists = useLists();
   const typing = useAllTyping();
+  const presence = useAllPresence();
   const connected = useConnected();
   const [filter, setFilter] = useState<Filter>('all');
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -96,7 +97,6 @@ export default function Chats() {
       return next;
     });
   }, []);
-
 
   const pickedRows = (rows ?? []).filter((r) => picked.has(r.chat.id));
   const allPinned = pickedRows.length > 0 && pickedRows.every((r) => r.prefs.pinnedAt);
@@ -198,6 +198,7 @@ export default function Chats() {
       <View style={{ flex: 1, paddingHorizontal: 4 }}>
         <Animated.FlatList
           data={visible}
+          extraData={[picked, typing, presence]}
           keyExtractor={(r) => r.chat.id}
           itemLayoutAnimation={listLayout}
           contentContainerStyle={{ paddingBottom: 96 }}
@@ -239,7 +240,7 @@ export default function Chats() {
               <ChatRow
                 row={item}
                 typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== myId)}
-                online={!!(item.other && core.presence[item.other]?.online)}
+                online={!!(item.other && presence[item.other]?.online)}
                 selecting={selecting}
                 selected={picked.has(item.chat.id)}
                 onPress={() => (selecting ? togglePick(item.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: item.chat.id } }))}

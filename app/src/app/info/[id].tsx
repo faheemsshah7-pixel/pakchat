@@ -10,7 +10,7 @@ import { View } from 'react-native';
 import Animated, { FadeInDown, interpolate, LinearTransition, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
-import { useBlocked, useChat, usePeople, usePerson, usePresence } from '../../core/hooks';
+import { useBlocked, useChat, useChatPrefs, usePeople, usePerson, usePresence } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { lastSeen, TIMERS, timerLabel } from '../../ui/format';
@@ -28,6 +28,7 @@ export default function Info() {
   const person = usePerson(other);
   const presence = usePresence(other);
   const blocked = useBlocked();
+  const prefs = useChatPrefs(id);
   const [member, setMember] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
@@ -52,7 +53,6 @@ export default function Info() {
   const group = chat.kind === 'group';
   const title = core.chatTitle(chat);
   const amAdmin = group && roleOf(chat, core.myId) === 'admin';
-  const prefs = core.prefs[id] ?? {};
   const isBlocked = !!other && !!blocked?.some((p) => p.id === other);
   const sub = group ? fill(t.members, { n: chat.members.length }) : lastSeen(presence, t);
 

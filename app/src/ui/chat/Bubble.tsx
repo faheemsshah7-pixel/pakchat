@@ -137,7 +137,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           </Txt>
         </View>
       )}
-      {quoted && !m.deleted && <Quote m={quoted} mine={mine} onPress={() => onQuote(quoted)} />}
+      {/* While picking messages, a tap anywhere on the bubble picks it (no jumping, voting or retrying). */}
+      {quoted && !m.deleted && <Quote m={quoted} mine={mine} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />}
       {m.deleted ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="close" size={14} color={meta} />
@@ -146,7 +147,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           </Txt>
         </View>
       ) : m.kind === 'poll' && m.poll ? (
-        <Poll m={m} mine={mine} onVote={(i) => onVote(m, i)} />
+        <Poll m={m} mine={mine} onVote={(i) => (selecting ? onPress(m) : onVote(m, i))} />
       ) : (
         <Text
           style={[
@@ -188,7 +189,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         <GestureDetector gesture={pan}>
           <Animated.View style={[{ maxWidth: '80%' }, slide]}>
             <Pressy
-              onPress={() => (m.status === 'failed' ? onRetry(m) : onPress(m))}
+              onPress={() => (m.status === 'failed' && !selecting ? onRetry(m) : onPress(m))}
               onLongPress={() => onLongPress(m)}
               scale={0.98}
               label={m.text ?? ''}
@@ -219,7 +220,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 {t.notSent}
               </Txt>
             )}
-            {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => onReaction(m, e)} />}
+            {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
           </Animated.View>
         </GestureDetector>
       </View>

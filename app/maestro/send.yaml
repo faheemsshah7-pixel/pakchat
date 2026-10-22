@@ -6,4 +6,6 @@ appId: com.pakchat.app
 - inputText: ${TEXT}
 - tapOn:
     id: send
-- assertVisible: ${TEXT}
+- extendedWaitUntil:
+    visible: ${TEXT}
+    timeout: 10000

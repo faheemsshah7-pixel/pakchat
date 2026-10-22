@@ -3,8 +3,8 @@
 // Step 1: pick people. Each one you pick pops into the row at the top.
 // Step 2: give the group a name, then Create.
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { FlatList, ScrollView, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { BackHandler, FlatList, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeInRight, LinearTransition, ZoomIn, ZoomOut } from 'react-native-reanimated';
 
 import { core, isOffline, type Person } from '../core/core';
@@ -12,7 +12,7 @@ import { useChat, usePeople } from '../core/hooks';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
-import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, Toggle, TopBar, Txt } from '../ui/kit';
+import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
 import { toast } from '../ui/overlays';
 
 export default function NewGroup() {
@@ -24,6 +24,7 @@ export default function NewGroup() {
   const [picked, setPicked] = useState<Person[]>([]);
   const [query, setQuery] = useState('');
   const [step, setStep] = useState<1 | 2>(1);
+  const lift = useKeyboardLift();
   const [title, setTitle] = useState('');
   const [onlyAdmins, setOnlyAdmins] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -38,6 +39,16 @@ export default function NewGroup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [people, query, existing],
   );
+
+  // On the name step, Android's back goes to picking people again (not out of the screen).
+  useEffect(() => {
+    if (step !== 2) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setStep(1);
+      return true;
+    });
+    return () => sub.remove();
+  }, [step]);
 
   const isPicked = (id: string) => picked.some((p) => p.id === id);
   const toggle = (p: Person) => setPicked((old) => (old.some((x) => x.id === p.id) ? old.filter((x) => x.id !== p.id) : [...old, p]));
@@ -159,6 +170,7 @@ export default function NewGroup() {
       {list.length > 0 && <Section title={t.onPakChat} />}
       <FlatList
         data={list}
+        extraData={picked}
         keyExtractor={(p) => p.id}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ marginHorizontal: 12, paddingBottom: 110 }}
@@ -201,7 +213,7 @@ export default function NewGroup() {
       />
 
       {picked.length > 0 && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} style={{ position: 'absolute', start: 16, end: 16, bottom: 24 }}>
+        <Animated.View entering={FadeInDown.springify().damping(18)} style={[{ position: 'absolute', start: 16, end: 16 }, lift]}>
           <Button title={add ? t.addMembers : t.continue} icon={add ? 'userPlus' : 'forwardArrow'} onPress={() => (add ? finish() : setStep(2))} busy={busy} testID="group-next" />
         </Animated.View>
       )}

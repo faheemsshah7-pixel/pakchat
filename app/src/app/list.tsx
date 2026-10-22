@@ -14,7 +14,7 @@ import { useChatList, useLists } from '../core/hooks';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
-import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt, useKeyboardLift } from '../ui/kit';
 
 export default function ListScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -24,6 +24,7 @@ export default function ListScreen() {
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left);
   const [name, setName] = useState(old?.name ?? '');
   const [picked, setPicked] = useState<Set<string>>(new Set(old?.chatIds ?? []));
+  const lift = useKeyboardLift();
 
   function toggle(chatId: string) {
     setPicked((was) => {
@@ -44,6 +45,7 @@ export default function ListScreen() {
       <TopBar title={old ? t.editList : t.newList} onBack={() => router.back()} />
       <FlatList
         data={rows}
+        extraData={picked}
         keyExtractor={(r) => r.chat.id}
         contentContainerStyle={{ padding: 12, paddingBottom: 110 }}
         ItemSeparatorComponent={Divider}
@@ -78,9 +80,9 @@ export default function ListScreen() {
           );
         }}
       />
-      <View style={{ position: 'absolute', start: 16, end: 16, bottom: 24 }}>
+      <Animated.View style={[{ position: 'absolute', start: 16, end: 16 }, lift]}>
         <Button title={t.saveList} icon="check" onPress={save} disabled={!name.trim()} testID="save-list" />
-      </View>
+      </Animated.View>
     </Screen>
   );
 }

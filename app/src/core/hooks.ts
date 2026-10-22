@@ -95,7 +95,8 @@ export function useChatList(): ChatRow[] | null {
       const chats = await core.client.chats();
       const rows: ChatRow[] = [];
       for (const chat of chats) {
-        const [last] = await core.client.messages(chat.id, { limit: 1 });
+        // The newest few, in case the very newest is a disappearing message whose time is up.
+        const last = core.forgetExpired(await core.client.messages(chat.id, { limit: 5 })).at(-1);
         const prefs = core.prefs[chat.id] ?? {};
         // A chat with nothing in it yet (just made, or deleted here) only shows once it has something,
         // unless it's a group: groups always show.
@@ -123,22 +124,22 @@ const PAGE = 60;
 /** The newest messages of a chat, oldest first. `more()` reaches further back. */
 export function useMessages(chatId: string) {
   const [limit, setLimit] = useState(PAGE);
-  const list = useLoaded<Message[] | null>(
+  const loaded = useLoaded<{ list: Message[]; read: number } | null>(
     [`messages:${chatId}`, 'auth'],
     async () => {
       const all = await core.client.messages(chatId, { limit });
-      // Disappearing messages: hide the ones whose time is up (the core removes them too).
-      const now = Date.now();
-      return all.filter((m) => !m.expiresAt || m.expiresAt > now);
+      // Disappearing messages: the ones whose time is up are hidden and removed from the phone.
+      return { list: core.forgetExpired(all), read: all.length };
     },
     null,
     [chatId, limit],
   );
-  const hasMore = (list?.length ?? 0) >= limit;
+  // A full page means there may be older ones (counted before hiding any, so paging never stops early).
+  const hasMore = (loaded?.read ?? 0) >= limit;
   const more = useCallback(() => {
     if (hasMore) setLimit((l) => l + PAGE);
   }, [hasMore]);
-  return { list, more, hasMore };
+  return { list: loaded?.list ?? null, more, hasMore };
 }
 
 // ---- People ----
@@ -173,6 +174,11 @@ export function usePresence(userId: string | null | undefined): Presence | null 
   return useCore(['presence'], () => (userId ? (core.presence[userId] ?? null) : null));
 }
 
+/** Everyone's online dots, for the chat list (which follows the people on screen). */
+export function useAllPresence() {
+  return useCore(['presence'], () => core.presence);
+}
+
 /** Who is typing in a chat right now (not me). */
 export function useTyping(chatId: string | null): string[] {
   const now = useCore(['typing'], () => (chatId ? core.typing[chatId] : undefined));
@@ -190,6 +196,13 @@ export function useBlocked() {
     void core.loadBlocked().catch(() => {});
   }, []);
   return useCore(['blocked'], () => core.blocked);
+}
+
+const NO_PREFS: ChatPrefs = {};
+
+/** One chat's own settings on this phone (muted, pinned…), kept up to date. */
+export function useChatPrefs(chatId: string): ChatPrefs {
+  return useCore(['prefs'], () => core.prefs[chatId] ?? NO_PREFS);
 }
 
 export function useStarred() {

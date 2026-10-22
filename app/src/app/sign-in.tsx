@@ -7,10 +7,15 @@
 //
 // Under the buttons is the server's address. On your phone that's your Mac's
 // address on the Wi-Fi (the commands in LEARN.md Step 26 show how to find it).
-import { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+// Tap it to change it right there on the screen.
+//
+// The keyboard: Android draws the app behind it, so the screen makes room
+// itself (an empty space as tall as the keyboard at the bottom) and scrolls
+// down, so the box you're typing in is never hidden.
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, View, type ScrollViewInstance } from 'react-native';
 import { GoogleOneTapSignIn, isCancelledResponse, isNoSavedCredentialFoundResponse, isSuccessResponse } from 'react-native-nitro-google-signin';
-import Animated, { FadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, useAnimatedKeyboard, useAnimatedStyle, ZoomIn } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
 import { core, GOOGLE_WEB_CLIENT_ID, isOffline, serverUrl, setServerUrl } from '../core/core';
@@ -19,7 +24,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
 import { lively } from '../ui/motion';
-import { Sheet, toast } from '../ui/overlays';
+import { toast } from '../ui/overlays';
 
 /** Google's "G", in its four colours (Google asks for it on sign-in buttons). */
 function GoogleG() {
@@ -45,13 +50,24 @@ export default function SignIn() {
   const [draft, setDraft] = useState(server);
   const [testOn, setTestOn] = useState(false);
   const [testName, setTestName] = useState('');
+  const scroller = useRef<ScrollViewInstance>(null);
+  const keyboard = useAnimatedKeyboard();
+  const keyboardSpace = useAnimatedStyle(() => ({ height: keyboard.height.value }));
+
+  // Once the keyboard is up, scroll so the box you tapped sits just above it.
+  function showBottom() {
+    setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 350);
+  }
 
   useEffect(() => console.log('[pakchat] sign-in screen drawn'), []);
 
   // Pretend accounts only show when the Mac's server was started for the emulator tests.
   useEffect(() => {
     let alive = true;
-    void core.testSignInOn().then((on) => alive && setTestOn(on));
+    void core
+      .testSignInOn()
+      .then((on) => alive && setTestOn(on))
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -93,7 +109,7 @@ export default function SignIn() {
   }
 
   async function testSignIn() {
-    if (!testName.trim()) return;
+    if (!testName.trim() || busy) return;
     setError('');
     setBusy(true);
     await finish(() => core.signInForTest(testName));
@@ -101,6 +117,8 @@ export default function SignIn() {
   }
 
   function saveServer() {
+    // Nothing typed: keep the address as it was.
+    if (!draft.trim()) return setEditing(false);
     const url = /^https?:\/\//.test(draft.trim()) ? draft.trim() : `http://${draft.trim()}`;
     setServerUrl(url);
     setServer(serverUrl());
@@ -115,7 +133,7 @@ export default function SignIn() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroller} contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }} keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
           <Pressy onPress={() => setPrefs({ lang: lang === 'ur' ? 'en' : 'ur' })} label={t.switchLanguage} testID="switch-language">
             <Glass style={{ height: 40, paddingHorizontal: 14, borderRadius: 13, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -211,42 +229,45 @@ export default function SignIn() {
               <Txt size={13} weight="700" color={theme.sectionText}>
                 {t.testAccount}
               </Txt>
-              <Field value={testName} onChangeText={setTestName} placeholder={t.yourName} testID="test-name" autoCapitalize="words" returnKeyType="go" onSubmitEditing={testSignIn} />
+              <Field value={testName} onChangeText={setTestName} placeholder={t.yourName} testID="test-name" autoCapitalize="words" returnKeyType="go" onSubmitEditing={testSignIn} onFocus={showBottom} />
               <Button title={t.continue} look="soft" onPress={testSignIn} busy={busy} testID="test-sign-in" />
             </Animated.View>
           )}
 
-          <Pressy onPress={() => (setDraft(server), setEditing(true))} label={t.serverAddress} testID="server-address" scale={0.98}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 }}>
-              <Icon name="server" size={15} color={theme.muted} />
+          {editing ? (
+            <Animated.View entering={FadeIn} style={{ gap: 8, marginTop: 6 }}>
               <Txt size={13} color={theme.muted}>
-                {server.replace(/^https?:\/\//, '')}
+                {t.serverAddressHint}
               </Txt>
-              <Icon name="edit" size={14} color={theme.muted} />
-            </View>
-          </Pressy>
+              <Field
+                value={draft}
+                onChangeText={setDraft}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                placeholder="http://192.168.1.10:4000"
+                testID="server-field"
+                icon="server"
+                autoFocus
+                onFocus={showBottom}
+                onSubmitEditing={saveServer}
+              />
+              <Button title={t.save} onPress={saveServer} testID="server-save" />
+            </Animated.View>
+          ) : (
+            <Pressy onPress={() => (setDraft(server), setEditing(true))} label={t.serverAddress} testID="server-address" scale={0.98}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 }}>
+                <Icon name="server" size={15} color={theme.muted} />
+                <Txt size={13} color={theme.muted}>
+                  {server.replace(/^https?:\/\//, '')}
+                </Txt>
+                <Icon name="edit" size={14} color={theme.muted} />
+              </View>
+            </Pressy>
+          )}
         </Animated.View>
+        <Animated.View style={keyboardSpace} />
       </ScrollView>
-
-      <Sheet visible={editing} onClose={() => setEditing(false)} title={t.serverAddress}>
-        <View style={{ paddingHorizontal: 20, paddingTop: 8, gap: 12 }}>
-          <Txt size={14} color={theme.muted}>
-            {t.serverAddressHint}
-          </Txt>
-          <Field
-            value={draft}
-            onChangeText={setDraft}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            placeholder="http://192.168.1.10:4000"
-            testID="server-field"
-            icon="server"
-            onSubmitEditing={saveServer}
-          />
-          <Button title={t.save} onPress={saveServer} testID="server-save" />
-        </View>
-      </Sheet>
     </Screen>
   );
 }

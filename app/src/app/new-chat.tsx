@@ -1,7 +1,7 @@
 // new-chat.tsx: start a chat. Type a friend's Gmail (or just the part before
 // "@gmail.com") and PakChat finds them, or pick someone you already chat with.
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
@@ -30,7 +30,7 @@ export default function NewChat() {
   );
 
   async function find() {
-    if (!query.trim()) return;
+    if (!query.trim() || busy) return;
     setBusy(true);
     setNote('');
     setFound(null);
@@ -46,12 +46,18 @@ export default function NewChat() {
     }
   }
 
+  // A second tap while the chat is opening does nothing (no second chat screen).
+  const opening = useRef(false);
   async function open(userId: string) {
+    if (opening.current) return;
+    opening.current = true;
     try {
       const chat = await core.client.openDirect(userId);
       router.replace({ pathname: '/chat/[id]', params: { id: chat.id } });
     } catch (err) {
       setNote(isOffline(err) ? t.offline : t.couldNot);
+    } finally {
+      opening.current = false;
     }
   }
 

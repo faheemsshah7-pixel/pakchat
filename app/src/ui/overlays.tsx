@@ -8,7 +8,7 @@
 // Each one animates in AND out: it stays on screen until its closing
 // animation has finished, then goes away.
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { Easing, FadeInDown, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -103,6 +103,20 @@ export function MenuItem({ icon, label, onPress, danger, testID }: { icon?: Icon
 
 // ---- The bottom sheet ----
 
+/** How tall the on-screen keyboard is right now (0 when it's closed). */
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
 export function Sheet({ visible, onClose, children, title }: { visible: boolean; onClose: () => void; children: ReactNode; title?: string }) {
   const t = useTheme();
   const { rtl } = useLook();
@@ -110,14 +124,17 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
   const { height } = useWindowDimensions();
   const { mounted, p } = useOpenClose(visible);
   const drag = useSharedValue(0);
+  const keyboardHeight = useKeyboardHeight();
 
   // Pull it down to close; let go early and it springs back up.
   const pan = usePanGesture({
     activeOffsetY: 8,
     onUpdate: (e) => {
+      'worklet';
       drag.value = Math.max(0, e.translationY);
     },
     onDeactivate: (e) => {
+      'worklet';
       if (e.translationY > 120 || e.velocityY > 900) scheduleOnRN(onClose);
       drag.value = withSpring(0, smooth);
     },
@@ -135,7 +152,8 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
               backgroundColor: t.dark ? '#1E2026' : '#F7FAFF',
               borderTopLeftRadius: 28,
               borderTopRightRadius: 28,
-              paddingBottom: insets.bottom + 12,
+              // Above the keyboard when it's open, so the box you type in and its button show.
+              paddingBottom: Math.max(insets.bottom, keyboardHeight) + 12,
               boxShadow: `0 -10px 40px -20px ${t.shadow}`,
               maxHeight: height * 0.85,
             },

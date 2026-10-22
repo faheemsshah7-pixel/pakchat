@@ -32,6 +32,10 @@ export default function Search() {
   const messages = found.filter((f) => !only || f.chatId === only).map((f): Row => ({ kind: 'msg', f }));
   const titles = useMemo(() => new Map((rows ?? []).map((r) => [r.chat.id, r.title])), [rows]);
 
+  // Searching inside a chat goes back to that same chat (not a second copy of it on top).
+  const openChat = (chatId: string) =>
+    only === chatId ? router.dismissTo({ pathname: '/chat/[id]', params: { id: chatId } }) : router.replace({ pathname: '/chat/[id]', params: { id: chatId } });
+
   const sections = [
     ...(chats.length ? [{ title: t.chats, data: chats }] : []),
     ...(messages.length ? [{ title: fill(t.messagesFound, { n: messages.length }), data: messages }] : []),
@@ -66,7 +70,7 @@ export default function Search() {
           renderItem={({ item, index }) => (
             <Animated.View entering={FadeInDown.delay(Math.min(index, 8) * 20).springify().damping(22)}>
               {item.kind === 'chat' ? (
-                <Pressy onPress={() => router.replace({ pathname: '/chat/[id]', params: { id: item.id } })} label={item.title} scale={0.98}>
+                <Pressy onPress={() => openChat(item.id)} label={item.title} scale={0.98}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 }}>
                     <Avatar id={item.id} name={item.title} size={44} group={item.group} />
                     <Txt size={15.5} weight="600">
@@ -75,7 +79,7 @@ export default function Search() {
                   </View>
                 </Pressy>
               ) : (
-                <Pressy onPress={() => router.replace({ pathname: '/chat/[id]', params: { id: item.f.chatId } })} label={item.f.text} scale={0.98} testID={`found-${item.f.text}`}>
+                <Pressy onPress={() => openChat(item.f.chatId)} label={item.f.text} scale={0.98} testID={`found-${item.f.text}`}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 16, backgroundColor: theme.glass, marginBottom: 6 }}>
                     <Avatar id={item.f.chatId} name={titles.get(item.f.chatId) ?? ''} size={44} />
                     <View style={{ flex: 1, gap: 2 }}>

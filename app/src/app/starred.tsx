@@ -48,7 +48,11 @@ export default function Starred() {
         ListEmptyComponent={list ? <Empty icon="star" text={t.noStarred} /> : undefined}
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 25).springify().damping(22)}>
-            <Pressy onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.chatId } })} label={item.text ?? ''} scale={0.98}>
+            <Pressy
+              onPress={() =>
+                // From a chat's info: back to that chat, not a second copy of it.
+                only === item.chatId ? router.dismissTo({ pathname: '/chat/[id]', params: { id: item.chatId } }) : router.push({ pathname: '/chat/[id]', params: { id: item.chatId } })
+              } label={item.text ?? ''} scale={0.98}>
               <Glass style={{ padding: 12, borderRadius: 18, gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <Avatar id={item.author} name={core.name(item.author)} size={30} />

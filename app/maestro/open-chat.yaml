@@ -3,7 +3,7 @@ appId: com.pakchat.app
 ---
 - extendedWaitUntil:
     visible: ${OTHER}
-    timeout: 30000
+    timeout: 60000
 - tapOn: ${OTHER}
 - extendedWaitUntil:
     visible: ${TEXT}

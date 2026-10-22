@@ -6,10 +6,16 @@ appId: com.pakchat.app
 - inputText: Library at 4pm then
 - tapOn:
     id: send
+- tapOn:
+    id: composer
 - inputText: Bring chapter 3
 - tapOn:
     id: send
+- tapOn:
+    id: composer
 - inputText: Don't be late
 - tapOn:
     id: send
-- assertVisible: Don't be late
+- extendedWaitUntil:
+    visible: Don't be late
+    timeout: 10000

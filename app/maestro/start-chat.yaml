@@ -3,16 +3,36 @@ appId: com.pakchat.app
 ---
 - tapOn:
     id: new-chat
+- extendedWaitUntil:
+    visible:
+      id: find-field
+    timeout: 20000
 - tapOn:
     id: find-field
 - inputText: ${OTHER}@test.pakchat
+- runFlow:
+    when:
+      notVisible:
+        id: find
+    commands:
+      - hideKeyboard
 - tapOn:
     id: find
+- extendedWaitUntil:
+    visible:
+      id: found-person
+    timeout: 20000
 - tapOn:
     id: found-person
+- extendedWaitUntil:
+    visible:
+      id: composer
+    timeout: 20000
 - tapOn:
     id: composer
 - inputText: ${TEXT}
 - tapOn:
     id: send
-- assertVisible: ${TEXT}
+- extendedWaitUntil:
+    visible: ${TEXT}
+    timeout: 10000

@@ -25,10 +25,11 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import Animated, { interpolate, interpolateColor, useAnimatedStyle, useSharedValue, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
+import Animated, { interpolate, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
+import { useT } from '../i18n';
 import { useLook, useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
 import { fade, lively, snappy } from './motion';
@@ -123,6 +124,16 @@ export function SkyBackground() {
       </Svg>
     </View>
   );
+}
+
+/**
+ * For a button pinned to the bottom of a screen: `bottom` space that grows with
+ * the keyboard, so the button rides up above it instead of hiding behind it.
+ */
+export function useKeyboardLift(base = 24) {
+  const keyboard = useAnimatedKeyboard();
+  const insets = useSafeAreaInsets();
+  return useAnimatedStyle(() => ({ bottom: base + Math.max(0, keyboard.height.value - insets.bottom) }));
 }
 
 /** Every screen sits in one of these. */
@@ -503,9 +514,10 @@ export function TopBar({
   children?: ReactNode;
 }) {
   const t = useTheme();
+  const words = useT();
   return (
     <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginHorizontal: 10, marginTop: 10, padding: 6, minHeight: 56 }}>
-      {onBack && <IconButton icon="back" label="Back" onPress={onBack} flip testID="back" size={42} iconSize={23} />}
+      {onBack && <IconButton icon="back" label={words.back} onPress={onBack} flip testID="back" size={42} iconSize={23} />}
       {children ?? (
         <View style={{ flex: 1, paddingHorizontal: onBack ? 4 : 12 }}>
           <Txt size={18} weight="700" lines={1}>

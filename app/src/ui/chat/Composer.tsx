@@ -53,11 +53,27 @@ export function Composer({
   }, [editing, replyTo]);
 
   // Keep a draft (not while editing: that isn't a new message).
+  const latest = useRef(text);
+  useEffect(() => {
+    latest.current = text;
+  }, [text]);
+  const saveDraft = (words: string) => {
+    if ((core.prefs[chat.id]?.draft ?? '') !== (words.trim() ? words : '')) core.setPrefs(chat.id, { draft: words.trim() ? words : undefined });
+  };
   useEffect(() => {
     if (editing) return;
-    const id = setTimeout(() => core.setPrefs(chat.id, { draft: text.trim() ? text : undefined }), 400);
+    const id = setTimeout(() => saveDraft(text), 400);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, chat.id, editing]);
+  // Leaving the chat quickly still keeps what was typed (the wait above may not have finished).
+  useEffect(
+    () => () => {
+      if (!editing) saveDraft(latest.current);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chat.id, editing],
+  );
 
   // Stop "typing…" when leaving the chat.
   useEffect(
@@ -87,6 +103,8 @@ export function Composer({
     if (!clean) return;
     onSend(clean, mentions.filter((id) => clean.includes(`@${core.name(id)}`)));
     setText('');
+    // Sent: the draft goes at once, so it can't come back if you leave straight away.
+    if (!editing) saveDraft('');
     setMentions([]);
     if (typingSent.current) core.client.typing(chat.id, false);
     typingSent.current = 0;

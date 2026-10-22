@@ -1,30 +1,45 @@
 # Signs in a pretend test account on this emulator (the server must be started
 # with PAKCHAT_TEST_SIGN_IN=1). NAME is who this phone is, e.g. Ali.
-# 10.0.2.2 is how an Android emulator reaches the Mac it runs on.
 appId: com.pakchat.app
 ---
 - launchApp:
     clearState: true
-- tapOn:
-    id: server-address
-- eraseText: 60
-- inputText: http://10.0.2.2:4000
-- tapOn:
-    id: server-save
+- runFlow: anr.yaml
+# A fresh start can be slow on a busy Mac: wait for the sign-in screen first.
 - extendedWaitUntil:
     visible:
+      id: google-sign-in
+    timeout: 90000
+# The address is already right: on an emulator the app uses the Mac (10.0.2.2) by itself.
+- assertVisible: 10.0.2.2:4000
+# The test box appears once the app hears back from the server. On a small or
+# slow emulator it can sit below the bottom edge, so scroll down until it shows.
+- scrollUntilVisible:
+    element:
       id: test-name
-    timeout: 10000
+    direction: DOWN
+    timeout: 30000
 - tapOn:
     id: test-name
+- waitForAnimationToEnd
 - inputText: ${NAME}
+# The keyboard covers the bottom of this screen, so put it away, then check the name went in.
+- hideKeyboard
+- assertVisible: ${NAME}
+- scrollUntilVisible:
+    element:
+      id: test-sign-in
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: test-sign-in
 - extendedWaitUntil:
     visible:
       id: profile-continue
-    timeout: 20000
+    timeout: 30000
 - tapOn:
     id: profile-continue
-- assertVisible:
-    id: new-chat
+- extendedWaitUntil:
+    visible:
+      id: new-chat
+    timeout: 20000

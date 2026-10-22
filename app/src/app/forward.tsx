@@ -36,7 +36,11 @@ export default function Forward() {
     });
   }
 
+  const [busy, setBusy] = useState(false);
   async function send() {
+    // One tap sends once, even if the button is tapped again while sending.
+    if (busy) return;
+    setBusy(true);
     try {
       for (const chatId of picked) for (const w of words) await core.client.sendText(chatId, w, { forwarded: true });
       toast(t.forwardedNote);
@@ -44,6 +48,8 @@ export default function Forward() {
       else router.back();
     } catch {
       toast(t.couldNot);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -52,6 +58,7 @@ export default function Forward() {
       <TopBar title={t.forwardTo} subtitle={fill(t.selected, { n: picked.size })} onBack={() => router.back()} />
       <FlatList
         data={rows}
+        extraData={picked}
         keyExtractor={(r) => r.chat.id}
         contentContainerStyle={{ padding: 12, paddingBottom: 110 }}
         ItemSeparatorComponent={Divider}
@@ -80,7 +87,7 @@ export default function Forward() {
       />
       {picked.size > 0 && (
         <Animated.View entering={FadeInDown.springify().damping(18)} style={{ position: 'absolute', start: 16, end: 16, bottom: 24 }}>
-          <Button title={t.send} icon="send" onPress={send} testID="forward-send" />
+          <Button title={t.send} icon="send" onPress={send} busy={busy} testID="forward-send" />
         </Animated.View>
       )}
     </Screen>

@@ -5,7 +5,9 @@ appId: com.pakchat.app
 ---
 - launchApp:
     clearState: true
+- runFlow: anr.yaml
+# A first start on a busy Mac can be slow.
 - extendedWaitUntil:
     visible:
       id: google-sign-in
-    timeout: 15000
+    timeout: 90000

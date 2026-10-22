@@ -1,0 +1,8 @@
+# A busy emulator sometimes shows "... isn't responding". Tap Wait and carry on.
+appId: com.pakchat.app
+---
+- runFlow:
+    when:
+      visible: Wait
+    commands:
+      - tapOn: Wait

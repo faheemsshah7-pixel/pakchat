@@ -3,8 +3,7 @@
 import KV from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { View } from 'react-native';
-import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeInDown, useAnimatedKeyboard, useAnimatedStyle, ZoomIn } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useAuth } from '../core/hooks';
@@ -19,6 +18,8 @@ export default function Profile() {
   const { me, myId } = useAuth();
   const [name, setName] = useState(me?.name ?? '');
   const [busy, setBusy] = useState(false);
+  const keyboard = useAnimatedKeyboard();
+  const lift = useAnimatedStyle(() => ({ paddingBottom: 24 + keyboard.height.value }));
 
   async function done() {
     setBusy(true);
@@ -35,7 +36,8 @@ export default function Profile() {
 
   return (
     <Screen>
-      <View style={{ flex: 1, padding: 24, gap: 16, justifyContent: 'center' }}>
+      {/* Lifted by the keyboard's height, so the name box and Continue stay above it. */}
+      <Animated.View style={[{ flex: 1, padding: 24, gap: 16, justifyContent: 'center' }, lift]}>
         <Animated.View entering={ZoomIn.springify().damping(14)} style={{ alignItems: 'center' }}>
           <Avatar id={myId} name={name} size={110} />
         </Animated.View>
@@ -51,7 +53,7 @@ export default function Profile() {
           <Field value={name} onChangeText={setName} placeholder={t.yourName} maxLength={25} autoCapitalize="words" testID="profile-name" />
           <Button title={t.continue} onPress={done} busy={busy} disabled={!name.trim()} testID="profile-continue" />
         </Animated.View>
-      </View>
+      </Animated.View>
     </Screen>
   );
 }

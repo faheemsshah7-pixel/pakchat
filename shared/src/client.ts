@@ -254,6 +254,20 @@ export class PakChat {
     return this.o.storage.listMessages(chatId, options);
   }
 
+  /**
+   * Removes messages from this device only ("delete for me", clearing a chat, or
+   * disappearing messages whose time is up). It waits its turn in the lane, so it
+   * never runs in the middle of a message being saved.
+   */
+  deleteHere(chatId: string, refs: Ref[]) {
+    const { storage } = this.o;
+    return this.inLane(() =>
+      storage.transaction(async () => {
+        for (const r of refs) await storage.deleteMessage(chatId, r.author, r.id);
+      }),
+    );
+  }
+
   /** Saves the server's view of a chat, keeping what only this device knows. */
   private async saveChat(sc: ServerChat, old?: Chat | null): Promise<Chat> {
     old ??= await this.o.storage.getChat(sc.id);

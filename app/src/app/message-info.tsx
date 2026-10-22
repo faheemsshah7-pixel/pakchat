@@ -22,7 +22,11 @@ export default function MessageInfo() {
   const [m, setM] = useState<Message | null>(null);
 
   useEffect(() => {
-    const load = () => void core.storage.getMessage(chatId, author, id).then(setM);
+    const load = () =>
+      void core.storage
+        .getMessage(chatId, author, id)
+        .then(setM)
+        .catch(() => {});
     load();
     return core.on(`messages:${chatId}`, load);
   }, [chatId, author, id]);

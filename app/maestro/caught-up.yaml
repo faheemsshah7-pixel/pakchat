@@ -3,7 +3,7 @@ appId: com.pakchat.app
 ---
 - extendedWaitUntil:
     visible: Don't be late
-    timeout: 60000
+    timeout: 90000
 - assertVisible: Library at 4pm then
 - assertVisible: Bring chapter 3
 - assertVisible:

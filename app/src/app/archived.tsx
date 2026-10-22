@@ -13,7 +13,8 @@ import { toast } from '../ui/overlays';
 
 export default function Archived() {
   const t = useT();
-  const rows = (useChatList() ?? []).filter((r) => r.prefs.archived);
+  const all = useChatList();
+  const rows = (all ?? []).filter((r) => r.prefs.archived);
   const typing = useAllTyping();
 
   const unarchive = (id: string) => {
@@ -28,7 +29,7 @@ export default function Archived() {
         data={rows}
         keyExtractor={(r) => r.chat.id}
         contentContainerStyle={{ padding: 10 }}
-        ListEmptyComponent={<Empty icon="archive" text={t.noArchived} />}
+        ListEmptyComponent={all ? <Empty icon="archive" text={t.noArchived} /> : undefined}
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeInDown.delay(index * 25).springify().damping(22)} exiting={FadeOut} style={{ marginBottom: 4 }}>
             <ChatRow

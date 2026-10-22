@@ -48,9 +48,18 @@ type Topic = 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | '
 const extra = (Constants.expoConfig?.extra ?? {}) as { serverUrl?: string; googleWebClientId?: string };
 export const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId ?? '';
 
-/** The server's address. On a phone that's the Mac's address on the Wi-Fi, set on the sign-in screen. */
+/** How an Android emulator reaches the Mac it runs on. */
+const EMULATOR_SERVER = 'http://10.0.2.2:4000';
+
+/**
+ * The server's address. On a phone that's the Mac's address on the Wi-Fi, set on the sign-in screen.
+ * On an emulator it starts as the Mac itself, so the emulator tests never have to type it in.
+ */
 export function serverUrl(): string {
-  return KV.getItemSync('serverUrl') ?? extra.serverUrl ?? 'http://localhost:4000';
+  const saved = KV.getItemSync('serverUrl');
+  if (saved) return saved;
+  if (!Device.isDevice) return EMULATOR_SERVER;
+  return extra.serverUrl ?? 'http://localhost:4000';
 }
 
 export function setServerUrl(url: string) {
@@ -241,6 +250,9 @@ class Core {
       this.prefs = {};
       this.starred = {};
       this.lists = [];
+      this.blocked = null;
+      this.presence = {};
+      this.typing = {};
     }
     await this.storage.setValue('app:lastUser', session.userId);
     this.remember({ id: session.userId, name: session.me.name, about: session.me.about, photo: session.me.photo });
@@ -434,21 +446,37 @@ class Core {
 
   /** "Delete for me": only from this phone. */
   async deleteForMe(list: Pick<Message, 'chatId' | 'author' | 'id'>[]) {
-    for (const m of list) await this.storage.deleteMessage(m.chatId, m.author, m.id);
-    for (const chatId of new Set(list.map((m) => m.chatId))) this.emit(`messages:${chatId}`);
+    const byChat = new Map<string, { author: string; id: string }[]>();
+    for (const m of list) byChat.set(m.chatId, [...(byChat.get(m.chatId) ?? []), { author: m.author, id: m.id }]);
+    for (const [chatId, refs] of byChat) {
+      await this.client.deleteHere(chatId, refs);
+      this.emit(`messages:${chatId}`);
+    }
     this.emit('chats');
   }
 
   /** Deletes a whole chat from this phone (it comes back if someone writes again). */
   async deleteChatHere(chatId: string) {
     const all = await this.storage.listMessages(chatId, { limit: 100_000 });
-    await this.storage.transaction(async () => {
-      for (const m of all) await this.storage.deleteMessage(chatId, m.author, m.id);
-    });
+    await this.client.deleteHere(chatId, all);
     this.setPrefs(chatId, { archived: false, pinnedAt: undefined });
     this.emit(`messages:${chatId}`);
     this.emit('chats');
   }
+
+  /** Disappearing messages whose time is up are removed from the phone, not just hidden. */
+  forgetExpired(list: Message[]) {
+    const now = Date.now();
+    const gone = list.filter((m) => m.expiresAt && m.expiresAt <= now);
+    if (!gone.length) return list;
+    // Each one is removed once, even if a screen reads it again while that's happening.
+    const fresh = gone.filter((m) => !this.forgetting.has(`${m.chatId}/${m.author}/${m.id}`));
+    for (const m of fresh) this.forgetting.add(`${m.chatId}/${m.author}/${m.id}`);
+    if (fresh.length) void this.deleteForMe(fresh).catch(() => {});
+    return list.filter((m) => !gone.includes(m));
+  }
+
+  private forgetting = new Set<string>();
 
   /** The chat's name: the group's title, or the other person's name. */
   chatTitle(chat: Chat): string {

@@ -14,7 +14,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedKeyboard, useAnimated
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
-import { useChat, useMessages, useNow, usePeople, usePresence, useStarred, useTyping } from '../../core/hooks';
+import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePresence, useStarred, useTyping } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
@@ -40,6 +40,7 @@ export default function ChatScreen() {
   const { list, more, hasMore } = useMessages(id);
   const typing = useTyping(id);
   const starred = useStarred();
+  const prefs = useChatPrefs(id);
   usePeople();
   const other = chat ? core.otherPerson(chat) : null;
   const presence = usePresence(other);
@@ -74,6 +75,8 @@ export default function ChatScreen() {
     useCallback(() => {
       focused.current = true;
       core.setPrefs(id, { markedUnread: false });
+      // Coming back to the chat (from its info, say): anything that came meanwhile is read now.
+      void core.client.markRead(id).catch(() => {});
       return () => {
         focused.current = false;
       };
@@ -94,6 +97,11 @@ export default function ChatScreen() {
     });
     return () => sub.remove();
   }, [selecting, replyTo, editing]);
+
+  // A disappearing message goes when its time is up, even if nothing else changes on screen.
+  useEffect(() => {
+    if (list) core.forgetExpired(list);
+  }, [list, now]);
 
   const byKey = useMemo(() => new Map((list ?? []).map((m) => [keyOf(m), m])), [list]);
 
@@ -462,11 +470,11 @@ export default function ChatScreen() {
         <MenuItem icon="info" label={group ? t.groupInfo : t.contactInfo} onPress={() => (setMenu(false), router.push({ pathname: '/info/[id]', params: { id } }))} />
         <MenuItem icon="search" label={t.search} onPress={() => (setMenu(false), router.push({ pathname: '/search', params: { chat: id } }))} />
         <MenuItem
-          icon={core.prefs[id]?.muted ? 'bell' : 'muted'}
-          label={core.prefs[id]?.muted ? t.unmute : t.mute}
+          icon={prefs.muted ? 'bell' : 'muted'}
+          label={prefs.muted ? t.unmute : t.mute}
           onPress={() => {
             setMenu(false);
-            core.setPrefs(id, { muted: !core.prefs[id]?.muted });
+            core.setPrefs(id, { muted: !prefs.muted });
           }}
         />
         <MenuItem icon="timer" label={t.disappearing} onPress={() => (setMenu(false), setTimerOpen(true))} testID="menu-timer" />
@@ -549,7 +557,7 @@ export default function ChatScreen() {
               const all = pickedList;
               setDeleting(false);
               done();
-              void core.deleteForMe(all);
+              void act(() => core.deleteForMe(all));
             },
           },
           { label: t.cancel, onPress: () => setDeleting(false) },
@@ -567,7 +575,7 @@ export default function ChatScreen() {
             danger: true,
             onPress: () => {
               setClearing(false);
-              void core.deleteChatHere(id);
+              void act(() => core.deleteChatHere(id));
             },
           },
           { label: t.cancel, onPress: () => setClearing(false) },

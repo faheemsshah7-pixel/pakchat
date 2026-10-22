@@ -26,7 +26,8 @@ export function PollSheet({ visible, onClose, onSend }: { visible: boolean; onCl
     setOptions(next);
   }
 
-  const filled = options.map((o) => o.trim()).filter(Boolean);
+  // The same answer typed twice counts once.
+  const filled = [...new Set(options.map((o) => o.trim()).filter(Boolean))];
   const ready = question.trim().length > 0 && filled.length >= 2;
 
   return (
