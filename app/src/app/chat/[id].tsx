@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, FlatList, View, type ListViewToken } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomIn, ZoomOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
@@ -23,7 +23,7 @@ import { PollSheet } from '../../ui/chat/PollSheet';
 import { dayLabel, lastSeen, sameDay, TIMERS, timerLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
-import { thud, tick } from '../../ui/motion';
+import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
 type Item = { key: string; kind: 'msg'; m: Message; first: boolean } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'typing' };
@@ -343,7 +343,7 @@ export default function ChatScreen() {
         <View style={{ minHeight: 62, zIndex: 2 }}>{header}</View>
 
         {pinned && !selecting && (
-          <Animated.View entering={FadeInDown.springify().damping(20)} exiting={FadeOut}>
+          <Animated.View entering={rise()} exiting={FadeOut}>
             <Pressy onPress={() => jumpTo(pinned)} label={t.pinnedMessage} scale={0.98}>
               <Glass style={{ marginHorizontal: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Icon name="pin" size={16} color={theme.accInk} />
@@ -388,7 +388,7 @@ export default function ChatScreen() {
             }
             ListHeaderComponent={
               list && list.length === 0 && mayWrite ? (
-                <Animated.View entering={ZoomIn.springify().damping(16).delay(150)} style={{ alignSelf: 'center', marginVertical: 20 }}>
+                <Animated.View entering={pop(150)} style={{ alignSelf: 'center', marginVertical: 20 }}>
                   <Button title={t.sayHi} look="soft" onPress={() => send(t.salam, [])} testID="say-hi" />
                 </Animated.View>
               ) : undefined
@@ -401,7 +401,7 @@ export default function ChatScreen() {
               const k = keyOf(m);
               const showBar = one !== null && keyOf(one) === k && !m.deleted;
               return (
-                <Animated.View entering={isNew ? FadeInDown.springify().damping(17).stiffness(230) : undefined}>
+                <Animated.View entering={isNew ? arrive : undefined}>
                   <Bubble
                     m={m}
                     group={!!group}
@@ -427,7 +427,7 @@ export default function ChatScreen() {
 
           {/* Back to the newest, when you've scrolled up. */}
           {!atBottom && (
-            <Animated.View entering={ZoomIn.springify().damping(15)} exiting={ZoomOut.duration(140)} style={{ position: 'absolute', end: 16, bottom: 12 }}>
+            <Animated.View entering={pop()} exiting={ZoomOut.duration(140)} style={{ position: 'absolute', end: 16, bottom: 12 }}>
               <Pressy onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })} label={t.newest} scale={0.9} testID="to-bottom">
                 <Glass strong style={{ width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="down" size={22} color={theme.accInk} />
@@ -591,7 +591,7 @@ export default function ChatScreen() {
             { icon: 'camera' as const, label: t.camera, on: () => toast(t.comingSoon), testID: 'attach-camera' },
             { icon: 'doc' as const, label: t.document, on: () => toast(t.comingSoon), testID: 'attach-doc' },
           ].map((a, i) => (
-            <Animated.View key={a.icon} entering={ZoomIn.delay(60 + i * 40).springify().damping(15)} style={{ width: '23%', alignItems: 'center' }}>
+            <Animated.View key={a.icon} entering={pop(60 + i * 40)} style={{ width: '23%', alignItems: 'center' }}>
               <Pressy onPress={a.on} label={a.label} testID={a.testID} scale={0.9}>
                 <View style={{ alignItems: 'center', gap: 6, paddingVertical: 8 }}>
                   <View style={{ width: 56, height: 56, borderRadius: 19, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
@@ -657,10 +657,10 @@ export default function ChatScreen() {
 function ReactionBar({ mine, current, onPick }: { mine: boolean; current?: string; onPick: (emoji: string) => void }) {
   const { theme } = useLook();
   return (
-    <Animated.View entering={ZoomIn.springify().damping(16)} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3 }}>
+    <Animated.View entering={pop()} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3 }}>
       <Glass strong style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 3, borderRadius: 26, boxShadow: `0 16px 34px -14px ${theme.shadow}` }}>
         {REACTIONS.map((e, i) => (
-          <Animated.View key={e} entering={ZoomIn.delay(30 + i * 30).springify().damping(12)}>
+          <Animated.View key={e} entering={pop(30 + i * 30)}>
             <Pressy onPress={() => onPick(e)} label={e} scale={0.8} testID={`react-${e}`}>
               <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: current === e ? theme.accSoft : 'transparent' }}>
                 <Txt size={24} align="center">

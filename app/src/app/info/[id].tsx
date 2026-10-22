@@ -7,7 +7,7 @@ import { roleOf } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
-import Animated, { FadeInDown, interpolate, LinearTransition, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { interpolate, LinearTransition, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { useBlocked, useChat, useChatPrefs, usePeople, usePerson, usePresence } from '../../core/hooks';
@@ -17,6 +17,7 @@ import { lastSeen, TIMERS, timerLabel } from '../../ui/format';
 import { Icon, type IconName } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, Toggle, Txt } from '../../ui/kit';
 import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
+import { rise } from '../../ui/motion';
 
 export default function Info() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -114,7 +115,7 @@ export default function Info() {
 
         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 18, paddingHorizontal: 14 }}>
           {actions.map((a, i) => (
-            <Animated.View key={a.icon} entering={FadeInDown.delay(60 + i * 40).springify().damping(18)} style={{ flex: 1 }}>
+            <Animated.View key={a.icon} entering={rise(60 + i * 40)} style={{ flex: 1 }}>
               <Pressy onPress={a.on} label={a.label} scale={0.94}>
                 <Glass style={{ alignItems: 'center', gap: 6, paddingVertical: 12, borderRadius: 18 }}>
                   <Icon name={a.icon} size={21} color={theme.accInk} />
@@ -166,7 +167,7 @@ export default function Info() {
                 </>
               )}
               {members.map((mb, i) => (
-                <Animated.View key={mb.userId} layout={LinearTransition.springify().damping(22)}>
+                <Animated.View key={mb.userId} layout={LinearTransition.springify().damping(30).stiffness(210)}>
                   {i > 0 && <Divider />}
                   <Pressy onPress={() => mb.userId !== core.myId && setMember(mb.userId)} label={core.name(mb.userId)} scale={0.98} testID={`member-${core.name(mb.userId)}`}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>

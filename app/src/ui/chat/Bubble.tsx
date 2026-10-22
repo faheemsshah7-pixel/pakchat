@@ -9,7 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
@@ -19,7 +19,7 @@ import { Ticks } from '../ChatRow';
 import { clock, systemText } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
-import { fade, smooth, snappy, tick } from '../motion';
+import { fade, pop, smooth, snappy, tick } from '../motion';
 
 const PULL = 64;
 
@@ -196,14 +196,17 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               testID={`msg-${m.text ?? m.id}`}
             >
               {mine ? (
-                <LinearGradient
-                  colors={theme.bubbleMine}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[radius, { boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}`, borderWidth: selected ? 2 : 0, borderColor: theme.acc }]}
+                // The gradient can't round its own corners one by one on Android (it came
+                // out square), so a plain View with the corners clips it instead.
+                <View
+                  style={[
+                    radius,
+                    { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}`, borderWidth: selected ? 2 : 0, borderColor: theme.acc },
+                  ]}
                 >
+                  <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
                   {body}
-                </LinearGradient>
+                </View>
               ) : (
                 <View
                   style={[
@@ -293,7 +296,7 @@ function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: bo
   return (
     <View style={{ flexDirection: 'row', gap: 4, marginTop: -6, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 10 }}>
       {[...counts].map(([emoji, c]) => (
-        <Animated.View key={emoji} entering={ZoomIn.springify().damping(12)}>
+        <Animated.View key={emoji} entering={pop()}>
           <Pressy onPress={() => onPress(emoji)} scale={0.9} label={emoji}>
             <View
               style={{
@@ -412,7 +415,7 @@ export function DayLabel({ text }: { text: string }) {
 export function TypingDots({ name }: { name?: string }) {
   const { theme } = useLook();
   return (
-    <Animated.View entering={ZoomIn.springify().damping(14)} style={{ alignSelf: 'flex-start', marginTop: 4, gap: 3 }}>
+    <Animated.View entering={pop()} style={{ alignSelf: 'flex-start', marginTop: 4, gap: 3 }}>
       {!!name && (
         <Txt size={11.5} weight="600" color={theme.muted} style={{ marginStart: 6 }}>
           {name}

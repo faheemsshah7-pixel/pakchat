@@ -12,7 +12,7 @@
 //   TopBar       the glass bar at the top of a screen
 //   SettingRow   one row in Settings
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -25,14 +25,14 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import Animated, { interpolate, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
+import Animated, { interpolate, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { useT } from '../i18n';
 import { useLook, useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
-import { fade, lively, snappy } from './motion';
+import { fade, pop, snappy } from './motion';
 
 // ---- Words ----
 
@@ -172,6 +172,9 @@ export function Glass({ children, style, strong, testID }: { children?: ReactNod
 }
 
 /** Anything tappable. It sinks to 96% under your finger and springs back. */
+// The size and place keys that Pressy copies onto its outer Pressable (see below).
+const OUTER_KEYS = ['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'width', 'minWidth', 'maxWidth'] as const;
+
 export function Pressy({
   children,
   onPress,
@@ -195,8 +198,23 @@ export function Pressy({
 }) {
   const down = useSharedValue(0);
   const anim = useAnimatedStyle(() => ({ transform: [{ scale: interpolate(down.value, [0, 1], [1, scale]) }] }));
+  // How big the button is in its row (flex: 1, a width, alignSelf) has to be set on
+  // the outer Pressable too. With it only on the inner view, the Pressable shrank
+  // to fit, so a `flex: 1` button (like the chat title) got no room for its text.
+  // The inner view keeps the rest (colours, corners, padding) and fills the outer one.
+  const { outer, inner } = useMemo(() => {
+    const o: Record<string, unknown> = {};
+    const i: Record<string, unknown> = { ...StyleSheet.flatten(style) };
+    for (const k of OUTER_KEYS) {
+      if (i[k] !== undefined) o[k] = i[k];
+      delete i[k];
+    }
+    if (o.flex !== undefined || o.flexGrow !== undefined) i.flexGrow = 1;
+    return { outer: o as ViewStyle, inner: i as ViewStyle };
+  }, [style]);
   return (
     <Pressable
+      style={outer}
       accessibilityRole="button"
       accessibilityLabel={label}
       testID={testID}
@@ -207,7 +225,7 @@ export function Pressy({
       onPressIn={() => down.set(withSpring(1, snappy))}
       onPressOut={() => down.set(withSpring(0, snappy))}
     >
-      <Animated.View style={[style, anim, disabled && { opacity: 0.5 }]}>{children}</Animated.View>
+      <Animated.View style={[inner, anim, disabled && { opacity: 0.5 }]}>{children}</Animated.View>
     </Pressable>
   );
 }
@@ -370,7 +388,7 @@ export function Avatar({ id, name, size = 50, online, group }: { id: string; nam
       </LinearGradient>
       {online && (
         <Animated.View
-          entering={ZoomIn.springify().damping(14)}
+          entering={pop()}
           style={{
             position: 'absolute',
             end: -2,
@@ -481,7 +499,7 @@ export function Toggle({ on, onChange, label, testID }: { on: boolean; onChange:
 export function Fab({ icon, onPress, label, testID, bottom = 22 }: { icon: IconName; onPress: () => void; label: string; testID?: string; bottom?: number }) {
   const theme = useTheme();
   return (
-    <Animated.View entering={ZoomIn.springify().damping(lively.damping!).stiffness(lively.stiffness!).delay(120)} style={{ position: 'absolute', end: 22, bottom }}>
+    <Animated.View entering={pop(120)} style={{ position: 'absolute', end: 22, bottom }}>
       <Pressy onPress={onPress} label={label} testID={testID} scale={0.9}>
         <LinearGradient
           colors={theme.grad}
@@ -616,7 +634,9 @@ export function Field(props: TextInputProps & { icon?: IconName }) {
         {...rest}
         style={[
           fontStyle(value || null, lang, 16, '400'),
-          { flex: 1, color: t.text, textAlign: rtl ? 'right' : 'left', paddingVertical: 0, lineHeight: undefined },
+          // The box is always as tall as the field, with the words centred in it. Without a set
+          // height Android could measure it as 0 tall once you typed, so your words vanished.
+          { flex: 1, alignSelf: 'stretch', height: '100%', color: t.text, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center', paddingVertical: 0 },
           style,
         ]}
       />
@@ -629,7 +649,7 @@ export function Empty({ icon, text, children }: { icon: IconName; text: string; 
   const t = useTheme();
   return (
     <View style={{ alignItems: 'center', paddingHorizontal: 36, paddingVertical: 48, gap: 14 }}>
-      <Animated.View entering={ZoomIn.springify().damping(16)}>
+      <Animated.View entering={pop()}>
         <View style={{ width: 84, height: 84, borderRadius: 28, backgroundColor: t.accSoft, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={icon} size={38} color={t.accInk} stroke={1.6} />
         </View>

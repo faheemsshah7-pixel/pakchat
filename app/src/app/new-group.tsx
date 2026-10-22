@@ -5,7 +5,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { BackHandler, FlatList, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeInRight, LinearTransition, ZoomIn, ZoomOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInRight, LinearTransition, ZoomOut } from 'react-native-reanimated';
 
 import { core, isOffline, type Person } from '../core/core';
 import { useChat, usePeople } from '../core/hooks';
@@ -14,6 +14,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { pop, rise } from '../ui/motion';
 
 export default function NewGroup() {
   const { add } = useLocalSearchParams<{ add?: string }>();
@@ -88,9 +89,9 @@ export default function NewGroup() {
     return (
       <Screen>
         <TopBar title={t.newGroup} onBack={() => setStep(1)} />
-        <Animated.View entering={FadeInRight.springify().damping(20)} style={{ padding: 16, gap: 14 }}>
+        <Animated.View entering={FadeInRight.springify().damping(18).stiffness(110)} style={{ padding: 16, gap: 14 }}>
           <View style={{ alignItems: 'center', marginVertical: 10 }}>
-            <Animated.View entering={ZoomIn.springify().damping(14)}>
+            <Animated.View entering={pop()}>
               <Avatar id={title || 'new'} name={title} size={96} group />
             </Animated.View>
           </View>
@@ -130,7 +131,7 @@ export default function NewGroup() {
         <Animated.View entering={FadeIn}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 16, paddingTop: 12 }}>
             {picked.map((p) => (
-              <Animated.View key={p.id} entering={ZoomIn.springify().damping(14)} exiting={ZoomOut.duration(140)} layout={LinearTransition.springify().damping(20)}>
+              <Animated.View key={p.id} entering={pop()} exiting={ZoomOut.duration(140)} layout={LinearTransition.springify().damping(30).stiffness(210)}>
                 <Pressy onPress={() => toggle(p)} label={p.name} scale={0.9}>
                   <View style={{ alignItems: 'center', width: 62, gap: 4 }}>
                     <View>
@@ -178,7 +179,7 @@ export default function NewGroup() {
         renderItem={({ item, index }) => {
           const on = isPicked(item.id);
           return (
-            <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 25).springify().damping(20)}>
+            <Animated.View entering={rise(Math.min(index, 10) * 25)}>
               <Pressy onPress={() => toggle(item)} label={item.name} scale={0.98} testID={`pick-${item.name}`}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: on ? theme.selected : 'transparent' }}>
                   <Avatar id={item.id} name={item.name} size={44} />
@@ -200,7 +201,7 @@ export default function NewGroup() {
                     }}
                   >
                     {on && (
-                      <Animated.View entering={ZoomIn.springify().damping(12)}>
+                      <Animated.View entering={pop()}>
                         <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
                       </Animated.View>
                     )}
@@ -213,7 +214,7 @@ export default function NewGroup() {
       />
 
       {picked.length > 0 && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} style={[{ position: 'absolute', start: 16, end: 16 }, lift]}>
+        <Animated.View entering={rise()} style={[{ position: 'absolute', start: 16, end: 16 }, lift]}>
           <Button title={add ? t.addMembers : t.continue} icon={add ? 'userPlus' : 'forwardArrow'} onPress={() => (add ? finish() : setStep(2))} busy={busy} testID="group-next" />
         </Animated.View>
       )}

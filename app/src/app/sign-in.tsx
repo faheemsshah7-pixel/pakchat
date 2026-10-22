@@ -13,9 +13,9 @@
 // itself (an empty space as tall as the keyboard at the bottom) and scrolls
 // down, so the box you're typing in is never hidden.
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, View, type ScrollViewInstance } from 'react-native';
+import { Keyboard, ScrollView, View, type ScrollViewInstance } from 'react-native';
 import { GoogleOneTapSignIn, isCancelledResponse, isNoSavedCredentialFoundResponse, isSuccessResponse } from 'react-native-nitro-google-signin';
-import Animated, { FadeIn, FadeInDown, useAnimatedKeyboard, useAnimatedStyle, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
 import { core, GOOGLE_WEB_CLIENT_ID, isOffline, serverUrl, setServerUrl } from '../core/core';
@@ -23,7 +23,7 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
-import { lively } from '../ui/motion';
+import { pop, rise } from '../ui/motion';
 import { toast } from '../ui/overlays';
 
 /** Google's "G", in its four colours (Google asks for it on sign-in buttons). */
@@ -54,10 +54,16 @@ export default function SignIn() {
   const keyboard = useAnimatedKeyboard();
   const keyboardSpace = useAnimatedStyle(() => ({ height: keyboard.height.value }));
 
-  // Once the keyboard is up, scroll so the box you tapped sits just above it.
+  // Once the keyboard is up, scroll so the box you tapped sits just above it. The keyboard can
+  // take a while to slide up (much longer on a busy phone), so this runs when Android says it's
+  // fully up, not after a guessed wait. Tapping another box while it's already up scrolls too.
   function showBottom() {
-    setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 350);
+    setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 120);
   }
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 60));
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => console.log('[pakchat] sign-in screen drawn'), []);
 
@@ -82,10 +88,10 @@ export default function SignIn() {
         configured = true;
       }
       await GoogleOneTapSignIn.checkPlayServices();
-      // First the quick sheet with accounts used before, then all accounts on the phone.
-      let res = await GoogleOneTapSignIn.signIn();
+      // Google's account chooser with every Google account on the phone, plus "Add another account".
+      // (The quick sheet only listed accounts used here before, so a second Gmail never showed.)
+      let res = await GoogleOneTapSignIn.presentExplicitSignIn();
       if (isNoSavedCredentialFoundResponse(res)) res = await GoogleOneTapSignIn.createAccount();
-      if (isNoSavedCredentialFoundResponse(res)) res = await GoogleOneTapSignIn.presentExplicitSignIn();
       if (isCancelledResponse(res)) return;
       if (!isSuccessResponse(res) || !res.data.idToken) throw new Error('google');
       const idToken = res.data.idToken;
@@ -146,7 +152,7 @@ export default function SignIn() {
         </View>
 
         <View style={{ alignItems: 'center', marginTop: 48, gap: 12 }}>
-          <Animated.View entering={ZoomIn.springify().damping(lively.damping!).stiffness(lively.stiffness!)}>
+          <Animated.View entering={pop()}>
             <View
               style={{
                 width: 96,
@@ -161,12 +167,12 @@ export default function SignIn() {
               <Icon name="chat" size={46} color="#FFFFFF" stroke={2} />
             </View>
           </Animated.View>
-          <Animated.View entering={FadeInDown.delay(80).springify().damping(20)}>
+          <Animated.View entering={rise(80)}>
             <Txt size={36} weight="800" align="center" style={{ marginTop: 10, letterSpacing: -1 }}>
               {t.appName}
             </Txt>
           </Animated.View>
-          <Animated.View entering={FadeInDown.delay(140).springify().damping(20)}>
+          <Animated.View entering={rise(140)}>
             <Txt size={16} color={theme.muted} align="center">
               {t.tagline}
             </Txt>
@@ -175,7 +181,7 @@ export default function SignIn() {
 
         <View style={{ gap: 10, marginTop: 36 }}>
           {features.map((f, i) => (
-            <Animated.View key={f.icon} entering={FadeInDown.delay(200 + i * 70).springify().damping(20)}>
+            <Animated.View key={f.icon} entering={rise(200 + i * 70)}>
               <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 18 }}>
                 <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name={f.icon} size={19} color={theme.accInk} />
@@ -202,7 +208,7 @@ export default function SignIn() {
           </Animated.View>
         )}
 
-        <Animated.View entering={FadeInDown.delay(380).springify().damping(20)} style={{ gap: 10 }}>
+        <Animated.View entering={rise(380)} style={{ gap: 10 }}>
           <Pressy onPress={google} disabled={busy} label={t.continueGoogle} testID="google-sign-in">
             <View
               style={{

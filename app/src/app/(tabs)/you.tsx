@@ -6,16 +6,16 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
-import { core } from '../../core/core';
+import { core, serverUrl } from '../../core/core';
 import { useAuth } from '../../core/hooks';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { ACCENTS, accentGradient, makeTheme, type ModeChoice } from '../../theme/palette';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, Txt } from '../../ui/kit';
-import { tick } from '../../ui/motion';
+import { pop, rise, tick } from '../../ui/motion';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 
 export default function You() {
@@ -26,6 +26,7 @@ export default function You() {
   const [name, setName] = useState('');
   const [about, setAbout] = useState('');
   const [leaving, setLeaving] = useState(false);
+  const [server, setServer] = useState<string | null>(null);
 
   const modes: { key: ModeChoice; label: string }[] = [
     { key: 'sky', label: t.sky },
@@ -42,12 +43,23 @@ export default function You() {
     }
   }
 
+  async function saveServer() {
+    const typed = (server ?? '').trim();
+    setServer(null);
+    if (!typed) return;
+    try {
+      await core.changeServer(/^https?:\/\//.test(typed) ? typed : `http://${typed}`);
+    } catch {
+      toast(t.couldNot);
+    }
+  }
+
   const soon = (title: string) => router.push({ pathname: '/settings/soon', params: { title } });
 
   return (
     <Screen bottom={false}>
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 30 }}>
-        <Animated.View entering={FadeInDown.springify().damping(20)}>
+        <Animated.View entering={rise()}>
           <Pressy onPress={() => (setName(me?.name ?? ''), setAbout(me?.about ?? ''), setEditing(true))} label={t.editName} scale={0.98} testID="edit-me">
             <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, marginTop: 8, borderRadius: 24 }}>
               <Avatar id={myId} name={me?.name ?? ''} size={64} />
@@ -87,7 +99,7 @@ export default function You() {
                   <View style={{ width: 36, height: 36, borderRadius: 14, borderWidth: 2.5, borderColor: on ? theme.text : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
                     <LinearGradient colors={accentGradient(a)} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}>
                       {on && (
-                        <Animated.View entering={ZoomIn.springify().damping(12)}>
+                        <Animated.View entering={pop()}>
                           <Icon name="check" size={15} color="#FFFFFF" stroke={3} />
                         </Animated.View>
                       )}
@@ -114,6 +126,9 @@ export default function You() {
           <SettingRow icon="archive" title={t.backup} onPress={() => soon(t.backup)} />
           <Divider />
           <SettingRow icon="link" title={t.linked} onPress={() => soon(t.linked)} />
+          <Divider />
+          {/* Where the server is. Change it here when the Mac's Wi-Fi address changes (no need to log out). */}
+          <SettingRow icon="server" title={t.serverAddress} sub={serverUrl().replace(/^https?:\/\//, '')} onPress={() => setServer(serverUrl())} testID="open-server" />
         </Glass>
 
         <Glass style={{ marginTop: 14 }}>
@@ -126,6 +141,26 @@ export default function You() {
           <Field value={name} onChangeText={setName} placeholder={t.yourName} maxLength={25} testID="me-name" />
           <Field value={about} onChangeText={setAbout} placeholder={t.about} maxLength={140} testID="me-about" />
           <Button title={t.save} onPress={save} disabled={!name.trim()} testID="me-save" />
+        </View>
+      </Sheet>
+
+      <Sheet visible={server !== null} onClose={() => setServer(null)} title={t.serverAddress}>
+        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 12 }}>
+          <Txt size={13} color={theme.muted}>
+            {t.serverAddressHint}
+          </Txt>
+          <Field
+            value={server ?? ''}
+            onChangeText={setServer}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder="http://192.168.1.10:4000"
+            icon="server"
+            onSubmitEditing={saveServer}
+            testID="me-server"
+          />
+          <Button title={t.save} onPress={saveServer} disabled={!(server ?? '').trim()} testID="me-server-save" />
         </View>
       </Sheet>
 

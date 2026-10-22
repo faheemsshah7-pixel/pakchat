@@ -10,14 +10,8 @@ appId: com.pakchat.app
 - tapOn:
     id: find-field
 - inputText: ${OTHER}@test.pakchat
-- runFlow:
-    when:
-      notVisible:
-        id: find
-    commands:
-      - hideKeyboard
-- tapOn:
-    id: find
+# Enter on the keyboard is the same as tapping Find (and never hidden by the keyboard).
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       id: found-person

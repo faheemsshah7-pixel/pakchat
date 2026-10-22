@@ -1,4 +1,15 @@
-# Turns this emulator's network off (ON=true) or back on (ON=false).
+# Turns this emulator's network off (MODE=true) or back on (MODE=false).
+# Maestro only accepts the words "enabled" or "disabled" here, so we pick one of
+# two fixed steps depending on MODE, instead of putting MODE in the step itself.
 appId: com.pakchat.app
 ---
-- setAirplaneMode: ${MODE}
+- runFlow:
+    when:
+      true: ${MODE == 'true'}
+    commands:
+      - setAirplaneMode: enabled
+- runFlow:
+    when:
+      true: ${MODE == 'false'}
+    commands:
+      - setAirplaneMode: disabled

@@ -7,7 +7,7 @@ import KV from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BackHandler, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { core } from '../../core/core';
@@ -17,7 +17,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { ChatRow } from '../../ui/ChatRow';
 import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
-import { listLayout, thud, tick } from '../../ui/motion';
+import { listLayout, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 
 // The chips above the chats. `list:<id>` is one of your own lists.
@@ -186,7 +186,7 @@ export default function Chats() {
       </ScrollView>
 
       {!connected && (
-        <Animated.View entering={FadeInDown.springify().damping(20)} exiting={FadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>
+        <Animated.View entering={rise()} exiting={FadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint }} />
           <Txt size={12.5} weight="500" color={theme.muted} testID="connecting">
             {t.connecting}
@@ -236,7 +236,7 @@ export default function Chats() {
             ) : undefined
           }
           renderItem={({ item, index }) => (
-            <Animated.View entering={rows && index < 12 ? FadeInDown.delay(index * 28).springify().damping(22) : undefined} exiting={FadeOut.duration(160)}>
+            <Animated.View entering={rows && index < 12 ? rise(index * 28) : undefined} exiting={FadeOut.duration(160)}>
               <ChatRow
                 row={item}
                 typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== myId)}

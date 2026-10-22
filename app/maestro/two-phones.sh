@@ -9,11 +9,22 @@
 #
 # Then:  bash app/maestro/two-phones.sh
 #
+# If it fails part way, it prints a "carry on" command, for example:
+#   bash app/maestro/two-phones.sh from 4
+# That skips steps 1 to 3 (they already passed) and starts again at step 4,
+# with the same two test people. If it fails again from there, run it from the start.
+#
 # If a step fails, a screenshot of each phone, the app's log and Maestro's own
 # record of the step are saved in ~/Desktop/pakchat-test, so we can see what
 # the phones were showing at that moment.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# Which step to start from: 1 unless "from N" was given.
+FROM=1
+if [ "${1:-}" = "from" ]; then
+  FROM=${2:?Say which step, for example: from 4}
+fi
 
 OUT="$HOME/Desktop/pakchat-test"
 rm -rf "$OUT"
@@ -57,6 +68,7 @@ animations() {
 
 # Whatever happens, put the phones back as they were (network on, animations on).
 step="getting ready"
+num=1
 finish() {
   local code=$?
   for phone in "$A" "$B"; do adb -s "$phone" shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true; done
@@ -67,8 +79,11 @@ finish() {
       adb -s "$phone" logcat -d -t 400 -s ReactNativeJS:V > "$OUT/log-$phone.txt" 2>/dev/null || true
     done
     echo
-    echo "Failed at: $step"
+    echo "Failed at step $num: $step"
     echo "Screenshots and logs are in ~/Desktop/pakchat-test (send me the screenshots)."
+    if [ "$num" -gt 1 ]; then
+      echo "To carry on from this step later:  bash app/maestro/two-phones.sh from $num"
+    fi
   fi
 }
 trap finish EXIT
@@ -87,47 +102,71 @@ run() {
   maestro --device "$phone" test --debug-output "$OUT/maestro" "$@"
 }
 
-# Fresh names each run, so old test chats don't get in the way.
-n=$RANDOM
+# Fresh names each run, so old test chats don't get in the way. The number is
+# kept in a file so "from N" can carry on with the same two people.
+SAVED="$HOME/.pakchat-test-run"
+if [ "$FROM" -gt 1 ] && [ -n "${3:-}" ]; then
+  n=$3   # the number from the names, e.g. 14405 for Ali14405
+  echo "$n" > "$SAVED"
+elif [ "$FROM" -gt 1 ] && [ -f "$SAVED" ]; then
+  n=$(cat "$SAVED")
+elif [ "$FROM" -gt 1 ]; then
+  echo "There's no earlier run to carry on from. Run it from the start: bash app/maestro/two-phones.sh"
+  exit 1
+else
+  n=$RANDOM
+  echo "$n" > "$SAVED"
+fi
 ALI="Ali$n"
 SARA="Sara$n"
 
-step="the app opens and really draws its sign-in screen"
-echo "== $step"
-for phone in "$A" "$B"; do
-  run "$phone" starts.yaml
-  adb -s "$phone" exec-out screencap -p > "$OUT/start-$phone.png"
-  python3 looks-alive.py "$OUT/start-$phone.png"
-done
+# Starts step N (and prints its name), or says to skip it when it's before FROM.
+begin() {
+  num=$1
+  step=$2
+  if [ "$num" -lt "$FROM" ]; then
+    echo "== $num. $step (skipped, passed last time)"
+    return 1
+  fi
+  echo "== $num. $step"
+}
 
-step="both phones sign in"
-echo "== $step"
-run "$A" -e NAME="$ALI" sign-in.yaml
-run "$B" -e NAME="$SARA" sign-in.yaml
+if begin 1 "the app opens and really draws its sign-in screen"; then
+  for phone in "$A" "$B"; do
+    run "$phone" starts.yaml
+    adb -s "$phone" exec-out screencap -p > "$OUT/start-$phone.png"
+    python3 looks-alive.py "$OUT/start-$phone.png"
+  done
+fi
 
-step="Ali writes first, Sara answers"
-echo "== $step"
-run "$A" -e OTHER="$(echo "$SARA" | tr 'A-Z' 'a-z')" -e TEXT="Salam Sara" start-chat.yaml
-run "$B" -e OTHER="$ALI" -e TEXT="Salam Sara" open-chat.yaml
-run "$B" -e TEXT="Walaikum salam" send.yaml
-run "$A" -e TEXT="Walaikum salam" wait-for.yaml
+if begin 2 "both phones sign in"; then
+  run "$A" -e NAME="$ALI" sign-in.yaml
+  run "$B" -e NAME="$SARA" sign-in.yaml
+fi
 
-step="Sara goes offline; Ali sends three messages"
-echo "== $step"
-run "$B" -e MODE=true offline.yaml
-run "$A" send-offline-three.yaml
+if begin 3 "Ali writes first, Sara answers"; then
+  run "$A" -e OTHER="$(echo "$SARA" | tr 'A-Z' 'a-z')" -e TEXT="Salam Sara" start-chat.yaml
+  run "$B" -e OTHER="$ALI" -e TEXT="Salam Sara" open-chat.yaml
+  run "$B" -e TEXT="Walaikum salam" send.yaml
+  run "$A" -e TEXT="Walaikum salam" wait-for.yaml
+fi
 
-step="Sara comes back and catches up, in order"
-echo "== $step"
-run "$B" -e MODE=false offline.yaml
-run "$B" caught-up.yaml
+if begin 4 "Sara goes offline; Ali sends three messages"; then
+  run "$B" -e MODE=true offline.yaml
+  run "$A" send-offline-three.yaml
+fi
 
-step="looks and Urdu on Ali's phone"
-echo "== $step"
-run "$A" look-and-urdu.yaml
+if begin 5 "Sara comes back and catches up, in order"; then
+  run "$B" -e MODE=false offline.yaml
+  run "$B" caught-up.yaml
+fi
 
-step="Ali makes a list with Sara in it, then deletes it"
-echo "== $step"
-run "$A" -e NAME="$SARA" lists.yaml
+if begin 6 "looks and Urdu on Ali's phone"; then
+  run "$A" look-and-urdu.yaml
+fi
+
+if begin 7 "Ali makes a list with Sara in it, then deletes it"; then
+  run "$A" -e NAME="$SARA" lists.yaml
+fi
 
 echo "All passed."

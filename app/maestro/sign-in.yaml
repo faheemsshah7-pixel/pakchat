@@ -23,9 +23,15 @@ appId: com.pakchat.app
     id: test-name
 - waitForAnimationToEnd
 - inputText: ${NAME}
-# The keyboard covers the bottom of this screen, so put it away, then check the name went in.
-- hideKeyboard
-- assertVisible: ${NAME}
+# No hideKeyboard: when an emulator has no on-screen keyboard, Maestro's
+# hideKeyboard presses Back instead, which closed the app. The screen keeps the
+# box and its button above the keyboard by itself.
+# The box should sit just above the keyboard; scroll if it doesn't, then the name must be in it.
+- scrollUntilVisible:
+    element:
+      text: ${NAME}
+    direction: DOWN
+    timeout: 10000
 - scrollUntilVisible:
     element:
       id: test-sign-in

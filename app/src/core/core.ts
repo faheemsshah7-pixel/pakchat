@@ -172,7 +172,11 @@ class Core {
       this.emit(`messages:${m.chatId}`);
       this.emit('chats');
     });
-    this.client.on('chat', () => this.emit('chats'));
+    this.client.on('chat', () => {
+      this.emit('chats');
+      // Someone new may have started a chat with me, or joined a group: get their name.
+      this.namesSoon();
+    });
     this.client.on('connection', (c) => {
       this.connected = c;
       this.emit('connection');
@@ -262,6 +266,15 @@ class Core {
     this.emit('chats');
   }
 
+  /** The server moved (the Mac's Wi-Fi address changed): save the new address and reconnect there, still signed in. */
+  async changeServer(url: string) {
+    setServerUrl(url);
+    if (this.state !== 'signedIn') return;
+    this.client.stop();
+    this.makeClient();
+    if (await this.client.load()) this.afterSignIn();
+  }
+
   async signOut() {
     await this.client.signOut();
     this.state = 'signedOut';
@@ -331,8 +344,26 @@ class Core {
   async loadPeople(force = false) {
     const chats = await this.storage.listChats();
     const ids = new Set<string>();
-    for (const c of chats) for (const m of c.members) if (force || !this.people[m.userId]) ids.add(m.userId);
-    for (const id of ids) await this.person(id, true).catch(() => {});
+    for (const c of chats) for (const m of c.members) if ((force || !this.people[m.userId]) && !this.asking.has(m.userId)) ids.add(m.userId);
+    for (const id of ids) {
+      this.asking.add(id);
+      await this.person(id, true)
+        .catch(() => {})
+        .finally(() => this.asking.delete(id));
+    }
+  }
+
+  /** People whose names are being fetched right now (so two screens don't ask twice). */
+  private asking = new Set<string>();
+  private namesTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Looks up new names shortly (many chat changes in a row make one lookup). */
+  private namesSoon() {
+    if (this.namesTimer) clearTimeout(this.namesTimer);
+    this.namesTimer = setTimeout(() => {
+      this.namesTimer = null;
+      if (this.state === 'signedIn') void this.loadPeople().catch(() => {});
+    }, 300);
   }
 
   async person(userId: string, refresh = false): Promise<Person | null> {

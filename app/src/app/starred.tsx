@@ -4,7 +4,7 @@ import type { Message } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useStarred } from '../core/hooks';
@@ -12,6 +12,7 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { listTime } from '../ui/format';
 import { Avatar, Empty, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { rise } from '../ui/motion';
 
 export default function Starred() {
   const { chat: only } = useLocalSearchParams<{ chat?: string }>();
@@ -47,7 +48,7 @@ export default function Starred() {
         contentContainerStyle={{ padding: 12, gap: 8 }}
         ListEmptyComponent={list ? <Empty icon="star" text={t.noStarred} /> : undefined}
         renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 25).springify().damping(22)}>
+          <Animated.View entering={rise(Math.min(index, 10) * 25)}>
             <Pressy
               onPress={() =>
                 // From a chat's info: back to that chat, not a second copy of it.

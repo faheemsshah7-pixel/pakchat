@@ -3,7 +3,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { FlatList, View } from 'react-native';
-import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useChatList } from '../core/hooks';
@@ -12,6 +12,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Pressy, Screen, TopBar, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { pop, rise } from '../ui/motion';
 
 export default function Forward() {
   const { texts } = useLocalSearchParams<{ texts: string }>();
@@ -65,7 +66,7 @@ export default function Forward() {
         renderItem={({ item, index }) => {
           const on = picked.has(item.chat.id);
           return (
-            <Animated.View entering={FadeInDown.delay(Math.min(index, 10) * 25).springify().damping(22)}>
+            <Animated.View entering={rise(Math.min(index, 10) * 25)}>
               <Pressy onPress={() => toggle(item.chat.id)} label={item.title} scale={0.98} testID={`forward-${item.title}`}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 16, backgroundColor: on ? theme.selected : 'transparent' }}>
                   <Avatar id={item.chat.id} name={item.title} size={44} group={item.chat.kind === 'group'} />
@@ -75,7 +76,7 @@ export default function Forward() {
                     </Txt>
                   </View>
                   {on && (
-                    <Animated.View entering={ZoomIn.springify().damping(12)} style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
+                    <Animated.View entering={pop()} style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
                     </Animated.View>
                   )}
@@ -86,7 +87,7 @@ export default function Forward() {
         }}
       />
       {picked.size > 0 && (
-        <Animated.View entering={FadeInDown.springify().damping(18)} style={{ position: 'absolute', start: 16, end: 16, bottom: 24 }}>
+        <Animated.View entering={rise()} style={{ position: 'absolute', start: 16, end: 16, bottom: 24 }}>
           <Button title={t.send} icon="send" onPress={send} busy={busy} testID="forward-send" />
         </Animated.View>
       )}

@@ -7,14 +7,14 @@ import type { Chat, Message } from '@pakchat/shared';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, TextInput, View, type TextInputInstance } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, interpolate, LinearTransition, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../icons';
 import { fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
-import { lively, smooth } from '../motion';
+import { lively, rise } from '../motion';
 import { toast } from '../overlays';
 
 const EMOJI = ['😂', '❤️', '👍', '🙏', '😍', '😭', '🔥', '😊', '🤲', '💯', '😅', '🥰', '👌', '😢', '🎉', '🤣', '✨', '🌙'];
@@ -138,9 +138,11 @@ export function Composer({
   const quickOnes = [t.quickOk, t.quickInshallah, t.quickSure, t.quickHaha];
 
   return (
-    <Animated.View layout={LinearTransition.springify().damping(smooth.damping!).stiffness(smooth.stiffness!)}>
+    // No layout animation on this outer view: it moves with the keyboard every frame,
+    // and an animation here lagged behind and bounced. The parts inside fade in on their own.
+    <Animated.View>
       {suggestions.length > 0 && (
-        <Animated.View entering={FadeInDown.springify().damping(20)} exiting={FadeOutDown.duration(120)}>
+        <Animated.View entering={rise()} exiting={FadeOutDown.duration(120)}>
           <Glass strong style={{ marginHorizontal: 10, marginBottom: 6, paddingVertical: 4, borderRadius: 18 }}>
             {suggestions.map((p) => (
               <Pressy key={p.id} onPress={() => mention(p)} label={p.name} scale={0.98}>
@@ -172,7 +174,7 @@ export function Composer({
       )}
 
       {emoji && (
-        <Animated.View entering={FadeInDown.springify().damping(20)} exiting={FadeOutDown.duration(120)}>
+        <Animated.View entering={rise()} exiting={FadeOutDown.duration(120)}>
           <Glass strong style={{ marginHorizontal: 10, marginTop: 8, padding: 6, borderRadius: 20, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
             {EMOJI.map((e) => (
               <Pressy key={e} onPress={() => changed(text + e)} label={e} scale={0.85}>
@@ -189,7 +191,7 @@ export function Composer({
 
       <Glass style={{ marginHorizontal: 10, marginTop: 10, marginBottom: 10, padding: 6, borderRadius: 22 }}>
         {banner && (
-          <Animated.View entering={FadeInDown.springify().damping(20)} exiting={FadeOut.duration(100)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Animated.View entering={rise()} exiting={FadeOut.duration(100)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 10, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
               <Txt size={13} weight="700" color={theme.accInk}>
                 {editing ? t.editing : fill(t.replyingTo, { name: banner.author === core.myId ? t.youWord : core.name(banner.author) || '…' })}

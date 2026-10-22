@@ -10,6 +10,7 @@ import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
@@ -22,6 +23,10 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 export default function Root() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* When the phone's "Remove animations" is on, Reanimated skips animations, and screens
+          that slide in after a short wait (sign-in's buttons) could stay invisible. The emulator
+          test caught it. So our animations always play; they're short and soft anyway. */}
+      <ReducedMotionConfig mode={ReduceMotion.Never} />
       <SafeAreaProvider>
         <ThemeProvider>
           <App />

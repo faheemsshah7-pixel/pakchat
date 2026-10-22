@@ -4,13 +4,32 @@ appId: com.pakchat.app
 ---
 - tapOn:
     id: tab-index
+# A "Family" list left over from a run that stopped part way would be tapped
+# instead of the new one, so delete it first.
+- runFlow:
+    when:
+      visible:
+        id: filter-list-Family
+    commands:
+      - longPressOn:
+          id: filter-list-Family
+      - tapOn:
+          id: delete-list
+      - tapOn:
+          id: confirm-delete-list
 - tapOn:
     id: new-list
 - tapOn:
     id: list-name
 - inputText: Family
-- hideKeyboard
-- tapOn: ${NAME}
+# Close the keyboard first by tapping the plain "Chats in this list" heading.
+# (On older builds, the first tap on a chat while the keyboard was open only
+# closed the keyboard, so the chat wasn't ticked.)
+- tapOn: Chats in this list
+# Tap the chat's own row by its id. Tapping the name as text could hit the same
+# name on the chat list hidden behind this screen, which picks nothing.
+- tapOn:
+    id: list-pick-${NAME}
 - tapOn:
     id: save-list
 - tapOn:

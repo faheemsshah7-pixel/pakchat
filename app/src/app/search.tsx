@@ -4,7 +4,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { SectionList, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useChatList, useSearch } from '../core/hooks';
@@ -13,6 +13,7 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { listTime } from '../ui/format';
 import { Avatar, Empty, Field, IconButton, Pressy, Screen, Txt, fontStyle } from '../ui/kit';
+import { rise } from '../ui/motion';
 
 type Row = { kind: 'chat'; id: string; title: string; group: boolean } | { kind: 'msg'; f: Found };
 
@@ -68,7 +69,7 @@ export default function Search() {
             </Txt>
           )}
           renderItem={({ item, index }) => (
-            <Animated.View entering={FadeInDown.delay(Math.min(index, 8) * 20).springify().damping(22)}>
+            <Animated.View entering={rise(Math.min(index, 8) * 20)}>
               {item.kind === 'chat' ? (
                 <Pressy onPress={() => openChat(item.id)} label={item.title} scale={0.98}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 }}>

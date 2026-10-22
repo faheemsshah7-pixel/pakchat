@@ -10,14 +10,14 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { Easing, FadeInDown, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { useLook, useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
 import { Pressy, Txt } from './kit';
-import { smooth } from './motion';
+import { rise, smooth } from './motion';
 
 /** Keeps something on screen while it animates out. `p` goes 0 → 1 when opening and back when closing. */
 function useOpenClose(visible: boolean) {
@@ -125,6 +125,11 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
   const { mounted, p } = useOpenClose(visible);
   const drag = useSharedValue(0);
   const keyboardHeight = useKeyboardHeight();
+  // Some phones shrink the pop-up's window when the keyboard opens and some don't. If it already
+  // shrank, lifting by the keyboard's height again would push the boxes off the top. So measure how
+  // much it shrank and only make up the rest.
+  const [space, setSpace] = useState(height);
+  const lift = Math.max(insets.bottom, keyboardHeight - Math.max(0, height - space));
 
   // Pull it down to close; let go early and it springs back up.
   const pan = usePanGesture({
@@ -144,7 +149,7 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
   if (!mounted) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end', direction: rtl ? 'rtl' : 'ltr' }}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', direction: rtl ? 'rtl' : 'ltr' }} onLayout={(e) => setSpace(e.nativeEvent.layout.height)}>
         <Backdrop p={p} onClose={onClose} />
         <Animated.View
           style={[
@@ -153,9 +158,9 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
               borderTopLeftRadius: 28,
               borderTopRightRadius: 28,
               // Above the keyboard when it's open, so the box you type in and its button show.
-              paddingBottom: Math.max(insets.bottom, keyboardHeight) + 12,
+              paddingBottom: lift + 12,
               boxShadow: `0 -10px 40px -20px ${t.shadow}`,
-              maxHeight: height * 0.85,
+              maxHeight: space * 0.9,
             },
             style,
           ]}
@@ -256,7 +261,7 @@ export function ToastHost() {
       {now && (
         <Animated.View
           key={now.id}
-          entering={FadeInDown.springify().damping(18)}
+          entering={rise()}
           exiting={FadeOutDown.duration(160)}
           style={{ paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16, backgroundColor: t.dark ? '#ECEEF2' : '#0B1B36' }}
         >

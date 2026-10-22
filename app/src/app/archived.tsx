@@ -2,7 +2,7 @@
 // writes; swipe one left (or hold it) to bring it back.
 import { router } from 'expo-router';
 import { FlatList } from 'react-native';
-import Animated, { FadeInDown, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeOut } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useAllTyping, useChatList } from '../core/hooks';
@@ -10,6 +10,7 @@ import { useT } from '../i18n';
 import { ChatRow } from '../ui/ChatRow';
 import { Empty, Screen, TopBar } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { rise } from '../ui/motion';
 
 export default function Archived() {
   const t = useT();
@@ -31,7 +32,7 @@ export default function Archived() {
         contentContainerStyle={{ padding: 10 }}
         ListEmptyComponent={all ? <Empty icon="archive" text={t.noArchived} /> : undefined}
         renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(index * 25).springify().damping(22)} exiting={FadeOut} style={{ marginBottom: 4 }}>
+          <Animated.View entering={rise(index * 25)} exiting={FadeOut} style={{ marginBottom: 4 }}>
             <ChatRow
               row={item}
               typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== core.myId)}
