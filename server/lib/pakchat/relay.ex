@@ -298,6 +298,14 @@ defmodule Pakchat.Relay do
 
   ## Collecting
 
+  @doc "True if a message sent since `since` is still waiting for this device (it hasn't collected it)."
+  def waiting?(device_id, %DateTime{} = since) do
+    Repo.exists?(
+      from e in Envelope,
+        where: e.device_id == ^device_id and e.kind == "message" and e.sent_at >= ^since
+    )
+  end
+
   @doc "Envelopes waiting for this device, oldest first, after envelope `after_id`."
   def pending(%Device{id: device_id}, after_id \\ 0, limit \\ 200) do
     Repo.all(

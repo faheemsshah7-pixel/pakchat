@@ -26,12 +26,12 @@ import * as Device from 'expo-device';
 import KV from 'expo-sqlite/kv-store';
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { loadSignal } from '../../modules/pakchat-signal';
+import { fileModule, loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
 import { openStorage } from './db';
 import { backUpIfDue } from './backup';
 import { forgetFile, maybeDownload, uploader } from './files';
-import { startPush } from './push';
+import { alertFor, startPush } from './push';
 
 export type Person = { id: string; name: string; about?: string | null; photo?: string | null };
 
@@ -112,6 +112,8 @@ class Core {
   /** chatId → userId → when they started typing. */
   typing: Record<string, Record<string, number>> = {};
   presence: Record<string, Presence> = {};
+  /** The chat open on screen, if any: its messages don't alert while you're looking. */
+  viewing: string | null = null;
 
   // ---- Change notices for the screens ----
 
@@ -193,6 +195,7 @@ class Core {
       this.emit('chats');
       if (m.file) void maybeDownload(m);
     });
+    this.client.on('arrived', (m) => alertFor(m));
     this.client.on('chat', () => {
       this.emit('chats');
       // Someone new may have started a chat with me, or joined a group: get their name.
@@ -243,20 +246,72 @@ class Core {
   }
 
   private watchingApp = false;
-  private sleepTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Counts moves in and out of PakChat, so a late "let go" can tell it's out of date. */
+  private moves = 0;
 
   /**
-   * Leaving PakChat disconnects it a second later, so the server sees the
-   * phone as away and sends an alert for new messages (it never alerts a phone
-   * that's connected). The pause means picking a photo doesn't disconnect.
-   * Coming back connects again and collects what came in.
+   * Leaving PakChat lets go of the connection straight away, so the server
+   * sees the phone as away and wakes it for the next message (it never wakes a
+   * phone that's connected). Only a message still being sent is let finish
+   * first, for at most two seconds. Coming back connects again and collects
+   * what came in.
+   *
+   * No timers here: phones pause them while the app is in the background, so
+   * the waiting is done by the phone itself (fileModule().wait).
    */
   private appMoved(s: AppStateStatus) {
-    if (this.sleepTimer) clearTimeout(this.sleepTimer);
-    this.sleepTimer = null;
+    const move = ++this.moves;
     if (this.state !== 'signedIn') return;
-    if (s === 'active') this.client.start();
-    else if (s === 'background') this.sleepTimer = setTimeout(() => this.client.stop(), 1_000);
+    if (s === 'active') {
+      this.client.start();
+      return;
+    }
+    if (s !== 'background') return;
+    void Promise.race([this.client.settled(), fileModule().wait(2_000)])
+      .catch(() => {})
+      .then(() => {
+        if (move === this.moves && !this.collecting && AppState.currentState !== 'active') this.client.stop();
+      });
+  }
+
+  private collecting: Promise<boolean> | null = null;
+
+  /**
+   * A wake-up from the server (background.ts): connect, take in what's waiting
+   * (which sends the grey "delivered" ticks and shows the alerts), and let go
+   * again if PakChat isn't open. Returns false only if PakChat is closed and
+   * the server couldn't be reached, so the caller can still say "New message".
+   */
+  collect(): Promise<boolean> {
+    this.collecting ??= this.collectNow().finally(() => {
+      this.collecting = null;
+    });
+    return this.collecting;
+  }
+
+  private async collectNow(): Promise<boolean> {
+    await this.init();
+    if (this.state !== 'signedIn') return true;
+    const wait = (ms: number) => fileModule().wait(ms);
+    // While PakChat is open the server only wakes it when a message wasn't picked
+    // up in time: the connection may have died without noticing, so make a new one.
+    if (AppState.currentState === 'active') this.client.stop();
+    this.client.start();
+    // Up to 10 seconds to get through.
+    for (let i = 0; i < 40 && !this.client.isConnected; i++) await wait(250);
+    const reached = this.client.isConnected;
+    if (reached) {
+      // The server sends what's waiting as soon as we're in. Let it come, and let it all
+      // be handled (never more than 5 seconds each, so a stuck step can't hold the phone awake).
+      const settled = () => Promise.race([this.client.settled(), wait(5_000)]);
+      await wait(1_200);
+      await settled();
+      await wait(300);
+      await settled();
+    }
+    const open = AppState.currentState === 'active';
+    if (!open) this.client.stop();
+    return reached || open;
   }
 
   newId() {

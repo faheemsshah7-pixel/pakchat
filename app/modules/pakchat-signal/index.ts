@@ -21,6 +21,8 @@ export type FileModule = {
   contactAccounts(): Promise<PhoneBookAccount[]>;
   /** Saves a contact in the phone's address book. Null type and account: the phone itself. */
   saveToPhoneBook(type: string | null, account: string | null, name: string, phone: string | null, email: string | null): Promise<string>;
+  /** Answers after `ms`, even in the background, where setTimeout stops (see push.ts). */
+  wait(ms: number): Promise<void>;
   addListener(event: 'progress', fn: (e: { tag: string; done: number; total: number }) => void): EventSubscription;
 };
 

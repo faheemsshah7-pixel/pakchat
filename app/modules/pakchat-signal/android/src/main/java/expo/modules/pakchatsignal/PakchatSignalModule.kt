@@ -13,6 +13,7 @@ import org.signal.libsignal.protocol.NoSessionException
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** A bundle as JavaScript sends it: the same fields as PublicBundle, with bytes as base64 text. */
 class BundleRecord : Record {
@@ -57,6 +58,8 @@ class PakchatSignalModule : Module() {
 
   // Files go up and down on their own threads, so a big upload never holds up messages.
   private val transfers = Executors.newFixedThreadPool(3)
+  // For wait(): one thread that only keeps time.
+  private val clock = Executors.newSingleThreadScheduledExecutor()
 
   /** Runs a slow file job away from everything else, and answers when it's done. */
   private fun slowly(promise: Promise, job: () -> Any?) {
@@ -126,6 +129,15 @@ class PakchatSignalModule : Module() {
         FileTransfer.download(url, path(to), bytes(key), digest?.let { bytes(it) }, progress(tag))
         to
       }
+    }
+
+    /**
+     * Answers after `ms`. JavaScript's own timers (setTimeout) stop while PakChat
+     * isn't on screen; this one keeps going, so a push that wakes the app can
+     * still count down while it collects messages.
+     */
+    AsyncFunction("wait") { ms: Int, promise: Promise ->
+      clock.schedule({ promise.resolve(null) }, ms.coerceIn(0, 60_000).toLong(), TimeUnit.MILLISECONDS)
     }
 
     /** Where a contact can be saved: Google accounts, the phone, SIMs. Needs the contacts permission. */

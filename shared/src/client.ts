@@ -66,6 +66,8 @@ export type ClientOptions = {
 export type Events = {
   /** A message was added or changed. */
   message: (m: Message) => void;
+  /** A new message from someone else just arrived (once per message): for alerts. */
+  arrived: (m: Message) => void;
   chat: (c: Chat) => void;
   typing: (e: { chatId: string; userId: string; typing: boolean }) => void;
   presence: (p: Record<string, unknown>) => void;
@@ -107,6 +109,8 @@ export class PakChat {
   private incoming: WireEnvelope[] = [];
   private draining: Promise<void> | null = null;
   private flushing = false;
+  /** The send run going on now, if any. */
+  private flushRun: Promise<void> | null = null;
   private flushAgain = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private acks: number[] = [];
@@ -254,6 +258,19 @@ export class PakChat {
       await this.lane;
       while (this.flushing) await new Promise((r) => setTimeout(r, 5));
       if (!this.draining && !this.flushing && this.incoming.length === 0) return;
+    }
+  }
+
+  /**
+   * Like idle(), but without timers: phones pause timers while the app is in
+   * the background, and this is what the app waits on there before it lets go.
+   */
+  async settled() {
+    for (let i = 0; i < 50; i++) {
+      await this.draining;
+      await this.lane;
+      await this.flushRun?.catch(() => {});
+      if (!this.draining && !this.flushRun && this.incoming.length === 0) return;
     }
   }
 
@@ -519,6 +536,16 @@ export class PakChat {
       return;
     }
     this.flushing = true;
+    const run = this.sendAll();
+    this.flushRun = run;
+    try {
+      await run;
+    } finally {
+      if (this.flushRun === run) this.flushRun = null;
+    }
+  }
+
+  private async sendAll(): Promise<void> {
     try {
       do {
         this.flushAgain = false;
@@ -941,7 +968,9 @@ export class PakChat {
         await storage.putChat(fresh);
         await this.applyWaiting(fresh, m);
       });
-      this.emit('message', (await storage.getMessage(chat.id, e.from, c.id)) ?? m);
+      const saved = (await storage.getMessage(chat.id, e.from, c.id)) ?? m;
+      this.emit('message', saved);
+      if (e.from !== this.s.userId) this.emit('arrived', saved);
       if (e.from !== this.s.userId && e.seq != null) {
         const key = `${chat.id}|${e.from}`;
         this.delivered.set(key, (this.delivered.get(key) ?? new Set()).add(e.seq));

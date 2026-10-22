@@ -8,8 +8,9 @@ defmodule Pakchat.Push.Fcm do
   `server/.env` as `FCM_SERVICE_ACCOUNT=/Users/you/pakchat-secrets/fcm.json`.
   Without it, alerts are only written in the log.
 
-  The alert carries no names and no words from the chat, only "New message",
-  because the server can't read messages anyway.
+  The push carries no names and no words, because the server can't read
+  messages anyway. It's "data only" and high priority: Android wakes the app,
+  which collects and unlocks the message and shows "Sara: hi" itself.
   """
   require Logger
 
@@ -24,12 +25,7 @@ defmodule Pakchat.Push.Fcm do
       body = %{
         message: %{
           token: token,
-          notification: %{title: "PakChat", body: "New message"},
-          android: %{
-            priority: "high",
-            # One alert that updates, not a pile of them.
-            notification: %{channel_id: "messages", tag: "pakchat-messages"}
-          },
+          android: %{priority: "high", ttl: "86400s", collapse_key: "pakchat-wake"},
           data: %{wake: "1"}
         }
       }

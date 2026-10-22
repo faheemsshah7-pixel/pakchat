@@ -1367,10 +1367,19 @@ only for people in that chat. The Kotlin code locks and uploads a piece at a tim
 never sits in memory. The biggest size is `FILE_MAX_MB` on the server, and the app asks for it, so it
 can change after launch with no app update.
 
-### Alerts when PakChat is closed
+### Alerts when PakChat is closed, WhatsApp style
 Android lets one service wake apps: **Firebase Cloud Messaging (FCM)**. The phone gets a push token
-from Firebase and gives it to our server. When a message waits for a phone that isn't connected, the
-server asks Firebase to show "New message". The words never go through Firebase.
+from Firebase and gives it to our server. Leaving PakChat disconnects at once. When a message comes
+for a phone that isn't connected, the server sends a quiet **wake-up** through Firebase, with no
+words in it. The phone wakes PakChat in the background (`app/src/core/background.ts`), which
+connects, collects the message (the sender sees grey double ticks, never blue), unlocks it, and
+shows the alert itself: the chat's name and "Sara: See you at 5". One alert per chat, updated as more
+come, with "3 new messages" on top. Muted chats stay quiet, and tapping opens the chat. The words
+never go through Firebase or our server.
+
+If a phone looks connected but doesn't collect a message within 3 seconds (its connection died
+without noticing), the server wakes it anyway. Phones pause JavaScript timers in the background,
+so the app waits with the phone's own clock instead (`wait` in the pakchat-signal module).
 
 ### Phase 5: alerts (free, about 10 minutes, once)
 1. Go to console.firebase.google.com, **Add project**, name it PakChat (Analytics can be off).

@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
 import { haveFile, loadLimits, sendPicked, TooBig, type Picked } from '../../core/files';
+import { dismissChatAlert } from '../../core/push';
 import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePerson, usePresence, useStarred, useTyping } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -89,17 +90,25 @@ export default function ChatScreen() {
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
+      // This chat's alert goes, and new messages here don't alert while you're looking.
+      core.viewing = id;
+      if (AppState.currentState === 'active') void dismissChatAlert(id);
       core.setPrefs(id, { markedUnread: false });
       // Coming back to the chat (from its info, say): anything that came meanwhile is read now.
       if (AppState.currentState === 'active') void core.client.markRead(id).catch(() => {});
       return () => {
         focused.current = false;
+        if (core.viewing === id) core.viewing = null;
       };
     }, [id]),
   );
   useEffect(() => {
     if (onScreen && focused.current && chat && chat.unread > 0) void core.client.markRead(id).catch(() => {});
   }, [chat, id, list, onScreen]);
+  // Back in PakChat with this chat open: its alert has been seen.
+  useEffect(() => {
+    if (onScreen && focused.current) void dismissChatAlert(id);
+  }, [id, onScreen]);
 
   // Back first cancels picking, replying or editing.
   useEffect(() => {

@@ -1,7 +1,7 @@
 {
   "name": "pakchat-app",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/noto-nastaliq-urdu": "^0.4.2",
@@ -33,6 +33,7 @@
     "expo-sqlite": "~58.0.13",
     "expo-status-bar": "~58.0.3",
     "expo-system-ui": "~58.0.6",
+    "expo-task-manager": "~58.0.12",
     "expo-video": "~58.0.12",
     "expo-video-thumbnails": "~58.0.2",
     "phoenix": "^1.8.15",

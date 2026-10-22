@@ -350,7 +350,7 @@ export const en = {
   storageNote: 'Files you choose download by themselves. Others wait for a tap.',
   // Alerts
   newMessage: 'New message',
-  notificationsNote: 'PakChat alerts you when a message arrives, even when the app is closed. The alert never shows what the message says.',
+  notificationsNote: 'PakChat alerts you when a message arrives, even when the app is closed, with who sent it and what it says. Your phone unlocks the message itself: our server and Google never see the words.',
   notificationsOff: "Alerts are off for PakChat. Turn them on in your phone's settings.",
   notificationsOn: 'Alerts are on',
   openSettings: 'Open settings',
@@ -706,7 +706,7 @@ export const ur: Strings = {
   docsWord: 'دستاویزات',
   storageNote: 'جو فائلیں آپ چنیں وہ خود ڈاؤن لوڈ ہوں گی۔ باقی ٹیپ کا انتظار کریں گی۔',
   newMessage: 'نیا پیغام',
-  notificationsNote: 'پیغام آنے پر پاک چیٹ آپ کو بتاتا ہے، ایپ بند ہو تب بھی۔ اطلاع میں پیغام کبھی نظر نہیں آتا۔',
+  notificationsNote: 'پیغام آنے پر پاک چیٹ آپ کو بتاتا ہے، ایپ بند ہو تب بھی، کس نے بھیجا اور کیا لکھا۔ پیغام آپ کا فون خود کھولتا ہے: ہمارا سرور اور گوگل الفاظ کبھی نہیں دیکھتے۔',
   notificationsOff: 'پاک چیٹ کی اطلاعات بند ہیں۔ فون کی سیٹنگز میں آن کریں۔',
   notificationsOn: 'اطلاعات آن ہیں',
   openSettings: 'سیٹنگز کھولیں',

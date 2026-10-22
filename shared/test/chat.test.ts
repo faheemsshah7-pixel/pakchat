@@ -116,12 +116,27 @@ describe.each(WAYS)('chats (%s)', (_label, phone, web) => {
     expect(await ali.client.outbox()).toEqual([]);
   });
 
-  test('a message pushed twice shows once', async () => {
+  test('a message pushed twice shows once, and alerts once', async () => {
     const { ali, sara, chat } = await two();
+    const alerts: string[] = [];
+    sara.client.on('arrived', (m) => alerts.push(m.text ?? ''));
+    const mine: string[] = [];
+    ali.client.on('arrived', (m) => mine.push(m.text ?? ''));
     w.server.chaos = { duplicate: true };
     await ali.client.sendText(chat.id, 'Only once please');
     await w.settle();
     expect(await w.texts(sara, chat.id)).toEqual(['Ali: Only once please']);
+    expect(alerts).toEqual(['Only once please']);
+    // Ticks and my own messages never alert.
+    expect(mine).toEqual([]);
+  });
+
+  test('settled() waits for a send to finish, so the app can let go safely', async () => {
+    const { ali, chat } = await two();
+    const sent = await ali.client.sendText(chat.id, 'Before I go');
+    await ali.client.settled();
+    expect((await ali.storage.getMessage(chat.id, ali.id, sent.id))!.seq).not.toBeNull();
+    expect(await ali.client.outbox()).toEqual([]);
   });
 
   test('the app picks up where it left off after a restart', async () => {

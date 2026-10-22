@@ -1,5 +1,5 @@
 // settings/notifications.tsx: whether PakChat can alert you when it's closed.
-// The alert only ever says "New message": never who, never what.
+// The alert shows who wrote and what they said, unlocked on the phone itself.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';

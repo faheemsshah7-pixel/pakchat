@@ -135,6 +135,28 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert Enum.map(list, & &1.seq) == [1, 2, 3]
   end
 
+  test "a connected phone that doesn't collect a message is pushed after 3 s", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    Accounts.set_push_token(sara.device, %{push_token: "fcm-token", push_platform: "fcm"})
+    a = online(ali.token, ali.device)
+    online(sara.token, sara.device)
+    before = DateTime.add(DateTime.utc_now(), -5, :second)
+
+    send_msg(a, chat.id, [sealed(sara, "are you there?")])
+    [env] = envelopes_for(sara.device)
+
+    # Not now: it's connected. A check in 3 seconds instead.
+    assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
+    assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true}
+    assert DateTime.diff(job.scheduled_at, DateTime.utc_now()) in 1..3
+
+    # Still waiting then (a dead connection): it's pushed. Collected: it isn't.
+    assert Relay.waiting?(sara.device.id, before)
+    Relay.ack(sara.device, [env.id])
+    refute Relay.waiting?(sara.device.id, before)
+    assert :ok = perform_job(Pakchat.Push.Notify, job.args)
+  end
+
   test "ticks don't wake a closed app, and my own messages don't wake my other devices", ctx do
     %{ali: ali, sara: sara, chat: chat} = ctx
     Accounts.set_push_token(ali.device, %{push_token: "ali-phone", push_platform: "fcm"})

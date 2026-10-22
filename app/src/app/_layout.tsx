@@ -4,7 +4,8 @@
 // splash screen up until we know whether you're signed in, and then shows
 // either the sign-in screens or the app. Screens slide in from the right
 // (from the left in Urdu, which reads right to left).
-import { SplashScreen, Stack, type ErrorBoundaryProps } from 'expo-router';
+import { router, SplashScreen, Stack, useRootNavigationState, type ErrorBoundaryProps } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
@@ -59,6 +60,16 @@ function App() {
   useEffect(() => {
     if (state !== 'loading' || stuck) void SplashScreen.hideAsync().catch(() => {});
   }, [state, stuck]);
+
+  // Tapping a message alert opens its chat, even when the tap started PakChat.
+  const tapped = Notifications.useLastNotificationResponse();
+  const nav = useRootNavigationState();
+  useEffect(() => {
+    if (!tapped || state !== 'signedIn' || !nav?.key) return;
+    Notifications.clearLastNotificationResponse();
+    const chatId = tapped.notification.request.content.data?.chatId;
+    if (typeof chatId === 'string' && chatId !== core.viewing) router.push({ pathname: '/chat/[id]', params: { id: chatId } });
+  }, [tapped, state, nav?.key]);
 
   // The window behind the screens matches the look, so nothing flashes white in Graphite.
   useEffect(() => {

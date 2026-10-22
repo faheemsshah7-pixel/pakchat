@@ -2,17 +2,34 @@ defmodule Pakchat.Push.Notify do
   @moduledoc """
   The background job that sends one push alert.
 
-  `unique` means: if this device already has an alert queued in the last
-  30 seconds, don't queue another. Ten messages in a row wake it once.
+  `unique` means: while this device already has a push waiting to go, don't
+  queue another. Ten messages in a row wake it once, and it collects all ten.
+  Once that push has gone, the next message gets its own.
+
+  `if_waiting`: the phone looked connected, so only push if it still hasn't
+  collected anything (see `Pakchat.Push`).
   """
-  use Oban.Worker, queue: :push, max_attempts: 5, unique: [period: 30, keys: [:device_id]]
+  use Oban.Worker,
+    queue: :push,
+    max_attempts: 5,
+    unique: [period: 60, keys: [:device_id], states: [:available, :scheduled]]
+
   require Logger
-  alias Pakchat.Accounts
+  alias Pakchat.{Accounts, Relay}
   alias Pakchat.Push.Fcm
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"device_id" => device_id}}) do
+  def perform(%Oban.Job{args: %{"device_id" => device_id} = args} = job) do
     case Accounts.get_device(device_id) do
+      %{push_token: token} when is_binary(token) and is_map_key(args, "if_waiting") ->
+        # Only messages from about when this was queued: an old one that's
+        # stuck shouldn't wake the phone again and again.
+        since = DateTime.add(job.inserted_at || DateTime.utc_now(), -5, :second)
+
+        if Relay.waiting?(device_id, since),
+          do: perform(%Oban.Job{args: %{"device_id" => device_id}}),
+          else: :ok
+
       %{push_token: token, push_platform: "fcm"} = device when is_binary(token) ->
         if Fcm.configured?() do
           send_fcm(device, token)
