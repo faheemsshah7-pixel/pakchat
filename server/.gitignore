@@ -28,3 +28,6 @@ pakchat-*.tar
 
 # Secrets on your Mac (Google client ids and so on). Never commit them.
 .env
+
+# Files and backups people sent while testing (locked, but not for git).
+/priv/files/

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 
 import type { Found } from '../data/sqliteStorage';
 import { core, type ChatPrefs, type Person, type Presence } from './core';
+import { moving } from './files';
 
 type Topic = Parameters<typeof core.on>[0];
 
@@ -244,4 +245,11 @@ export function useNow(ms = 30_000) {
     return () => clearInterval(t);
   }, [ms]);
   return now;
+}
+
+// ---- Files ----
+
+/** How far a file has moved (0 to 1) while it uploads or downloads, else undefined. */
+export function useFileProgress(tag: string): number | undefined {
+  return useCore(['files'], () => moving[tag]);
 }

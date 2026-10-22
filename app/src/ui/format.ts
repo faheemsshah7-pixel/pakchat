@@ -1,7 +1,7 @@
 // format.ts: turning times and messages into the short words a screen shows.
 import type { Message } from '@pakchat/shared';
 
-import { core } from '../core/core';
+import { core, reasonOf } from '../core/core';
 import { fill, type Strings } from '../i18n';
 
 const DAY = 86_400_000;
@@ -109,12 +109,49 @@ export function timerLabel(seconds: number, t: Strings) {
   return t.days90;
 }
 
+/** "📷 Photo", "🎥 Video: caption", "📄 notes.pdf" */
+function fileLine(m: Message, t: Strings) {
+  const f = m.file!;
+  const what = f.kind === 'image' ? t.photo : f.kind === 'video' ? t.videoMsg : f.kind === 'voice' ? t.voice : `📄 ${f.name ?? t.document}`;
+  return m.text ? `${what}: ${m.text}` : what;
+}
+
 /** The one line under a chat's name in the list. */
 export function preview(m: Message | null, t: Strings, group: boolean) {
   if (!m) return '';
   if (m.kind === 'system') return systemText(m, t);
   if (m.deleted) return m.author === core.myId ? t.youDeleted : t.deleted;
-  const body = m.kind === 'poll' ? `${t.poll} ${m.poll?.question ?? ''}` : (m.text ?? '');
+  const body = m.kind === 'poll' ? `${t.poll} ${m.poll?.question ?? ''}` : m.kind === 'file' && m.file ? fileLine(m, t) : (m.text ?? '');
   if (group && m.author !== core.myId) return `${core.name(m.author) || '…'}: ${body}`;
   return body;
+}
+
+/** Words for the server's reasons to refuse a phone number or a code. */
+export function phoneError(t: Strings, err: unknown) {
+  const reason = reasonOf(err);
+  const words: Record<string, string> = {
+    offline: t.serverError,
+    bad_phone: t.badPhone,
+    wrong_code: t.wrongCode,
+    too_many_tries: t.tooManyTries,
+    wait: t.waitForCode,
+    too_many_codes: t.tooManyCodes,
+    sms_cap: t.smsCap,
+    rate_limited: t.slowDown,
+    taken: t.taken,
+  };
+  return words[reason] ?? t.couldNot;
+}
+
+/** "2.4 MB", "830 KB" */
+export function fileSize(bytes: number) {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** "1:05" for a video's length in ms. */
+export function duration(ms: number) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }

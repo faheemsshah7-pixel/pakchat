@@ -144,6 +144,39 @@ describe.each(WAYS)('chats (%s)', (_label, phone, web) => {
     expect((await w.texts(ali, chat.id)).at(-1)).toBe('Sara: Back');
   });
 
+  test('a message is not lost if the app is killed right after opening it', async () => {
+    const { ali, sara, chat } = await two();
+    await ali.client.sendText(chat.id, 'Before');
+    await w.settle();
+    // Sara's phone opens the next message, then dies before saving it.
+    const put = sara.storage.putMessage.bind(sara.storage);
+    let dying = true;
+    let opened = false;
+    sara.storage.putMessage = (m) => {
+      if (dying && m.text === 'Killed') {
+        opened = true;
+        return new Promise<void>(() => {});
+      }
+      return put(m);
+    };
+    await ali.client.sendText(chat.id, 'Killed');
+    for (let i = 0; i < 500 && !opened; i++) await new Promise((r) => setTimeout(r, 2));
+    expect(opened).toBe(true);
+    sara.client.stop();
+    dying = false;
+    // The app opens again: the server still has the envelope (never confirmed) and sends it again.
+    const { PakChat } = await import('../src/client');
+    const again = new PakChat({ signal: sara.signal, storage: sara.storage, server: w.server.api(), connect: w.server.connect });
+    expect(await again.load()).toBe(true);
+    sara.client = again;
+    again.start();
+    await w.settle();
+    expect(await w.texts(sara, chat.id)).toEqual(['Ali: Before', 'Ali: Killed']);
+    await ali.client.sendText(chat.id, 'After');
+    await w.settle();
+    expect((await w.texts(sara, chat.id)).at(-1)).toBe('Ali: After');
+  });
+
   test('a reinstalled phone: new keys, chats carry on, and a "security code changed"', async () => {
     const { ali, sara, chat } = await two();
     await ali.client.sendText(chat.id, 'Hi');

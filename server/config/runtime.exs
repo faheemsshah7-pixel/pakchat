@@ -45,6 +45,35 @@ if config_env() != :test do
          |> Enum.map(&String.trim/1)
 end
 
+# Phase 5 settings, all optional (see server/.env.example).
+if config_env() != :test do
+  int = fn name, default ->
+    case Integer.parse(System.get_env(name, "")) do
+      {n, ""} when n > 0 -> n
+      _ -> default
+    end
+  end
+
+  config :pakchat,
+    # How sign-in codes are sent: "terminal" (printed here, free) or "twilio" (real SMS).
+    sms: System.get_env("SMS", "terminal"),
+    sms_daily_cap: int.("SMS_DAILY_CAP", 100),
+    twilio: [
+      account_sid: System.get_env("TWILIO_ACCOUNT_SID"),
+      auth_token: System.get_env("TWILIO_AUTH_TOKEN"),
+      verify_sid: System.get_env("TWILIO_VERIFY_SID")
+    ],
+    # Numbers typed with a leading 0 are in this country (92 is Pakistan).
+    phone_country: System.get_env("PHONE_COUNTRY", "92"),
+    # The biggest file to send, and the biggest backup, in MB.
+    file_max_mb: int.("FILE_MAX_MB", 100),
+    backup_max_mb: int.("BACKUP_MAX_MB", 2048),
+    # Where files and backups are kept (locked), until launch moves them to S3-style storage.
+    files_dir: System.get_env("FILES_DIR", "priv/files"),
+    # Firebase's service account key file, for push alerts. Never put it in git.
+    fcm_service_account: System.get_env("FCM_SERVICE_ACCOUNT")
+end
+
 if config_env() == :dev do
   # Pretend accounts for the emulator tests (app/maestro). Off unless you start
   # the server with PAKCHAT_TEST_SIGN_IN=1. Never on in production.

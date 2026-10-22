@@ -103,13 +103,39 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "buildArchs": ["arm64-v8a"],
+            "buildArchs": [
+              "arm64-v8a"
+            ],
             "useLegacyPackaging": true,
             "enableMinifyInReleaseBuilds": false,
             "enableShrinkResourcesInReleaseBuilds": false
           }
         }
-      ]
+      ],
+      "expo-video",
+      "expo-sharing",
+      "expo-audio",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "PakChat uses your contacts to show which friends are on PakChat, and to save new contacts."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PakChat lets you send photos and videos.",
+          "cameraPermission": "PakChat lets you take photos and videos to send."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#2F6BF0",
+          "defaultChannel": "messages"
+        }
+      ],
+      "expo-document-picker"
     ],
     "extra": {
       "googleWebClientId": "459861530466-6clhf90r8bfd2urbikjsqicvkcndbel9.apps.googleusercontent.com",

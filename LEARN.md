@@ -1345,3 +1345,75 @@ on, and checks they arrive in order. If a step fails, it prints a command like
   the one-tap answers in every chat.
 - Open the app, go to You > Language > اردو, and watch the tabs, the swipe arrows and the switches
   turn round.
+
+## Step 27: Phase 5, files, alerts, phone numbers, contacts and backups
+
+| Part | Files |
+|---|---|
+| Locked files | `server/lib/pakchat/files.ex`, `file_controller.ex`; `app/modules/pakchat-signal/android/` `FileLock.kt`, `FileTransfer.kt`; `app/src/core/files.ts`, `app/src/ui/chat/FileBody.tsx`, `app/src/app/viewer.tsx` |
+| Alerts when the app is closed | `server/lib/pakchat/push/fcm.ex`; `app/src/core/push.ts`, `app/app.config.js` |
+| Signing in by phone number | `server/lib/pakchat/phone.ex`, `phone_codes.ex`, `sms.ex`, `sms/`; `app/src/app/sign-in.tsx` |
+| Gmail and number in one account | `accounts.ex`, `me_controller.ex`; `app/src/app/settings/account.tsx` |
+| Contacts | `shared/src/contacts.ts`; `app/src/app/contact.tsx`, `app/src/core/phoneBook.ts`, `PhoneBook.kt` |
+| Backups | `backup_controller.ex`; `app/src/core/backup.ts`, `settings/backup.tsx`, `restore.tsx`, `sqliteStorage.ts` |
+| The lost-message fix | `shared/src/client.ts`, `shared/src/web/wasmSignal.ts`, `SignalDevice.kt` |
+
+### Files are locked before they leave the phone
+A photo is locked on the phone with a new random key (AES-256, plus an HMAC that notices any
+change), the way Signal does it. Only the locked bytes go to the server. The key travels inside the
+message, which is itself locked, so the server holds a file it can never open. The other phone gets
+a **signed link**: a web address with a stamp only our server can make, that works for 6 hours, and
+only for people in that chat. The Kotlin code locks and uploads a piece at a time, so a 100 MB video
+never sits in memory. The biggest size is `FILE_MAX_MB` on the server, and the app asks for it, so it
+can change after launch with no app update.
+
+### Alerts when PakChat is closed
+Android lets one service wake apps: **Firebase Cloud Messaging (FCM)**. The phone gets a push token
+from Firebase and gives it to our server. When a message waits for a phone that isn't connected, the
+server asks Firebase to show "New message". The words never go through Firebase.
+
+### Phase 5: alerts (free, about 10 minutes, once)
+1. Go to console.firebase.google.com, **Add project**, name it PakChat (Analytics can be off).
+2. **Add app**, Android, package name `com.pakchat.app`. Download `google-services.json` and put
+   it in `~/Documents/pakchat/app/`. Git ignores it.
+3. Project settings, **Service accounts**, **Generate new private key**. Keep that file outside the
+   repo, for example in `~/pakchat-secrets/`.
+4. In `server/.env` add `FCM_SERVICE_ACCOUNT=/Users/<you>/pakchat-secrets/<the file>.json`.
+5. Restart the server and rebuild the app (`npx expo run:android`). Settings, Notifications
+   should now say alerts are on.
+
+### Signing in with a number
+The server makes a 6-digit code, keeps only a hash of it for 10 minutes, and allows 5 tries. For now
+`SMS=terminal` prints the code in the server's Terminal, which is free. At launch, `SMS=twilio` and
+the Twilio keys in `server/.env` send real SMS, with no app change. `SMS_DAILY_CAP` stops a bill
+running away.
+
+### One account, two ways in
+You can add a number to a Google account, or a Gmail to a phone account, in You, Ways to sign in.
+If that Gmail or number already has its own PakChat account, it's refused as taken. You can remove
+one only while the other is still there, so you can never lock yourself out.
+
+### Contacts, WhatsApp style
+Names you save are yours: they live on your phone, not on the server. Someone you haven't saved
+shows as "~ Their name", and their chat starts with a "Not in your contacts" card. Saving asks where,
+like WhatsApp: your Google account, the phone, or the SIM card. To find which of your phone's contacts
+use PakChat, the app sends **hashes** of their numbers (SHA-256), not the numbers themselves.
+
+### Backups
+A backup is a copy of your chats' database with the keys and session left out, locked with a key
+made from your backup password (PBKDF2, slow on purpose so guessing is slow), and uploaded. On a new
+phone, sign in, type the password, and the chats come back. Forget the password and nobody, not even
+us, can open it. Photos and videos aren't in the backup; they download again while the server still
+has them (30 days).
+
+### The lost-message fix
+Before, if the app was killed just after unlocking a message but before saving it, the message
+was gone: Signal's keys had moved on and couldn't open it again. Now the unlocked text is saved
+together with the new key state, in one write, and only forgotten once the message is safely in the
+chat. So opening the same envelope again gives the same text.
+
+### Try this
+- Send a photo, then look in `server/priv/files`: the file is there, but it's noise.
+- In `server/.env`, set `FILE_MAX_MB=5` and restart the server. Try sending a big video: the app
+  says it's too big, without an update. Set it back.
+- Sign in with a number and watch the code appear in the server's Terminal.

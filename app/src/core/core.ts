@@ -6,11 +6,16 @@
 // messages. Screens read from here (through hooks.ts) and never wait for the
 // network: the database answers first, and the network only updates it.
 import {
+  hashContacts,
   HttpServer,
+  meFromWire,
+  normalizePhone,
   OfflineError,
   PakChat,
   phoenixConnection,
+  ServerError,
   type Chat,
+  type ContactCard,
   type Me,
   type Message,
   type Session,
@@ -23,6 +28,9 @@ import KV from 'expo-sqlite/kv-store';
 import { loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
 import { openStorage } from './db';
+import { backUpIfDue } from './backup';
+import { forgetFile, maybeDownload, uploader } from './files';
+import { startPush } from './push';
 
 export type Person = { id: string; name: string; about?: string | null; photo?: string | null };
 
@@ -41,7 +49,10 @@ export type ChatList = { id: string; name: string; chatIds: string[] };
 
 export type Presence = { online: boolean; lastSeen: string | null };
 
-type Topic = 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | 'presence' | 'blocked' | `messages:${string}`;
+/** Someone I saved under my own name, with the number or Gmail I know them by. Only on this phone. */
+export type Contact = { name: string; phone?: string; email?: string; fromPhoneBook?: boolean };
+
+type Topic = 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | 'presence' | 'blocked' | 'files' | 'backup' | `messages:${string}`;
 
 // ---- Where the server is ----
 
@@ -82,13 +93,15 @@ if (typeof AbortSignal !== 'undefined' && !(AbortSignal as { timeout?: unknown }
 class Core {
   storage!: SqliteStorage;
   client!: PakChat;
-  private server!: HttpServer;
+  server!: HttpServer;
   private listeners = new Map<Topic, Set<() => void>>();
   private ready: Promise<void> | null = null;
 
   state: 'loading' | 'signedOut' | 'signedIn' = 'loading';
   connected = false;
   people: Record<string, Person> = {};
+  /** userId → how I saved them. People not here show as "~ Name". */
+  contacts: Record<string, Contact> = {};
   prefs: Record<string, ChatPrefs> = {};
   starred: Record<string, true> = {};
   lists: ChatList[] = [];
@@ -141,6 +154,7 @@ class Core {
     this.storage = await openStorage();
     this.at('reading saved names and settings');
     this.people = (await this.storage.getValue<Record<string, Person>>('app:people')) ?? {};
+    this.contacts = (await this.storage.getValue<Record<string, Contact>>('app:contacts')) ?? {};
     this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
     this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
     this.lists = (await this.storage.getValue<ChatList[]>('app:lists')) ?? [];
@@ -167,10 +181,12 @@ class Core {
       connect: phoenixConnection(socketUrl(serverUrl())),
       deviceName: Device.modelName ?? 'Android phone',
       newId: () => Crypto.randomUUID(),
+      files: uploader,
     });
     this.client.on('message', (m) => {
       this.emit(`messages:${m.chatId}`);
       this.emit('chats');
+      if (m.file) void maybeDownload(m);
     });
     this.client.on('chat', () => {
       this.emit('chats');
@@ -206,12 +222,19 @@ class Core {
 
   private afterSignIn() {
     this.client.start();
+    void startPush();
+    // The daily backup, a little after starting so it doesn't slow the start.
+    setTimeout(() => void backUpIfDue(), 30_000);
     // Fill in anything missed while signed out, and everyone's names.
     void this.client
       .syncChats()
       .then(() => this.loadPeople())
       .catch(() => {});
     void this.loadPeople();
+  }
+
+  newId() {
+    return Crypto.randomUUID();
   }
 
   get me(): Me | null {
@@ -239,6 +262,23 @@ class Core {
     return new HttpServer(serverUrl(), 3_000).testSignInOn();
   }
 
+  /** Sends a sign-in code to a number. Answers the number as the server tidied it. */
+  async sendPhoneCode(phone: string) {
+    await this.init();
+    return new HttpServer(serverUrl()).sendSignInCode(phone);
+  }
+
+  /** Emulator tests only: the code the Mac's server printed. */
+  testCode(phone: string) {
+    return new HttpServer(serverUrl(), 3_000).testCode(phone);
+  }
+
+  /** Signs in with a number and its code. True when the account is new (ask for a name). */
+  async signInWithPhone(phone: string, code: string) {
+    const session = await this.signInWith(() => this.client.signInWithPhone(phone, code));
+    return session.newAccount === true;
+  }
+
   private async signInWith(signIn: () => Promise<Session>) {
     await this.init();
     // A different server address may have been typed in on the sign-in screen.
@@ -251,6 +291,7 @@ class Core {
       await this.storage.wipe();
       await this.storage.setValue('session', session);
       this.people = {};
+      this.contacts = {};
       this.prefs = {};
       this.starred = {};
       this.lists = [];
@@ -258,12 +299,15 @@ class Core {
       this.presence = {};
       this.typing = {};
     }
+    // Signing in on a phone that didn't have this account: offer its backup (index.tsx).
+    if (previous !== session.userId) KV.setItemSync(`offerRestore:${session.userId}`, '1');
     await this.storage.setValue('app:lastUser', session.userId);
     this.remember({ id: session.userId, name: session.me.name, about: session.me.about, photo: session.me.photo });
     this.state = 'signedIn';
     this.afterSignIn();
     this.emit('auth');
     this.emit('chats');
+    return session;
   }
 
   /** The server moved (the Mac's Wi-Fi address changed): save the new address and reconnect there, still signed in. */
@@ -306,25 +350,38 @@ class Core {
 
   /** Changes my name, about, or privacy. The server answers with the new me. */
   async updateMe(change: { name?: string; about?: string; privacy?: { last_seen?: string; online?: string; read_receipts?: boolean } }) {
-    const wire = await this.call<{ id: string; email: string; name: string; about: string | null; photo: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean } }>(
-      'PATCH',
-      '/me',
-      change,
-    );
-    const s = this.client.me;
-    if (s) {
-      s.me = {
-        id: wire.id,
-        email: wire.email,
-        name: wire.name,
-        about: wire.about,
-        photo: wire.photo,
-        privacy: { lastSeen: wire.privacy.last_seen, online: wire.privacy.online, readReceipts: wire.privacy.read_receipts },
-      };
-      await this.storage.setValue('session', s);
-      this.remember({ id: wire.id, name: wire.name, about: wire.about, photo: wire.photo });
-    }
+    await this.saveMe(meFromWire(await this.call<Parameters<typeof meFromWire>[0]>('PATCH', '/me', change)));
+  }
+
+  private async saveMe(me: Me) {
+    await this.client.updateMe(me);
+    this.remember({ id: me.id, name: me.name, about: me.about, photo: me.photo });
     this.emit('auth');
+  }
+
+  /** Where to send alerts for this phone (Google's push token). */
+  async savePushToken(token: string) {
+    await this.call('PUT', '/me/push', { token, platform: 'fcm' });
+  }
+
+  // ---- Ways to sign in: Gmail and phone number on one account ----
+
+  /** Adds a Gmail to my account (Google's token proves it's mine). Fails with "taken" if it has its own account. */
+  async linkGoogle(idToken: string) {
+    await this.saveMe(await this.server.linkGoogle(idToken));
+  }
+
+  sendLinkCode(phone: string) {
+    return this.server.sendLinkCode(phone);
+  }
+
+  async linkPhone(phone: string, code: string) {
+    await this.saveMe(await this.server.linkPhone(phone, code));
+  }
+
+  /** Takes the Gmail or number off my account. The server refuses if it's the last way in. */
+  async unlink(what: 'google' | 'phone') {
+    await this.saveMe(await this.server.unlink(what));
   }
 
   // ---- People ----
@@ -335,9 +392,77 @@ class Core {
     this.emit('people');
   }
 
+  /** The name to show: how I saved them, or "~ their own name" when they aren't in my contacts. */
   name(userId: string): string {
     if (userId === this.myId) return this.me?.name ?? '';
-    return this.people[userId]?.name ?? '';
+    const saved = this.contacts[userId]?.name;
+    if (saved) return saved;
+    const own = this.people[userId]?.name;
+    return own ? `~ ${own}` : '';
+  }
+
+  /** The name without the "~" (for @mentions). */
+  plainName(userId: string): string {
+    if (userId === this.myId) return this.me?.name ?? '';
+    return this.contacts[userId]?.name || this.people[userId]?.name || '';
+  }
+
+  isContact(userId: string) {
+    return userId === this.myId || !!this.contacts[userId];
+  }
+
+  // ---- Contacts (only on this phone) ----
+
+  saveContact(userId: string, contact: Contact) {
+    this.contacts = { ...this.contacts, [userId]: contact };
+    void this.storage.setValue('app:contacts', this.contacts);
+    this.emit('people');
+    this.emit('chats');
+  }
+
+  removeContact(userId: string) {
+    const next = { ...this.contacts };
+    delete next[userId];
+    this.contacts = next;
+    void this.storage.setValue('app:contacts', this.contacts);
+    this.emit('people');
+    this.emit('chats');
+  }
+
+  /**
+   * Finds who is on PakChat among my phone's contacts. Numbers and Gmails are
+   * hashed on the phone first, so the address book never leaves it as it is.
+   * Saves each match under the name in my phone's contacts. Answers how many.
+   */
+  async matchPhoneBook(cards: ContactCard[]) {
+    const sha256 = (text: string) => Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, text, { encoding: Crypto.CryptoEncoding.BASE64 });
+    const { phones, emails } = await hashContacts(cards, sha256);
+    const all = [...[...phones.keys()].map((h) => ['p', h] as const), ...[...emails.keys()].map((h) => ['e', h] as const)];
+    const found = new Set<string>();
+    const next = { ...this.contacts };
+    for (let i = 0; i < all.length; i += 2000) {
+      const part = all.slice(i, i + 2000);
+      const matches = await this.server.matchContacts(
+        part.filter(([k]) => k === 'p').map(([, h]) => h),
+        part.filter(([k]) => k === 'e').map(([, h]) => h),
+      );
+      for (const m of matches) {
+        const card = cards[phones.get(m.hash) ?? emails.get(m.hash) ?? -1];
+        if (!card) continue;
+        found.add(m.user.id);
+        this.people = { ...this.people, [m.user.id]: m.user };
+        // A name I typed in PakChat myself wins over the phone book.
+        if (next[m.user.id] && !next[m.user.id].fromPhoneBook) continue;
+        const phone = card.phones.map((p) => normalizePhone(p)).find(Boolean) ?? undefined;
+        next[m.user.id] = { name: card.name || m.user.name, phone, email: card.emails[0]?.toLowerCase(), fromPhoneBook: true };
+      }
+    }
+    this.contacts = next;
+    await this.storage.setValue('app:contacts', next);
+    await this.storage.setValue('app:people', this.people);
+    this.emit('people');
+    this.emit('chats');
+    return found.size;
   }
 
   /** Fetches the names of everyone in my chats that this phone doesn't know yet. */
@@ -373,13 +498,26 @@ class Core {
     return p;
   }
 
-  /** Finds someone by their Gmail address ("ali" means ali@gmail.com). Null if they haven't joined. */
-  async lookup(email: string) {
-    const q = email.trim().toLowerCase();
+  /**
+   * Finds someone by Gmail ("ali" means ali@gmail.com) or phone number ("0300 1234567").
+   * Null if they haven't joined.
+   */
+  async lookup(typed: string) {
+    const q = typed.trim().toLowerCase();
     if (!q) return null;
-    const found = await this.server.lookup(q.includes('@') ? q : `${q}@gmail.com`);
-    if (found) this.remember({ id: found.id, name: found.name });
+    // Only digits (and + - ( ) spaces): a number. Anything else: a Gmail.
+    const looksLikeNumber = /^[+0-9][0-9\s\-()]{6,}$/.test(q);
+    const phone = looksLikeNumber ? normalizePhone(q) : null;
+    if (looksLikeNumber && !phone) return null;
+    const found = phone ? await this.server.lookup(phone, 'phone') : await this.server.lookup(q.includes('@') ? q : `${q}@gmail.com`);
+    if (found) this.rememberQuietly(found);
     return found;
+  }
+
+  /** Learns someone's own name without saving them as a contact. */
+  private rememberQuietly(p: Person) {
+    if (this.people[p.id]?.name === p.name) return;
+    this.remember({ ...this.people[p.id], ...p });
   }
 
   // ---- Blocking ----
@@ -476,7 +614,9 @@ class Core {
   }
 
   /** "Delete for me": only from this phone. */
-  async deleteForMe(list: Pick<Message, 'chatId' | 'author' | 'id'>[]) {
+  async deleteForMe(list: Pick<Message, 'chatId' | 'author' | 'id'>[], keepFiles = false) {
+    // Their photos, videos and documents go from the phone too (each message has its own copy).
+    if (!keepFiles) for (const m of list) await forgetFile(await this.storage.getMessage(m.chatId, m.author, m.id));
     const byChat = new Map<string, { author: string; id: string }[]>();
     for (const m of list) byChat.set(m.chatId, [...(byChat.get(m.chatId) ?? []), { author: m.author, id: m.id }]);
     for (const [chatId, refs] of byChat) {
@@ -489,6 +629,7 @@ class Core {
   /** Deletes a whole chat from this phone (it comes back if someone writes again). */
   async deleteChatHere(chatId: string) {
     const all = await this.storage.listMessages(chatId, { limit: 100_000 });
+    for (const m of all) await forgetFile(m);
     await this.client.deleteHere(chatId, all);
     this.setPrefs(chatId, { archived: false, pinnedAt: undefined });
     this.emit(`messages:${chatId}`);
@@ -527,4 +668,11 @@ export { isOffline };
 
 function isOffline(err: unknown) {
   return err instanceof OfflineError;
+}
+
+/** Why the server said no ("wrong_code", "taken"…), "offline", or "unknown". */
+export function reasonOf(err: unknown): string {
+  if (err instanceof OfflineError) return 'offline';
+  if (err instanceof ServerError) return err.reason;
+  return 'unknown';
 }

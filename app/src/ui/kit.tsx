@@ -358,7 +358,8 @@ function hash(s: string) {
 
 /** "Ayesha Khan" → "A", "FAST CS-B" → "FC". */
 export function initials(name: string) {
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  // "~ Sara" (someone not in my contacts) is still S.
+  const words = name.replace(/^~\s*/, '').trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return '?';
   if (words.length === 1 || hasUrdu(name)) return [...words[0]][0].toUpperCase();
   const two = words[0] === words[0].toUpperCase() && words[1] === words[1].toUpperCase();

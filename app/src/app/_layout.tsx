@@ -108,6 +108,13 @@ function App() {
           <Stack.Screen name="settings/language" />
           <Stack.Screen name="settings/blocked" />
           <Stack.Screen name="settings/soon" />
+          <Stack.Screen name="settings/account" />
+          <Stack.Screen name="settings/notifications" />
+          <Stack.Screen name="settings/storage" />
+          <Stack.Screen name="settings/backup" />
+          <Stack.Screen name="restore" />
+          <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="viewer" options={{ animation: 'fade' }} />
         </Stack.Protected>
         <Stack.Protected guard={state === 'signedOut'}>
           <Stack.Screen name="sign-in" options={{ animation: 'fade' }} />

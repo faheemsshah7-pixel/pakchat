@@ -9,7 +9,10 @@ import type { Chat, Role } from './storage';
 /** Me, as the server knows me. */
 export type Me = {
   id: string;
-  email: string;
+  /** Null when I signed in by phone and haven't added a Gmail. */
+  email: string | null;
+  /** Like "+923001234567". Null until I add one. */
+  phone?: string | null;
   name: string;
   about?: string | null;
   photo?: string | null;
@@ -23,7 +26,12 @@ export type SignedIn = {
   deviceId: number;
   /** The device's own id, for the live connection. */
   deviceUuid: string;
+  /** The account was made just now (signing in by phone): ask for a name. */
+  newAccount?: boolean;
 };
+
+/** Someone found by a hashed number or Gmail from my phone's contacts. */
+export type Match = { hash: string; user: { id: string; name: string; about?: string | null; photo?: string | null } };
 
 /** A chat as the server sends it: who's in it, and its counter. */
 export type ServerChat = Pick<Chat, 'id' | 'kind' | 'members' | 'title' | 'description' | 'photo' | 'onlyAdminsSend' | 'inviteCode'> & {
@@ -33,6 +41,7 @@ export type ServerChat = Pick<Chat, 'id' | 'kind' | 'members' | 'title' | 'descr
 /** What the server's web addresses can do, for the core. Tests use a pretend server with the same shape. */
 export interface ServerApi {
   signIn(idToken: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn>;
+  signInWithPhone(phone: string, code: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn>;
   /** Every call after sign-in carries this session token. */
   useToken(token: string | null): void;
   signOut(): Promise<void>;
@@ -80,7 +89,7 @@ type WireChat = {
   invite_code?: string | null;
 };
 
-type WireMe = { id: string; email: string; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean } };
+type WireMe = { id: string; email: string | null; phone?: string | null; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean } };
 
 type WireBundle = {
   device_id: number;
@@ -95,6 +104,14 @@ type WireBundle = {
   kyber_pre_key: string;
   kyber_pre_key_signature: string;
 };
+
+type WireSignedIn = { token: string; user: WireMe; device_id: number; device_uuid: string; new_account?: boolean };
+
+function signedIn(r: WireSignedIn): SignedIn {
+  const out: SignedIn = { token: r.token, user: meFromWire(r.user), deviceId: r.device_id, deviceUuid: r.device_uuid };
+  if (r.new_account) out.newAccount = true;
+  return out;
+}
 
 export function chatFromWire(c: WireChat): ServerChat {
   const chat: ServerChat = { id: c.id, kind: c.kind, seq: c.seq, members: c.members.map((m) => ({ userId: m.user_id, role: m.role })) };
@@ -111,7 +128,8 @@ export function chatFromWire(c: WireChat): ServerChat {
 export function meFromWire(u: WireMe): Me {
   return {
     id: u.id,
-    email: u.email,
+    email: u.email ?? null,
+    phone: u.phone ?? null,
     name: u.name,
     about: u.about,
     photo: u.photo,
@@ -192,12 +210,98 @@ export class HttpServer implements ServerApi {
   }
 
   async signIn(idToken: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
-    const r = await this.call<{ token: string; user: WireMe; device_id: number; device_uuid: string }>('POST', '/auth/google', {
-      id_token: idToken,
-      device: deviceToWire(device),
-      ...keysToWire(keys),
-    });
-    return { token: r.token, user: meFromWire(r.user), deviceId: r.device_id, deviceUuid: r.device_uuid };
+    return signedIn(
+      await this.call<WireSignedIn>('POST', '/auth/google', {
+        id_token: idToken,
+        device: deviceToWire(device),
+        ...keysToWire(keys),
+      }),
+    );
+  }
+
+  // ---- Phone numbers ----
+
+  /** Sends a sign-in code to a number (typed any way). Answers the tidied number. */
+  async sendSignInCode(phone: string) {
+    const r = await this.call<{ phone: string; resend_after: number }>('POST', '/auth/phone/code', { phone });
+    return { phone: r.phone, resendAfter: r.resend_after };
+  }
+
+  async signInWithPhone(phone: string, code: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
+    return signedIn(await this.call<WireSignedIn>('POST', '/auth/phone', { phone, code, device: deviceToWire(device), ...keysToWire(keys) }));
+  }
+
+  /** Emulator tests only: the last code the Mac's server printed for a number. */
+  async testCode(phone: string) {
+    return (await this.call<{ code: string }>('GET', `/auth/test/code?phone=${encodeURIComponent(phone)}`)).code;
+  }
+
+  /** Adds a Gmail to my account. Google's token proves it's mine. */
+  async linkGoogle(idToken: string) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/google', { id_token: idToken }));
+  }
+
+  /** Sends a code to a number I want to add to my account. */
+  async sendLinkCode(phone: string) {
+    const r = await this.call<{ phone: string; resend_after: number }>('POST', '/me/phone/code', { phone });
+    return { phone: r.phone, resendAfter: r.resend_after };
+  }
+
+  async linkPhone(phone: string, code: string) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/phone', { phone, code }));
+  }
+
+  /** Takes the Gmail or the number off my account (the other must stay). */
+  async unlink(what: 'google' | 'phone') {
+    return meFromWire(await this.call<WireMe>('DELETE', `/me/${what}`));
+  }
+
+  /** Which of these hashes (see contacts.ts) are people on PakChat. */
+  async matchContacts(phones: string[], emails: string[]): Promise<Match[]> {
+    return this.call<Match[]>('POST', '/contacts/match', { phones, emails });
+  }
+
+  // ---- Files and backups ----
+
+  async fileLimits() {
+    const r = await this.call<{ max_bytes: number; max_backup_bytes: number }>('GET', '/files/limits');
+    return { maxBytes: r.max_bytes, maxBackupBytes: r.max_backup_bytes };
+  }
+
+  /** Makes room for a locked file of `size` bytes in a chat. The upload link starts with /api. */
+  async startUpload(chatId: string, size: number) {
+    const r = await this.call<{ id: string; upload_url: string }>('POST', '/files', { chat_id: chatId, size });
+    return { id: r.id, uploadUrl: this.url(r.upload_url) };
+  }
+
+  /** A download link for a file, good for a few hours. */
+  async fileLink(id: string) {
+    return this.url((await this.call<{ url: string }>('GET', `/files/${encodeURIComponent(id)}/link`)).url);
+  }
+
+  /** My backup on the server, or null. */
+  async backup() {
+    try {
+      const r = await this.call<{ id: string; size: number; made_at: string; url: string }>('GET', '/backup');
+      return { id: r.id, size: r.size, madeAt: Date.parse(r.made_at), url: this.url(r.url) };
+    } catch (err) {
+      if (err instanceof ServerError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async startBackup(size: number) {
+    const r = await this.call<{ id: string; upload_url: string }>('POST', '/backup', { size });
+    return { id: r.id, uploadUrl: this.url(r.upload_url) };
+  }
+
+  async deleteBackup() {
+    await this.call('DELETE', '/backup');
+  }
+
+  /** The server's links are paths ("/api/files/…"); this makes them whole addresses. */
+  private url(path: string) {
+    return /^https?:/.test(path) ? path : `${this.baseUrl}${path}`;
   }
 
   /**
@@ -205,13 +309,14 @@ export class HttpServer implements ServerApi {
    * when the server on the Mac was started with PAKCHAT_TEST_SIGN_IN=1.
    */
   async signInForTest(email: string, name: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
-    const r = await this.call<{ token: string; user: WireMe; device_id: number; device_uuid: string }>('POST', '/auth/test', {
-      email,
-      name,
-      device: deviceToWire(device),
-      ...keysToWire(keys),
-    });
-    return { token: r.token, user: meFromWire(r.user), deviceId: r.device_id, deviceUuid: r.device_uuid };
+    return signedIn(
+      await this.call<WireSignedIn>('POST', '/auth/test', {
+        email,
+        name,
+        device: deviceToWire(device),
+        ...keysToWire(keys),
+      }),
+    );
   }
 
   /** Is pretend sign-in switched on (so the app shows it)? */
@@ -282,9 +387,10 @@ export class HttpServer implements ServerApi {
     return chatFromWire(await this.call<WireChat>('PATCH', `/groups/${encodeURIComponent(chatId)}`, body));
   }
 
-  async lookup(email: string) {
+  /** Finds someone by Gmail, or by phone number with `{ phone }`. */
+  async lookup(email: string, by: 'email' | 'phone' = 'email') {
     try {
-      return await this.call<{ id: string; name: string }>('GET', `/users/lookup?email=${encodeURIComponent(email)}`);
+      return await this.call<{ id: string; name: string }>('GET', `/users/lookup?${by}=${encodeURIComponent(email)}`);
     } catch (err) {
       if (err instanceof ServerError && err.status === 404) return null;
       throw err;

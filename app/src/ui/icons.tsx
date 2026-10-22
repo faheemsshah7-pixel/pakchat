@@ -70,6 +70,11 @@ const ICONS = {
   doc: { d: ['M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5'] },
   hash: { d: ['M5 9h14M5 15h14M10 4L8 20M16 4l-2 16'] },
   server: { d: ['M7 7h.01M7 17h.01'], rects: [[3, 3, 18, 8, 2], [3, 13, 18, 8, 2]] },
+  play: { fill: ['M8 5l11 7-11 7z'] },
+  download: { d: ['M12 4v11M7 10l5 5 5-5M5 20h14'] },
+  upload: { d: ['M12 15V4M7 9l5-5 5 5M5 20h14'] },
+  music: { d: ['M9 18V6l10-2v12'], circles: [[6.5, 18, 2.5], [16.5, 16, 2.5]] },
+  contacts: { d: ['M3 20c0-3.5 3-5 6-5s6 1.5 6 5M16 11a3 3 0 1 0 0-6M18 15c2 .5 3 2 3 5'], circles: [[9, 8, 3.5]] },
 } satisfies Record<string, Shape>;
 
 export type IconName = keyof typeof ICONS;

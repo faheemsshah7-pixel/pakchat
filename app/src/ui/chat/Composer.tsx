@@ -101,7 +101,7 @@ export function Composer({
   function send(words = text) {
     const clean = words.trim();
     if (!clean) return;
-    onSend(clean, mentions.filter((id) => clean.includes(`@${core.name(id)}`)));
+    onSend(clean, mentions.filter((id) => clean.includes(`@${core.plainName(id)}`)));
     setText('');
     // Sent: the draft goes at once, so it can't come back if you leave straight away.
     if (!editing) saveDraft('');
@@ -115,7 +115,7 @@ export function Composer({
   const suggestions = at
     ? chat.members
         .filter((mb) => mb.userId !== core.myId)
-        .map((mb) => ({ id: mb.userId, name: core.name(mb.userId) }))
+        .map((mb) => ({ id: mb.userId, name: core.plainName(mb.userId) }))
         .filter((p) => p.name && p.name.toLowerCase().startsWith(at[2].toLowerCase()))
         .slice(0, 5)
     : [];

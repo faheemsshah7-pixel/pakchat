@@ -101,7 +101,7 @@ export class SqliteStorage implements Storage {
       ]);
       // Keep the search index in step: deleted messages and polls' answers aren't searchable.
       await this.db.run('DELETE FROM search WHERE chat_id = ? AND author = ? AND msg_id = ?', [m.chatId, m.author, m.id]);
-      const words = m.deleted ? '' : m.kind === 'poll' ? [m.poll?.question, ...(m.poll?.options ?? [])].join(' ') : (m.text ?? '');
+      const words = m.deleted ? '' : m.kind === 'poll' ? [m.poll?.question, ...(m.poll?.options ?? [])].join(' ') : [m.text, m.file?.name].filter(Boolean).join(' ');
       if (words.trim() && m.kind !== 'system') {
         await this.db.run('INSERT INTO search (text, chat_id, author, msg_id, sent_at) VALUES (?, ?, ?, ?, ?)', [words, m.chatId, m.author, m.id, m.sentAt]);
       }
@@ -202,6 +202,54 @@ export class SqliteStorage implements Storage {
       [match, limit],
     );
     return rows.map((r) => ({ chatId: r.chat_id, author: r.author, id: r.msg_id, text: r.text, sentAt: Number(r.sent_at) }));
+  }
+
+  // ---- Backups ----
+
+  /** Writes a copy of the whole database to `path` (a file that mustn't exist yet), for a backup. */
+  async exportTo(path: string) {
+    await this.db.run('VACUUM INTO ?', [path]);
+    // A backup holds chats, messages and this phone's own notes (names, contacts, prefs),
+    // never the sign-in, the outbox or anything else only this phone should have.
+    await this.db.run('ATTACH DATABASE ? AS b', [path]);
+    try {
+      await this.db.exec(`DELETE FROM b.kv WHERE key NOT LIKE 'app:%' OR key = 'app:lastUser'; DELETE FROM b.outbox; DELETE FROM b.seen;`);
+      // Squeeze out the deleted rows, so nothing of them is left in the file.
+      await this.db.exec('VACUUM b');
+    } finally {
+      await this.db.exec('DETACH DATABASE b');
+    }
+  }
+
+  /**
+   * Adds a backup's chats and messages to this phone. Chats and messages already
+   * here stay as they are (they're newer); this phone's own housekeeping (session, outbox, keys waiting)
+   * is never taken from the backup, and files from the old phone aren't here,
+   * so their places are forgotten (they download again while the server has them).
+   */
+  async importFrom(path: string) {
+    await this.db.run('ATTACH DATABASE ? AS b', [path]);
+    try {
+      await this.transaction(async () => {
+        await this.db.exec(`
+          INSERT OR IGNORE INTO chats (id, last_activity, json) SELECT id, last_activity, json FROM b.chats;
+          INSERT OR IGNORE INTO messages (chat_id, author, id, seq, ord, sent_at, json)
+            SELECT chat_id, author, id, seq, ord, sent_at, json_remove(json, '$.file.local') FROM b.messages
+            WHERE json_extract(json, '$.status') IS NOT 'queued';
+          INSERT INTO search (text, chat_id, author, msg_id, sent_at)
+            SELECT s.text, s.chat_id, s.author, s.msg_id, s.sent_at FROM b.search s
+            WHERE NOT EXISTS (SELECT 1 FROM search x WHERE x.chat_id = s.chat_id AND x.author = s.author AND x.msg_id = s.msg_id);
+          INSERT OR REPLACE INTO kv (key, json) SELECT key, json FROM b.kv WHERE key LIKE 'app:%' AND key <> 'app:lastUser';
+        `);
+      });
+    } finally {
+      await this.db.exec('DETACH DATABASE b');
+    }
+  }
+
+  /** How many chats this phone has (a new phone with none is offered its backup). */
+  async chatCount() {
+    return (await this.db.first<{ n: number }>('SELECT count(*) AS n FROM chats'))?.n ?? 0;
   }
 
   /** Forgets everything (signing in as someone else on this phone). */

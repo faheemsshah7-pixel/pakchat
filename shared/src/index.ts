@@ -2,6 +2,7 @@
 
 export * from './client';
 export * from './connection';
+export * from './contacts';
 export * from './content';
 export * from './ids';
 export * from './rules';

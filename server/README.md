@@ -38,10 +38,24 @@ For the emulator tests (`app/maestro`), start it with pretend accounts allowed:
 `PAKCHAT_TEST_SIGN_IN=1 mix phx.server`. They only work for made-up
 `@test.pakchat` addresses, and never in production.
 
+### Phase 5 settings (all in `.env`, all optional)
+
+- `SMS=terminal` (the default) prints phone sign-in codes in this Terminal
+  window, free. At launch, change it to `SMS=twilio` and fill in the three
+  `TWILIO_` lines: the app doesn't change. `SMS_DAILY_CAP` stops the whole
+  server sending more than that many codes a day (each real SMS costs money).
+- `FILE_MAX_MB=100` is the biggest file people can send. The app asks the
+  server, so raising it needs no app update.
+- Files and backups are kept, locked, in `priv/files` (git ignores it). Set
+  `FILES_DIR` to keep them somewhere else.
+- `FCM_SERVICE_ACCOUNT` is the path to Firebase's key file, for alerts when
+  the app is closed (see "Phase 5: alerts" in `LEARN.md`). Without it the
+  server runs fine and just sends no alerts.
+
 ## Test it
 
 ```
-mix test            # all the tests (60 of them)
+mix test            # all the tests (79 of them)
 mix credo           # style checks
 mix format          # tidies the code
 ```
@@ -60,11 +74,20 @@ cd ../shared && npm run test:server                   # in a second terminal
 | --- | --- |
 | `GET /api/health` | `{"status":"ok","database":"ok"}` for the host to check |
 | `POST /api/auth/google` | Sign in with a Google token and the phone's public keys. Gives a session token |
+| `POST /api/auth/phone/code` | Send a 6-digit code to a number (rate-limited, with a daily cap) |
+| `POST /api/auth/phone` | Sign in with the number and code. Says `new_account` the first time |
 | `DELETE /api/auth/session` | Sign out (the phone signs out its linked devices too) |
 | `GET`/`PATCH /api/me` | My profile and privacy settings |
 | `PUT /api/me/push` | My push token, for alerts when the app is closed |
+| `PUT /api/me/google`, `POST /api/me/phone/code`, `PUT /api/me/phone` | Add a Gmail or a number to my account (refused as `taken` if it has its own account) |
+| `DELETE /api/me/google`, `DELETE /api/me/phone` | Remove one, only while another way to sign in stays |
+| `POST /api/contacts/match` | Which of these hashed numbers and Gmails are on PakChat (rate-limited) |
+| `GET /api/files/limits` | The biggest file and backup allowed |
+| `POST /api/files`, `PUT <upload link>` | Start a locked file, then upload its bytes to the signed link |
+| `GET /api/files/:id/link`, `GET <link>` | A download link for chat members (6 hours), then the bytes |
+| `GET`/`POST`/`DELETE /api/backup` | My locked backup: where it is, a new one, or delete it |
 | `GET`/`POST /api/keys` | How many one-time keys I have left / upload more |
-| `GET /api/users/lookup?email=` | Find someone by Gmail (rate-limited) |
+| `GET /api/users/lookup?email=` or `?phone=` | Find someone by Gmail or number (rate-limited) |
 | `GET /api/users/:id` | Someone's name, about and photo |
 | `GET /api/users/:id/presence` | Their online and last seen, as their privacy allows |
 | `GET /api/users/:id/devices` | Their device numbers |
@@ -103,7 +126,12 @@ lib/pakchat/
   relay.ex                    sending, holding, delivering and deleting envelopes
   privacy.ex                  who may see online and last seen
   presence.ex                 who is online right now
-  push.ex, push/notify.ex     push alerts (a stub until phase 5)
+  push.ex, push/notify.ex     push alerts: who to alert, and when
+  push/fcm.ex                 sends them through Firebase (FCM)
+  phone.ex                    tidies numbers into +92... form, and the hashes
+  phone_codes.ex              sign-in codes: daily caps, 10 minutes, 5 tries
+  sms.ex, sms/                sends codes: terminal.ex (prints them) or twilio.ex
+  files.ex, files/            locked files and backups, signed links, clean-up
   relay/cleanup.ex            the hourly job that deletes 30-day-old envelopes
   rate_limit.ex               "too many, slow down"
 lib/pakchat_web/

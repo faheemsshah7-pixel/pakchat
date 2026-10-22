@@ -5,10 +5,40 @@
 /** A message in a chat, named by who wrote it and the id their phone gave it. */
 export type Ref = { author: string; id: string };
 
+/**
+ * A file inside a message. The file itself was locked on the sender's phone
+ * with `key` (only ever sent inside this locked message) and uploaded; the
+ * server only has the locked bytes, under `id`. `digest` (SHA-256 of the
+ * locked bytes) lets the other phone check nothing was changed.
+ */
+export type Attachment = {
+  /** The server's id for the locked bytes. "pending" while the sender is still uploading. */
+  id: string;
+  /** 64 random bytes, base64: 32 to lock (AES-256), 32 to check (HMAC-SHA256). */
+  key: string;
+  digest: string;
+  /** The size before locking, in bytes. */
+  size: number;
+  mime: string;
+  kind: FileKind;
+  /** The file's own name (documents). */
+  name?: string;
+  width?: number;
+  height?: number;
+  /** Videos and voice notes, in ms. */
+  duration?: number;
+  /** A tiny blurred preview (JPEG, base64), shown before the photo or video downloads. */
+  thumb?: string;
+};
+
+export type FileKind = 'image' | 'video' | 'audio' | 'voice' | 'doc';
+export const FILE_KINDS: readonly FileKind[] = ['image', 'video', 'audio', 'voice', 'doc'];
+
 /** Things that show up as a message bubble. */
 export type Body =
   | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean }
-  | { t: 'poll'; question: string; options: string[]; multi: boolean };
+  | { t: 'poll'; question: string; options: string[]; multi: boolean }
+  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean };
 
 /** Changes to messages that are already there. */
 export type Change =
@@ -43,7 +73,7 @@ export type Payload = Body | Change | Control;
  */
 export type Content = Payload & { v: 1; id: string; chat: string; at: number };
 
-export const BODY_TYPES = ['text', 'poll'] as const;
+export const BODY_TYPES = ['text', 'poll', 'file'] as const;
 export const CHANGE_TYPES = ['edit', 'delete', 'react', 'vote', 'pin', 'timer'] as const;
 
 // Limits, so nobody can send something huge or odd.
@@ -51,6 +81,7 @@ const MAX_TEXT = 20_000;
 const MAX_OPTIONS = 12;
 const MAX_MENTIONS = 256;
 const MAX_ID = 64;
+const MAX_THUMB = 16_000;
 
 export function isBody(c: Payload): c is Body {
   return (BODY_TYPES as readonly string[]).includes(c.t);
@@ -66,6 +97,27 @@ const isText = (x: unknown, max = MAX_TEXT): x is string => typeof x === 'string
 const isRef = (x: unknown): x is Ref => isObject(x) && isId(x.author) && isId(x.id);
 const isIdList = (x: unknown, max: number): x is string[] => Array.isArray(x) && x.length <= max && x.every(isId);
 const isCount = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
+
+/** Checks a file's description. Returns it with only the known fields, or null. */
+function checkAttachment(x: unknown): Attachment | null {
+  if (!isObject(x) || !isId(x.id) || !isText(x.key, 200) || !isText(x.digest, 200)) return null;
+  if (!isCount(x.size) || !isText(x.mime, 200) || !FILE_KINDS.includes(x.kind as FileKind)) return null;
+  const out: Attachment = { id: x.id, key: x.key, digest: x.digest, size: x.size, mime: x.mime, kind: x.kind as FileKind };
+  if (x.name !== undefined) {
+    if (!isText(x.name, 255)) return null;
+    out.name = x.name;
+  }
+  for (const k of ['width', 'height', 'duration'] as const) {
+    if (x[k] === undefined) continue;
+    if (!isCount(x[k])) return null;
+    out[k] = x[k];
+  }
+  if (x.thumb !== undefined) {
+    if (!isText(x.thumb, MAX_THUMB)) return null;
+    out.thumb = x.thumb;
+  }
+  return out;
+}
 
 /** Checks one payload's shape. Returns it with only the known fields, or null. */
 function checkPayload(x: Record<string, unknown>): Payload | null {
@@ -86,6 +138,19 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (!Array.isArray(options) || options.length < 2 || options.length > MAX_OPTIONS) return null;
       if (!options.every((o) => isText(o, 100) && o.trim() !== '')) return null;
       return { t: 'poll', question: x.question, options: options as string[], multi: x.multi === true };
+    }
+    case 'file': {
+      const file = checkAttachment(x.file);
+      if (!file) return null;
+      if (x.caption !== undefined && !isText(x.caption)) return null;
+      if (x.mentions !== undefined && !isIdList(x.mentions, MAX_MENTIONS)) return null;
+      if (x.replyTo !== undefined && !isRef(x.replyTo)) return null;
+      const out: Body = { t: 'file', file };
+      if (typeof x.caption === 'string' && x.caption.trim()) out.caption = x.caption;
+      if (x.mentions) out.mentions = x.mentions as string[];
+      if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
+      if (x.forwarded === true) out.forwarded = true;
+      return out;
     }
     case 'edit':
       if (!isId(x.target) || !isText(x.text) || x.text.trim() === '') return null;

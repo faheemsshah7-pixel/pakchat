@@ -6,23 +6,26 @@
 import type { Message, Ref } from '@pakchat/shared';
 import { EDIT_MINUTES, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, FlatList, View, type ListViewToken } from 'react-native';
+import { BackHandler, FlatList, ScrollView, View, type ListViewToken } from 'react-native';
 import Animated, { FadeIn, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
-import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePresence, useStarred, useTyping } from '../../core/hooks';
+import { haveFile, loadLimits, sendPicked, TooBig, type Picked } from '../../core/files';
+import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePerson, usePresence, useStarred, useTyping } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
 import { Composer } from '../../ui/chat/Composer';
+import { fromCamera, fromFiles, fromGallery } from '../../ui/chat/attachments';
 import { PollSheet } from '../../ui/chat/PollSheet';
-import { dayLabel, lastSeen, sameDay, TIMERS, timerLabel } from '../../ui/format';
+import { dayLabel, fileSize, lastSeen, sameDay, TIMERS, timerLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
-import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
+import { Avatar, Button, Field, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
@@ -44,6 +47,9 @@ export default function ChatScreen() {
   usePeople();
   const other = chat ? core.otherPerson(chat) : null;
   const presence = usePresence(other);
+  // WhatsApp's "Not in your contacts" card, for a one-to-one chat with someone I haven't saved.
+  const stranger = !!other && other !== core.myId && !core.isContact(other);
+  const [blocking, setBlocking] = useState(false);
 
   const [picked, setPicked] = useState<Map<string, Message>>(new Map());
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -52,6 +58,8 @@ export default function ChatScreen() {
   const [pickMenu, setPickMenu] = useState(false);
   const [attach, setAttach] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
+  const [outgoing, setOutgoing] = useState<Picked[] | null>(null);
+  const [caption, setCaption] = useState('');
   const [pollKey, setPollKey] = useState(0);
   const [timerOpen, setTimerOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -193,6 +201,41 @@ export default function ChatScreen() {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }
 
+  /** Opens a picker, then shows what was picked with a caption box. */
+  async function pick(from: () => Promise<(Picked | null)[]>) {
+    setAttach(false);
+    try {
+      const picked = (await from()).filter((p): p is Picked => !!p);
+      if (!picked.length) return;
+      const limit = await loadLimits();
+      const ok = picked.filter((p) => !p.size || p.size <= limit);
+      if (ok.length < picked.length) toast(fill(t.fileTooBig, { mb: Math.floor(limit / 1024 / 1024) }));
+      if (!ok.length) return;
+      setCaption('');
+      setOutgoing(ok);
+    } catch {
+      toast(t.couldNot);
+    }
+  }
+
+  function sendOutgoing() {
+    const list = outgoing ?? [];
+    const words = caption.trim();
+    setOutgoing(null);
+    void act(async () => {
+      for (const [i, p] of list.entries()) {
+        try {
+          // The caption goes with the first one, as on WhatsApp.
+          await sendPicked(id, p, i === 0 && words ? words : undefined);
+        } catch (err) {
+          if (err instanceof TooBig) toast(fill(t.fileTooBig, { mb: Math.floor(Number(err.message) / 1024 / 1024) }));
+          else throw err;
+        }
+      }
+    });
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }
+
   const react = useCallback(
     (m: Message, emoji: string) => {
       const mine = m.reactions?.[core.myId];
@@ -217,8 +260,11 @@ export default function ChatScreen() {
   const retry = useCallback(
     (m: Message) => {
       void (async () => {
-        await core.deleteForMe([m]);
-        if (m.text) await core.client.sendText(id, m.text, { replyTo: m.replyTo, mentions: m.mentions });
+        await core.deleteForMe([m], true);
+        if (m.kind === 'file' && m.file?.local) {
+          const { local, id: _id, key: _key, digest: _digest, ...meta } = m.file;
+          await core.client.sendFile(id, { ...meta, local }, { caption: m.text, replyTo: m.replyTo, mentions: m.mentions });
+        } else if (m.text) await core.client.sendText(id, m.text, { replyTo: m.replyTo, mentions: m.mentions });
       })().catch(() => {});
     },
     [id],
@@ -287,8 +333,10 @@ export default function ChatScreen() {
           flip
           onPress={() => {
             const texts = pickedList.filter((m) => m.kind === 'text' && !m.deleted && m.text).map((m) => m.text!);
+            // Files go on only once they're on this phone (downloaded).
+            const files = pickedList.filter((m) => m.kind === 'file' && !m.deleted && haveFile(m)).map((m) => [m.chatId, m.author, m.id]);
             done();
-            if (texts.length) router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts) } });
+            if (texts.length || files.length) router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), files: JSON.stringify(files) } });
           }}
           testID="pick-forward"
         />
@@ -376,13 +424,16 @@ export default function ChatScreen() {
             onScrollToIndexFailed={(info) => setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5 }), 250)}
             ListFooterComponent={
               list && !hasMore ? (
-                <View style={{ alignSelf: 'center', maxWidth: '88%', marginVertical: 12, padding: 12, borderRadius: 14, backgroundColor: theme.glass, flexDirection: 'row', gap: 8 }}>
-                  <Icon name="lock" size={15} color={theme.accInk} />
-                  <View style={{ flexShrink: 1 }}>
-                    <Txt size={12.5} color={theme.sectionText}>
-                      {t.lockedNote}
-                    </Txt>
+                <View>
+                  <View style={{ alignSelf: 'center', maxWidth: '88%', marginVertical: 12, padding: 12, borderRadius: 14, backgroundColor: theme.glass, flexDirection: 'row', gap: 8 }}>
+                    <Icon name="lock" size={15} color={theme.accInk} />
+                    <View style={{ flexShrink: 1 }}>
+                      <Txt size={12.5} color={theme.sectionText}>
+                        {t.lockedNote}
+                      </Txt>
+                    </View>
                   </View>
+                  {stranger && <NotInContacts userId={other} onBlock={() => setBlocking(true)} />}
                 </View>
               ) : undefined
             }
@@ -565,6 +616,24 @@ export default function ChatScreen() {
       />
 
       <Dialog
+        visible={blocking}
+        onClose={() => setBlocking(false)}
+        title={fill(t.blockName, { name: other ? core.plainName(other) : '' })}
+        buttons={[
+          {
+            label: t.block,
+            danger: true,
+            testID: 'confirm-block',
+            onPress: () => {
+              setBlocking(false);
+              if (other) void act(() => core.block(other, true)).then(() => toast(t.blocked));
+            },
+          },
+          { label: t.cancel, onPress: () => setBlocking(false) },
+        ]}
+      />
+
+      <Dialog
         visible={clearing}
         onClose={() => setClearing(false)}
         title={t.clearChat}
@@ -582,14 +651,14 @@ export default function ChatScreen() {
         ]}
       />
 
-      {/* "+": things to send. Photos and files come with the next update. */}
+      {/* "+": things to send. */}
       <Sheet visible={attach} onClose={() => setAttach(false)} title={t.attach}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingTop: 8, gap: 6 }}>
           {[
+            { icon: 'photo' as const, label: t.gallery, on: () => pick(fromGallery), testID: 'attach-photo' },
+            { icon: 'camera' as const, label: t.camera, on: () => pick(async () => [await fromCamera()]), testID: 'attach-camera' },
+            { icon: 'doc' as const, label: t.document, on: () => pick(async () => [await fromFiles()]), testID: 'attach-doc' },
             { icon: 'poll' as const, label: t.pollWord, on: () => (setAttach(false), setPollKey((k) => k + 1), setTimeout(() => setPollOpen(true), 200)), testID: 'attach-poll' },
-            { icon: 'photo' as const, label: t.gallery, on: () => toast(t.comingSoon), testID: 'attach-photo' },
-            { icon: 'camera' as const, label: t.camera, on: () => toast(t.comingSoon), testID: 'attach-camera' },
-            { icon: 'doc' as const, label: t.document, on: () => toast(t.comingSoon), testID: 'attach-doc' },
           ].map((a, i) => (
             <Animated.View key={a.icon} entering={pop(60 + i * 40)} style={{ width: '23%', alignItems: 'center' }}>
               <Pressy onPress={a.on} label={a.label} testID={a.testID} scale={0.9}>
@@ -604,6 +673,35 @@ export default function ChatScreen() {
               </Pressy>
             </Animated.View>
           ))}
+        </View>
+      </Sheet>
+
+      {/* What you picked, with a caption, before it goes. */}
+      <Sheet visible={!!outgoing?.length} onClose={() => setOutgoing(null)} title={outgoing && outgoing.length > 1 ? fill(t.selected, { n: outgoing.length }) : t.send}>
+        <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 12 }}>
+          <ScrollView horizontal contentContainerStyle={{ gap: 8 }} showsHorizontalScrollIndicator={false}>
+            {(outgoing ?? []).map((p) =>
+              p.kind === 'image' ? (
+                <Image key={p.uri} source={{ uri: p.uri }} style={{ width: outgoing!.length > 1 ? 96 : 220, height: outgoing!.length > 1 ? 96 : 220, borderRadius: 14 }} contentFit="cover" />
+              ) : (
+                <View key={p.uri} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: theme.glass, maxWidth: 260 }}>
+                  <Icon name={p.kind === 'video' ? 'video' : p.kind === 'audio' ? 'music' : 'doc'} size={24} color={theme.accInk} />
+                  <View style={{ flexShrink: 1 }}>
+                    <Txt size={14.5} weight="600" lines={2}>
+                      {p.name ?? (p.kind === 'video' ? t.videoLabel : t.document)}
+                    </Txt>
+                    {!!p.size && (
+                      <Txt size={12.5} color={theme.muted}>
+                        {fileSize(p.size)}
+                      </Txt>
+                    )}
+                  </View>
+                </View>
+              ),
+            )}
+          </ScrollView>
+          <Field value={caption} onChangeText={setCaption} placeholder={t.addCaption} maxLength={1000} testID="caption" />
+          <Button title={t.send} icon="send" onPress={sendOutgoing} testID="send-file" />
         </View>
       </Sheet>
 
@@ -650,6 +748,33 @@ export default function ChatScreen() {
         </View>
       </Sheet>
     </Screen>
+  );
+}
+
+/** "Not in your contacts": who they are on PakChat, and Add or Block. */
+function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const person = usePerson(userId);
+  return (
+    <Animated.View entering={rise()} style={{ alignSelf: 'center', width: '88%', marginBottom: 12 }}>
+      <Glass strong style={{ padding: 16, borderRadius: 22, alignItems: 'center', gap: 8 }} testID="not-in-contacts">
+        <Avatar id={userId} name={person?.name ?? ''} size={56} />
+        <Txt size={16} weight="700" align="center">
+          {person?.name ? `~ ${person.name}` : '…'}
+        </Txt>
+        <Txt size={13} color={theme.muted} align="center">
+          {t.notInContacts}
+        </Txt>
+        <Txt size={12.5} color={theme.muted} align="center">
+          {t.notInContactsNote}
+        </Txt>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, alignSelf: 'stretch' }}>
+          <Button title={t.block} look="danger" onPress={onBlock} style={{ flex: 1 }} testID="stranger-block" />
+          <Button title={t.addContact} onPress={() => router.push({ pathname: '/contact', params: { id: userId } })} style={{ flex: 1 }} testID="stranger-add" />
+        </View>
+      </Glass>
+    </Animated.View>
   );
 }
 

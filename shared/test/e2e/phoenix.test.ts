@@ -9,11 +9,13 @@
 //
 // It uses its own empty database (pakchat_e2e), never real accounts.
 
+import { createHash, randomBytes } from 'node:crypto';
+
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
-import { PakChat } from '../../src/client';
+import { PakChat, type FileUploader } from '../../src/client';
 import { phoenixConnection } from '../../src/connection';
-import { HttpServer, type SignedIn } from '../../src/server';
+import { HttpServer, ServerError, type SignedIn } from '../../src/server';
 import type { SignalApi } from '../../src/signal';
 import { MemoryStorage, type Message } from '../../src/storage';
 import { type Kind, make } from '../signals';
@@ -32,10 +34,31 @@ async function helper<T>(path: string, body: object): Promise<T> {
   return json as T;
 }
 
-function newClient(kind: Kind, signal = make[kind](), storage = new MemoryStorage()) {
-  const client = new PakChat({ signal, storage, server: new HttpServer(HTTP), connect: phoenixConnection(SOCKET), deviceName: 'Test' });
-  return { client, signal, storage };
+// Stand-in for the phone's locked files: "local" names bytes kept here, and
+// what goes up is those bytes as they are (the server can't tell either way).
+const localFiles = new Map<string, Buffer>();
+
+function uploaderFor(server: HttpServer): FileUploader {
+  return {
+    async upload(chatId, local) {
+      const bytes = localFiles.get(local)!;
+      const { id, uploadUrl } = await server.startUpload(chatId, bytes.length);
+      const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
+      if (res.status !== 204) throw new Error(`upload: ${res.status}`);
+      return { id, key: 'test-key', digest: createHash('sha256').update(bytes).digest('base64') };
+    },
+  };
 }
+
+function newClient(kind: Kind, signal = make[kind](), storage = new MemoryStorage()) {
+  const server = new HttpServer(HTTP);
+  const client = new PakChat({ signal, storage, server, connect: phoenixConnection(SOCKET), deviceName: 'Test', files: uploaderFor(server) });
+  return { client, signal, storage, server };
+}
+
+/** A made-up Pakistani mobile number, different every time. */
+const newNumber = () => `0300${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`;
+const sha256 = (text: string) => createHash('sha256').update(text).digest('base64');
 
 /** Signs someone in with a pretend Google account. The same `key` is the same account. */
 async function person(name: string, kind: Kind, key = `${name}-${Date.now()}-${Math.random()}`): Promise<Person> {
@@ -194,5 +217,110 @@ describe('against the real server', () => {
     await ali.client.sendText(chat.id, 'New phone?');
     await eventually(async () => expect(await texts(fresh, chat.id)).toEqual(['Ali: New phone?']));
     expect(changed).toContain(sara.id);
+  });
+
+  test('phone sign-in: a code, a new account, and the same account next time', async () => {
+    const { client, server } = newClient('node');
+    const sent = await server.sendSignInCode(newNumber());
+    expect(sent.phone).toMatch(/^\+92300\d{7}$/);
+    await expect(client.signInWithPhone(sent.phone, '000000')).rejects.toMatchObject({ reason: 'wrong_code' });
+    const code = await server.testCode(sent.phone);
+    const s = await client.signInWithPhone(sent.phone, code);
+    expect(s.newAccount).toBe(true);
+    expect(s.me.phone).toBe(sent.phone);
+    expect(s.me.email).toBeNull();
+    // A code works once.
+    await expect(newClient('node').client.signInWithPhone(sent.phone, code)).rejects.toMatchObject({ reason: 'wrong_code' });
+
+    // Friends can find the new account by its number.
+    const friend = await person('Friend', 'node');
+    const friendServer = new HttpServer(HTTP);
+    friendServer.useToken(friend.client.me!.token);
+    expect((await friendServer.lookup(sent.phone, 'phone'))?.id).toBe(s.userId);
+    client.stop();
+  });
+
+  test('a Google account adds a number, signs in with it, and finds friends by hashed contacts', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'node');
+    const aliServer = new HttpServer(HTTP);
+    aliServer.useToken(ali.client.me!.token);
+    const number = newNumber();
+    const { phone } = await aliServer.sendLinkCode(number);
+    const me = await aliServer.linkPhone(phone, await aliServer.testCode(phone));
+    expect(me.phone).toBe(phone);
+    expect(me.email).toBeTruthy();
+
+    // Sara has Ali's number in her phone's contacts (typed her own way) and an unknown one.
+    const saraServer = new HttpServer(HTTP);
+    saraServer.useToken(sara.client.me!.token);
+    const found = await saraServer.matchContacts([sha256(phone), sha256('+923009999999')], []);
+    expect(found.map((f) => f.user.id)).toEqual([ali.id]);
+    expect(found[0].hash).toBe(sha256(phone));
+    expect((await saraServer.lookup(number, 'phone'))?.id).toBe(ali.id);
+
+    // Sara can't take Ali's number.
+    await expect(saraServer.sendLinkCode(number)).rejects.toMatchObject({ reason: 'taken' });
+
+    // Signing in with the number reaches the same account (after the 30 s wait between codes).
+    const fresh = newClient('wasm');
+    await new Promise((r) => setTimeout(r, 31_000));
+    await fresh.server.sendSignInCode(phone);
+    const s = await fresh.client.signInWithPhone(phone, await fresh.server.testCode(phone));
+    expect(s.userId).toBe(ali.id);
+    expect(s.newAccount).toBeUndefined();
+    // Both ways in: removing one is fine, removing the last is not.
+    const noPhone = await fresh.server.unlink('phone');
+    expect(noPhone.phone).toBeNull();
+    await expect(fresh.server.unlink('google')).rejects.toMatchObject({ reason: 'last_sign_in' });
+  }, 60_000);
+
+  test('a file goes up, its message arrives, and only chat members can fetch it', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'wasm');
+    const bilal = await person('Bilal', 'node');
+    const chat = await ali.client.openDirect(sara.id);
+    const bytes = randomBytes(300_000);
+    localFiles.set('photo-1', bytes);
+    await ali.client.sendFile(chat.id, { local: 'photo-1', size: bytes.length, mime: 'image/jpeg', kind: 'image', width: 800, height: 600 }, { caption: 'Library' });
+    let got: Message | undefined;
+    await eventually(async () => {
+      got = (await sara.client.messages(chat.id)).find((m) => m.kind === 'file');
+      expect(got?.file?.id).toMatch(/^[0-9a-f-]{36}$/);
+    });
+    expect(got!.text).toBe('Library');
+    expect(got!.file).toMatchObject({ size: 300_000, mime: 'image/jpeg', kind: 'image', key: 'test-key', width: 800, height: 600 });
+
+    const saraServer = new HttpServer(HTTP);
+    saraServer.useToken(sara.client.me!.token);
+    const link = await saraServer.fileLink(got!.file!.id);
+    const down = Buffer.from(await (await fetch(link)).arrayBuffer());
+    expect(down.equals(bytes)).toBe(true);
+    expect(createHash('sha256').update(down).digest('base64')).toBe(got!.file!.digest);
+
+    const bilalServer = new HttpServer(HTTP);
+    bilalServer.useToken(bilal.client.me!.token);
+    await expect(bilalServer.fileLink(got!.file!.id)).rejects.toBeInstanceOf(ServerError);
+    // Ali's own copy now has the server's id too.
+    await eventually(async () => expect((await ali.client.messages(chat.id)).find((m) => m.kind === 'file')?.file?.id).toBe(got!.file!.id));
+    expect((await saraServer.fileLimits()).maxBytes).toBeGreaterThan(0);
+  });
+
+  test('a backup goes up, comes back, and is replaced by the next', async () => {
+    const ali = await person('Ali', 'node');
+    const server = new HttpServer(HTTP);
+    server.useToken(ali.client.me!.token);
+    expect(await server.backup()).toBeNull();
+    for (const size of [1000, 2000]) {
+      const bytes = randomBytes(size);
+      const { uploadUrl } = await server.startBackup(size);
+      expect((await fetch(uploadUrl, { method: 'PUT', body: new Uint8Array(bytes) })).status).toBe(204);
+      const b = await server.backup();
+      expect(b?.size).toBe(size);
+      expect(Math.abs(Date.now() - b!.madeAt)).toBeLessThan(60_000);
+      expect(Buffer.from(await (await fetch(b!.url)).arrayBuffer()).equals(bytes)).toBe(true);
+    }
+    await server.deleteBackup();
+    expect(await server.backup()).toBeNull();
   });
 });

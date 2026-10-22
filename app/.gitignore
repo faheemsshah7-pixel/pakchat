@@ -42,3 +42,6 @@ yarn-error.*
 
 # build output of our own native modules
 /modules/*/android/build/
+
+# Firebase file for alerts (LEARN.md "Phase 5: alerts"): kept on your Mac, not in git
+/google-services.json

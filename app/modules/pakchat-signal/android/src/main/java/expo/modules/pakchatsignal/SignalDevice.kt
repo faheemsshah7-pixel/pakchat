@@ -172,15 +172,38 @@ class SignalDevice private constructor(
       Sealed(message.type, message.serialize())
     }
 
-  /** Unlocks a message from another device. Throws if it was changed, repeated or isn't for us. */
-  fun decrypt(fromName: String, fromDeviceId: Int, sealed: Sealed): ByteArray =
-    backend.transaction {
+  /**
+   * Unlocks a message from another device. Throws if it was changed, repeated or isn't for us.
+   *
+   * With `keep` (the envelope's number), the unlocked text is saved in the same
+   * transaction as the new session state, and asking again with the same number
+   * gives the same text back. So if the app is killed before it saves the
+   * message, it can still open it when the server sends it again. `forgetOpened`
+   * clears it once the message is safely saved.
+   */
+  fun decrypt(fromName: String, fromDeviceId: Int, sealed: Sealed, keep: Long? = null): ByteArray =
+    opening(keep, fromName, fromDeviceId) {
       val cipher = SessionCipher(store, address, SignalProtocolAddress(fromName, fromDeviceId))
       when (sealed.type) {
         CiphertextMessage.PREKEY_TYPE -> cipher.decrypt(PreKeySignalMessage(sealed.body))
         CiphertextMessage.WHISPER_TYPE -> cipher.decrypt(SignalMessage(sealed.body))
         else -> throw IllegalArgumentException("Unknown message type ${sealed.type}")
       }
+    }
+
+  /** Forgets texts kept by `decrypt` or `groupDecrypt`, once the app has saved them. */
+  fun forgetOpened(keeps: List<Long>) {
+    backend.transaction {
+      for (k in keeps) for (key in backend.keys(OPENED, "$uid/$k/")) backend.delete(OPENED, key)
+    }
+  }
+
+  // The kept text is filed under the sender too, so a resent number can't come back as someone else's.
+  private fun opening(keep: Long?, fromName: String, fromDeviceId: Int, open: () -> ByteArray): ByteArray =
+    backend.transaction {
+      val key = keep?.let { "$uid/$it/$fromName.$fromDeviceId" }
+      key?.let { k -> backend.get(OPENED, k) }
+        ?: open().also { plain -> key?.let { backend.put(OPENED, it, plain) } }
     }
 
   /**
@@ -202,8 +225,8 @@ class SignalDevice private constructor(
   fun groupEncrypt(distributionId: String, plaintext: ByteArray): ByteArray =
     backend.transaction { GroupCipher(store, address).encrypt(UUID.fromString(distributionId), plaintext).serialize() }
 
-  fun groupDecrypt(fromName: String, fromDeviceId: Int, body: ByteArray): ByteArray =
-    backend.transaction { GroupCipher(store, SignalProtocolAddress(fromName, fromDeviceId)).decrypt(body) }
+  fun groupDecrypt(fromName: String, fromDeviceId: Int, body: ByteArray, keep: Long? = null): ByteArray =
+    opening(keep, fromName, fromDeviceId) { GroupCipher(store, SignalProtocolAddress(fromName, fromDeviceId)).decrypt(body) }
 
   /**
    * The safety number for a chat, like WhatsApp's "Verify security code".
@@ -222,6 +245,7 @@ class SignalDevice private constructor(
     private const val DEVICES = "devices"
     private const val SELF = "self"
     private const val META = "meta"
+    private const val OPENED = "opened"
 
     /** Makes a brand-new device with fresh keys, and saves it. */
     fun create(backend: KeyBackend, name: String, deviceId: Int): SignalDevice =

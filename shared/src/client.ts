@@ -15,7 +15,7 @@
 // the person who left can't read what comes next.
 
 import type { Connection, ConnectionFactory, WireEnvelope } from './connection';
-import type { Body, Change, Content, Payload, Ref } from './content';
+import type { Attachment, Body, Change, Content, Payload, Ref } from './content';
 import { isBody, isChange, parseContent, writeContent } from './content';
 import { randomId } from './ids';
 import { changeAllowed, maySend } from './rules';
@@ -34,7 +34,22 @@ export type Session = {
   /** This device's name inside the Signal module. */
   handle: string;
   me: Me;
+  /** Only straight after signing in: the account was made just now. */
+  newAccount?: boolean;
 };
+
+/**
+ * Uploading files, which the app does itself (locking big files needs native
+ * code). The outbox calls it for a file message that hasn't been uploaded
+ * yet, so a file sent while offline goes when the network comes back.
+ */
+export type FileUploader = {
+  /** Locks the file at `local`, uploads it for `chatId`, and says where it went and its key. */
+  upload(chatId: string, local: string, message: Ref): Promise<Pick<Attachment, 'id' | 'key' | 'digest'>>;
+};
+
+/** A file on this device, about to be sent. */
+export type OutgoingFile = Omit<Attachment, 'id' | 'key' | 'digest'> & { local: string };
 
 export type ClientOptions = {
   signal: SignalApi;
@@ -43,6 +58,7 @@ export type ClientOptions = {
   connect: ConnectionFactory;
   /** Shown in "Linked devices", like "Pixel 7". */
   deviceName?: string;
+  files?: FileUploader;
   now?: () => number;
   newId?: () => string;
 };
@@ -66,6 +82,8 @@ type Waiting = { from: string; at: number; change: Change };
 type SentRecord = { chatId: string; seq: number; kind: OutboxItem['kind']; content: string; at: number };
 type Prepared = { payload: Record<string, unknown>; shared: string[]; groupKey?: GroupKey };
 
+// A file message's id before its file is uploaded.
+const PENDING = 'pending';
 // Messages waiting to be sent go after every numbered one.
 const QUEUED = 1e15;
 // How many recent sends we remember, to send again if someone asks.
@@ -155,6 +173,11 @@ export class PakChat {
     return this.signInWith((device, keys) => this.o.server.signIn(idToken, device, keys));
   }
 
+  /** Signs in with a phone number and the code sent to it by SMS. */
+  signInWithPhone(phone: string, code: string): Promise<Session> {
+    return this.signInWith((device, keys) => this.o.server.signInWithPhone(phone, code, device, keys));
+  }
+
   /**
    * Makes this device's keys and registers them through `register`. Google
    * sign-in uses it, and so will linking the website with a QR code (phase 8).
@@ -176,7 +199,7 @@ export class PakChat {
     };
     await storage.setValue('session', this.session);
     server.useToken(signedIn.token);
-    return this.session;
+    return signedIn.newAccount ? { ...this.session, newAccount: true } : this.session;
   }
 
   async signOut() {
@@ -197,6 +220,8 @@ export class PakChat {
   /** Connects, and keeps connecting whenever the network comes back. */
   start() {
     if (this.conn) return;
+    // Held group messages opened just before the app was killed: finish them.
+    void this.inLane(() => this.releaseAll()).catch((err) => this.emit('error', err as Error));
     this.conn = this.o.connect({ token: this.s.token, deviceUuid: this.s.deviceUuid });
     this.conn.open({
       envelopes: (list) => this.receive(list),
@@ -266,6 +291,28 @@ export class PakChat {
         for (const r of refs) await storage.deleteMessage(chatId, r.author, r.id);
       }),
     );
+  }
+
+  /** Saves a new copy of my profile (after changing my name, or linking a Gmail or number). */
+  async updateMe(me: Me) {
+    if (!this.session) return;
+    this.session = { ...this.session, me };
+    await this.inLane(() => this.o.storage.setValue('session', this.session));
+  }
+
+  /**
+   * Changes a message on this device only, in the lane: for example, where a
+   * downloaded file now is. Returns the changed message, or null if it's gone.
+   */
+  changeHere(chatId: string, ref: Ref, change: (m: Message) => void) {
+    return this.inLane(async () => {
+      const m = await this.o.storage.getMessage(chatId, ref.author, ref.id);
+      if (!m) return null;
+      change(m);
+      await this.o.storage.putMessage(m);
+      this.emit('message', m);
+      return m;
+    });
   }
 
   /** Saves the server's view of a chat, keeping what only this device knows. */
@@ -362,6 +409,21 @@ export class PakChat {
     return this.sendBody(chatId, body);
   }
 
+  /**
+   * Sends a photo, video, voice note or document. It shows at once; the file is
+   * locked and uploaded by the outbox (through `files.upload`), then the message goes.
+   */
+  sendFile(chatId: string, file: OutgoingFile, extra: { caption?: string; replyTo?: Ref; mentions?: string[]; forwarded?: boolean } = {}) {
+    if (!this.o.files) throw new Error('This device cannot send files');
+    const { local, ...meta } = file;
+    const body: Body = { t: 'file', file: { ...meta, id: PENDING, key: '', digest: '' } };
+    if (extra.caption?.trim()) body.caption = extra.caption;
+    if (extra.mentions?.length) body.mentions = extra.mentions;
+    if (extra.replyTo) body.replyTo = extra.replyTo;
+    if (extra.forwarded) body.forwarded = true;
+    return this.sendBody(chatId, body, local);
+  }
+
   sendPoll(chatId: string, question: string, options: string[], multi = false) {
     return this.sendBody(chatId, { t: 'poll', question, options, multi });
   }
@@ -398,7 +460,7 @@ export class PakChat {
     return { ...payload, v: 1, id: this.newId(), chat: chatId, at: this.now() } as Content;
   }
 
-  private async sendBody(chatId: string, body: Body): Promise<Message> {
+  private async sendBody(chatId: string, body: Body, local?: string): Promise<Message> {
     const content = this.content(chatId, body);
     const parsed = parseContent(writeContent(content));
     if (!parsed) throw new Error('That message is not allowed (too long, or empty)');
@@ -407,6 +469,7 @@ export class PakChat {
       const now = this.now();
       const m = this.toMessage(chat, parsed as Content & Body, this.s.userId, this.s.deviceId, null, now);
       m.status = 'queued';
+      if (m.file && local) m.file.local = local;
       await this.o.storage.transaction(async () => {
         await this.o.storage.putMessage(m);
         await this.queue(content, kindFor(content), { author: m.author, id: m.id });
@@ -487,6 +550,7 @@ export class PakChat {
   private async sendOne(item: OutboxItem): Promise<boolean> {
     let prepared: Prepared;
     try {
+      item = await this.uploadFirst(item);
       prepared = await this.inLane(() => this.prepare(item));
       const reply = await this.push('send', prepared.payload);
       await this.inLane(() => this.sent(item, prepared, reply));
@@ -509,6 +573,32 @@ export class PakChat {
       await this.inLane(() => this.failed(item, err as Error));
       return true;
     }
+  }
+
+  /**
+   * A file message whose file isn't uploaded yet: upload it, then put its id
+   * and key in the message, so what's sent (and any resend) has them.
+   */
+  private async uploadFirst(item: OutboxItem): Promise<OutboxItem> {
+    const c = parseContent(item.content);
+    if (c?.t !== 'file' || c.file.id !== PENDING || !item.message) return item;
+    const ref = item.message;
+    const m = await this.o.storage.getMessage(item.chatId, ref.author, ref.id);
+    if (!m?.file?.local || !this.o.files) throw new Error('The file to send is gone');
+    const done = await this.o.files.upload(item.chatId, m.file.local, ref);
+    const content = writeContent({ ...c, file: { ...c.file, ...done } });
+    const next = { ...item, content };
+    await this.inLane(async () => {
+      await this.o.storage.transaction(async () => {
+        await this.o.storage.putOutbox(next);
+        const fresh = await this.o.storage.getMessage(item.chatId, ref.author, ref.id);
+        if (fresh?.file) {
+          fresh.file = { ...fresh.file, ...done };
+          await this.o.storage.putMessage(fresh);
+        }
+      });
+    });
+    return next;
   }
 
   private async tryLater(item: OutboxItem, ms: number) {
@@ -732,7 +822,11 @@ export class PakChat {
   /** Confirms what we got, sends "delivered" ticks, and asks again for anything we couldn't open. */
   private async afterBatch() {
     const ids = this.acks.splice(0);
-    if (ids.length) await this.push('ack', { ids }).catch(() => {});
+    if (ids.length) {
+      // Saved and marked seen: Signal can let go of the opened texts, then the server of the envelopes.
+      await this.inLane(() => this.o.signal.forgetOpened(this.s.handle, ids)).catch(() => {});
+      await this.push('ack', { ids }).catch(() => {});
+    }
 
     const ticks = [...this.delivered];
     this.delivered.clear();
@@ -786,10 +880,10 @@ export class PakChat {
     let text: string;
     try {
       if (e.type === SEALED.group) {
-        text = await signal.groupDecrypt(handle, e.from, e.from_device, e.body);
+        text = await signal.groupDecrypt(handle, e.from, e.from_device, e.body, e.id);
       } else {
         const before = e.type === SEALED.first ? await signal.identityKey(handle, e.from, e.from_device) : null;
-        text = await signal.decrypt(handle, e.from, e.from_device, { type: e.type, body: e.body });
+        text = await signal.decrypt(handle, e.from, e.from_device, { type: e.type, body: e.body }, e.id);
         if (e.type === SEALED.first) {
           this.keysUsed++;
           const after = await signal.identityKey(handle, e.from, e.from_device);
@@ -835,6 +929,8 @@ export class PakChat {
     const at = Date.parse(e.sent_at) || this.now();
     const { storage } = this.o;
     if (isBody(c)) {
+      // A file that was never uploaded can't be shown (a broken or odd sender).
+      if (c.t === 'file' && (c.file.id === PENDING || !c.file.key || !c.file.digest)) return;
       if (await storage.getMessage(chat.id, e.from, c.id)) return; // sent again: already have it
       const m = this.toMessage(chat, c, e.from, e.from_device, e.seq, at);
       await storage.transaction(async () => {
@@ -868,6 +964,12 @@ export class PakChat {
     };
     if (c.t === 'text') {
       m.text = c.text;
+      if (c.mentions) m.mentions = c.mentions;
+      if (c.replyTo) m.replyTo = c.replyTo;
+      if (c.forwarded) m.forwarded = true;
+    } else if (c.t === 'file') {
+      m.file = { ...c.file };
+      if (c.caption) m.text = c.caption;
       if (c.mentions) m.mentions = c.mentions;
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
@@ -1055,22 +1157,32 @@ export class PakChat {
     this.heldNow.push(e);
   }
 
+  /** Tries every held group message again (each sender once). */
+  private async releaseAll() {
+    const list = (await this.o.storage.getValue<WireEnvelope[]>('held')) ?? [];
+    const senders = new Map(list.filter((h) => h.from_device != null).map((h) => [`${h.from}:${h.from_device}`, h]));
+    for (const h of senders.values()) await this.release(h.from, h.from_device!);
+  }
+
   /** A group key arrived: open what was waiting for it. */
   private async release(from: string, fromDevice: number) {
     const list = (await this.o.storage.getValue<WireEnvelope[]>('held')) ?? [];
     const mine = list.filter((h) => h.from === from && h.from_device === fromDevice);
     if (!mine.length) return;
     const keep = list.filter((h) => !mine.includes(h));
+    const done: number[] = [];
     for (const h of mine) {
       try {
-        const text = await this.o.signal.groupDecrypt(this.s.handle, from, fromDevice, h.body!);
+        const text = await this.o.signal.groupDecrypt(this.s.handle, from, fromDevice, h.body!, h.id);
         await this.applyContent(h, text);
+        done.push(h.id);
       } catch (err) {
         // Still no key for this one (it's older than the key): keep waiting for the resend.
         if (errorCode(err) === SignalError.noGroupKey) keep.push(h);
       }
     }
     await this.o.storage.setValue('held', keep);
+    if (done.length) await this.o.signal.forgetOpened(this.s.handle, done);
   }
 
   /** Tells the sender's device we couldn't open their message, so it sends it again. Once per message. */

@@ -146,7 +146,8 @@ fi
 
 if begin 3 "Ali writes first, Sara answers"; then
   run "$A" -e OTHER="$(echo "$SARA" | tr 'A-Z' 'a-z')" -e TEXT="Salam Sara" start-chat.yaml
-  run "$B" -e OTHER="$ALI" -e TEXT="Salam Sara" open-chat.yaml
+  # Ali isn't in Sara's contacts, so her phone shows him as "~ Ali…".
+  run "$B" -e OTHER="~ $ALI" -e TEXT="Salam Sara" open-chat.yaml
   run "$B" -e TEXT="Walaikum salam" send.yaml
   run "$A" -e TEXT="Walaikum salam" wait-for.yaml
 fi
@@ -166,7 +167,7 @@ if begin 6 "looks and Urdu on Ali's phone"; then
 fi
 
 if begin 7 "Ali makes a list with Sara in it, then deletes it"; then
-  run "$A" -e NAME="$SARA" lists.yaml
+  run "$A" -e NAME="~ $SARA" lists.yaml
 fi
 
 echo "All passed."

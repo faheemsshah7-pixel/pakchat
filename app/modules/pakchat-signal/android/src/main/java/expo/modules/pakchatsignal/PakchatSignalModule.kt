@@ -1,6 +1,7 @@
 package expo.modules.pakchatsignal
 
 import android.util.Base64
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -9,7 +10,9 @@ import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 import org.signal.libsignal.protocol.DuplicateMessageException
 import org.signal.libsignal.protocol.NoSessionException
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 /** A bundle as JavaScript sends it: the same fields as PublicBundle, with bytes as base64 text. */
 class BundleRecord : Record {
@@ -52,6 +55,38 @@ class PakchatSignalModule : Module() {
   }
   private val devices = ConcurrentHashMap<String, SignalDevice>()
 
+  // Files go up and down on their own threads, so a big upload never holds up messages.
+  private val transfers = Executors.newFixedThreadPool(3)
+
+  /** Runs a slow file job away from everything else, and answers when it's done. */
+  private fun slowly(promise: Promise, job: () -> Any?) {
+    transfers.execute {
+      try {
+        promise.resolve(job())
+      } catch (e: SecurityException) {
+        promise.reject("ERR_FILE_CHANGED", e.message ?: "The file was changed", e)
+      } catch (e: Exception) {
+        promise.reject("ERR_FILE", e.message ?: "The file couldn't be moved", e)
+      }
+    }
+  }
+
+  // Progress for a file, at most every 1% (so the bridge isn't flooded).
+  private fun progress(tag: String): (Long, Long) -> Unit {
+    var last = -1L
+    return { done, total ->
+      val pct = if (total > 0) done * 100 / total else -1
+      if (pct != last) {
+        last = pct
+        sendEvent("progress", mapOf("tag" to tag, "done" to done.toDouble(), "total" to total.toDouble()))
+      }
+    }
+  }
+
+  private fun path(uri: String) = File(uri.removePrefix("file://"))
+
+  private fun resolver() = (appContext.reactContext ?: throw Exceptions.ReactContextLost()).contentResolver
+
   private fun device(handle: String): SignalDevice {
     devices[handle]?.let { return it }
     // Not opened yet since the app started: find it in the saved keys.
@@ -69,6 +104,46 @@ class PakchatSignalModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("PakchatSignal")
+
+    Events("progress")
+
+    // ---- Files (see FileLock and FileTransfer) ----
+
+    /** How big a file is once locked, so the app can ask the server for room first. */
+    Function("lockedSize") { plain: Double -> FileLock.lockedSize(plain.toLong()).toDouble() }
+
+    /** Locks a file and uploads it. `key` (base64) only for backups; files get a new one. */
+    AsyncFunction("uploadFile") { uri: String, url: String, key: String?, tag: String, promise: Promise ->
+      slowly(promise) {
+        val up = FileTransfer.upload(path(uri), url, key?.let { bytes(it) }, progress(tag))
+        mapOf("key" to b64(up.key), "digest" to b64(up.digest), "size" to up.size.toDouble())
+      }
+    }
+
+    /** Downloads a locked file, checks it, and unlocks it to `to`. */
+    AsyncFunction("downloadFile") { url: String, to: String, key: String, digest: String?, tag: String, promise: Promise ->
+      slowly(promise) {
+        FileTransfer.download(url, path(to), bytes(key), digest?.let { bytes(it) }, progress(tag))
+        to
+      }
+    }
+
+    /** Where a contact can be saved: Google accounts, the phone, SIMs. Needs the contacts permission. */
+    AsyncFunction("contactAccounts") { promise: Promise ->
+      slowly(promise) {
+        PhoneBook.accounts(resolver()).map { mapOf("type" to it.type, "name" to it.name, "kind" to it.kind) }
+      }
+    }
+
+    /** Saves a contact in the phone's address book, in the account picked. */
+    AsyncFunction("saveToPhoneBook") { type: String?, account: String?, name: String, phone: String?, email: String?, promise: Promise ->
+      slowly(promise) { PhoneBook.save(resolver(), type, account, name, phone, email) }
+    }
+
+    /** The backup key from the backup password (slow on purpose). */
+    AsyncFunction("backupKey") { password: String, userId: String, promise: Promise ->
+      slowly(promise) { b64(FileLock.backupKey(password, userId)) }
+    }
 
     AsyncFunction("createDevice") { name: String, deviceId: Int ->
       val d = SignalDevice.create(backend, name, deviceId)
@@ -159,12 +234,17 @@ class PakchatSignalModule : Module() {
       }
     }
 
-    AsyncFunction("decrypt") { handle: String, fromName: String, fromDeviceId: Int, sealed: SealedRecord ->
+    // `keep` is the envelope's number (a JavaScript number, so it comes as a Double).
+    AsyncFunction("decrypt") { handle: String, fromName: String, fromDeviceId: Int, sealed: SealedRecord, keep: Double? ->
       using(handle) { d ->
         coded(group = false) {
-          String(d.decrypt(fromName, fromDeviceId, Sealed(sealed.type, bytes(sealed.body))), Charsets.UTF_8)
+          String(d.decrypt(fromName, fromDeviceId, Sealed(sealed.type, bytes(sealed.body)), keep?.toLong()), Charsets.UTF_8)
         }
       }
+    }
+
+    AsyncFunction("forgetOpened") { handle: String, keeps: List<Double> ->
+      using(handle) { d -> d.forgetOpened(keeps.map { it.toLong() }) }
     }
 
     AsyncFunction("createGroupKey") { handle: String, distributionId: String ->
@@ -179,9 +259,9 @@ class PakchatSignalModule : Module() {
       using(handle) { d -> coded(group = true) { b64(d.groupEncrypt(distributionId, text.toByteArray(Charsets.UTF_8))) } }
     }
 
-    AsyncFunction("groupDecrypt") { handle: String, fromName: String, fromDeviceId: Int, body: String ->
+    AsyncFunction("groupDecrypt") { handle: String, fromName: String, fromDeviceId: Int, body: String, keep: Double? ->
       using(handle) { d ->
-        coded(group = true) { String(d.groupDecrypt(fromName, fromDeviceId, bytes(body)), Charsets.UTF_8) }
+        coded(group = true) { String(d.groupDecrypt(fromName, fromDeviceId, bytes(body), keep?.toLong()), Charsets.UTF_8) }
       }
     }
 

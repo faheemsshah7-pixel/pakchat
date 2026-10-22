@@ -4,7 +4,7 @@
 //
 // Signal's keys are NOT kept here: they stay inside the Signal module.
 
-import type { Ref } from './content';
+import type { Attachment, Ref } from './content';
 
 export type Role = 'admin' | 'member';
 
@@ -46,8 +46,11 @@ export type Message = {
   order: number;
   /** The server's time (ms), or this phone's time while it waits. */
   sentAt: number;
-  kind: 'text' | 'poll' | 'system';
+  kind: 'text' | 'poll' | 'file' | 'system';
+  /** The words, or a file's caption. */
   text?: string;
+  /** A photo, video, voice note or document, and where it is on this device. */
+  file?: LocalAttachment;
   mentions?: string[];
   replyTo?: Ref;
   forwarded?: boolean;
@@ -67,6 +70,12 @@ export type Message = {
   /** Groups: who has it, and who has read it. */
   deliveredTo?: string[];
   readBy?: string[];
+};
+
+/** A file in a message, plus what only this device knows about it. */
+export type LocalAttachment = Attachment & {
+  /** Where the file is on this device, once it's here (sent from here, or downloaded). */
+  local?: string;
 };
 
 /** One thing waiting to go to the server, oldest first. */

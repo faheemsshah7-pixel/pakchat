@@ -1,0 +1,111 @@
+defmodule Pakchat.Push.Fcm do
+  @moduledoc """
+  Sends alerts through Google's push service (Firebase Cloud Messaging), which
+  is free.
+
+  It needs the Firebase project's "service account" key file, kept only on
+  the Mac (or the live server) and never in git. Put its path in
+  `server/.env` as `FCM_SERVICE_ACCOUNT=/Users/you/pakchat-secrets/firebase.json`.
+  Without it, alerts are only written in the log.
+
+  The alert carries no names and no words from the chat, only "New message",
+  because the server can't read messages anyway.
+  """
+  require Logger
+
+  @scope "https://www.googleapis.com/auth/firebase.messaging"
+
+  def configured?, do: account() != nil
+
+  @doc "Sends one alert. `:gone` means the phone's token is no longer valid."
+  def send(token) do
+    with %{} = acc <- account(),
+         {:ok, access} <- access_token(acc) do
+      body = %{
+        message: %{
+          token: token,
+          notification: %{title: "PakChat", body: "New message"},
+          android: %{
+            priority: "high",
+            # One alert that updates, not a pile of them.
+            notification: %{channel_id: "messages", tag: "pakchat-messages"}
+          },
+          data: %{wake: "1"}
+        }
+      }
+
+      case Req.post("https://fcm.googleapis.com/v1/projects/#{acc["project_id"]}/messages:send",
+             json: body,
+             auth: {:bearer, access},
+             retry: false
+           ) do
+        {:ok, %{status: 200}} -> :ok
+        {:ok, %{status: status}} when status in [400, 404] -> :gone
+        other -> {:error, other}
+      end
+    else
+      nil -> {:error, :not_configured}
+      error -> error
+    end
+  end
+
+  # The key file, read once.
+  defp account do
+    case :persistent_term.get({__MODULE__, :account}, :unread) do
+      :unread ->
+        acc =
+          with path when is_binary(path) <- Application.get_env(:pakchat, :fcm_service_account),
+               {:ok, text} <- File.read(path),
+               {:ok, %{"private_key" => _, "client_email" => _} = acc} <- Jason.decode(text) do
+            acc
+          else
+            _ -> nil
+          end
+
+        :persistent_term.put({__MODULE__, :account}, acc)
+        acc
+
+      acc ->
+        acc
+    end
+  end
+
+  # Google wants a short-lived access token, made by signing a request with
+  # the key file. Each one lasts an hour, so we keep it until just before then.
+  defp access_token(acc) do
+    now = System.system_time(:second)
+
+    case :persistent_term.get({__MODULE__, :token}, nil) do
+      {token, until} when until > now + 60 ->
+        {:ok, token}
+
+      _ ->
+        claims = %{
+          "iss" => acc["client_email"],
+          "scope" => @scope,
+          "aud" => acc["token_uri"] || "https://oauth2.googleapis.com/token",
+          "iat" => now,
+          "exp" => now + 3600
+        }
+
+        jwk = JOSE.JWK.from_pem(acc["private_key"])
+        {_, assertion} = jwk |> JOSE.JWT.sign(%{"alg" => "RS256"}, claims) |> JOSE.JWS.compact()
+
+        case Req.post(claims["aud"],
+               form: [
+                 grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                 assertion: assertion
+               ],
+               retry: false
+             ) do
+          {:ok, %{status: 200, body: %{"access_token" => token, "expires_in" => secs}}} ->
+            :persistent_term.put({__MODULE__, :token}, {token, now + secs})
+            {:ok, token}
+
+          other ->
+            Logger.error("FCM sign-in failed: #{inspect(other)}")
+            {:error, :fcm_auth}
+        end
+    end
+  end
+end

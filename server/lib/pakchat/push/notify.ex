@@ -7,18 +7,35 @@ defmodule Pakchat.Push.Notify do
   """
   use Oban.Worker, queue: :push, max_attempts: 5, unique: [period: 30, keys: [:device_id]]
   require Logger
+  alias Pakchat.Accounts
+  alias Pakchat.Push.Fcm
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"device_id" => device_id}}) do
-    case Pakchat.Accounts.get_device(device_id) do
-      %{push_token: token, push_platform: platform} when is_binary(token) ->
-        # Phase 5: send it to FCM or APNs here.
-        Logger.info("push (stub): would wake device #{device_id} via #{platform}")
-        :ok
+    case Accounts.get_device(device_id) do
+      %{push_token: token, push_platform: "fcm"} = device when is_binary(token) ->
+        if Fcm.configured?() do
+          send_fcm(device, token)
+        else
+          Logger.info("push: FCM_SERVICE_ACCOUNT isn't set, so no alert for device #{device_id}")
+          :ok
+        end
 
       _ ->
-        # Signed out, or no token any more. Nothing to do.
+        # Signed out, no token any more, or iPhone (later). Nothing to do.
         :ok
+    end
+  end
+
+  defp send_fcm(device, token) do
+    case Fcm.send(token) do
+      :gone ->
+        # The app was removed or its token changed: stop using this one.
+        Accounts.set_push_token(device, %{push_token: nil, push_platform: nil})
+        :ok
+
+      other ->
+        other
     end
   end
 end

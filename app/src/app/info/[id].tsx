@@ -3,7 +3,7 @@
 // The big picture shrinks away as you scroll, and the name slides into the bar
 // at the top. Admins can rename the group, add and remove people, and choose
 // who may send.
-import { roleOf } from '@pakchat/shared';
+import { formatPhone, roleOf } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
@@ -127,6 +127,18 @@ export default function Info() {
             </Animated.View>
           ))}
         </View>
+
+        {!group && other && other !== core.myId && (
+          <Glass style={{ marginHorizontal: 12, marginTop: 16 }}>
+            <SettingRow
+              icon="userPlus"
+              title={core.contacts[other] ? t.editContact : t.saveContact}
+              sub={[core.contacts[other]?.phone && formatPhone(core.contacts[other].phone), core.contacts[other]?.email].filter(Boolean).join(' · ') || undefined}
+              onPress={() => router.push({ pathname: '/contact', params: { id: other } })}
+              testID="info-contact"
+            />
+          </Glass>
+        )}
 
         <Glass style={{ marginHorizontal: 12, marginTop: 16 }}>
           <SettingRow icon="photo" title={t.media} sub={t.comingSoon} onPress={() => toast(t.comingSoon)} />

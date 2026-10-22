@@ -16,6 +16,7 @@ import { core } from '../../core/core';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Ticks } from '../ChatRow';
+import { FileBody } from './FileBody';
 import { clock, systemText } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
@@ -148,6 +149,20 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         </View>
       ) : m.kind === 'poll' && m.poll ? (
         <Poll m={m} mine={mine} onVote={(i) => (selecting ? onPress(m) : onVote(m, i))} />
+      ) : m.kind === 'file' && m.file ? (
+        <>
+          <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+          {!!m.text && (
+            <Text
+              style={[
+                fontStyle(m.text, lang, 15.5, '400'),
+                { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left', maxWidth: 236 },
+              ]}
+            >
+              <Words text={m.text} mentions={m.mentions} />
+            </Text>
+          )}
+        </>
       ) : (
         <Text
           style={[
@@ -235,7 +250,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
 function Words({ text, mentions }: { text: string; mentions?: string[] }) {
   const { theme } = useLook();
   if (!mentions?.length) return <>{text}</>;
-  const names = mentions.map((id) => `@${core.name(id)}`).filter((n) => n.length > 1);
+  const names = mentions.map((id) => `@${core.plainName(id)}`).filter((n) => n.length > 1);
   if (!names.length) return <>{text}</>;
   const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const parts = text.split(new RegExp(`(${escaped.join('|')})`, 'g'));

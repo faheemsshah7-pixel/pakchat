@@ -1,5 +1,6 @@
 // profile.tsx: once, after signing in for the first time: "What should people call you?"
-// Google's name is filled in already; change it if you like.
+// Google's name is filled in already; change it if you like. Signing in by phone
+// gives a stand-in name ("PakChat 4567"), so the box starts empty then.
 import KV from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -17,7 +18,7 @@ export default function Profile() {
   const t = useT();
   const { theme } = useLook();
   const { me, myId } = useAuth();
-  const [name, setName] = useState(me?.name ?? '');
+  const [name, setName] = useState(/^PakChat \d{4}$/.test(me?.name ?? '') ? '' : (me?.name ?? ''));
   const [busy, setBusy] = useState(false);
   const keyboard = useAnimatedKeyboard();
   const lift = useAnimatedStyle(() => ({ paddingBottom: 24 + keyboard.height.value }));
@@ -25,7 +26,7 @@ export default function Profile() {
   async function done() {
     setBusy(true);
     try {
-      if (name.trim() && name.trim() !== me?.name) await core.updateMe({ name: name.trim() });
+      if (name.trim() !== me?.name) await core.updateMe({ name: name.trim() });
       KV.setItemSync(`welcomed:${myId}`, '1');
       router.back();
     } catch {

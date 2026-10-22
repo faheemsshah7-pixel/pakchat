@@ -15,6 +15,8 @@ defmodule Pakchat.Accounts.User do
     field :google_sub, :string
     field :email, :string
     field :phone, :string
+    field :phone_hash, :binary
+    field :email_hash, :binary
     field :name, :string
     field :about, :string, default: "Hey there! I am using PakChat."
     field :photo, :string
@@ -36,6 +38,44 @@ defmodule Pakchat.Accounts.User do
     |> validate_length(:name, max: 25)
     |> unique_constraint(:google_sub)
     |> unique_constraint(:email)
+    |> put_hashes()
+  end
+
+  @doc "Used when someone signs in with a phone number for the first time."
+  def phone_signup_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:phone, :name])
+    |> validate_required([:phone, :name])
+    |> unique_constraint(:phone)
+    |> put_hashes()
+  end
+
+  @doc "Adds (or, with nils, removes) the Gmail on an account."
+  def link_google_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:google_sub, :email])
+    |> update_change(:email, &(&1 && String.downcase(&1)))
+    |> unique_constraint(:google_sub)
+    |> unique_constraint(:email)
+    |> put_hashes()
+  end
+
+  @doc "Adds (or, with nil, removes) the phone number on an account."
+  def link_phone_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:phone])
+    |> unique_constraint(:phone)
+    |> put_hashes()
+  end
+
+  # Keeps the hashes used by "contacts on PakChat" in step with the number and Gmail.
+  defp put_hashes(changeset) do
+    phone = get_field(changeset, :phone)
+    email = get_field(changeset, :email)
+
+    changeset
+    |> put_change(:phone_hash, phone && Pakchat.Phone.hash(phone))
+    |> put_change(:email_hash, email && Pakchat.Phone.email_hash(email))
   end
 
   @doc "What the person can change about themselves."

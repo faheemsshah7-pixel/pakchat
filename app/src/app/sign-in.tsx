@@ -1,9 +1,13 @@
-// sign-in.tsx: the first screen. Continue with Google, and that's it.
+// sign-in.tsx: the first screen. Continue with Google, or with your phone number.
 //
 // Google sign-in on Android goes through the phone's Credential Manager: it
 // shows the Google accounts on the phone, you pick one, and Google gives the
 // app a signed "ID token". The server checks Google's signature on it, then
 // makes (or finds) your account. No password ever touches PakChat.
+//
+// With a phone number, the server sends a 6-digit code. Until PakChat goes live
+// the code isn't texted: it shows in the Mac's Terminal (server/README.md, "SMS").
+// On a test server the app fills it in by itself, for the emulator tests.
 //
 // Under the buttons is the server's address. On your phone that's your Mac's
 // address on the Wi-Fi (the commands in LEARN.md Step 26 show how to find it).
@@ -14,17 +18,19 @@
 // down, so the box you're typing in is never hidden.
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, ScrollView, View, type ScrollViewInstance } from 'react-native';
-import { GoogleOneTapSignIn, isCancelledResponse, isNoSavedCredentialFoundResponse, isSuccessResponse } from 'react-native-nitro-google-signin';
 import Animated, { FadeIn, useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
-import { core, GOOGLE_WEB_CLIENT_ID, isOffline, serverUrl, setServerUrl } from '../core/core';
-import { useT } from '../i18n';
+import { formatPhone } from '@pakchat/shared';
+
+import { core, isOffline, serverUrl, setServerUrl } from '../core/core';
+import { googleIdToken } from '../core/google';
+import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
+import { phoneError } from '../ui/format';
 import { pop, rise } from '../ui/motion';
-import { toast } from '../ui/overlays';
 
 /** Google's "G", in its four colours (Google asks for it on sign-in buttons). */
 function GoogleG() {
@@ -38,8 +44,6 @@ function GoogleG() {
   );
 }
 
-let configured = false;
-
 export default function SignIn() {
   const t = useT();
   const { theme, lang, setPrefs } = useLook();
@@ -50,6 +54,12 @@ export default function SignIn() {
   const [draft, setDraft] = useState(server);
   const [testOn, setTestOn] = useState(false);
   const [testName, setTestName] = useState('');
+  // Signing in by phone: type the number, then the code.
+  const [step, setStep] = useState<'start' | 'number' | 'code'>('start');
+  const [phone, setPhone] = useState('');
+  const [sentTo, setSentTo] = useState('');
+  const [code, setCode] = useState('');
+  const [resendIn, setResendIn] = useState(0);
   const scroller = useRef<ScrollViewInstance>(null);
   const keyboard = useAnimatedKeyboard();
   const keyboardSpace = useAnimatedStyle(() => ({ height: keyboard.height.value }));
@@ -83,18 +93,8 @@ export default function SignIn() {
     setError('');
     setBusy(true);
     try {
-      if (!configured) {
-        GoogleOneTapSignIn.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
-        configured = true;
-      }
-      await GoogleOneTapSignIn.checkPlayServices();
-      // Google's account chooser with every Google account on the phone, plus "Add another account".
-      // (The quick sheet only listed accounts used here before, so a second Gmail never showed.)
-      let res = await GoogleOneTapSignIn.presentExplicitSignIn();
-      if (isNoSavedCredentialFoundResponse(res)) res = await GoogleOneTapSignIn.createAccount();
-      if (isCancelledResponse(res)) return;
-      if (!isSuccessResponse(res) || !res.data.idToken) throw new Error('google');
-      const idToken = res.data.idToken;
+      const idToken = await googleIdToken();
+      if (!idToken) return;
       await finish(() => core.signIn(idToken));
     } catch {
       // Google itself said no (or isn't set up on this phone).
@@ -105,12 +105,49 @@ export default function SignIn() {
   }
 
   /** Hands the token to our server. Its problems get their own words, so this never throws. */
-  async function finish(signIn: () => Promise<void>) {
+  async function finish(signIn: () => Promise<unknown>) {
     try {
       await signIn();
     } catch (err) {
       // Google said yes, but our server couldn't be reached (wrong address, or it isn't running), or said no.
       setError(isOffline(err) ? t.serverError : t.signInRefused);
+    }
+  }
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const id = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendIn]);
+
+  async function sendCode() {
+    if (!phone.trim() || busy) return;
+    setError('');
+    setBusy(true);
+    try {
+      const r = await core.sendPhoneCode(phone);
+      setSentTo(r.phone);
+      setResendIn(r.resendAfter);
+      setCode('');
+      setStep('code');
+      // A test server tells the app the code, so the emulator tests needn't read the Terminal.
+      if (testOn) void core.testCode(r.phone).then(setCode).catch(() => {});
+    } catch (err) {
+      setError(phoneError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function phoneSignIn(typed = code) {
+    if (typed.length < 6 || busy) return;
+    setError('');
+    setBusy(true);
+    try {
+      await core.signInWithPhone(sentTo, typed);
+    } catch (err) {
+      setError(phoneError(t, err));
+      setBusy(false);
     }
   }
 
@@ -209,28 +246,92 @@ export default function SignIn() {
         )}
 
         <Animated.View entering={rise(380)} style={{ gap: 10 }}>
-          <Pressy onPress={google} disabled={busy} label={t.continueGoogle} testID="google-sign-in">
-            <View
-              style={{
-                height: 54,
-                borderRadius: 17,
-                backgroundColor: '#FFFFFF',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 12,
-                boxShadow: '0 12px 28px -14px rgba(30,64,140,0.45)',
-              }}
-            >
-              <GoogleG />
-              <Txt size={16} weight="700" color="#1F1F1F">
-                {busy ? t.signingIn : t.continueGoogle}
-              </Txt>
-            </View>
-          </Pressy>
-          <Button title={t.usePhone} icon="calls" onPress={() => toast(t.phoneSoon)} />
+          {step === 'start' && (
+            <>
+              <Pressy onPress={google} disabled={busy} label={t.continueGoogle} testID="google-sign-in">
+                <View
+                  style={{
+                    height: 54,
+                    borderRadius: 17,
+                    backgroundColor: '#FFFFFF',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 12,
+                    boxShadow: '0 12px 28px -14px rgba(30,64,140,0.45)',
+                  }}
+                >
+                  <GoogleG />
+                  <Txt size={16} weight="700" color="#1F1F1F">
+                    {busy ? t.signingIn : t.continueGoogle}
+                  </Txt>
+                </View>
+              </Pressy>
+              <Button title={t.usePhone} icon="calls" onPress={() => (setError(''), setStep('number'))} testID="use-phone" />
+            </>
+          )}
 
-          {testOn && (
+          {step === 'number' && (
+            <Animated.View entering={FadeIn} style={{ gap: 8 }}>
+              <Txt size={13} color={theme.muted}>
+                {t.phoneHint}
+              </Txt>
+              <Field
+                value={phone}
+                onChangeText={setPhone}
+                placeholder="0300 1234567"
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                icon="calls"
+                autoFocus
+                testID="phone-field"
+                onFocus={showBottom}
+                returnKeyType="go"
+                onSubmitEditing={sendCode}
+              />
+              <Button title={t.sendCode} onPress={sendCode} busy={busy} disabled={!phone.trim()} testID="send-code" />
+              <Button title={t.back} look="soft" onPress={() => (setError(''), setStep('start'))} />
+            </Animated.View>
+          )}
+
+          {step === 'code' && (
+            <Animated.View entering={FadeIn} style={{ gap: 8 }}>
+              <Txt size={14} color={theme.muted} align="center">
+                {fill(t.codeSentTo, { phone: formatPhone(sentTo) })}
+              </Txt>
+              <Field
+                value={code}
+                onChangeText={(v) => {
+                  const digits = v.replace(/\D/g, '').slice(0, 6);
+                  setCode(digits);
+                  if (digits.length === 6) void phoneSignIn(digits);
+                }}
+                placeholder="123456"
+                keyboardType="number-pad"
+                autoComplete="sms-otp"
+                textContentType="oneTimeCode"
+                maxLength={6}
+                autoFocus
+                testID="code-field"
+                onFocus={showBottom}
+              />
+              <Button title={busy ? t.signingIn : t.signInWord} onPress={() => phoneSignIn()} busy={busy} disabled={code.length < 6} testID="code-sign-in" />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Pressy onPress={() => (setError(''), setStep('number'))} label={t.changeNumber}>
+                  <Txt size={14} weight="600" color={theme.accInk} style={{ padding: 8 }}>
+                    {t.changeNumber}
+                  </Txt>
+                </Pressy>
+                <Pressy onPress={sendCode} disabled={resendIn > 0 || busy} label={t.resendCode}>
+                  <Txt size={14} weight="600" color={resendIn > 0 ? theme.muted : theme.accInk} style={{ padding: 8 }}>
+                    {resendIn > 0 ? fill(t.resendIn, { s: resendIn }) : t.resendCode}
+                  </Txt>
+                </Pressy>
+              </View>
+            </Animated.View>
+          )}
+
+          {testOn && step === 'start' && (
             <Animated.View entering={FadeIn} style={{ gap: 8, marginTop: 6 }}>
               <Txt size={13} weight="700" color={theme.sectionText}>
                 {t.testAccount}

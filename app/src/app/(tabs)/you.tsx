@@ -2,6 +2,7 @@
 //
 // Pick Sky, Graphite or Auto (follows the phone) and one of six accent
 // colours: the whole app changes at once, and remembers it.
+import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
@@ -71,7 +72,7 @@ export default function You() {
                   {me?.about || t.aboutHint}
                 </Txt>
                 <Txt size={12.5} color={theme.muted} lines={1}>
-                  {me?.email}
+                  {me?.email ?? (me?.phone ? formatPhone(me.phone) : '')}
                 </Txt>
               </View>
               <IconButton icon="edit" label={t.editName} look="soft" size={40} iconSize={18} onPress={() => (setName(me?.name ?? ''), setAbout(me?.about ?? ''), setEditing(true))} />
@@ -113,17 +114,25 @@ export default function You() {
 
         <Section title={t.settings} />
         <Glass>
+          <SettingRow
+            icon="key"
+            title={t.signInWays}
+            sub={[me?.email, me?.phone && formatPhone(me.phone)].filter(Boolean).join(' · ')}
+            onPress={() => router.push('/settings/account')}
+            testID="open-account"
+          />
+          <Divider />
           <SettingRow icon="lock" title={t.privacy} sub={t.privacySub} onPress={() => router.push('/settings/privacy')} testID="open-privacy" />
           <Divider />
           <SettingRow icon="globe" title={t.language} sub={t.languageSub} onPress={() => router.push('/settings/language')} testID="open-language" />
           <Divider />
           <SettingRow icon="key" title={t.appLock} sub={t.appLockSub} onPress={() => soon(t.appLock)} />
           <Divider />
-          <SettingRow icon="bell" title={t.notifications} onPress={() => soon(t.notifications)} />
+          <SettingRow icon="bell" title={t.notifications} onPress={() => router.push('/settings/notifications')} testID="open-notifications" />
           <Divider />
-          <SettingRow icon="database" title={t.storage} sub={t.storageSub} onPress={() => soon(t.storage)} />
+          <SettingRow icon="database" title={t.storage} sub={t.storageSub} onPress={() => router.push('/settings/storage')} testID="open-storage" />
           <Divider />
-          <SettingRow icon="archive" title={t.backup} onPress={() => soon(t.backup)} />
+          <SettingRow icon="archive" title={t.backup} onPress={() => router.push('/settings/backup')} testID="open-backup" />
           <Divider />
           <SettingRow icon="link" title={t.linked} onPress={() => soon(t.linked)} />
           <Divider />

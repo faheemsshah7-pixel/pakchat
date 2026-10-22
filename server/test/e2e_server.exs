@@ -83,8 +83,17 @@ Application.put_env(:pakchat, :rate_limits,
   keys: {100_000, 60_000},
   send: {100_000, 10_000},
   groups: {100_000, 60_000},
-  invites: {100_000, 60_000}
+  invites: {100_000, 60_000},
+  sms: {100_000, 60_000},
+  contacts: {100_000, 60_000}
 )
+
+# Phone sign-in: codes are kept for GET /api/auth/test/code instead of being texted,
+# and files go to a folder of their own.
+Application.put_env(:pakchat, :test_sign_in, true)
+Application.put_env(:pakchat, :sms, "terminal")
+Application.put_env(:pakchat, :sms_daily_cap, 100_000)
+Application.put_env(:pakchat, :files_dir, Path.join(System.tmp_dir!(), "pakchat-e2e-files"))
 
 # Its own database (so `mix test` can still run alongside), fresh each time.
 repo = Application.get_env(:pakchat, Pakchat.Repo)

@@ -1,16 +1,19 @@
 // new-chat.tsx: start a chat. Type a friend's Gmail (or just the part before
-// "@gmail.com") and PakChat finds them, or pick someone you already chat with.
+// "@gmail.com") or number and PakChat finds them, or pick one of your contacts
+// or someone you already chat with. Your phone's contacts can be checked too.
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { core, isOffline } from '../core/core';
+import { findFromPhoneBook } from '../core/phoneBook';
 import { usePeople } from '../core/hooks';
-import { useT } from '../i18n';
+import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
 import { rise } from '../ui/motion';
+import { toast } from '../ui/overlays';
 
 export default function NewChat() {
   const t = useT();
@@ -21,14 +24,29 @@ export default function NewChat() {
   const [note, setNote] = useState('');
   const [found, setFound] = useState<{ id: string; name: string } | null>(null);
 
-  const known = useMemo(
-    () =>
-      Object.values(people)
-        .filter((p) => p.id !== core.myId && p.name)
-        .filter((p) => !query.trim() || p.name.toLowerCase().includes(query.trim().toLowerCase()))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [people, query],
-  );
+  const [syncing, setSyncing] = useState(false);
+
+  // My contacts first (by the names I gave them), then others I chat with ("~ Name").
+  const known = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return Object.values(people)
+      .filter((p) => p.id !== core.myId && p.name)
+      .map((p) => ({ id: p.id, name: core.name(p.id), about: p.about, saved: core.isContact(p.id) }))
+      .filter((p) => !q || p.name.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.saved) - Number(a.saved) || a.name.replace(/^~ /, '').localeCompare(b.name.replace(/^~ /, '')));
+  }, [people, query]);
+
+  async function phoneBook() {
+    setSyncing(true);
+    try {
+      const n = await findFromPhoneBook();
+      toast(n === null ? t.noContactsAccess : fill(t.foundContacts, { n }));
+    } catch (err) {
+      toast(isOffline(err) ? t.offline : t.couldNot);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function find() {
     if (!query.trim() || busy) return;
@@ -69,7 +87,7 @@ export default function NewChat() {
         <Field
           value={query}
           onChangeText={(q) => (setQuery(q), setFound(null), setNote(''))}
-          placeholder={t.findPerson}
+          placeholder={t.searchPeopleHint}
           icon="search"
           autoCapitalize="none"
           autoCorrect={false}
@@ -94,7 +112,7 @@ export default function NewChat() {
                 <Avatar id={found.id} name={found.name} size={48} />
                 <View style={{ flex: 1 }}>
                   <Txt size={16} weight="700">
-                    {found.name}
+                    {core.name(found.id) || found.name}
                   </Txt>
                   <Txt size={13} color={theme.acc} weight="600">
                     {t.message}
@@ -108,9 +126,13 @@ export default function NewChat() {
 
       <Glass style={{ marginHorizontal: 12 }}>
         <SettingRow icon="group" title={t.newGroup} onPress={() => router.replace('/new-group')} testID="to-new-group" />
+        <Divider />
+        <SettingRow icon="userPlus" title={t.newContact} onPress={() => router.push('/contact')} testID="new-contact" />
+        <Divider />
+        <SettingRow icon="contacts" title={syncing ? t.connecting : t.findContacts} sub={t.findContactsNote} onPress={syncing ? undefined : phoneBook} testID="find-contacts" />
       </Glass>
 
-      {known.length > 0 && <Section title={t.onPakChat} />}
+      {known.length > 0 && <Section title={t.contacts} />}
       <FlatList
         data={known}
         keyExtractor={(p) => p.id}

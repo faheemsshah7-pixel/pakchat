@@ -6,6 +6,7 @@ import { FlatList, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
+import { forwardFile } from '../core/files';
 import { useChatList } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
@@ -15,18 +16,14 @@ import { toast } from '../ui/overlays';
 import { pop, rise } from '../ui/motion';
 
 export default function Forward() {
-  const { texts } = useLocalSearchParams<{ texts: string }>();
+  const { texts, files } = useLocalSearchParams<{ texts?: string; files?: string }>();
   const t = useT();
   const { theme } = useLook();
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const words: string[] = (() => {
-    try {
-      return JSON.parse(texts ?? '[]');
-    } catch {
-      return [];
-    }
-  })();
+  const words: string[] = parse(texts);
+  // Photos, videos and documents that are on this phone: [chatId, author, id] each.
+  const refs: [string, string, string][] = parse(files);
 
   function toggle(id: string) {
     setPicked((old) => {
@@ -43,7 +40,11 @@ export default function Forward() {
     if (busy) return;
     setBusy(true);
     try {
-      for (const chatId of picked) for (const w of words) await core.client.sendText(chatId, w, { forwarded: true });
+      const toSend = (await Promise.all(refs.map(([c, a, i]) => core.storage.getMessage(c, a, i)))).filter((m) => !!m?.file?.local);
+      for (const chatId of picked) {
+        for (const w of words) await core.client.sendText(chatId, w, { forwarded: true });
+        for (const m of toSend) await forwardFile(chatId, m!);
+      }
       toast(t.forwardedNote);
       if (picked.size === 1) router.replace({ pathname: '/chat/[id]', params: { id: [...picked][0] } });
       else router.back();
@@ -93,4 +94,12 @@ export default function Forward() {
       )}
     </Screen>
   );
+}
+
+function parse<T>(json: string | undefined): T[] {
+  try {
+    return JSON.parse(json ?? '[]') as T[];
+  } catch {
+    return [];
+  }
 }

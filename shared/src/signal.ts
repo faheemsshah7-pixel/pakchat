@@ -89,11 +89,19 @@ export interface SignalApi {
   /** Their identity key as last seen (base64), or null if we never talked. */
   identityKey(handle: string, theirName: string, theirDeviceId: number): Promise<string | null>;
   encrypt(handle: string, toName: string, toDeviceId: number, text: string): Promise<Sealed>;
-  decrypt(handle: string, fromName: string, fromDeviceId: number, sealed: Sealed): Promise<string>;
+  /**
+   * With `keep` (the envelope's number), the opened text is saved together with
+   * the new key state, and opening the same envelope again gives the same text
+   * instead of a duplicate error. So a message isn't lost if the app is killed
+   * after opening it but before saving it. `forgetOpened` clears it afterwards.
+   */
+  decrypt(handle: string, fromName: string, fromDeviceId: number, sealed: Sealed, keep?: number): Promise<string>;
   /** This device's group key for one group (made the first time). `distributionId` is a UUID. */
   createGroupKey(handle: string, distributionId: string): Promise<string>;
   acceptGroupKey(handle: string, fromName: string, fromDeviceId: number, groupKey: string): Promise<void>;
   groupEncrypt(handle: string, distributionId: string, text: string): Promise<string>;
-  groupDecrypt(handle: string, fromName: string, fromDeviceId: number, body: string): Promise<string>;
+  groupDecrypt(handle: string, fromName: string, fromDeviceId: number, body: string, keep?: number): Promise<string>;
+  /** Forgets texts kept by `decrypt` and `groupDecrypt`, once they're safely saved. */
+  forgetOpened(handle: string, keeps: number[]): Promise<void>;
   safetyNumber(handle: string, theirName: string, theirDeviceId: number): Promise<string>;
 }

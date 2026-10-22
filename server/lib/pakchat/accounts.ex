@@ -5,7 +5,7 @@ defmodule Pakchat.Accounts do
   """
   import Ecto.Query
   alias Pakchat.Accounts.{Block, Device, GoogleToken, User}
-  alias Pakchat.Repo
+  alias Pakchat.{Phone, PhoneCodes, Repo}
 
   # One phone plus up to 4 linked devices, like WhatsApp.
   @max_linked 4
@@ -23,6 +23,28 @@ defmodule Pakchat.Accounts do
   def sign_in_with_google(id_token, device_attrs) do
     with {:ok, claims} <- GoogleToken.verify(id_token) do
       sign_in_as(claims, device_attrs)
+    end
+  end
+
+  @doc """
+  Sends a sign-in code by SMS (or prints it in the Terminal, see `Pakchat.Sms`).
+  `phone` is as typed; the reply has the tidied number.
+  """
+  def send_sign_in_code(phone) do
+    with {:ok, phone} <- Phone.normalize(phone),
+         {:ok, info} <- PhoneCodes.send_code(phone, "sign_in") do
+      {:ok, Map.put(info, :phone, phone)}
+    end
+  end
+
+  @doc """
+  Signs in with a phone number and the code we sent it. Makes the account the
+  first time; the reply's `new_account` tells the app to ask for a name.
+  """
+  def sign_in_with_phone(phone, code, device_attrs) do
+    with {:ok, phone} <- Phone.normalize(phone),
+         :ok <- PhoneCodes.check(phone, "sign_in", code) do
+      sign_in_as(%{"phone" => phone}, device_attrs)
     end
   end
 
@@ -48,30 +70,46 @@ defmodule Pakchat.Accounts do
   defp sign_in_as(claims, device_attrs) do
     token = new_token()
 
-    with {:ok, {user, device, old}} <-
+    with {:ok, {user, device, old, new?}} <-
            Repo.transaction(fn -> take_over(claims, device_attrs, token) end) do
       Enum.each(old, &disconnect/1)
-      {:ok, %{user: user, device: device, token: token}}
+      {:ok, %{user: user, device: device, token: token, new_account: new?}}
     end
   end
 
   # Finds or makes the account, removes its old devices, and adds this phone.
   defp take_over(claims, device_attrs, token) do
-    user = find_or_create_user(claims)
+    {user, new?} = find_or_create_user(claims)
     old = Repo.all(from d in Device, where: d.user_id == ^user.id, select: d.id)
     Repo.delete_all(from d in Device, where: d.user_id == ^user.id)
     attrs = Map.merge(device_attrs, %{user_id: user.id, device_id: 1, token_hash: hash(token)})
 
     case Repo.insert(Device.register_changeset(%Device{}, attrs)) do
-      {:ok, device} -> {user, device, old}
+      {:ok, device} -> {user, device, old, new?}
       {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp find_or_create_user(%{"phone" => phone}) do
+    case Repo.get_by(User, phone: phone) do
+      %User{} = user ->
+        {user, false}
+
+      nil ->
+        # Until they pick a name: "PakChat 4567", from the end of the number.
+        %User{}
+        |> User.phone_signup_changeset(%{
+          phone: phone,
+          name: "PakChat " <> String.slice(phone, -4, 4)
+        })
+        |> insert_new()
     end
   end
 
   defp find_or_create_user(%{"sub" => sub} = claims) do
     case Repo.get_by(User, google_sub: sub) do
       %User{} = user ->
-        user
+        {user, false}
 
       nil ->
         name = claims["name"] || claims["email"] |> String.split("@") |> hd()
@@ -83,11 +121,68 @@ defmodule Pakchat.Accounts do
           name: String.slice(name, 0, 25),
           photo: claims["picture"]
         })
-        |> Repo.insert()
-        |> case do
-          {:ok, user} -> user
-          {:error, changeset} -> Repo.rollback(changeset)
-        end
+        |> insert_new()
+    end
+  end
+
+  defp insert_new(changeset) do
+    case Repo.insert(changeset) do
+      {:ok, user} -> {user, true}
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  ## One account, two ways in: Gmail and phone number
+
+  @doc """
+  Adds a Gmail to my account (I signed in by phone). Google's token proves
+  it's mine. Refused if that Gmail already has its own PakChat account.
+  """
+  def link_google(%User{} = user, id_token) do
+    with {:ok, claims} <- GoogleToken.verify(id_token),
+         :ok <- free(User, :google_sub, claims["sub"], user),
+         :ok <- free(User, :email, String.downcase(claims["email"] || ""), user) do
+      user
+      |> User.link_google_changeset(%{google_sub: claims["sub"], email: claims["email"]})
+      |> Repo.update()
+    end
+  end
+
+  @doc "Sends a code to a number I want to add to my account."
+  def send_link_code(%User{} = user, phone) do
+    with {:ok, phone} <- Phone.normalize(phone),
+         :ok <- free(User, :phone, phone, user),
+         {:ok, info} <- PhoneCodes.send_code(phone, "link") do
+      {:ok, Map.put(info, :phone, phone)}
+    end
+  end
+
+  @doc "Adds the number to my account, once the code proves it's mine."
+  def link_phone(%User{} = user, phone, code) do
+    with {:ok, phone} <- Phone.normalize(phone),
+         :ok <- free(User, :phone, phone, user),
+         :ok <- PhoneCodes.check(phone, "link", code) do
+      user |> User.link_phone_changeset(%{phone: phone}) |> Repo.update()
+    end
+  end
+
+  @doc "Takes the Gmail or the number off my account, as long as the other stays."
+  def unlink(%User{phone: nil}, :google), do: {:error, :last_sign_in}
+  def unlink(%User{google_sub: nil}, :phone), do: {:error, :last_sign_in}
+
+  def unlink(%User{} = user, :google),
+    do: user |> User.link_google_changeset(%{google_sub: nil, email: nil}) |> Repo.update()
+
+  def unlink(%User{} = user, :phone),
+    do: user |> User.link_phone_changeset(%{phone: nil}) |> Repo.update()
+
+  # The Gmail or number isn't someone else's account already. (Joining two
+  # accounts into one is a later decision; for now it's refused.)
+  defp free(schema, field, value, %User{id: my_id}) do
+    case Repo.get_by(schema, [{field, value}]) do
+      nil -> :ok
+      %{id: ^my_id} -> :ok
+      _ -> {:error, :taken}
     end
   end
 
@@ -181,6 +276,29 @@ defmodule Pakchat.Accounts do
   end
 
   def find_by_email(_), do: nil
+
+  @doc "Finds someone by their phone number, typed any way."
+  def find_by_phone(phone) do
+    case Phone.normalize(phone) do
+      {:ok, phone} -> Repo.get_by(User, phone: phone)
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Which of these hashed numbers and Gmails are on PakChat (for "contacts on
+  PakChat"). Returns `[{hash, user}]`. The phone hashes its contacts itself,
+  so the numbers in its address book are never sent as they are.
+  """
+  def match_hashes(phone_hashes, email_hashes) do
+    phones =
+      Repo.all(from u in User, where: u.phone_hash in ^phone_hashes, select: {u.phone_hash, u})
+
+    emails =
+      Repo.all(from u in User, where: u.email_hash in ^email_hashes, select: {u.email_hash, u})
+
+    phones ++ emails
+  end
 
   @doc "Remembers when someone was last online."
   def touch_last_seen(user_id) do

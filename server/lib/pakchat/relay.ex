@@ -363,7 +363,15 @@ defmodule Pakchat.Relay do
       Phoenix.PubSub.broadcast(Pakchat.PubSub, "relay:" <> device_id, {:envelopes, list})
     end
 
-    Push.wake_offline(Map.keys(by_device))
+    # Only messages wake a closed app: not ticks, reactions or group notes.
+    by_device
+    |> Enum.map(fn {id, list} ->
+      {id, for(e <- list, e.kind == "message", uniq: true, do: e.sender_id)}
+    end)
+    |> Enum.reject(fn {_id, senders} -> senders == [] end)
+    |> Map.new()
+    |> Push.wake_offline()
+
     :ok
   end
 

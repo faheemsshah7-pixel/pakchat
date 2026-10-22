@@ -31,8 +31,15 @@ defmodule PakchatWeb.Router do
 
     get "/health", HealthController, :show
     post "/auth/google", AuthController, :google
+    post "/auth/phone/code", AuthController, :phone_code
+    post "/auth/phone", AuthController, :phone
     get "/auth/test", AuthController, :test
     post "/auth/test", AuthController, :test
+    get "/auth/test/code", AuthController, :test_code
+
+    # Signed links: the token in the link is the permission (see Pakchat.Files).
+    put "/files/:id/data", FileController, :upload
+    get "/files/:id/data", FileController, :download
   end
 
   scope "/api", PakchatWeb do
@@ -43,6 +50,20 @@ defmodule PakchatWeb.Router do
     get "/me", MeController, :show
     patch "/me", MeController, :update
     put "/me/push", MeController, :push
+    put "/me/google", MeController, :link_google
+    post "/me/phone/code", MeController, :phone_code
+    put "/me/phone", MeController, :link_phone
+    delete "/me/:what", MeController, :unlink
+
+    post "/contacts/match", UserController, :match
+
+    get "/files/limits", FileController, :limits
+    post "/files", FileController, :create
+    get "/files/:id/link", FileController, :link
+
+    get "/backup", BackupController, :show
+    post "/backup", BackupController, :create
+    delete "/backup", BackupController, :delete
 
     get "/keys", KeyController, :count
     post "/keys", KeyController, :upload

@@ -154,6 +154,52 @@ describe('the website keeps its keys between visits', () => {
   });
 });
 
+describe('an opened message is kept until it is saved', () => {
+  test.each(['node', 'wasm'] as const)('%s: opening again gives the same text, until forgotten', async (kind) => {
+    const a = make.node();
+    const b = make[kind]();
+    const ali = await a.createDevice('ali', 1);
+    const sara = await b.createDevice('sara', 1);
+    await a.startSession(ali, 'sara', 1, await bundleFor(b, sara, 1));
+    const first = await a.encrypt(ali, 'sara', 1, 'one');
+    expect(await b.decrypt(sara, 'ali', 1, first, 41)).toBe('one');
+    expect(await b.decrypt(sara, 'ali', 1, first, 41)).toBe('one');
+    // Someone else can't get it back under the same number.
+    expect(await codeOf(b.decrypt(sara, 'bob', 1, first, 41))).not.toBe('no error');
+    await b.forgetOpened(sara, [41]);
+    expect(await codeOf(b.decrypt(sara, 'ali', 1, first, 41))).toBe(SignalError.duplicate);
+
+    await b.acceptGroupKey(sara, 'ali', 1, await a.createGroupKey(ali, GROUP));
+    const g = await a.groupEncrypt(ali, GROUP, 'group');
+    expect(await b.groupDecrypt(sara, 'ali', 1, g, 42)).toBe('group');
+    expect(await b.groupDecrypt(sara, 'ali', 1, g, 42)).toBe('group');
+    await b.forgetOpened(sara, [42]);
+    expect(await codeOf(b.groupDecrypt(sara, 'ali', 1, g, 42))).toBe(SignalError.duplicate);
+  });
+
+  test('the website saves the kept text with its keys, in one go', async () => {
+    const saved = new Map<string, string>();
+    const options = { save: (h: string, s: string) => void saved.set(h, s), load: (h: string) => saved.get(h) ?? null };
+    const web = wasmSignal(options);
+    const phone = make.node();
+    const site = await web.createDevice('ali', 2);
+    const sara = await phone.createDevice('sara', 1);
+    await phone.startSession(sara, 'ali', 2, await bundleFor(web, site, 2));
+    const sealed = await phone.encrypt(sara, 'ali', 2, 'one');
+    expect(await web.decrypt(site, 'sara', 1, sealed, 7)).toBe('one');
+
+    // The tab closes before the message is saved; next visit, the same envelope comes again.
+    const again = wasmSignal(options);
+    const handle = (await again.openDevice('ali', 2))!;
+    expect(await again.decrypt(handle, 'sara', 1, sealed, 7)).toBe('one');
+    await again.forgetOpened(handle, [7]);
+    const third = wasmSignal(options);
+    const h3 = (await third.openDevice('ali', 2))!;
+    expect(await codeOf(third.decrypt(h3, 'sara', 1, sealed, 7))).toBe(SignalError.duplicate);
+    expect(await third.decrypt(h3, 'sara', 1, await phone.encrypt(sara, 'ali', 2, 'two'))).toBe('two');
+  });
+});
+
 describe("Signal's published test numbers", () => {
   // From libsignal's own tests (rust/protocol/src/fingerprint.rs, "testVectorsVersion1"
   // in Signal's Java tests). Both of our builds must give exactly these.

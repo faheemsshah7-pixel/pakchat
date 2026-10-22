@@ -176,4 +176,30 @@ class SignalDeviceTest {
     val again = SignalDevice.open(backend, "ali", 1)!!
     assertEquals(listOf(4, 5), again.newPreKeys(2).first.map { it.keyId })
   }
+
+  @Test
+  fun keptTextSurvivesBeingKilledBeforeSaving() {
+    val backend = MemoryKeyBackend()
+    val (ali, sara) = chatting(backend)
+    val first = ali.encrypt("sara", 1, "one".utf8())
+    assertArrayEquals("one".utf8(), sara.decrypt("ali", 1, first, keep = 41))
+
+    // Killed before the app saved it: the server sends envelope 41 again.
+    val sara2 = SignalDevice.open(backend, "sara", 1)!!
+    assertArrayEquals("one".utf8(), sara2.decrypt("ali", 1, first, keep = 41))
+    // Another sender can't get it back under the same number.
+    assertThrows(Exception::class.java) { sara2.decrypt("bob", 1, first, keep = 41) }
+
+    // Once saved and forgotten, it's an ordinary repeat again.
+    sara2.forgetOpened(listOf(41))
+    assertThrows(DuplicateMessageException::class.java) { sara2.decrypt("ali", 1, first, keep = 41) }
+
+    // Groups too.
+    sara2.acceptGroupKey("ali", 1, ali.createGroupKey(group))
+    val g = ali.groupEncrypt(group, "group".utf8())
+    assertArrayEquals("group".utf8(), sara2.groupDecrypt("ali", 1, g, keep = 42))
+    assertArrayEquals("group".utf8(), sara2.groupDecrypt("ali", 1, g, keep = 42))
+    sara2.forgetOpened(listOf(42))
+    assertThrows(DuplicateMessageException::class.java) { sara2.groupDecrypt("ali", 1, g, keep = 42) }
+  }
 }

@@ -13,13 +13,15 @@ import { OfflineError, ServerError } from '../src/server';
 import type { Bundle, DeviceKeys, OneTimeKey, PreKeys, SignedKey } from '../src/signal';
 import type { Role } from '../src/storage';
 
-type User = { id: string; name: string; email: string };
+type User = { id: string; name: string; email: string | null; phone?: string };
 type Device = { uuid: string; userId: string; deviceId: number; token: string; keys: DeviceKeys; ec: OneTimeKey[]; kyber: SignedKey[] };
 type FakeChat = { id: string; kind: 'direct' | 'group'; members: { userId: string; role: Role }[]; seq: number; title?: string; onlyAdminsSend?: boolean };
 type Sealed = { user_id: string; device_id: number; type: number; body: string };
 
 const uuid = () => crypto.randomUUID();
 const tick = () => new Promise((r) => setTimeout(r, 0));
+
+export const FAKE_CODE = '123456';
 
 export class FakeServer {
   users = new Map<string, User>();
@@ -75,6 +77,7 @@ export class FakeServer {
         token = t;
       },
       signIn: (idToken, device, keys) => call(() => this.signIn(idToken, device, keys)),
+      signInWithPhone: (phone, code, device, keys) => call(() => this.signInWithPhone(phone, code, device, keys)),
       signOut: () => call(() => void this.devices.splice(this.devices.indexOf(who()), 1)),
       keyCounts: () => call(() => ({ ec: who().ec.length, kyber: who().kyber.length })),
       uploadKeys: (keys) =>
@@ -169,7 +172,7 @@ export class FakeServer {
 
   private me(userId: string): Me {
     const u = this.users.get(userId)!;
-    return { id: u.id, email: u.email, name: u.name, privacy: { lastSeen: 'everyone', online: 'everyone', readReceipts: true } };
+    return { id: u.id, email: u.email, phone: u.phone ?? null, name: u.name, privacy: { lastSeen: 'everyone', online: 'everyone', readReceipts: true } };
   }
 
   private byToken(token: string) {
@@ -193,6 +196,28 @@ export class FakeServer {
       this.users.set(user.id, user);
     }
     // Signing in again replaces every device, like the real server.
+    for (const old of this.devicesOf(user.id)) {
+      this.devices.splice(this.devices.indexOf(old), 1);
+      this.pending.delete(old.uuid);
+      this.online.delete(old.uuid);
+    }
+    const d = this.addDevice(user.id, 1, keys, pre);
+    return { token: d.token, user: this.me(user.id), deviceId: 1, deviceUuid: d.uuid };
+  }
+
+  /** The pretend SMS code is always 123456. */
+  private signInWithPhone(phone: string, code: string, keys: DeviceKeys & { name: string }, pre: PreKeys): SignedIn {
+    if (code !== FAKE_CODE) throw new ServerError('wrong_code', 422);
+    let user = [...this.users.values()].find((u) => u.phone === phone);
+    const made = !user;
+    if (!user) {
+      user = { id: uuid(), name: `PakChat ${phone.slice(-4)}`, email: null, phone };
+      this.users.set(user.id, user);
+    }
+    return { ...this.takeOver(user, keys, pre), ...(made ? { newAccount: true } : {}) };
+  }
+
+  private takeOver(user: User, keys: DeviceKeys & { name: string }, pre: PreKeys): SignedIn {
     for (const old of this.devicesOf(user.id)) {
       this.devices.splice(this.devices.indexOf(old), 1);
       this.pending.delete(old.uuid);

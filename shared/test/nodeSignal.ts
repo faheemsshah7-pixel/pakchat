@@ -23,6 +23,8 @@ class Store {
   signedPreKeys = new Map<number, S.SignedPreKeyRecord>();
   kyberPreKeys = new Map<number, S.KyberPreKeyRecord>();
   senderKeys = new Map<string, S.SenderKeyRecord>();
+  /** Opened texts kept by envelope number and sender, like the phone's "opened" table. */
+  opened = new Map<string, string>();
 
   constructor(
     readonly identity: S.IdentityKeyPair,
@@ -139,6 +141,16 @@ async function coded<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Opens with `run`, or gives back the text kept under `keep` (see SignalApi.decrypt). */
+async function opening(d: Device, keep: number | undefined, name: string, deviceId: number, run: () => Promise<string>) {
+  const key = keep == null ? null : `${keep}/${name}.${deviceId}`;
+  const kept = key ? d.store.opened.get(key) : undefined;
+  if (kept !== undefined) return kept;
+  const text = await coded(run);
+  if (key) d.store.opened.set(key, text);
+  return text;
+}
+
 export function nodeSignal(): SignalApi {
   const devices = new Map<string, Device>();
   const get = (h: string) => {
@@ -253,11 +265,11 @@ export function nodeSignal(): SignalApi {
       });
     },
 
-    async decrypt(handle, fromName, fromDeviceId, sealed) {
+    async decrypt(handle, fromName, fromDeviceId, sealed, keep) {
       const d = get(handle);
       const them = addr(fromName, fromDeviceId);
       const s = d.store;
-      return coded(async () => {
+      return opening(d, keep, fromName, fromDeviceId, async () => {
         const plain =
           sealed.type === S.CiphertextMessageType.PreKey
             ? await S.signalDecryptPreKey(S.PreKeySignalMessage.deserialize(bytes(sealed.body)), them, local(d), s.sessionStore, s.identityStore, s.preKeyStore, s.signedPreKeyStore, s.kyberPreKeyStore)
@@ -285,8 +297,13 @@ export function nodeSignal(): SignalApi {
       });
     },
 
-    async groupDecrypt(handle, fromName, fromDeviceId, body) {
-      return coded(async () => {
+    async forgetOpened(handle, keeps) {
+      const { opened } = get(handle).store;
+      for (const key of [...opened.keys()]) if (keeps.includes(Number(key.split('/')[0]))) opened.delete(key);
+    },
+
+    async groupDecrypt(handle, fromName, fromDeviceId, body, keep) {
+      return opening(get(handle), keep, fromName, fromDeviceId, async () => {
         const plain = await S.groupDecrypt(addr(fromName, fromDeviceId), get(handle).store.senderKeyStore, bytes(body));
         return Buffer.from(plain).toString('utf8');
       });

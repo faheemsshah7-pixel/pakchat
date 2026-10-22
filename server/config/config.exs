@@ -19,7 +19,8 @@ config :pakchat, Oban,
   queues: [default: 10, push: 20],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 86_400},
-    {Oban.Plugins.Cron, crontab: [{"@hourly", Pakchat.Relay.Cleanup}]}
+    {Oban.Plugins.Cron,
+     crontab: [{"@hourly", Pakchat.Relay.Cleanup}, {"@hourly", Pakchat.Files.Cleanup}]}
   ]
 
 # Rate limits: {how many, per how many milliseconds}.
@@ -35,7 +36,12 @@ config :pakchat, :rate_limits,
   # Making groups, per person.
   groups: {20, 60_000},
   # Looking up and using invite links, per person.
-  invites: {20, 60_000}
+  invites: {20, 60_000},
+  # Asking for SMS codes, per internet address (or per person, when linking a number).
+  # Codes also have daily caps of their own (Pakchat.PhoneCodes).
+  sms: {5, 600_000},
+  # "Which of my contacts are on PakChat?", per person.
+  contacts: {20, 3_600_000}
 
 # Websites allowed to talk to the server (the phone app doesn't need this).
 config :pakchat, :allowed_origins, [

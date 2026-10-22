@@ -14,6 +14,7 @@ defmodule PakchatWeb.Wire do
     %{
       id: u.id,
       email: u.email,
+      phone: u.phone,
       name: u.name,
       about: u.about,
       photo: u.photo,

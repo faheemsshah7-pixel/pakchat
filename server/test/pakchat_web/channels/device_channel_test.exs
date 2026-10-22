@@ -135,6 +135,30 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert Enum.map(list, & &1.seq) == [1, 2, 3]
   end
 
+  test "ticks don't wake a closed app, and my own messages don't wake my other devices", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    Accounts.set_push_token(ali.device, %{push_token: "ali-phone", push_platform: "fcm"})
+    ali_web = linked(ali.user)
+    Accounts.set_push_token(ali_web.device, %{push_token: "ali-web", push_platform: "fcm"})
+    s = online(sara.token, sara.device)
+
+    ref =
+      push(s, "receipt", %{
+        "chat_id" => chat.id,
+        "to" => ali.user.id,
+        "status" => "read",
+        "seqs" => [1]
+      })
+
+    assert_reply ref, :ok
+    assert all_enqueued(worker: Pakchat.Push.Notify) == []
+
+    # Ali's phone sends; his linked website gets a copy but no alert.
+    a = online(ali.token, ali.device)
+    send_msg(a, chat.id, [sealed(sara), sealed(Map.put(ali_web, :user, ali.user))])
+    refute_enqueued(worker: Pakchat.Push.Notify, args: %{device_id: ali_web.device.id})
+  end
+
   test "\"I already have up to N\" skips and deletes those", ctx do
     %{ali: ali, sara: sara, chat: chat} = ctx
     a = online(ali.token, ali.device)

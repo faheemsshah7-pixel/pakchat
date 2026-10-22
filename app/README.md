@@ -24,6 +24,14 @@ On the sign-in screen, tap **Server address**:
 - a real phone on the same Wi-Fi: `http://<your Mac's address>:4000`
   (find it with `ipconfig getifaddr en0`)
 
+## Alerts and SMS
+
+Alerts when the app is closed need `google-services.json` from Firebase in this
+folder (see "Phase 5: alerts" in `../LEARN.md`). Without it the app builds and
+works, and Settings, Notifications says alerts aren't available.
+
+Signing in by phone: until launch, the code shows in the server's Terminal.
+
 ## Checks (run all of them before handing anything over)
 
 ```
@@ -49,7 +57,8 @@ Test sign-in only works when the server was started with
 
 ```
 src/app/          the screens (every file is one; _layout.tsx files hold them together)
-src/core/         core.ts runs the PakChat client; hooks.ts gives screens their data
+src/core/         core.ts runs the PakChat client; hooks.ts gives screens their data;
+                  files.ts, push.ts, backup.ts, phoneBook.ts for Phase 5
 src/data/         sqliteStorage.ts: everything saved on the phone, and search
 src/ui/           the building blocks: kit.tsx, icons, overlays (menus, sheets), motion
 src/theme/        Sky and Graphite looks, the accent colours

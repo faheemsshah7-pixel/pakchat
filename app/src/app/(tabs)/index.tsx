@@ -10,6 +10,7 @@ import { BackHandler, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { findBackup } from '../../core/backup';
 import { core } from '../../core/core';
 import { useAllPresence, useAllTyping, useAuth, useChatList, useConnected, useLists, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
@@ -43,8 +44,15 @@ export default function Chats() {
   const selecting = picked.size > 0;
 
   // The first time on this phone, a quick "what should people call you?".
+  // On a phone just signed in to, an offer to restore the chats from a backup comes first (on top).
   useEffect(() => {
-    if (myId && !KV.getItemSync(`welcomed:${myId}`)) router.push('/profile');
+    if (!myId) return;
+    if (!KV.getItemSync(`welcomed:${myId}`)) router.push('/profile');
+    if (KV.getItemSync(`offerRestore:${myId}`)) {
+      void findBackup()
+        .then((b) => (b ? router.push('/restore') : KV.removeItemSync(`offerRestore:${myId}`)))
+        .catch(() => {});
+    }
   }, [myId]);
 
   // Back cancels picking, instead of leaving the app.
