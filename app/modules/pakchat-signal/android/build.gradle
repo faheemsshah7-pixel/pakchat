@@ -26,6 +26,11 @@ android {
 }
 
 dependencies {
+  // Message alerts in WhatsApp's style (MessagingStyle, reply buttons): ChatAlerts.kt.
+  implementation "androidx.core:core:1.16.0"
+  // Reply, Mark as read and Mute hand the work to the app's JavaScript (AlertActionReceiver.kt).
+  compileOnly "com.facebook.react:react-android"
+
   // libsignal for Android: the Java code plus the compiled Rust core for phones.
   implementation "org.signal:libsignal-android:${libsignalVersion}"
 

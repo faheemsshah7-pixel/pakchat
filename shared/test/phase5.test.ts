@@ -123,6 +123,58 @@ describe('files', () => {
     expect(await sara.client.messages(chat.id)).toHaveLength(1);
   }, 20_000);
 
+  test('cancelled while it uploads: never sent, gone from the chat, and not tried again', async () => {
+    const { up, ali, sara, chat } = await two();
+    // The upload hangs until we let it finish, like a big file on slow internet.
+    let finish: (ok: boolean) => void = () => {};
+    const started = new Promise<void>((ready) => {
+      (ali.client as unknown as { o: { files: unknown } }).o.files = {
+        upload: () => {
+          ready();
+          return new Promise((resolve, reject) => {
+            finish = (ok) => (ok ? resolve({ id: 'file-x', key: 'k'.repeat(88), digest: 'd'.repeat(44) }) : reject(new OfflineError('Cancelled')));
+          });
+        },
+      };
+    });
+    const sent = await ali.client.sendFile(chat.id, photo);
+    await started;
+    expect(await ali.client.cancelSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
+    // Even if the upload still finishes just after, nothing goes.
+    finish(true);
+    await w.settle();
+    expect(await ali.client.messages(chat.id)).toEqual([]);
+    expect(await ali.client.outbox()).toEqual([]);
+    expect(await sara.client.messages(chat.id)).toEqual([]);
+
+    // Something already sent can't be taken back this way.
+    (ali.client as unknown as { o: { files: unknown } }).o.files = up.files;
+    const done = await ali.client.sendFile(chat.id, photo);
+    await w.settle();
+    expect(await ali.client.cancelSend(chat.id, { author: ali.id, id: done.id })).toBe(false);
+    expect(await sara.client.messages(chat.id)).toHaveLength(1);
+  });
+
+  test('cancelled while the upload fails: not put back to try again', async () => {
+    const { ali, chat } = await two();
+    let fail: () => void = () => {};
+    const started = new Promise<void>((ready) => {
+      (ali.client as unknown as { o: { files: unknown } }).o.files = {
+        upload: () => {
+          ready();
+          return new Promise((_, reject) => (fail = () => reject(new OfflineError('Cancelled'))));
+        },
+      };
+    });
+    const sent = await ali.client.sendFile(chat.id, photo);
+    await started;
+    expect(await ali.client.cancelSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
+    fail();
+    await w.settle();
+    expect(await ali.client.outbox()).toEqual([]);
+    expect(await ali.client.messages(chat.id)).toEqual([]);
+  });
+
   test('a file message that was never uploaded is ignored', () => {
     const c = parseContent(JSON.stringify({ v: 1, id: 'x', chat: 'c', at: 1, t: 'file', file: { id: 'pending', key: '', digest: '', size: 1, mime: 'a/b', kind: 'doc' } }));
     // It parses (the sender's own copy looks like this), but the receiving side drops it (see client.ts).

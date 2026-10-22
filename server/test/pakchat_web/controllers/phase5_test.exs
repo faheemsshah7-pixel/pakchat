@@ -6,7 +6,7 @@ defmodule PakchatWeb.Phase5Test do
   # Not async: it switches test sign-in on (to read the printed codes) and changes limits.
   use PakchatWeb.ConnCase, async: false
   import Pakchat.Fixtures
-  alias Pakchat.{Accounts, Files, Phone}
+  alias Pakchat.{Accounts, Chats, Files, Phone, Relay}
   alias Pakchat.Sms.Terminal
 
   setup do
@@ -249,6 +249,32 @@ defmodule PakchatWeb.Phase5Test do
       back = as(sara) |> get(~p"/api/users/#{ali.user.id}") |> json_response(200)
       refute Map.has_key?(back, "email")
       refute Map.has_key?(back, "phone")
+    end
+
+    test "once the other person writes back, the one who started sees how to reach them too" do
+      ali = person("Ali")
+      sara = person("Sara")
+      {:ok, chat} = Chats.get_or_create_direct(ali.user, sara.user.id)
+
+      sealed = fn to ->
+        %{user_id: to.user.id, device_id: to.device.device_id, type: 2, body: "eA=="}
+      end
+
+      ways? = fn viewer, of ->
+        as(viewer)
+        |> get(~p"/api/users/#{of.user.id}")
+        |> json_response(200)
+        |> Map.has_key?("email")
+      end
+
+      # Ali started it: Sara sees his, he doesn't see hers, even after he writes again.
+      {:ok, _} = Relay.send_message(ali.device, chat.id, %{envelopes: [sealed.(sara)]})
+      assert ways?.(sara, ali)
+      refute ways?.(ali, sara)
+
+      # Sara answers: now Ali sees hers.
+      {:ok, _} = Relay.send_message(sara.device, chat.id, %{envelopes: [sealed.(ali)]})
+      assert ways?.(ali, sara)
     end
 
     test "from the phone's contacts, by hashes only, and one person shows once per hash" do

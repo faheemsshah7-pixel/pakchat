@@ -1377,6 +1377,11 @@ shows the alert itself: the chat's name and "Sara: See you at 5". One alert per 
 come, with "3 new messages" on top. Muted chats stay quiet, and tapping opens the chat. The words
 never go through Firebase or our server.
 
+The alert itself is drawn by our Kotlin code (`ChatAlerts.kt`), like WhatsApp's: the chat's messages
+listed one under another, all chats bundled as "5 messages from 2 chats", and Reply, Mark as read and
+Mute buttons. Those buttons start PakChat's JavaScript without any screens for a few seconds
+(`AlertActionReceiver.kt`, then `background.ts`), which sends the reply or the blue ticks and lets go.
+
 If a phone looks connected but doesn't collect a message within 3 seconds (its connection died
 without noticing), the server wakes it anyway. Phones pause JavaScript timers in the background,
 so the app waits with the phone's own clock instead (`wait` in the pakchat-signal module).

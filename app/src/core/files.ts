@@ -157,10 +157,32 @@ export async function forwardFile(chatId: string, m: Message) {
   await core.client.sendFile(chatId, { ...meta, local: copy.uri }, { caption: m.text || undefined, forwarded: true });
 }
 
+/**
+ * The ✕ on a file that's still sending: stops the upload and takes the message
+ * back, so nothing half-sent goes out. False if it had already gone.
+ */
+export async function cancelSend(m: Message) {
+  fileModule().cancelTransfer(tagOf(m.chatId, m));
+  const taken = await core.client.cancelSend(m.chatId, m);
+  if (!taken) return false;
+  stopped(tagOf(m.chatId, m));
+  await forgetFile(m);
+  core.emit(`messages:${m.chatId}`);
+  core.emit('chats');
+  return true;
+}
+
 // ---- Receiving ----
 
 export class FileGone extends Error {}
 export class FileBroken extends Error {}
+/** You stopped it (the ✕): nothing to say. */
+export class Cancelled extends Error {}
+
+/** The ✕ on a file that's downloading: stops it, and the download button comes back. */
+export function cancelDownload(m: Message) {
+  fileModule().cancelTransfer(tagOf(m.chatId, m));
+}
 
 const fetching = new Set<string>();
 
@@ -183,6 +205,7 @@ export async function download(m: Message) {
       await fileModule().downloadFile(url, out.uri, f.key, f.digest, tag);
     } catch (err) {
       const e = err as { code?: string; message?: string };
+      if (e.code === 'ERR_CANCELLED') throw new Cancelled();
       if (e.code === 'ERR_FILE_CHANGED') throw new FileBroken();
       if (/ 404\b/.test(e.message ?? '')) throw new FileGone();
       throw new OfflineError('The download stopped');

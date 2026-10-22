@@ -16,6 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
 import { useAuth } from '../core/hooks';
+import { takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { ToastHost } from '../ui/overlays';
 
@@ -62,14 +63,17 @@ function App() {
   }, [state, stuck]);
 
   // Tapping a message alert opens its chat, even when the tap started PakChat.
-  const tapped = Notifications.useLastNotificationResponse();
+  const tappedPlain = Notifications.useLastNotificationResponse();
   const nav = useRootNavigationState();
+  const [taps, setTaps] = useState(0);
+  useEffect(() => watchTaps(() => setTaps((n) => n + 1)), []);
   useEffect(() => {
-    if (!tapped || state !== 'signedIn' || !nav?.key) return;
-    Notifications.clearLastNotificationResponse();
-    const chatId = tapped.notification.request.content.data?.chatId;
-    if (typeof chatId === 'string' && chatId !== core.viewing) router.push({ pathname: '/chat/[id]', params: { id: chatId } });
-  }, [tapped, state, nav?.key]);
+    if (state !== 'signedIn' || !nav?.key) return;
+    // The plain "New message" alert just opens PakChat.
+    if (tappedPlain) Notifications.clearLastNotificationResponse();
+    const chatId = takeTapped();
+    if (chatId && chatId !== core.viewing) router.push({ pathname: '/chat/[id]', params: { id: chatId } });
+  }, [taps, tappedPlain, state, nav?.key]);
 
   // The window behind the screens matches the look, so nothing flashes white in Graphite.
   useEffect(() => {

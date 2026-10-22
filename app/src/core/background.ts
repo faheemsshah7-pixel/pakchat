@@ -1,12 +1,16 @@
-// background.ts: what PakChat does when a wake-up arrives from the server.
+// background.ts: what PakChat does without any screens.
 //
-// It runs even when PakChat is closed: Android starts the app's JavaScript
-// without any screens, runs this, and puts it away again. It has to be set up
-// before anything else loads, so index.ts (the app's entry) imports it first.
+// - A wake-up from the server (the app may be closed): collect what's waiting.
+//   Android starts the app's JavaScript, runs this, and puts it away again.
+// - Reply, Mark as read or Mute pressed on a message alert (ChatAlerts.kt).
+//
+// Both have to be set up before anything else loads, so index.ts (the app's
+// entry) imports this first.
 import * as TaskManager from 'expo-task-manager';
+import { AppRegistry } from 'react-native';
 
 import { core } from './core';
-import { alertPlain, WAKE_TASK } from './push';
+import { alertPlain, dismissChatAlert, WAKE_TASK } from './push';
 
 TaskManager.defineTask(WAKE_TASK, async () => {
   try {
@@ -15,5 +19,17 @@ TaskManager.defineTask(WAKE_TASK, async () => {
   } catch (err) {
     console.log(`[pakchat] wake: ${String(err)}`);
     await alertPlain();
+  }
+});
+
+type AlertAction = { action: 'reply' | 'read' | 'mute'; chatId: string; text?: string };
+
+AppRegistry.registerHeadlessTask('PakchatAlertAction', () => async ({ action, chatId, text }: AlertAction) => {
+  try {
+    await core.onAlert(action, chatId, text ?? '');
+  } catch (err) {
+    console.log(`[pakchat] alert action: ${String(err)}`);
+  } finally {
+    await dismissChatAlert(chatId);
   }
 });

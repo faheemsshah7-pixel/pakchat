@@ -357,6 +357,12 @@ function hash(s: string) {
 }
 
 /** "Ayesha Khan" → "A", "FAST CS-B" → "FC". */
+/** A person's picture colours (the light look), for alerts drawn outside the app. */
+export function avatarTint(id: string) {
+  const [a, b, ink] = TINTS_SKY[hash(id) % TINTS_SKY.length];
+  return { a, b, ink };
+}
+
 export function initials(name: string) {
   // "~ Sara" (someone not in my contacts) is still S.
   const words = name.replace(/^~\s*/, '').trim().split(/\s+/).filter(Boolean);

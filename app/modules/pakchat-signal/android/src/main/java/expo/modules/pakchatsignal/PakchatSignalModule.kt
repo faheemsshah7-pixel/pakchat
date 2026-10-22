@@ -11,6 +11,7 @@ import expo.modules.kotlin.records.Record
 import org.signal.libsignal.protocol.DuplicateMessageException
 import org.signal.libsignal.protocol.NoSessionException
 import java.io.File
+import java.io.InterruptedIOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -61,23 +62,42 @@ class PakchatSignalModule : Module() {
   // For wait(): one thread that only keeps time.
   private val clock = Executors.newSingleThreadScheduledExecutor()
 
+  // Transfers queued or moving now, and the ones you've asked to stop (by tag).
+  private val running = ConcurrentHashMap.newKeySet<String>()
+  private val cancelled = ConcurrentHashMap.newKeySet<String>()
+
+  private class Cancelled : InterruptedIOException("Cancelled")
+
   /** Runs a slow file job away from everything else, and answers when it's done. */
-  private fun slowly(promise: Promise, job: () -> Any?) {
+  private fun slowly(promise: Promise, tag: String? = null, job: () -> Any?) {
+    tag?.let { running.add(it) }
     transfers.execute {
       try {
+        if (tag != null && cancelled.contains(tag)) throw Cancelled()
         promise.resolve(job())
+      } catch (e: Cancelled) {
+        promise.reject("ERR_CANCELLED", "Cancelled", e)
       } catch (e: SecurityException) {
         promise.reject("ERR_FILE_CHANGED", e.message ?: "The file was changed", e)
       } catch (e: Exception) {
-        promise.reject("ERR_FILE", e.message ?: "The file couldn't be moved", e)
+        // Stopping mid-way can also break the connection: still a cancel.
+        if (tag != null && cancelled.contains(tag)) promise.reject("ERR_CANCELLED", "Cancelled", e)
+        else promise.reject("ERR_FILE", e.message ?: "The file couldn't be moved", e)
+      } finally {
+        tag?.let {
+          running.remove(it)
+          cancelled.remove(it)
+        }
       }
     }
   }
 
-  // Progress for a file, at most every 1% (so the bridge isn't flooded).
+  // Progress for a file, at most every 1% (so the bridge isn't flooded). It's
+  // called for every piece, so it's also where a cancelled transfer stops.
   private fun progress(tag: String): (Long, Long) -> Unit {
     var last = -1L
     return { done, total ->
+      if (cancelled.contains(tag)) throw Cancelled()
       val pct = if (total > 0) done * 100 / total else -1
       if (pct != last) {
         last = pct
@@ -85,6 +105,8 @@ class PakchatSignalModule : Module() {
       }
     }
   }
+
+  private fun context() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
 
   private fun path(uri: String) = File(uri.removePrefix("file://"))
 
@@ -117,7 +139,7 @@ class PakchatSignalModule : Module() {
 
     /** Locks a file and uploads it. `key` (base64) only for backups; files get a new one. */
     AsyncFunction("uploadFile") { uri: String, url: String, key: String?, tag: String, promise: Promise ->
-      slowly(promise) {
+      slowly(promise, tag) {
         val up = FileTransfer.upload(path(uri), url, key?.let { bytes(it) }, progress(tag))
         mapOf("key" to b64(up.key), "digest" to b64(up.digest), "size" to up.size.toDouble())
       }
@@ -125,10 +147,31 @@ class PakchatSignalModule : Module() {
 
     /** Downloads a locked file, checks it, and unlocks it to `to`. */
     AsyncFunction("downloadFile") { url: String, to: String, key: String, digest: String?, tag: String, promise: Promise ->
-      slowly(promise) {
+      slowly(promise, tag) {
         FileTransfer.download(url, path(to), bytes(key), digest?.let { bytes(it) }, progress(tag))
         to
       }
+    }
+
+    // ---- Message alerts (see ChatAlerts) ----
+
+    /** Shows or updates one chat's alert. What to show comes as JSON (see push.ts). */
+    Function("showChatAlert") { json: String ->
+      ChatAlerts.show(context(), json)
+    }
+
+    Function("dismissChatAlert") { chatId: String ->
+      ChatAlerts.dismiss(context(), chatId)
+    }
+
+    /** Is this chat's alert still there (not swiped away)? */
+    Function("chatAlertShowing") { chatId: String ->
+      ChatAlerts.isShowing(context(), chatId)
+    }
+
+    /** Stops an upload or download (by its tag) as soon as it can. It fails with ERR_CANCELLED. */
+    Function("cancelTransfer") { tag: String ->
+      if (running.contains(tag)) cancelled.add(tag)
     }
 
     /**

@@ -270,11 +270,13 @@ class Core {
     void Promise.race([this.client.settled(), fileModule().wait(2_000)])
       .catch(() => {})
       .then(() => {
-        if (move === this.moves && !this.collecting && AppState.currentState !== 'active') this.client.stop();
+        if (move === this.moves && this.awake === 0 && AppState.currentState !== 'active') this.client.stop();
       });
   }
 
   private collecting: Promise<boolean> | null = null;
+  /** Background jobs holding the connection open right now (wake-ups, alert buttons). */
+  private awake = 0;
 
   /**
    * A wake-up from the server (background.ts): connect, take in what's waiting
@@ -283,35 +285,61 @@ class Core {
    * the server couldn't be reached, so the caller can still say "New message".
    */
   collect(): Promise<boolean> {
-    this.collecting ??= this.collectNow().finally(() => {
+    this.collecting ??= this.briefly(true, async (wait) => {
+      // The server sends what's waiting as soon as we're in. Let it come, and let it be handled.
+      await wait(1_200);
+    }).finally(() => {
       this.collecting = null;
     });
     return this.collecting;
   }
 
-  private async collectNow(): Promise<boolean> {
+  /** Reply, Mark as read or Mute, pressed on a message alert (background.ts). */
+  async onAlert(action: 'reply' | 'read' | 'mute', chatId: string, text: string) {
+    await this.init();
+    if (this.state !== 'signedIn') return;
+    if (action === 'mute') return this.setPrefs(chatId, { muted: true });
+    // Replying reads the chat too, as in WhatsApp. If the server can't be reached
+    // the reply waits in the outbox and goes next time.
+    if (action === 'reply' && text) await this.client.sendText(chatId, text);
+    await this.briefly(false, async () => {
+      await this.client.markRead(chatId);
+    });
+    this.emit(`messages:${chatId}`);
+    this.emit('chats');
+  }
+
+  /**
+   * Connects for a moment from the background, does `work` once connected,
+   * lets everything finish (never more than 5 seconds a step, so a stuck step
+   * can't hold the phone awake), and lets go again if PakChat isn't open.
+   * The waiting uses the phone's own clock: JavaScript timers stop in the background.
+   */
+  private async briefly(fresh: boolean, work: (wait: (ms: number) => Promise<void>) => Promise<void>): Promise<boolean> {
     await this.init();
     if (this.state !== 'signedIn') return true;
     const wait = (ms: number) => fileModule().wait(ms);
-    // While PakChat is open the server only wakes it when a message wasn't picked
-    // up in time: the connection may have died without noticing, so make a new one.
-    if (AppState.currentState === 'active') this.client.stop();
-    this.client.start();
-    // Up to 10 seconds to get through.
-    for (let i = 0; i < 40 && !this.client.isConnected; i++) await wait(250);
-    const reached = this.client.isConnected;
-    if (reached) {
-      // The server sends what's waiting as soon as we're in. Let it come, and let it all
-      // be handled (never more than 5 seconds each, so a stuck step can't hold the phone awake).
-      const settled = () => Promise.race([this.client.settled(), wait(5_000)]);
-      await wait(1_200);
-      await settled();
-      await wait(300);
-      await settled();
+    const settled = () => Promise.race([this.client.settled(), wait(5_000)]);
+    this.awake++;
+    try {
+      // While PakChat is open the server only wakes it when a message wasn't picked
+      // up in time: the connection may have died without noticing, so make a new one.
+      if (fresh && AppState.currentState === 'active') this.client.stop();
+      this.client.start();
+      // Up to 10 seconds to get through.
+      for (let i = 0; i < 40 && !this.client.isConnected; i++) await wait(250);
+      const reached = this.client.isConnected;
+      if (reached) {
+        await work(wait);
+        await settled();
+        await wait(300);
+        await settled();
+      }
+      return reached || AppState.currentState === 'active';
+    } finally {
+      this.awake--;
+      if (this.awake === 0 && AppState.currentState !== 'active') this.client.stop();
     }
-    const open = AppState.currentState === 'active';
-    if (!open) this.client.stop();
-    return reached || open;
   }
 
   newId() {

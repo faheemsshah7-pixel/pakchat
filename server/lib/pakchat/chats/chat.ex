@@ -15,6 +15,8 @@ defmodule Pakchat.Chats.Chat do
     field :only_admins_send, :boolean, default: false
     field :invite_code, :string
     field :seq, :integer, default: 0
+    # One-to-one: the person who didn't start the chat has written back.
+    field :answered, :boolean, default: false
     belongs_to :creator, Pakchat.Accounts.User, foreign_key: :created_by
     has_many :members, Pakchat.Chats.Member
     timestamps(type: :utc_datetime_usec)

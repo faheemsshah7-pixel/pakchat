@@ -78,13 +78,15 @@ defmodule Pakchat.Chats do
   end
 
   @doc """
-  True when `from` started a one-to-one chat with `to`. Then `to` may see how to
-  reach `from` (their number and Gmail), as WhatsApp shows the number of whoever
-  messages you, so "Add to contacts" can fill them in.
+  True when `to` may see how to reach `from` (their number and Gmail), so "Add
+  to contacts" can fill them in: `from` started a one-to-one chat with `to`
+  (as WhatsApp shows the number of whoever messages you), or `to` started it
+  and `from` wrote back.
   """
   def reached_out?(from, to) when from != to do
     Repo.exists?(
-      from c in Chat, where: c.direct_key == ^direct_key(from, to) and c.created_by == ^from
+      from c in Chat,
+        where: c.direct_key == ^direct_key(from, to) and (c.created_by == ^from or c.answered)
     )
   end
 

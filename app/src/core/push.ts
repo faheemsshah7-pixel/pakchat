@@ -8,8 +8,10 @@
 // alert itself: the chat's name and what the message says. Only this phone
 // ever sees the words; Google and our server never do.
 //
-// One alert per chat. A new message replaces it, with "3 new messages" on top.
-// Opening the chat clears it, and tapping it opens the chat.
+// Like WhatsApp: one alert per chat with its newest messages listed (names
+// first in groups), all chats bundled as "5 messages from 2 chats", and Reply,
+// Mark as read and Mute right on it (background.ts does those). Opening the
+// chat clears its alert, and tapping it opens the chat.
 //
 // This needs the app built with the Firebase file (app/google-services.json, see
 // LEARN.md "Phase 5: alerts"). Without it there's no token, and everything else
@@ -20,8 +22,10 @@ import { AndroidImportance } from 'expo-notifications';
 import KV from 'expo-sqlite/kv-store';
 import { AppState } from 'react-native';
 
-import { en, fill, ur, type Strings } from '../i18n/strings';
+import { fileModule } from '../../modules/pakchat-signal';
+import { en, ur, type Strings } from '../i18n/strings';
 import { preview } from '../ui/format';
+import { avatarTint, initials } from '../ui/kit';
 import { core } from './core';
 
 /** The background task the wake-ups run (defined in background.ts). */
@@ -37,11 +41,11 @@ export type PushState = 'on' | 'blocked' | 'unavailable';
 let state: PushState = 'unavailable';
 export const pushState = () => state;
 
-// Our own alerts show even while PakChat is open (for chats you're not looking at).
-// The quiet wake-ups have nothing to show.
+// The plain "New message" shows even while PakChat is open; the quiet wake-ups
+// have nothing to show. (Chat alerts are drawn by the phone itself: ChatAlerts.kt.)
 Notifications.setNotificationHandler({
   handleNotification: async (n) => {
-    const ours = typeof n.request.content.data?.chatId === 'string' || n.request.identifier === PLAIN;
+    const ours = n.request.identifier === PLAIN;
     return { shouldShowBanner: ours, shouldShowList: ours, shouldPlaySound: ours, shouldSetBadge: false };
   },
 });
@@ -100,11 +104,11 @@ const inLine = (work: () => Promise<void>) => {
   return line;
 };
 
-/** How many messages each chat's alert stands for. */
-type Counts = Record<string, number>;
-const COUNTS = 'app:alertCounts';
-
-const alertId = (chatId: string) => `chat:${chatId}`;
+/** What each chat's alert shows: its newest lines, and how many messages it stands for. */
+type Shown = Record<string, { count: number; lines: Line[] }>;
+type Line = { name: string; text: string; at: number; mine?: boolean };
+const SHOWN = 'app:alertLines';
+const KEEP = 7;
 
 /**
  * A message from someone else just arrived: alert, unless the chat is muted,
@@ -120,36 +124,61 @@ export function alertFor(m: Message) {
     const chat = await core.storage.getChat(m.chatId);
     if (!chat) return;
     const t = words();
-    const id = alertId(m.chatId);
-    // Still showing? Then this message adds to it. Swiped away? Start again at one.
-    const showing = (await Notifications.getPresentedNotificationsAsync()).some((n) => n.request.identifier === id);
-    const counts = (await core.storage.getValue<Counts>(COUNTS)) ?? {};
-    const n = (showing ? (counts[m.chatId] ?? 0) : 0) + 1;
-    await core.storage.setValue(COUNTS, { ...counts, [m.chatId]: n });
-    await Notifications.scheduleNotificationAsync({
-      identifier: id,
-      content: {
-        title: core.chatTitle(chat) || t.newMessage,
-        // In a group, who said it comes first: "Sara: See you at 5".
-        body: preview(m, t, chat.kind === 'group') || t.newMessage,
-        subtitle: n > 1 ? fill(t.newMessages, { n }) : undefined,
-        data: { chatId: m.chatId },
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      },
-      trigger: { channelId: CHANNEL },
-    });
+    const fm = fileModule();
+    const shown = (await core.storage.getValue<Shown>(SHOWN)) ?? {};
+    // Still showing? Then this message adds to it. Swiped away? Start again.
+    const was = fm.chatAlertShowing(m.chatId) ? shown[m.chatId] : undefined;
+    const line: Line = { name: core.name(m.author) || '…', text: preview(m, t, false) || t.newMessage, at: m.sentAt };
+    const next = { count: (was?.count ?? 0) + 1, lines: [...(was?.lines ?? []), line].slice(-KEEP) };
+    await core.storage.setValue(SHOWN, { ...shown, [m.chatId]: next });
+    const title = core.chatTitle(chat) || t.newMessage;
+    fm.showChatAlert(
+      JSON.stringify({
+        chatId: m.chatId,
+        title,
+        group: chat.kind === 'group',
+        me: t.you,
+        count: next.count,
+        lines: next.lines,
+        avatar: { ...avatarTint(core.otherPerson(chat) ?? chat.id), letters: initials(title) },
+        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats },
+      }),
+    );
   });
 }
 
-/** You've seen the chat: its alert goes, and its count starts again. */
+/** You've seen the chat: its alert goes, and it starts again from nothing. */
 export function dismissChatAlert(chatId: string) {
   return inLine(async () => {
-    await Notifications.dismissNotificationAsync(alertId(chatId));
-    const counts = (await core.storage.getValue<Counts>(COUNTS)) ?? {};
-    if (!(chatId in counts)) return;
-    delete counts[chatId];
-    await core.storage.setValue(COUNTS, counts);
+    fileModule().dismissChatAlert(chatId);
+    const shown = (await core.storage.getValue<Shown>(SHOWN)) ?? {};
+    if (!(chatId in shown)) return;
+    delete shown[chatId];
+    await core.storage.setValue(SHOWN, shown);
   });
+}
+
+// A tapped alert's chat, until the root layout opens it (see +native-intent.tsx).
+let tapped: string | null = null;
+const onTap = new Set<() => void>();
+
+export function tappedAlert(chatId: string) {
+  tapped = chatId;
+  for (const fn of onTap) fn();
+}
+
+/** The chat a tapped alert wants open, once: the next call answers null. */
+export function takeTapped() {
+  const id = tapped;
+  tapped = null;
+  return id;
+}
+
+export function watchTaps(fn: () => void) {
+  onTap.add(fn);
+  return () => {
+    onTap.delete(fn);
+  };
 }
 
 /** A wake-up came but the server couldn't be reached: say there's something, without the words. */

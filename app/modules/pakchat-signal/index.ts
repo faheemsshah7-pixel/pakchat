@@ -16,6 +16,12 @@ export type FileModule = {
   uploadFile(uri: string, url: string, key: string | null, tag: string): Promise<{ key: string; digest: string; size: number }>;
   /** Fetches, checks and unlocks a file to `to`. Throws ERR_FILE_CHANGED if it was tampered with. */
   downloadFile(url: string, to: string, key: string, digest: string | null, tag: string): Promise<string>;
+  /** Shows or updates one chat's message alert (WhatsApp style). See push.ts for the JSON. */
+  showChatAlert(json: string): void;
+  dismissChatAlert(chatId: string): void;
+  chatAlertShowing(chatId: string): boolean;
+  /** Stops an upload or download by its tag; it then fails with code ERR_CANCELLED. */
+  cancelTransfer(tag: string): void;
   backupKey(password: string, userId: string): Promise<string>;
   /** Where a contact can be saved on this phone (WhatsApp's "Save to"). */
   contactAccounts(): Promise<PhoneBookAccount[]>;

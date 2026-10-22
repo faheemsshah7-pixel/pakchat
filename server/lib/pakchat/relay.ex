@@ -75,6 +75,7 @@ defmodule Pakchat.Relay do
             direct_rows(base, envelopes, devices, blocked) ++
               group_rows(base, group, devices, blocked)
 
+          answered(chat, sender.user_id, kind, blocked)
           {seq, insert(rows)}
         end)
 
@@ -82,6 +83,15 @@ defmodule Pakchat.Relay do
       {:ok, %{seq: seq, sent_at: now}}
     end
   end
+
+  # The first reply in a one-to-one chat from the person who didn't start it
+  # (see `Chats.reached_out?/2`).
+  defp answered(%Chat{kind: "direct", answered: false} = chat, user_id, "message", [])
+       when user_id != chat.created_by do
+    Repo.update_all(from(c in Chat, where: c.id == ^chat.id), set: [answered: true])
+  end
+
+  defp answered(_chat, _user_id, _kind, _blocked), do: :ok
 
   # One row for each envelope locked for one device.
   defp direct_rows(base, envelopes, devices, blocked) do

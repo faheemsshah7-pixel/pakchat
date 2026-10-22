@@ -116,6 +116,8 @@ export class PakChat {
   private acks: number[] = [];
   /** "Delivered" ticks to send: `chat|author` to message numbers. */
   private delivered = new Map<string, Set<number>>();
+  /** Messages taken back before they went (cancelSend): the outbox lets them go. */
+  private unsent = new Set<string>();
   /** Group envelopes that arrived before their key, from this batch. */
   private heldNow: WireEnvelope[] = [];
   private keysUsed = 0;
@@ -308,6 +310,26 @@ export class PakChat {
         for (const r of refs) await storage.deleteMessage(chatId, r.author, r.id);
       }),
     );
+  }
+
+  /**
+   * Takes back one of my messages that hasn't gone yet (a file still uploading,
+   * say): out of the outbox and off this device. False if it already went.
+   * Stopping the upload itself is the app's job (it knows the transfer).
+   */
+  cancelSend(chatId: string, ref: Ref): Promise<boolean> {
+    const { storage } = this.o;
+    return this.inLane(async () => {
+      if (ref.author !== this.s.userId) return false;
+      const m = await storage.getMessage(chatId, ref.author, ref.id);
+      if (!m || m.seq != null) return false;
+      this.unsent.add(ref.id);
+      await storage.transaction(async () => {
+        await storage.deleteOutbox(ref.id);
+        await storage.deleteMessage(chatId, ref.author, ref.id);
+      });
+      return true;
+    });
   }
 
   /** Saves a new copy of my profile (after changing my name, or linking a Gmail or number). */
@@ -578,11 +600,14 @@ export class PakChat {
     let prepared: Prepared;
     try {
       item = await this.uploadFirst(item);
+      if (this.unsent.has(item.id)) return true;
       prepared = await this.inLane(() => this.prepare(item));
       const reply = await this.push('send', prepared.payload);
       await this.inLane(() => this.sent(item, prepared, reply));
       return true;
     } catch (err) {
+      // Taken back while it was on its way (cancelSend): nothing more to do.
+      if (this.unsent.has(item.id)) return true;
       if (err instanceof ServerError && err.reason === 'stale_devices') {
         // Someone linked or removed a device. Learn the new list and go again.
         await this.inLane(() => this.applyStale(item.chatId, err.details));
@@ -616,6 +641,8 @@ export class PakChat {
     const content = writeContent({ ...c, file: { ...c.file, ...done } });
     const next = { ...item, content };
     await this.inLane(async () => {
+      // Taken back while it uploaded: don't bring it back.
+      if (this.unsent.has(item.id)) return;
       await this.o.storage.transaction(async () => {
         await this.o.storage.putOutbox(next);
         const fresh = await this.o.storage.getMessage(item.chatId, ref.author, ref.id);
