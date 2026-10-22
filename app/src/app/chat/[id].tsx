@@ -10,7 +10,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, FlatList, ScrollView, View, type ListViewToken } from 'react-native';
+import { AppState, BackHandler, FlatList, ScrollView, View, type ListViewToken } from 'react-native';
 import Animated, { FadeIn, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -79,21 +79,27 @@ export default function ChatScreen() {
   const keyboard = useAnimatedKeyboard();
   const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(keyboard.height.value, insets.bottom) }));
 
-  // Reading the chat: blue ticks for them, and no more unread here.
+  // Reading the chat: blue ticks for them, and no more unread here. Only while PakChat is
+  // on screen: a chat left open in the background hasn't been read.
+  const [onScreen, setOnScreen] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setOnScreen(s === 'active'));
+    return () => sub.remove();
+  }, []);
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
       core.setPrefs(id, { markedUnread: false });
       // Coming back to the chat (from its info, say): anything that came meanwhile is read now.
-      void core.client.markRead(id).catch(() => {});
+      if (AppState.currentState === 'active') void core.client.markRead(id).catch(() => {});
       return () => {
         focused.current = false;
       };
     }, [id]),
   );
   useEffect(() => {
-    if (focused.current && chat && chat.unread > 0) void core.client.markRead(id).catch(() => {});
-  }, [chat, id, list]);
+    if (onScreen && focused.current && chat && chat.unread > 0) void core.client.markRead(id).catch(() => {});
+  }, [chat, id, list, onScreen]);
 
   // Back first cancels picking, replying or editing.
   useEffect(() => {
