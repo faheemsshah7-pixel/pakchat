@@ -5,7 +5,7 @@ defmodule Pakchat.Push.Fcm do
 
   It needs the Firebase project's "service account" key file, kept only on
   the Mac (or the live server) and never in git. Put its path in
-  `server/.env` as `FCM_SERVICE_ACCOUNT=/Users/you/pakchat-secrets/firebase.json`.
+  `server/.env` as `FCM_SERVICE_ACCOUNT=/Users/you/pakchat-secrets/fcm.json`.
   Without it, alerts are only written in the log.
 
   The alert carries no names and no words from the chat, only "New message",
@@ -39,9 +39,16 @@ defmodule Pakchat.Push.Fcm do
              auth: {:bearer, access},
              retry: false
            ) do
-        {:ok, %{status: 200}} -> :ok
-        {:ok, %{status: status}} when status in [400, 404] -> :gone
-        other -> {:error, other}
+        {:ok, %{status: 200}} ->
+          :ok
+
+        # UNREGISTERED: the app was removed, or Google gave it a new token.
+        {:ok, %{status: 404}} ->
+          :gone
+
+        other ->
+          Logger.warning("FCM refused an alert: #{inspect(other)}")
+          {:error, other}
       end
     else
       nil -> {:error, :not_configured}
