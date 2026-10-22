@@ -41,7 +41,7 @@ const URDU = /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/;
 /** True when the words have Urdu (or Arabic) letters in them. */
 export const hasUrdu = (s: string) => URDU.test(s);
 
-type Weight = '400' | '500' | '600' | '700' | '800';
+export type Weight = '400' | '500' | '600' | '700' | '800';
 
 /** The font for some words: Nastaliq for Urdu letters, Inter for everything else. */
 export function fontStyle(text: string | null, lang: 'en' | 'ur', size: number, weight: Weight): TextStyle {

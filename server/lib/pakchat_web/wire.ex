@@ -29,6 +29,9 @@ defmodule PakchatWeb.Wire do
   @doc "Someone else: only what anyone may see."
   def person(%User{} = u), do: %{id: u.id, name: u.name, about: u.about, photo: u.photo}
 
+  @doc "Someone who messaged me first: also how to reach them (see `Chats.reached_out?/2`)."
+  def person_with_ways(%User{} = u), do: Map.merge(person(u), %{phone: u.phone, email: u.email})
+
   def chat(%Chat{} = c, viewer_id) do
     members = Enum.map(c.members, &%{user_id: &1.user_id, role: &1.role})
     admin? = Enum.any?(c.members, &(&1.user_id == viewer_id and &1.role == "admin"))

@@ -1,7 +1,7 @@
 defmodule PakchatWeb.UserController do
   @moduledoc "Finding people, their profiles, and whether they're online."
   use PakchatWeb, :controller
-  alias Pakchat.{Accounts, Privacy, RateLimit}
+  alias Pakchat.{Accounts, Chats, Privacy, RateLimit}
   alias PakchatWeb.Wire
 
   action_fallback PakchatWeb.FallbackController
@@ -51,9 +51,15 @@ defmodule PakchatWeb.UserController do
 
   defp hashes(_), do: []
 
+  @doc """
+  `GET /api/users/:id`: someone's name, about and photo. If they started a chat
+  with me, also their `phone` and `email`, so I can add them to my contacts.
+  """
   def show(conn, %{"id" => id}) do
     with %{} = user <- Accounts.get_user(id) do
-      json(conn, Wire.person(user))
+      if Chats.reached_out?(user.id, conn.assigns.user.id),
+        do: json(conn, Wire.person_with_ways(user)),
+        else: json(conn, Wire.person(user))
     end
   end
 

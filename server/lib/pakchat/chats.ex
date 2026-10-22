@@ -77,6 +77,19 @@ defmodule Pakchat.Chats do
     Repo.exists?(from c in Chat, where: c.direct_key == ^direct_key(a, b))
   end
 
+  @doc """
+  True when `from` started a one-to-one chat with `to`. Then `to` may see how to
+  reach `from` (their number and Gmail), as WhatsApp shows the number of whoever
+  messages you, so "Add to contacts" can fill them in.
+  """
+  def reached_out?(from, to) when from != to do
+    Repo.exists?(
+      from c in Chat, where: c.direct_key == ^direct_key(from, to) and c.created_by == ^from
+    )
+  end
+
+  def reached_out?(_, _), do: false
+
   @doc "The next number on the chat's counter, taken in one step so no two messages share one."
   def next_seq(chat_id) do
     {1, [seq]} =

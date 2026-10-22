@@ -48,6 +48,19 @@ export default function SaveContact() {
     else setSaveTo(accountKey(list[0]));
   }
 
+  // Adding someone from a chat: fill in the number or Gmail I found them by, or that they messaged me from.
+  useEffect(() => {
+    if (!id || saved) return;
+    void core
+      .waysOf(id)
+      .then((w) => {
+        if (w.phone) setPhone((typed) => typed || formatPhone(w.phone!));
+        if (w.email) setEmail((typed) => typed || w.email!);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   useEffect(() => {
     // Editing someone already saved only changes PakChat's name for them.
     if (saved) return;

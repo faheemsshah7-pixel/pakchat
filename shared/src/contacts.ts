@@ -12,7 +12,9 @@ export function normalizePhone(typed: string, defaultCountry = '92'): string | n
   if (digits.startsWith('+')) n = digits.slice(1);
   else if (digits.startsWith('00')) n = digits.slice(2);
   else if (digits.startsWith('0')) n = defaultCountry + digits.slice(1);
-  else n = digits;
+  // No "+" or 0: "923001234567" already has the country, "3001234567" doesn't.
+  else if (digits.startsWith(defaultCountry)) n = digits;
+  else n = defaultCountry + digits;
   return /^[1-9][0-9]{7,14}$/.test(n) ? `+${n}` : null;
 }
 

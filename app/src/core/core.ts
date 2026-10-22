@@ -24,6 +24,7 @@ import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import * as Device from 'expo-device';
 import KV from 'expo-sqlite/kv-store';
+import { AppState, type AppStateStatus } from 'react-native';
 
 import { loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
@@ -33,6 +34,9 @@ import { forgetFile, maybeDownload, uploader } from './files';
 import { startPush } from './push';
 
 export type Person = { id: string; name: string; about?: string | null; photo?: string | null };
+
+/** How to reach someone: what I typed to find them, or what they showed me by messaging first. */
+export type Ways = { phone?: string; email?: string };
 
 /** Things about a chat that only this phone knows. */
 export type ChatPrefs = {
@@ -155,6 +159,7 @@ class Core {
     this.at('reading saved names and settings');
     this.people = (await this.storage.getValue<Record<string, Person>>('app:people')) ?? {};
     this.contacts = (await this.storage.getValue<Record<string, Contact>>('app:contacts')) ?? {};
+    this.ways = (await this.storage.getValue<Record<string, Ways>>('app:ways')) ?? {};
     this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
     this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
     this.lists = (await this.storage.getValue<ChatList[]>('app:lists')) ?? [];
@@ -223,6 +228,10 @@ class Core {
   private afterSignIn() {
     this.client.start();
     void startPush();
+    if (!this.watchingApp) {
+      this.watchingApp = true;
+      AppState.addEventListener('change', (s) => this.appMoved(s));
+    }
     // The daily backup, a little after starting so it doesn't slow the start.
     setTimeout(() => void backUpIfDue(), 30_000);
     // Fill in anything missed while signed out, and everyone's names.
@@ -231,6 +240,23 @@ class Core {
       .then(() => this.loadPeople())
       .catch(() => {});
     void this.loadPeople();
+  }
+
+  private watchingApp = false;
+  private sleepTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Leaving PakChat disconnects it a second later, so the server sees the
+   * phone as away and sends an alert for new messages (it never alerts a phone
+   * that's connected). The pause means picking a photo doesn't disconnect.
+   * Coming back connects again and collects what came in.
+   */
+  private appMoved(s: AppStateStatus) {
+    if (this.sleepTimer) clearTimeout(this.sleepTimer);
+    this.sleepTimer = null;
+    if (this.state !== 'signedIn') return;
+    if (s === 'active') this.client.start();
+    else if (s === 'background') this.sleepTimer = setTimeout(() => this.client.stop(), 1_000);
   }
 
   newId() {
@@ -268,8 +294,12 @@ class Core {
     return new HttpServer(serverUrl()).sendSignInCode(phone);
   }
 
-  /** Emulator tests only: the code the Mac's server printed. */
-  testCode(phone: string) {
+  /**
+   * Emulator tests only: the code the Mac's server printed. A real phone always
+   * types it from the Terminal, the way it will type a real SMS code.
+   */
+  async testCode(phone: string) {
+    if (Device.isDevice) throw new Error('Only on an emulator');
     return new HttpServer(serverUrl(), 3_000).testCode(phone);
   }
 
@@ -295,6 +325,7 @@ class Core {
       this.prefs = {};
       this.starred = {};
       this.lists = [];
+      this.ways = {};
       this.blocked = null;
       this.presence = {};
       this.typing = {};
@@ -493,9 +524,28 @@ class Core {
 
   async person(userId: string, refresh = false): Promise<Person | null> {
     if (!refresh && this.people[userId]) return this.people[userId];
-    const p = await this.call<Person>('GET', `/users/${encodeURIComponent(userId)}`);
+    // Someone who messaged me first comes with their number and Gmail.
+    const { phone, email, ...p } = await this.call<Person & { phone?: string | null; email?: string | null }>('GET', `/users/${encodeURIComponent(userId)}`);
     this.remember(p);
+    this.noteWays(p.id, { phone: phone ?? undefined, email: email ?? undefined });
     return p;
+  }
+
+  /** Numbers and Gmails I know for people, kept only on this phone (see `Ways`). */
+  ways: Record<string, Ways> = {};
+
+  private noteWays(userId: string, found: Ways) {
+    const was = this.ways[userId] ?? {};
+    const next = { phone: found.phone ?? was.phone, email: found.email ?? was.email };
+    if (next.phone === was.phone && next.email === was.email) return;
+    this.ways = { ...this.ways, [userId]: next };
+    void this.storage.setValue('app:ways', this.ways);
+  }
+
+  /** How to reach someone, for "Add to contacts": asks the server again in case they messaged me first. */
+  async waysOf(userId: string): Promise<Ways> {
+    await this.person(userId, true).catch(() => {});
+    return this.ways[userId] ?? {};
   }
 
   /**
@@ -509,8 +559,12 @@ class Core {
     const looksLikeNumber = /^[+0-9][0-9\s\-()]{6,}$/.test(q);
     const phone = looksLikeNumber ? normalizePhone(q) : null;
     if (looksLikeNumber && !phone) return null;
-    const found = phone ? await this.server.lookup(phone, 'phone') : await this.server.lookup(q.includes('@') ? q : `${q}@gmail.com`);
-    if (found) this.rememberQuietly(found);
+    const email = q.includes('@') ? q : `${q}@gmail.com`;
+    const found = phone ? await this.server.lookup(phone, 'phone') : await this.server.lookup(email);
+    if (found) {
+      this.rememberQuietly(found);
+      this.noteWays(found.id, phone ? { phone } : { email });
+    }
     return found;
   }
 

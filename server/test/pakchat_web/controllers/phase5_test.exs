@@ -51,7 +51,9 @@ defmodule PakchatWeb.Phase5Test do
             "0300-1234567",
             "+92 300 1234567",
             "0092 300 1234567",
-            "923001234567"
+            "923001234567",
+            "300 1234567",
+            "3001234567"
           ] do
         assert Phone.normalize(typed) == {:ok, "+923001234567"}
       end
@@ -225,6 +227,28 @@ defmodule PakchatWeb.Phase5Test do
       assert body["id"] == sara["user"]["id"]
       refute Map.has_key?(body, "phone")
       assert as(ali) |> get(~p"/api/users/lookup?phone=03000000000") |> json_response(404)
+    end
+
+    test "whoever starts a chat shows their number and Gmail to the other person, not the other way" do
+      ali = person("Ali")
+      send_code("03001239876")
+      sara = phone_sign_in("03001239876") |> json_response(200)
+      sara = %{token: sara["token"], id: sara["user"]["id"]}
+
+      # Before any chat, nobody sees anything.
+      refute as(ali)
+             |> get(~p"/api/users/#{sara.id}")
+             |> json_response(200)
+             |> Map.has_key?("phone")
+
+      # Sara messages Ali first: Ali can see her number (to add her), she can't see his Gmail.
+      as(sara) |> post(~p"/api/chats/direct", %{"user_id" => ali.user.id}) |> json_response(200)
+      seen = as(ali) |> get(~p"/api/users/#{sara.id}") |> json_response(200)
+      assert seen["phone"] == "+923001239876"
+      assert Map.has_key?(seen, "email")
+      back = as(sara) |> get(~p"/api/users/#{ali.user.id}") |> json_response(200)
+      refute Map.has_key?(back, "email")
+      refute Map.has_key?(back, "phone")
     end
 
     test "from the phone's contacts, by hashes only, and one person shows once per hash" do

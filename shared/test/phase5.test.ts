@@ -38,7 +38,7 @@ function uploader() {
 
 describe('phone numbers', () => {
   test('are tidied the same way as on the server', () => {
-    for (const typed of ['0300 1234567', '0300-1234567', '+92 300 1234567', '0092 300 1234567', '923001234567']) {
+    for (const typed of ['0300 1234567', '0300-1234567', '+92 300 1234567', '0092 300 1234567', '923001234567', '300 1234567', '3001234567']) {
       expect(normalizePhone(typed)).toBe('+923001234567');
     }
     expect(normalizePhone('+44 7700 900123')).toBe('+447700900123');

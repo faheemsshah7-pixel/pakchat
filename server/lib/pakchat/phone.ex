@@ -4,8 +4,9 @@ defmodule Pakchat.Phone do
   the number, with no spaces (the "E.164" form), like `+923001234567`.
 
   People type numbers every way: `0300 1234567`, `0300-1234567`,
-  `+92 300 1234567`, `0092300...`. A number that starts with a single 0 is
-  taken to be in the default country (Pakistan, 92).
+  `+92 300 1234567`, `0092300...`, or just `300 1234567`. Without a "+" or
+  "00", a number is taken to be in the default country (Pakistan, 92): with
+  its 0 (`0300...`), without it (`300...`), or with the 92 already (`92300...`).
   """
 
   @doc "Tidies a typed number. Returns `{:ok, \"+92...\"}` or `{:error, :bad_phone}`."
@@ -18,7 +19,8 @@ defmodule Pakchat.Phone do
         String.starts_with?(digits, "+") -> String.slice(digits, 1..-1//1)
         String.starts_with?(digits, "00") -> String.slice(digits, 2..-1//1)
         String.starts_with?(digits, "0") -> default_country() <> String.slice(digits, 1..-1//1)
-        true -> digits
+        String.starts_with?(digits, default_country()) -> digits
+        true -> default_country() <> digits
       end
 
     # E.164: 8 to 15 digits, and a country code never starts with 0.

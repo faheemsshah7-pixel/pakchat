@@ -26,6 +26,7 @@ import { PollSheet } from '../../ui/chat/PollSheet';
 import { dayLabel, fileSize, lastSeen, sameDay, TIMERS, timerLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Field, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
+import { Marquee } from '../../ui/Marquee';
 import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
@@ -356,9 +357,8 @@ export default function ChatScreen() {
               </Txt>
               {!!subtitle && (
                 <Animated.View key={subtitle} entering={FadeIn.duration(160)}>
-                  <Txt size={12} weight="500" lines={1} color={typing.length || presence?.online ? theme.acc : theme.muted} testID="chat-subtitle">
-                    {subtitle}
-                  </Txt>
+                  {/* "last seen today at 4:20 pm" slides along so the time shows, like WhatsApp. */}
+                  <Marquee text={subtitle} size={12} weight="500" color={typing.length || presence?.online ? theme.acc : theme.muted} testID="chat-subtitle" />
                 </Animated.View>
               )}
             </View>
