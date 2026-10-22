@@ -1314,8 +1314,14 @@ No password ever touches PakChat.
 Everything that moves uses **Reanimated springs** (`motion.ts`) instead of fixed-time animations.
 A spring keeps your finger's speed: let go of a swipe and the row carries on and settles, rather
 than jumping. Gestures (`usePanGesture`) run on the phone's UI thread, so they don't stutter even
-while the JavaScript is busy. If "Remove animations" is on in the phone's settings, Reanimated jumps
-straight to the end.
+while the JavaScript is busy. Animations play even when "Remove animations" is on in the phone's
+settings, because skipping them left some screens invisible.
+
+How bouncy a spring is depends on one ratio: its `damping` divided by `2 × √(stiffness × mass)`.
+At 1 it glides in with no bounce at all. At 0.85 to 0.9 it settles with a tiny overshoot you feel more
+than see, which is what most of PakChat uses. A sent message and the send button sit at about 0.7, one
+small bounce. Under 0.6 it wobbles, which is what felt annoying in the first builds. The typing bar
+has no animation of its own: it follows the keyboard frame by frame, so it never lags behind.
 
 ### Urdu, right to left
 Pick اردو and every screen flips at once, without restarting. The layout engine (**Yoga**) has a
@@ -1329,11 +1335,12 @@ an Urdu message in an English chat still looks right.
 have no Google account, so the server can make pretend `…@test.pakchat` accounts, but only when you
 start it with `PAKCHAT_TEST_SIGN_IN=1`, and never for real Gmail addresses. `two-phones.sh` signs
 in Ali and Sara, has them chat, turns Sara's network off, has Ali send three messages, turns it back
-on, and checks they arrive in order.
+on, and checks they arrive in order. If a step fails, it prints a command like
+`two-phones.sh from 7` that carries on from that step instead of starting over.
 
 ### Try this
-- In `app/src/ui/motion.ts`, change `smooth`'s `damping: 24` to `8`, rebuild, and swipe a chat.
-  It wobbles like jelly. Change it back.
+- In `app/src/ui/motion.ts`, change `smooth`'s `damping: 26` to `8`, rebuild, and swipe a chat.
+  It wobbles like jelly (the ratio drops from 0.9 to 0.28). Change it back.
 - In `app/src/i18n/strings.ts`, change `quickOk: 'Theek hai'` to your own phrase. It shows up in
   the one-tap answers in every chat.
 - Open the app, go to You > Language > اردو, and watch the tabs, the swipe arrows and the switches
