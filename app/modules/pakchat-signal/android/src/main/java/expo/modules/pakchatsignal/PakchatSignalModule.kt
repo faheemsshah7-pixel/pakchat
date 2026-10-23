@@ -130,7 +130,7 @@ class PakchatSignalModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PakchatSignal")
 
-    Events("progress")
+    Events("progress", "callAudio")
 
     // ---- Files (see FileLock and FileTransfer) ----
 
@@ -182,6 +182,58 @@ class PakchatSignalModule : Module() {
     AsyncFunction("wait") { ms: Int, promise: Promise ->
       clock.schedule({ promise.resolve(null) }, ms.coerceIn(0, 60_000).toLong(), TimeUnit.MILLISECONDS)
     }
+
+    // ---- Voice notes (see AudioJoin) ----
+
+    /** Joins the pieces of a paused-and-resumed voice note into one file. Answers its length (ms). */
+    AsyncFunction("joinAudio") { parts: List<String>, to: String, promise: Promise ->
+      slowly(promise) { AudioJoin.join(parts.map { path(it) }, path(to)).toDouble() }
+    }
+
+    // ---- Calls (see CallAlerts, CallAudio, CallService, CallLockScreen) ----
+
+    /** Rings: the full-screen incoming call alert. What to show comes as JSON (calls.ts). */
+    Function("callRing") { json: String -> CallAlerts.ring(context(), json) }
+
+    Function("callStopRing") { callId: String -> CallAlerts.stopRing(context(), callId) }
+
+    Function("callMissed") { json: String -> CallAlerts.missed(context(), json) }
+
+    Function("callDismissMissed") { chatId: String -> CallAlerts.dismissMissed(context(), chatId) }
+
+    /** Shows (or updates) the "Ongoing call" alert that keeps the call going in the background. */
+    Function("callOngoing") { json: String -> CallService.show(context(), json) }
+
+    Function("callEnded") {
+      val c = context()
+      CallService.stop(c)
+      CallAudio.stop(c)
+      CallLockScreen.show(false)
+    }
+
+    /** Call mode for the sound; tells JavaScript where the sound can go ("callAudio"). */
+    Function("callAudioStart") { video: Boolean ->
+      CallAudio.start(context(), video) { sendEvent("callAudio", it) }
+    }
+
+    Function("callRoute") { to: String -> CallAudio.route(context(), to) }
+
+    Function("callVideo") { on: Boolean -> CallAudio.setVideo(context(), on) }
+
+    Function("callAudioState") { CallAudio.state(context()) }
+
+    /** "ringing", "busy" or "ended", for the person calling. */
+    Function("callTone") { kind: String -> CallAudio.tone(kind) }
+
+    Function("callStopTone") { CallAudio.stopTone() }
+
+    /** Shows the app over the lock screen during a call (and keeps the screen on), or stops. */
+    Function("callShowOverLock") { on: Boolean, keepOn: Boolean -> CallLockScreen.show(on, keepOn) }
+
+    /** Can calls wake the screen? Android 14+ lets people turn that off. */
+    Function("callFullScreenAllowed") { CallAlerts.fullScreenAllowed(context()) }
+
+    Function("callOpenFullScreenSettings") { CallAlerts.openFullScreenSettings(context()) }
 
     /** Where a contact can be saved: Google accounts, the phone, SIMs. Needs the contacts permission. */
     AsyncFunction("contactAccounts") { promise: Promise ->

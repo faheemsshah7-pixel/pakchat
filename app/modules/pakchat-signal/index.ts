@@ -30,7 +30,36 @@ export type FileModule = {
   /** Answers after `ms`, even in the background, where setTimeout stops (see push.ts). */
   wait(ms: number): Promise<void>;
   addListener(event: 'progress', fn: (e: { tag: string; done: number; total: number }) => void): EventSubscription;
+
+  // ---- Voice notes (AudioJoin.kt) ----
+  /** Joins voice-note pieces (file URIs, in order) into `to`. Answers the length in ms. */
+  joinAudio(parts: string[], to: string): Promise<number>;
+
+  // ---- Calls (CallAlerts.kt, CallAudio.kt, CallService.kt, PakchatPackage.kt) ----
+  /** Rings with a full-screen call alert. See calls.ts for the JSON. */
+  callRing(json: string): void;
+  callStopRing(callId: string): void;
+  callMissed(json: string): void;
+  callDismissMissed(chatId: string): void;
+  /** Shows or updates the "Ongoing call" alert, which keeps the mic going in the background. */
+  callOngoing(json: string): void;
+  /** Ends everything native about a call: the alert, call mode, the lock-screen view. */
+  callEnded(): void;
+  callAudioStart(video: boolean): void;
+  callRoute(to: AudioRoute): void;
+  callVideo(on: boolean): void;
+  callAudioState(): CallAudioState;
+  callTone(kind: 'ringing' | 'busy' | 'ended'): void;
+  callStopTone(): void;
+  callShowOverLock(on: boolean, keepOn: boolean): void;
+  callFullScreenAllowed(): boolean;
+  callOpenFullScreenSettings(): void;
+  addListener(event: 'callAudio', fn: (e: CallAudioState) => void): EventSubscription;
 };
+
+/** Where a call's sound comes out. */
+export type AudioRoute = 'earpiece' | 'speaker' | 'headset' | 'bluetooth';
+export type CallAudioState = { routes: AudioRoute[]; route: AudioRoute };
 
 type Native = SignalApi & FileModule;
 

@@ -14,7 +14,7 @@ export type WireEnvelope = {
   seq: number | null;
   from: string;
   from_device: number | null;
-  kind: 'message' | 'reaction' | 'control' | 'receipt' | 'system';
+  kind: 'message' | 'reaction' | 'control' | 'receipt' | 'system' | 'call';
   sent_at: string;
   /** Locked messages: Signal's type and the locked bytes (base64). */
   type?: number;

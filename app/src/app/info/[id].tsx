@@ -10,6 +10,7 @@ import { View } from 'react-native';
 import Animated, { interpolate, LinearTransition, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
+import { defaultTimer } from '../../core/timer';
 import { useBlocked, useChat, useChatPrefs, usePeople, usePerson, usePresence } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -141,7 +142,7 @@ export default function Info() {
         )}
 
         <Glass style={{ marginHorizontal: 12, marginTop: 16 }}>
-          <SettingRow icon="photo" title={t.media} sub={t.comingSoon} onPress={() => toast(t.comingSoon)} />
+          <SettingRow icon="photo" title={t.media} onPress={() => router.push({ pathname: '/media/[id]', params: { id } })} testID="info-media" />
           <Divider />
           <SettingRow icon="star" title={t.starred} onPress={() => router.push({ pathname: '/starred', params: { chat: id } })} />
         </Glass>
@@ -232,7 +233,7 @@ export default function Info() {
               onPress={() => {
                 setMember(null);
                 void act(async () => {
-                  const c = await core.client.openDirect(picked.userId);
+                  const c = await core.client.openDirect(picked.userId, defaultTimer());
                   router.push({ pathname: '/chat/[id]', params: { id: c.id } });
                 });
               }}

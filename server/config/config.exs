@@ -41,7 +41,14 @@ config :pakchat, :rate_limits,
   # Codes also have daily caps of their own (Pakchat.PhoneCodes).
   sms: {5, 600_000},
   # "Which of my contacts are on PakChat?", per person.
-  contacts: {20, 3_600_000}
+  contacts: {20, 3_600_000},
+  # Call messages (ringing, connection details), per device. A call sends
+  # a burst of network routes as it starts.
+  calls: {600, 60_000},
+  # Changing who sees my status, per person.
+  status: {30, 60_000},
+  # GIF searches, per person.
+  gifs: {60, 60_000}
 
 # Websites allowed to talk to the server (the phone app doesn't need this).
 config :pakchat, :allowed_origins, [

@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { storageContract } from '@pakchat/shared/testing';
 import { describe, expect, test } from 'vitest';
 
-import { SqliteStorage, type Db, type SqlValue } from '../src/data/sqliteStorage';
+import { linksIn, SqliteStorage, type Db, type SqlValue } from '../src/data/sqliteStorage';
 
 /** Node's SQLite behind the same small interface the app uses for expo-sqlite. */
 function nodeDb(file = ':memory:'): Db {
@@ -130,5 +130,76 @@ describe('backups', () => {
     // Search follows what this phone keeps: its own words for a, the backup's for the photo.
     expect(await fresh.search('purani')).toEqual([]);
     expect((await fresh.search('photo')).map((f) => f.id)).toEqual(['f']);
+  });
+  test('restored chats keep their times and order, with what came since counted on top', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pakchat-'));
+    const old = await SqliteStorage.open(nodeDb());
+    const chat = (id: string, lastActivity: number, extra = {}) => ({ id, kind: 'direct' as const, members: [], readUpTo: 3, unread: 2, lastActivity, ...extra });
+    await old.putChat(chat('older', 1_000, { timer: 86_400 }));
+    await old.putChat(chat('newer', 2_000));
+    await old.putChat(chat('quiet', 1_500));
+    await old.putMessage(msg('older', 'a', 'Hi', { sentAt: 1_000 }));
+    await old.putMessage(msg('newer', 'b', 'Hello', { sentAt: 2_000 }));
+    await old.putMessage(msg('newer', 'p', 'Paused photo', { seq: null, status: 'paused', sentAt: 2_100 }));
+    await old.exportTo(join(dir, 'backup.db'));
+
+    // Signing in on the new phone saved the chats "just now", and one message came meanwhile.
+    const fresh = await SqliteStorage.open(nodeDb());
+    const now = 9_000_000;
+    await fresh.putChat(chat('older', now, { readUpTo: 0, unread: 1, title: 'From server' }));
+    await fresh.putChat(chat('newer', now, { readUpTo: 0, unread: 0 }));
+    await fresh.putChat(chat('quiet', now, { readUpTo: 0, unread: 0 }));
+    await fresh.putChat(chat('brandNew', now, { readUpTo: 0, unread: 0 }));
+    await fresh.putMessage(msg('older', 'c', 'Since', { seq: 4, order: 4, sentAt: 5_000 }));
+    await fresh.importFrom(join(dir, 'backup.db'));
+
+    const list = await fresh.listChats();
+    expect(list.map((c) => c.id)).toEqual(['brandNew', 'older', 'newer', 'quiet']);
+    const older = list.find((c) => c.id === 'older')!;
+    expect(older.lastActivity).toBe(5_000);
+    expect(older.unread).toBe(3);
+    expect(older.readUpTo).toBe(3);
+    expect(older.timer).toBe(86_400);
+    expect(older.title).toBe('From server');
+    expect(list.find((c) => c.id === 'newer')!.lastActivity).toBe(2_000);
+    expect(list.find((c) => c.id === 'quiet')!.lastActivity).toBe(1_500);
+    // A file that never went isn't brought back (its file isn't in the backup).
+    expect(await fresh.getMessage('newer', 'u1', 'p')).toBeNull();
+  });
+});
+
+describe('media, links and docs', () => {
+  const file = (kind: string, extra = {}) => ({ id: 'f', key: 'k', digest: 'd', size: 1, mime: 'x/y', kind, ...extra });
+  const msg = (id: string, ord: number, extra: Record<string, unknown>) => ({
+    chatId: 'c1',
+    id,
+    author: 'u1',
+    authorDevice: 1,
+    seq: ord,
+    order: ord,
+    sentAt: ord,
+    kind: 'text' as const,
+    status: 'sent' as const,
+    ...extra,
+  });
+
+  test('photos and videos, documents, and links, newest first', async () => {
+    const s = await SqliteStorage.open(nodeDb());
+    await s.putMessage(msg('p1', 1, { kind: 'file', file: file('image') }) as never);
+    await s.putMessage(msg('v1', 2, { kind: 'file', file: file('video') }) as never);
+    await s.putMessage(msg('g1', 3, { kind: 'file', file: file('video', { gif: true }) }) as never);
+    await s.putMessage(msg('s1', 4, { kind: 'file', file: file('sticker') }) as never);
+    await s.putMessage(msg('d1', 5, { kind: 'file', file: file('doc', { name: 'notes.pdf' }) }) as never);
+    await s.putMessage(msg('l1', 6, { text: 'Look: www.dawn.com/news' }));
+    await s.putMessage(msg('t1', 7, { text: 'no link, just http talk' }));
+    await s.putMessage(msg('p2', 8, { kind: 'file', file: file('image'), deleted: true }) as never);
+    expect((await s.shared('c1', 'media')).map((m) => m.id)).toEqual(['v1', 'p1']);
+    expect((await s.shared('c1', 'docs')).map((m) => m.id)).toEqual(['d1']);
+    expect((await s.shared('c1', 'links')).map((m) => m.id)).toEqual(['l1']);
+  });
+
+  test('finding web addresses in words', () => {
+    expect(linksIn('see https://pak.chat/a?b=1, and www.x.pk.')).toEqual(['https://pak.chat/a?b=1', 'https://www.x.pk']);
+    expect(linksIn('nothing here')).toEqual([]);
   });
 });

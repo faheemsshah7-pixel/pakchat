@@ -10,6 +10,7 @@ defmodule PakchatWeb.DeviceChannel do
   From the device:
 
     * `"send"`    a locked message, see `Pakchat.Relay.send_message/3`
+    * `"call"`    a locked call message (ringing, connecting), see `Pakchat.Relay.send_call/3`
     * `"ack"`     `{ids}`: "I have these", so the server deletes them
     * `"sync"`    `{after: {chat_id: N}}`: "I have everything up to N", send the rest
     * `"receipt"` `{chat_id, to, status: "delivered" | "read", seqs}`: the ticks
@@ -88,6 +89,18 @@ defmodule PakchatWeb.DeviceChannel do
 
       {:error, reason} ->
         {:reply, {:error, %{reason: reason}}, socket}
+    end
+  end
+
+  def handle_in("call", payload, socket) do
+    device = socket.assigns.device
+
+    with :ok <- RateLimit.hit(:calls, device.id),
+         {:ok, chat_id, params} <- Params.call(payload),
+         :ok <- Relay.send_call(device, chat_id, params) do
+      {:reply, :ok, socket}
+    else
+      {:error, reason} -> {:reply, {:error, %{reason: reason}}, socket}
     end
   end
 

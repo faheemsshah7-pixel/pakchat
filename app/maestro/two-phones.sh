@@ -170,4 +170,10 @@ if begin 7 "Ali makes a list with Sara in it, then deletes it"; then
   run "$A" -e NAME="~ $SARA" lists.yaml
 fi
 
+if begin 8 "Ali sends a sticker; it shows on Sara's phone"; then
+  run "$A" -e OTHER="~ $SARA" -e TEXT="Don't be late" open-chat.yaml
+  run "$A" sticker.yaml
+  run "$B" wait-sticker.yaml
+fi
+
 echo "All passed."

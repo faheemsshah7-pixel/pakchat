@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { findBackup } from '../../core/backup';
 import { core } from '../../core/core';
-import { useAllPresence, useAllTyping, useAuth, useChatList, useConnected, useLists, type ChatRow as Row } from '../../core/hooks';
+import { useAllPresence, useAllTyping, useAuth, useChatList, useConnected, useLists, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { ChatRow } from '../../ui/ChatRow';
@@ -54,6 +54,17 @@ export default function Chats() {
         .catch(() => {});
     }
   }, [myId]);
+
+  // The chats at the top are read ahead of time, so opening one is instant.
+  const top = (rows ?? [])
+    .slice(0, 8)
+    .map((r) => r.chat.id)
+    .join(',');
+  useEffect(() => {
+    if (!top) return;
+    const wait = setTimeout(() => warmChats(top.split(',')), 600);
+    return () => clearTimeout(wait);
+  }, [top]);
 
   // Back cancels picking, instead of leaving the app.
   useEffect(() => {

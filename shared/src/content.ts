@@ -29,16 +29,59 @@ export type Attachment = {
   duration?: number;
   /** A tiny blurred preview (JPEG, base64), shown before the photo or video downloads. */
   thumb?: string;
+  /** Voice notes: how loud each moment was, one byte (0 to 255) each, base64. Drawn as bars. */
+  waveform?: string;
+  /** A GIF: a short silent video that plays on a loop. */
+  gif?: true;
 };
 
-export type FileKind = 'image' | 'video' | 'audio' | 'voice' | 'doc';
-export const FILE_KINDS: readonly FileKind[] = ['image', 'video', 'audio', 'voice', 'doc'];
+/** `sticker`: a picture with a see-through background, shown big and without a bubble. */
+export type FileKind = 'image' | 'video' | 'audio' | 'voice' | 'doc' | 'sticker';
+export const FILE_KINDS: readonly FileKind[] = ['image', 'video', 'audio', 'voice', 'doc', 'sticker'];
+
+/**
+ * A reply to someone's status carries a little copy of it (the status itself
+ * is gone after a day, and the chat isn't the status's).
+ */
+export type StatusQuote = { author: string; id: string; kind: 'text' | 'image' | 'video'; text?: string; thumb?: string };
+
+/**
+ * A call message: never shown as a bubble, never saved. One call (`call`, its
+ * id) is a few of these between the phones in it:
+ *   ring     a call starts: phones ring (to everyone in the chat)
+ *   join     I'm in the call now (answering is joining)
+ *   here     "I'm already in it", the answer to a join, so the two connect
+ *   offer, answer, ice   WebRTC connecting two phones (to one device)
+ *   leave    I hung up
+ *   decline  I said no (or "answered on another of my devices")
+ *   busy     I'm on another call
+ *   media    my microphone or camera went on or off
+ * The device with the smaller name ("user:device") makes the offer, so two
+ * phones never both start (see app/src/calls).
+ */
+export type CallOp = 'ring' | 'join' | 'here' | 'offer' | 'answer' | 'ice' | 'leave' | 'decline' | 'busy' | 'media';
+export const CALL_OPS: readonly CallOp[] = ['ring', 'join', 'here', 'offer', 'answer', 'ice', 'leave', 'decline', 'busy', 'media'];
+export type IceCandidate = { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null };
+export type CallSignal = {
+  t: 'call';
+  call: string;
+  op: CallOp;
+  /** ring: a video call. media: my camera is on. */
+  video?: boolean;
+  /** media: my microphone is on. */
+  audio?: boolean;
+  /** ring: a group call. */
+  group?: boolean;
+  sdp?: string;
+  cand?: IceCandidate;
+};
 
 /** Things that show up as a message bubble. */
 export type Body =
-  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean }
+  /** `bg`: a status in words, on one of the app's colours. `status`: a reply to someone's status. */
+  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; bg?: number; status?: StatusQuote }
   | { t: 'poll'; question: string; options: string[]; multi: boolean }
-  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean };
+  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; status?: StatusQuote };
 
 /** Changes to messages that are already there. */
 export type Change =
@@ -60,7 +103,8 @@ export type Control =
   /** My group key for one group, sent locked to each device that needs it. */
   | { t: 'key'; distributionId: string; key: string }
   /** "I couldn't open your message number `seq`, please send it again." Sent unlocked. */
-  | { t: 'retry'; seq: number; why: 'session' | 'groupKey' };
+  | { t: 'retry'; seq: number; why: 'session' | 'groupKey' }
+  | CallSignal;
 
 export type Payload = Body | Change | Control;
 
@@ -82,6 +126,9 @@ const MAX_OPTIONS = 12;
 const MAX_MENTIONS = 256;
 const MAX_ID = 64;
 const MAX_THUMB = 16_000;
+const MAX_SDP = 20_000;
+/** How many colours a status in words can have (the app has a list). */
+export const STATUS_COLOURS = 12;
 
 export function isBody(c: Payload): c is Body {
   return (BODY_TYPES as readonly string[]).includes(c.t);
@@ -116,6 +163,43 @@ function checkAttachment(x: unknown): Attachment | null {
     if (!isText(x.thumb, MAX_THUMB)) return null;
     out.thumb = x.thumb;
   }
+  if (x.waveform !== undefined) {
+    if (!isText(x.waveform, 400) || !/^[A-Za-z0-9+/]*={0,2}$/.test(x.waveform)) return null;
+    out.waveform = x.waveform;
+  }
+  if (x.gif === true) out.gif = true;
+  return out;
+}
+
+function checkQuote(x: unknown): StatusQuote | null {
+  if (!isObject(x) || !isId(x.author) || !isId(x.id) || !['text', 'image', 'video'].includes(x.kind as string)) return null;
+  const out: StatusQuote = { author: x.author, id: x.id, kind: x.kind as StatusQuote['kind'] };
+  if (x.text !== undefined) {
+    if (!isText(x.text, 700)) return null;
+    out.text = x.text;
+  }
+  if (x.thumb !== undefined) {
+    if (!isText(x.thumb, MAX_THUMB)) return null;
+    out.thumb = x.thumb;
+  }
+  return out;
+}
+
+function checkCall(x: Record<string, unknown>): CallSignal | null {
+  if (!isId(x.call) || !CALL_OPS.includes(x.op as CallOp)) return null;
+  const out: CallSignal = { t: 'call', call: x.call, op: x.op as CallOp };
+  for (const k of ['video', 'audio', 'group'] as const) if (typeof x[k] === 'boolean') out[k] = x[k];
+  if (x.sdp !== undefined) {
+    if (!isText(x.sdp, MAX_SDP)) return null;
+    out.sdp = x.sdp;
+  }
+  if (x.cand !== undefined) {
+    const c = x.cand;
+    if (!isObject(c) || !isText(c.candidate, 1000)) return null;
+    out.cand = { candidate: c.candidate };
+    if (c.sdpMid === null || isText(c.sdpMid, 64)) out.cand.sdpMid = c.sdpMid as string | null;
+    if (c.sdpMLineIndex === null || isCount(c.sdpMLineIndex)) out.cand.sdpMLineIndex = c.sdpMLineIndex as number | null;
+  }
   return out;
 }
 
@@ -130,6 +214,15 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (x.mentions) out.mentions = x.mentions as string[];
       if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
       if (x.forwarded === true) out.forwarded = true;
+      if (x.bg !== undefined) {
+        if (!isCount(x.bg) || x.bg >= STATUS_COLOURS) return null;
+        out.bg = x.bg;
+      }
+      if (x.status !== undefined) {
+        const quote = checkQuote(x.status);
+        if (!quote) return null;
+        out.status = quote;
+      }
       return out;
     }
     case 'poll': {
@@ -150,6 +243,11 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (x.mentions) out.mentions = x.mentions as string[];
       if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
       if (x.forwarded === true) out.forwarded = true;
+      if (x.status !== undefined) {
+        const quote = checkQuote(x.status);
+        if (!quote) return null;
+        out.status = quote;
+      }
       return out;
     }
     case 'edit':
@@ -175,6 +273,8 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       return isId(x.distributionId) && isText(x.key, 4096) ? { t: 'key', distributionId: x.distributionId, key: x.key } : null;
     case 'retry':
       return isCount(x.seq) && (x.why === 'session' || x.why === 'groupKey') ? { t: 'retry', seq: x.seq, why: x.why } : null;
+    case 'call':
+      return checkCall(x);
     default:
       return null;
   }

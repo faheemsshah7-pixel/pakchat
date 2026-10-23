@@ -1,0 +1,13 @@
+# In an open chat: sends PakChat's "Salam" sticker from the smiley panel's Stickers tab.
+appId: com.pakchat.app
+---
+- tapOn:
+    id: emoji
+- tapOn:
+    id: panel-sticker
+- tapOn:
+    id: sticker-salam
+- extendedWaitUntil:
+    visible:
+      id: file-sticker
+    timeout: 20000

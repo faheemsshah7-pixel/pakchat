@@ -114,7 +114,9 @@ export default function TabsLayout() {
   return (
     <Tabs
       tabBar={(props) => <TabBar {...props} />}
-      screenOptions={{ headerShown: false, animation: 'fade', sceneStyle: { backgroundColor: theme.bg } }}
+      // No fade between tabs: the fade could get stuck half way when a settings
+      // page opened on top, leaving a tab blank (dark) until you switched away and back.
+      screenOptions={{ headerShown: false, animation: 'none', sceneStyle: { backgroundColor: theme.bg } }}
     >
       {TABS.map((tab) => (
         <Tabs.Screen key={tab.name} name={tab.name} />

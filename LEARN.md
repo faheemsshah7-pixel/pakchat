@@ -1431,3 +1431,76 @@ chat. So opening the same envelope again gives the same text.
 - In `server/.env`, set `FILE_MAX_MB=5` and restart the server. Try sending a big video: the app
   says it's too big, without an update. Set it back.
 - Sign in with a number and watch the code appear in the server's Terminal.
+
+## Step 28: Phase 6, calls, voice notes, status, GIFs, stickers and media
+
+### Voice notes, WhatsApp style
+Hold the mic to record and let go to send. Slide left to cancel, or slide up to the lock to keep
+recording without holding. Locked, you can pause, listen back (tap the bars to jump), record more,
+delete, or send. A single tap on the mic opens the same locked recording. Android can't pause a
+recording and keep one playable file, so each pause ends a piece, and the pieces are joined into one
+file by our Kotlin code (`AudioJoin.kt`, which copies the sound without re-encoding it). The bars are
+the loudness, sampled ten times a second while recording, and travel inside the locked message.
+
+### Calls go straight from phone to phone
+The sound and video use WebRTC: the two phones send it to each other directly, locked by WebRTC
+itself. Our server only passes the few call messages that set it up (`ring`, `join`, `offer`,
+`answer`, `ice`, `leave`…), and those are locked with Signal like any message
+(`app/src/core/calls.ts` explains each one). In a group call every two phones connect to each other,
+so 8 phones is the most: each one sends to the seven others.
+
+A call rings even when PakChat is closed or the phone is locked. The caller's `ring` wakes the other
+phone with a push, and our Kotlin code (`CallAlerts.kt`) shows Android's own call alert, full screen
+on a locked phone, with the ringtone. (WhatsApp uses Android's ConnectionService for this; we use the
+call-style alert, which looks and rings the same, needs no extra permission and is simpler to keep
+working.) While the call is on, a foreground service (`CallService.kt`) keeps the microphone going when
+you leave the app, and `CallAudio.kt` moves the sound between the earpiece, the speaker, headphones
+and Bluetooth.
+
+### Phase 6: the call relay (optional, free, about 15 minutes)
+Most calls connect directly. On some networks (some offices, some mobile data) the phones can't
+reach each other, and the call needs a relay in the middle. The relay passes locked sound it can't
+listen to. To run our own, free, on your Mac:
+1. `brew install coturn`
+2. Make a long random secret: `openssl rand -hex 32`
+3. Start it: `turnserver -n --listening-port=3478 --use-auth-secret --static-auth-secret=<the secret> --realm=pakchat --no-tls --no-dtls`
+4. In `server/.env` add `TURN_URLS=turn:192.168.100.2:3478?transport=udp,turn:192.168.100.2:3478?transport=tcp`
+   and `TURN_SECRET=<the same secret>`, then restart the server.
+The server hands each phone a password that only works for a day (made from the secret), so
+the secret itself never leaves your Mac. Without these lines calls still work wherever phones can
+reach each other.
+
+### Status
+Your status is a chat of its own, with the people allowed to see it as members (Settings, Status
+privacy). Each status is a locked message that's gone after 24 hours. Watching one sends a read
+receipt (that's the "seen by" list), a ❤️ is a reaction, and a reply goes to your normal chat with
+them, with a little copy of the status. The server never sees who watched whose status.
+
+### GIFs and stickers
+GIFs come from KLIPY, a free GIF library. Our server asks KLIPY (so KLIPY never sees who's
+searching), the phone downloads the small video it picked, and sends it locked like any video. To
+switch GIFs on, get a free key at klipy.com (developers) and put `KLIPY_KEY=<the key>` in
+`server/.env`. Without it, the GIF tab just hides.
+
+Stickers are pictures with a see-through background, shown big without a bubble. The 16 PakChat
+stickers are drawn by `app/scripts/make-stickers.py` (Urdu with its English spelling under it);
+change the list there and run it again to make new ones. You can also make one from any photo (the
++ in the Stickers tab), and hold a sticker someone sent you to save it.
+
+### Photos are made smaller, unless HD
+A phone photo is often 4 MB. Before sending, it's made at most 1600 pixels wide and saved as a JPEG
+at 75%, usually about 300 KB, which looks the same on a phone and sends much faster. Switch on HD
+quality in the send sheet to send it as it is.
+
+### Media, links and docs
+Open a chat's Info, Media, links and docs. It's read from the phone's own database (SQLite's
+`json_extract` looks inside each saved message), so it works offline and the server never knows.
+Tap a photo for the viewer: swipe, or use the arrows, and the strip at the bottom jumps anywhere.
+
+### Try this
+- Call from one emulator to the other with the app closed on the second: it rings.
+- In `app/scripts/make-stickers.py`, change a sticker's colours, run `python3 scripts/make-stickers.py`
+  in `app/`, rebuild, and send it.
+- Send the same photo twice, once with HD on. Compare their sizes in Info, Media, links and docs.
+- Set Settings, Privacy, Default message timer to 24 hours, then start a new chat: it starts with
+  disappearing messages on.

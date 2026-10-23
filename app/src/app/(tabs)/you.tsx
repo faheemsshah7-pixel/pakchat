@@ -16,7 +16,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { ACCENTS, accentGradient, makeTheme, type ModeChoice } from '../../theme/palette';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, Txt } from '../../ui/kit';
-import { pop, rise, tick } from '../../ui/motion';
+import { pop, tick } from '../../ui/motion';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 
 export default function You() {
@@ -60,7 +60,7 @@ export default function You() {
   return (
     <Screen bottom={false}>
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 30 }}>
-        <Animated.View entering={rise()}>
+        <View>
           <Pressy onPress={() => (setName(me?.name ?? ''), setAbout(me?.about ?? ''), setEditing(true))} label={t.editName} scale={0.98} testID="edit-me">
             <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, marginTop: 8, borderRadius: 24 }}>
               <Avatar id={myId} name={me?.name ?? ''} size={64} />
@@ -78,7 +78,7 @@ export default function You() {
               <IconButton icon="edit" label={t.editName} look="soft" size={40} iconSize={18} onPress={() => (setName(me?.name ?? ''), setAbout(me?.about ?? ''), setEditing(true))} />
             </Glass>
           </Pressy>
-        </Animated.View>
+        </View>
 
         <Section title={t.appearance} />
         <Glass style={{ padding: 12, gap: 14 }}>

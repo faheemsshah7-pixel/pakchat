@@ -90,6 +90,10 @@ defmodule PakchatWeb.Router do
     get "/invites/:code", InviteController, :show
     post "/invites/:code/join", InviteController, :join
 
+    get "/calls/ice", CallController, :ice
+    put "/status/audience", StatusController, :audience
+    get "/gifs", GifController, :index
+
     get "/blocks", BlockController, :index
     put "/blocks/:user_id", BlockController, :create
     delete "/blocks/:user_id", BlockController, :delete

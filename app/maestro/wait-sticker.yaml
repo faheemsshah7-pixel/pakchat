@@ -1,0 +1,7 @@
+# In an open chat: waits until a sticker arrives (it downloads by itself).
+appId: com.pakchat.app
+---
+- extendedWaitUntil:
+    visible:
+      id: file-sticker
+    timeout: 40000

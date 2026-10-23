@@ -16,8 +16,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
 import { useAuth } from '../core/hooks';
+import { calls, takeTappedCall, watchCallTaps } from '../core/calls';
 import { takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
+import { CallBar } from '../ui/CallBar';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -67,10 +69,18 @@ function App() {
   const nav = useRootNavigationState();
   const [taps, setTaps] = useState(0);
   useEffect(() => watchTaps(() => setTaps((n) => n + 1)), []);
+  useEffect(() => watchCallTaps(() => setTaps((n) => n + 1)), []);
   useEffect(() => {
     if (state !== 'signedIn' || !nav?.key) return;
     // The plain "New message" alert just opens PakChat.
     if (tappedPlain) Notifications.clearLastNotificationResponse();
+    // A ringing call's alert (or its Answer button): the call screen.
+    const call = takeTappedCall();
+    if (call) {
+      if (!calls.screenOpen) router.push({ pathname: '/call', params: { id: call.id, ...(call.answer ? { answer: '1' } : {}) } });
+      else if (call.answer && calls.view()?.state === 'incoming') void calls.answer();
+      return;
+    }
     const chatId = takeTapped();
     if (chatId && chatId !== core.viewing) router.push({ pathname: '/chat/[id]', params: { id: chatId } });
   }, [taps, tappedPlain, state, nav?.key]);
@@ -118,6 +128,8 @@ function App() {
           <Stack.Screen name="starred" />
           <Stack.Screen name="forward" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="message-info" />
+          <Stack.Screen name="poll-votes" />
+          <Stack.Screen name="media/[id]" />
           <Stack.Screen name="profile" />
           <Stack.Screen name="settings/privacy" />
           <Stack.Screen name="settings/language" />
@@ -130,11 +142,16 @@ function App() {
           <Stack.Screen name="restore" />
           <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="viewer" options={{ animation: 'fade' }} />
+          <Stack.Screen name="call" options={{ animation: 'fade', contentStyle: { backgroundColor: '#0B1424' } }} />
+          <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="status-new" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="settings/status-privacy" />
         </Stack.Protected>
         <Stack.Protected guard={state === 'signedOut'}>
           <Stack.Screen name="sign-in" options={{ animation: 'fade' }} />
         </Stack.Protected>
       </Stack>
+      {state === 'signedIn' && <CallBar />}
       <ToastHost />
     </View>
   );

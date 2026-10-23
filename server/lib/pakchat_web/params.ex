@@ -84,6 +84,15 @@ defmodule PakchatWeb.Params do
 
   def message(_), do: {:error, :bad_request}
 
+  @doc "What a device sends with a call message (see `Pakchat.Relay.send_call/3`)."
+  def call(%{"chat_id" => chat_id} = p) when is_binary(chat_id) do
+    with {:ok, envelopes} <- list(p["envelopes"], &envelope/1) do
+      {:ok, chat_id, %{envelopes: envelopes, ring: p["ring"] == true}}
+    end
+  end
+
+  def call(_), do: {:error, :bad_request}
+
   defp envelope(%{"user_id" => user_id, "device_id" => device_id} = p)
        when is_binary(user_id) and is_integer(device_id) do
     with {:ok, sealed} <- sealed(p), {:ok, user_id} <- Ecto.UUID.cast(user_id) do

@@ -8,11 +8,15 @@ defmodule Pakchat.Push.Notify do
 
   `if_waiting`: the phone looked connected, so only push if it still hasn't
   collected anything (see `Pakchat.Push`).
+
+  `call`: a call is ringing. It's queued apart from message pushes (a waiting
+  message push mustn't swallow it), and the push says "call", so the phone
+  knows to ring.
   """
   use Oban.Worker,
     queue: :push,
     max_attempts: 5,
-    unique: [period: 60, keys: [:device_id], states: [:available, :scheduled]]
+    unique: [period: 60, keys: [:device_id, :call], states: [:available, :scheduled]]
 
   require Logger
   alias Pakchat.{Accounts, Relay}
@@ -25,14 +29,15 @@ defmodule Pakchat.Push.Notify do
         # Only messages from about when this was queued: an old one that's
         # stuck shouldn't wake the phone again and again.
         since = DateTime.add(job.inserted_at || DateTime.utc_now(), -5, :second)
+        kind = if args["call"], do: "call", else: "message"
 
-        if Relay.waiting?(device_id, since),
-          do: perform(%Oban.Job{args: %{"device_id" => device_id}}),
+        if Relay.waiting?(device_id, since, kind),
+          do: perform(%Oban.Job{args: Map.delete(args, "if_waiting")}),
           else: :ok
 
       %{push_token: token, push_platform: "fcm"} = device when is_binary(token) ->
         if Fcm.configured?() do
-          send_fcm(device, token)
+          send_fcm(device, token, args["call"] == true)
         else
           Logger.info("push: FCM_SERVICE_ACCOUNT isn't set, so no alert for device #{device_id}")
           :ok
@@ -44,8 +49,8 @@ defmodule Pakchat.Push.Notify do
     end
   end
 
-  defp send_fcm(device, token) do
-    case Fcm.send(token) do
+  defp send_fcm(device, token, call?) do
+    case Fcm.send(token, call: call?) do
       :gone ->
         # The app was removed or its token changed: stop using this one.
         Accounts.set_push_token(device, %{push_token: nil, push_platform: nil})

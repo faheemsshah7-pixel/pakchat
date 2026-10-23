@@ -15,10 +15,10 @@
 // the person who left can't read what comes next.
 
 import type { Connection, ConnectionFactory, WireEnvelope } from './connection';
-import type { Attachment, Body, Change, Content, Payload, Ref } from './content';
+import type { Attachment, Body, CallSignal, Change, Content, Payload, Ref, StatusQuote } from './content';
 import { isBody, isChange, parseContent, writeContent } from './content';
 import { randomId } from './ids';
-import { changeAllowed, maySend } from './rules';
+import { changeAllowed, maySend, statusOwner } from './rules';
 import type { Me, ServerApi, ServerChat, SignedIn } from './server';
 import { OfflineError, ServerError } from './server';
 import type { DeviceKeys, PreKeys, SignalApi } from './signal';
@@ -74,11 +74,19 @@ export type Events = {
   connection: (connected: boolean) => void;
   /** Someone's security code changed (they reinstalled, or a new device). */
   securityCodeChanged: (e: { userId: string }) => void;
+  /** A call message (ringing, connecting, hanging up). Never saved: the app's call code handles it. */
+  call: (e: CallEvent) => void;
   /** Something went wrong that the app might want to log. */
   error: (err: Error) => void;
 };
 
-type Device = { userId: string; deviceId: number };
+export type Device = { userId: string; deviceId: number };
+
+/** A call message from one device (see `CallSignal` in content.ts). `at` is the server's time. */
+export type CallEvent = { chatId: string; from: string; fromDevice: number; signal: CallSignal & { id: string }; at: number };
+
+/** A status lasts a day. */
+export const STATUS_MS = 24 * 3600_000;
 type GroupKey = { distributionId: string; sharedWith: string[] };
 type Waiting = { from: string; at: number; change: Change };
 type SentRecord = { chatId: string; seq: number; kind: OutboxItem['kind']; content: string; at: number };
@@ -116,8 +124,12 @@ export class PakChat {
   private acks: number[] = [];
   /** "Delivered" ticks to send: `chat|author` to message numbers. */
   private delivered = new Map<string, Set<number>>();
-  /** Messages taken back before they went (cancelSend): the outbox lets them go. */
-  private unsent = new Set<string>();
+  /**
+   * How many times each message was stopped before it went (paused, or deleted
+   * while waiting). A send that started before a stop sees the number change and
+   * lets it go, even if it was sent again since (that's a new try of its own).
+   */
+  private stops = new Map<string, number>();
   /** Group envelopes that arrived before their key, from this batch. */
   private heldNow: WireEnvelope[] = [];
   private keysUsed = 0;
@@ -301,35 +313,77 @@ export class PakChat {
   /**
    * Removes messages from this device only ("delete for me", clearing a chat, or
    * disappearing messages whose time is up). It waits its turn in the lane, so it
-   * never runs in the middle of a message being saved.
+   * never runs in the middle of a message being saved. One of mine that hasn't
+   * gone yet (waiting, or paused) doesn't go at all.
    */
   deleteHere(chatId: string, refs: Ref[]) {
     const { storage } = this.o;
     return this.inLane(() =>
       storage.transaction(async () => {
-        for (const r of refs) await storage.deleteMessage(chatId, r.author, r.id);
+        for (const r of refs) {
+          if (r.author === this.s.userId) {
+            const m = await storage.getMessage(chatId, r.author, r.id);
+            if (m && m.seq == null) {
+              this.stopSending(r.id);
+              await storage.deleteOutbox(r.id);
+              await storage.deleteValue(`paused:${r.id}`);
+            }
+          }
+          await storage.deleteMessage(chatId, r.author, r.id);
+        }
       }),
     );
   }
 
+  private stopSending(id: string) {
+    this.stops.set(id, (this.stops.get(id) ?? 0) + 1);
+  }
+
   /**
-   * Takes back one of my messages that hasn't gone yet (a file still uploading,
-   * say): out of the outbox and off this device. False if it already went.
-   * Stopping the upload itself is the app's job (it knows the transfer).
+   * The ✕ on one of my files still sending, like WhatsApp: it stops, and stays
+   * in the chat, paused, with an upload button to send it again (resumeSend).
+   * Delete it from the message menu to take it back for good. False if it had
+   * already gone. Stopping the upload itself is the app's job (it knows the transfer).
    */
-  cancelSend(chatId: string, ref: Ref): Promise<boolean> {
+  pauseSend(chatId: string, ref: Ref): Promise<boolean> {
     const { storage } = this.o;
     return this.inLane(async () => {
       if (ref.author !== this.s.userId) return false;
       const m = await storage.getMessage(chatId, ref.author, ref.id);
-      if (!m || m.seq != null) return false;
-      this.unsent.add(ref.id);
+      if (!m || m.seq != null || m.status !== 'queued') return false;
+      const item = (await storage.listOutbox()).find((o) => o.id === ref.id);
+      if (!item) return false;
+      this.stopSending(ref.id);
+      m.status = 'paused';
       await storage.transaction(async () => {
+        // The outbox item waits on the side (with the upload, if it finished) until it's sent again.
+        await storage.setValue(`paused:${ref.id}`, item);
         await storage.deleteOutbox(ref.id);
-        await storage.deleteMessage(chatId, ref.author, ref.id);
+        await storage.putMessage(m);
       });
+      this.emit('message', m);
       return true;
     });
+  }
+
+  /** The upload button on a paused file: it goes back in the outbox and sends. */
+  async resumeSend(chatId: string, ref: Ref): Promise<boolean> {
+    const { storage } = this.o;
+    const ok = await this.inLane(async () => {
+      const item = await storage.getValue<OutboxItem>(`paused:${ref.id}`);
+      const m = await storage.getMessage(chatId, ref.author, ref.id);
+      if (!item || !m || m.status !== 'paused') return false;
+      m.status = 'queued';
+      await storage.transaction(async () => {
+        await storage.putOutbox({ ...item, tries: 0, notBefore: 0 });
+        await storage.deleteValue(`paused:${ref.id}`);
+        await storage.putMessage(m);
+      });
+      this.emit('message', m);
+      return true;
+    });
+    if (ok) void this.flush();
+    return ok;
   }
 
   /** Saves a new copy of my profile (after changing my name, or linking a Gmail or number). */
@@ -406,14 +460,25 @@ export class PakChat {
     for (const sc of await this.o.server.chats()) await this.inLane(() => this.saveChat(sc));
   }
 
-  async openDirect(userId: string) {
+  /**
+   * My chat with someone (made if there isn't one). `defaultTimer` (seconds,
+   * Settings › Privacy › Default message timer): a brand-new chat, with
+   * nothing in it yet, starts with disappearing messages on, as on WhatsApp.
+   */
+  async openDirect(userId: string, defaultTimer = 0) {
     const sc = await this.o.server.openDirect(userId);
-    return this.inLane(() => this.saveChat(sc));
+    const chat = await this.inLane(() => this.saveChat(sc));
+    if (defaultTimer > 0 && sc.seq === 0 && !chat.timer) await this.setTimer(chat.id, defaultTimer);
+    return chat;
   }
 
-  async createGroup(title: string, memberIds: string[], options?: { onlyAdminsSend?: boolean }) {
-    const sc = await this.o.server.createGroup(title, memberIds, options);
-    return this.inLane(() => this.saveChat(sc));
+  /** A new group. `defaultTimer` as for openDirect: a new group starts with it. */
+  async createGroup(title: string, memberIds: string[], options?: { onlyAdminsSend?: boolean; defaultTimer?: number }) {
+    const { defaultTimer = 0, ...rest } = options ?? {};
+    const sc = await this.o.server.createGroup(title, memberIds, rest);
+    const chat = await this.inLane(() => this.saveChat(sc));
+    if (defaultTimer > 0) await this.setTimer(chat.id, defaultTimer);
+    return chat;
   }
 
   async addMembers(chatId: string, userIds: string[]) {
@@ -439,12 +504,15 @@ export class PakChat {
 
   // ---- Sending ----
 
-  sendText(chatId: string, text: string, extra: { replyTo?: Ref; mentions?: string[]; forwarded?: boolean } = {}) {
+  /** `bg`: a status in words, on one of the app's colours. `status`: replying to someone's status. */
+  sendText(chatId: string, text: string, extra: { replyTo?: Ref; mentions?: string[]; forwarded?: boolean; bg?: number; status?: StatusQuote } = {}) {
     if (text.trim() === '') throw new Error('Nothing to send');
     const body: Body = { t: 'text', text };
     if (extra.mentions?.length) body.mentions = extra.mentions;
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
+    if (extra.bg !== undefined) body.bg = extra.bg;
+    if (extra.status) body.status = extra.status;
     return this.sendBody(chatId, body);
   }
 
@@ -452,7 +520,7 @@ export class PakChat {
    * Sends a photo, video, voice note or document. It shows at once; the file is
    * locked and uploaded by the outbox (through `files.upload`), then the message goes.
    */
-  sendFile(chatId: string, file: OutgoingFile, extra: { caption?: string; replyTo?: Ref; mentions?: string[]; forwarded?: boolean } = {}) {
+  sendFile(chatId: string, file: OutgoingFile, extra: { caption?: string; replyTo?: Ref; mentions?: string[]; forwarded?: boolean; status?: StatusQuote } = {}) {
     if (!this.o.files) throw new Error('This device cannot send files');
     const { local, ...meta } = file;
     const body: Body = { t: 'file', file: { ...meta, id: PENDING, key: '', digest: '' } };
@@ -460,6 +528,7 @@ export class PakChat {
     if (extra.mentions?.length) body.mentions = extra.mentions;
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
+    if (extra.status) body.status = extra.status;
     return this.sendBody(chatId, body, local);
   }
 
@@ -493,6 +562,67 @@ export class PakChat {
   /** Disappearing messages, in seconds (0 turns them off). */
   setTimer(chatId: string, seconds: number) {
     return this.sendChange(chatId, { t: 'timer', seconds });
+  }
+
+  // ---- Status ----
+
+  /** My own status chat, once I've set who sees it (see `setStatusAudience`). */
+  async myStatus(): Promise<Chat | null> {
+    const all = await this.o.storage.listChats();
+    return all.find((c) => c.kind === 'status' && c.members.some((m) => m.userId === this.s.userId && m.role === 'admin')) ?? null;
+  }
+
+  /**
+   * Sets who sees my status. If anyone was taken out, the next status goes
+   * with a new key, so they can't read it even if a copy reached them.
+   */
+  async setStatusAudience(userIds: string[]) {
+    const sc = await this.o.server.statusAudience(userIds);
+    return this.inLane(async () => {
+      const old = await this.o.storage.getChat(sc.id);
+      const now = new Set(sc.members.map((m) => m.userId));
+      if (old && old.members.some((m) => !now.has(m.userId))) await this.o.storage.deleteValue(`groupKey:${sc.id}`);
+      return this.saveChat(sc, old);
+    });
+  }
+
+  // ---- Calls ----
+
+  /**
+   * Sends a call message now, never through the outbox: a call message that
+   * arrives late is no use. `to` names the devices (the phone I'm connecting
+   * to); without it, every device in the chat gets it (ringing, joining,
+   * hanging up). `ring` makes a closed phone ring. Throws OfflineError when
+   * not connected.
+   */
+  async sendCall(chatId: string, signal: Omit<CallSignal, 't'>, options: { to?: Device[]; ring?: boolean } = {}) {
+    if (!this.connected) throw new OfflineError('Not connected');
+    const content = this.content(chatId, { ...signal, t: 'call' } as CallSignal);
+    if (!parseContent(writeContent(content))) throw new Error('Bad call message');
+    const envelopes = await this.inLane(async () => {
+      const chat = await this.mustChat(chatId);
+      const targets = options.to ?? (await this.targetsFor(chat));
+      return this.lockFor(targets, writeContent(content));
+    });
+    if (!envelopes.length) return;
+    await this.push('call', { chat_id: chatId, envelopes, ring: options.ring === true });
+  }
+
+  /**
+   * A call in the chat's history, on this phone only: "Missed voice call",
+   * "Video call · 2:15". `by` is who called.
+   */
+  async noteCall(chatId: string, callId: string, info: { by: string; video: boolean; group: boolean; missed: boolean; seconds: number }, at: number) {
+    await this.inLane(async () => {
+      const chat = await this.o.storage.getChat(chatId);
+      if (!chat || chat.kind === 'status') return;
+      await this.note(chat, `call-${callId}`, { event: 'call', ...info }, at);
+    });
+  }
+
+  /** This device, as call messages name it. */
+  get device(): Device {
+    return { userId: this.s.userId, deviceId: this.s.deviceId };
   }
 
   private content(chatId: string, payload: Payload): Content {
@@ -598,16 +728,18 @@ export class PakChat {
   /** Tries one item. Returns false to stop for now (offline). */
   private async sendOne(item: OutboxItem): Promise<boolean> {
     let prepared: Prepared;
+    const stops = this.stops.get(item.id) ?? 0;
+    const stopped = () => (this.stops.get(item.id) ?? 0) !== stops;
     try {
-      item = await this.uploadFirst(item);
-      if (this.unsent.has(item.id)) return true;
+      item = await this.uploadFirst(item, stopped);
+      if (stopped()) return true;
       prepared = await this.inLane(() => this.prepare(item));
       const reply = await this.push('send', prepared.payload);
       await this.inLane(() => this.sent(item, prepared, reply));
       return true;
     } catch (err) {
-      // Taken back while it was on its way (cancelSend): nothing more to do.
-      if (this.unsent.has(item.id)) return true;
+      // Paused or deleted while it was on its way: nothing more to do.
+      if (stopped()) return true;
       if (err instanceof ServerError && err.reason === 'stale_devices') {
         // Someone linked or removed a device. Learn the new list and go again.
         await this.inLane(() => this.applyStale(item.chatId, err.details));
@@ -631,7 +763,7 @@ export class PakChat {
    * A file message whose file isn't uploaded yet: upload it, then put its id
    * and key in the message, so what's sent (and any resend) has them.
    */
-  private async uploadFirst(item: OutboxItem): Promise<OutboxItem> {
+  private async uploadFirst(item: OutboxItem, stopped: () => boolean): Promise<OutboxItem> {
     const c = parseContent(item.content);
     if (c?.t !== 'file' || c.file.id !== PENDING || !item.message) return item;
     const ref = item.message;
@@ -641,8 +773,8 @@ export class PakChat {
     const content = writeContent({ ...c, file: { ...c.file, ...done } });
     const next = { ...item, content };
     await this.inLane(async () => {
-      // Taken back while it uploaded: don't bring it back.
-      if (this.unsent.has(item.id)) return;
+      // Paused or deleted while it uploaded: don't bring it back.
+      if (stopped()) return;
       await this.o.storage.transaction(async () => {
         await this.o.storage.putOutbox(next);
         const fresh = await this.o.storage.getMessage(item.chatId, ref.author, ref.id);
@@ -683,6 +815,12 @@ export class PakChat {
     const targets = await this.targetsFor(chat);
     if (chat.kind === 'direct') {
       return { payload: { ...base, envelopes: await this.lockFor(targets, item.content) }, shared: [] };
+    }
+    // Someone else's status: a like goes to its owner alone, never to the others watching it.
+    const owner = statusOwner(chat);
+    if (owner && owner !== this.s.userId) {
+      const theirs = targets.filter((t) => t.userId === owner);
+      return { payload: { ...base, envelopes: await this.lockFor(theirs, item.content) }, shared: [] };
     }
 
     // A group: my group key goes to every device that doesn't have it yet,
@@ -731,8 +869,10 @@ export class PakChat {
           m.seq = seq;
           m.order = seq;
           m.sentAt = sentAt;
-          if (m.status === 'queued' || m.status === 'failed') m.status = 'sent';
-          if (chat?.timer) m.expiresAt = sentAt + chat.timer * 1000;
+          // Paused just as it went: it went, so it shows as sent.
+          if (m.status === 'queued' || m.status === 'failed' || m.status === 'paused') m.status = 'sent';
+          if (chat?.kind === 'status') m.expiresAt = sentAt + STATUS_MS;
+          else if (chat?.timer) m.expiresAt = sentAt + chat.timer * 1000;
           await storage.putMessage(m);
           changed = m;
         }
@@ -741,6 +881,7 @@ export class PakChat {
       const chat = await storage.getChat(item.chatId);
       if (chat) await storage.putChat({ ...chat, lastActivity: Math.max(chat.lastActivity, sentAt) });
       await storage.deleteOutbox(item.id);
+      await storage.deleteValue(`paused:${item.id}`);
     });
     if (changed) this.emit('message', changed);
   }
@@ -952,7 +1093,8 @@ export class PakChat {
         await this.hold(e);
         return;
       }
-      await this.askAgain(e, e.type === SEALED.group ? 'groupKey' : 'session');
+      // A call message can't be sent again (it's too late by then).
+      if (e.kind !== 'call') await this.askAgain(e, e.type === SEALED.group ? 'groupKey' : 'session');
       return;
     }
     await this.applyContent(e, text);
@@ -981,6 +1123,13 @@ export class PakChat {
     if (!maySend(chat, e.from, c.t)) return;
 
     const at = Date.parse(e.sent_at) || this.now();
+    if (c.t === 'call') {
+      // Only as a call message, and only in chats with calls (the server checks too).
+      if (e.kind === 'call' && chat.kind !== 'status') this.emit('call', { chatId: chat.id, from: e.from, fromDevice: e.from_device, signal: c, at });
+      return;
+    }
+    // Anything else must not pretend to be a call message.
+    if (e.kind === 'call') return;
     const { storage } = this.o;
     if (isBody(c)) {
       // A file that was never uploaded can't be shown (a broken or odd sender).
@@ -1023,17 +1172,22 @@ export class PakChat {
       if (c.mentions) m.mentions = c.mentions;
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
+      if (c.bg !== undefined) m.bg = c.bg;
+      if (c.status) m.statusReply = c.status;
     } else if (c.t === 'file') {
       m.file = { ...c.file };
       if (c.caption) m.text = c.caption;
       if (c.mentions) m.mentions = c.mentions;
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
+      if (c.status) m.statusReply = c.status;
     } else {
       m.poll = { question: c.question, options: c.options, multi: c.multi };
     }
     if (author === this.s.userId) m.status = 'sent';
-    if (chat.timer) m.expiresAt = at + chat.timer * 1000;
+    // A status goes after a day; disappearing messages after the chat's timer.
+    if (chat.kind === 'status') m.expiresAt = at + STATUS_MS;
+    else if (chat.timer) m.expiresAt = at + chat.timer * 1000;
     return m;
   }
 
@@ -1101,7 +1255,10 @@ export class PakChat {
 
   /** A note in the chat from this device itself, like "messages now disappear after 7 days". */
   private async note(chat: Chat, id: string, event: SystemEvent, at: number) {
-    const m: Message = { chatId: chat.id, id, author: event.by, authorDevice: 0, seq: null, order: QUEUED + at, sentAt: at, kind: 'system', event };
+    // It goes just after the newest sent message, so later messages still come under it.
+    const recent = await this.o.storage.listMessages(chat.id, { limit: 50 });
+    const last = recent.find((x) => x.seq !== null)?.seq ?? 0;
+    const m: Message = { chatId: chat.id, id, author: event.by, authorDevice: 0, seq: null, order: last + 0.5, sentAt: at, kind: 'system', event };
     await this.o.storage.putMessage(m);
     this.emit('message', m);
   }
@@ -1185,12 +1342,16 @@ export class PakChat {
     this.emit('chat', fresh);
   }
 
-  /** I opened the chat: blue ticks for the others (if their settings allow), and no more unread. */
-  async markRead(chatId: string) {
+  /**
+   * I opened the chat: blue ticks for the others (if their settings allow), and
+   * no more unread. With `upTo`, only up to that message number (a status I
+   * just watched, not the ones after it).
+   */
+  async markRead(chatId: string, upTo?: number) {
     const ticks = await this.inLane(async () => {
       const chat = await this.o.storage.getChat(chatId);
       if (!chat) return [];
-      const recent = await this.o.storage.listMessages(chatId, { limit: 1000 });
+      const recent = (await this.o.storage.listMessages(chatId, { limit: 1000 })).filter((m) => upTo === undefined || (m.seq ?? 0) <= upTo);
       const unread = recent.filter((m) => m.kind !== 'system' && m.author !== this.s.userId && m.seq != null && m.seq > chat.readUpTo);
       const top = Math.max(chat.readUpTo, ...recent.map((m) => m.seq ?? 0));
       await this.markReadUpTo(chat, top);

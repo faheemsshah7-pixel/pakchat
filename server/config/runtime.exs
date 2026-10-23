@@ -72,6 +72,23 @@ if config_env() != :test do
     files_dir: System.get_env("FILES_DIR", "priv/files"),
     # Firebase's service account key file, for push alerts. Never put it in git.
     fcm_service_account: System.get_env("FCM_SERVICE_ACCOUNT")
+
+  # Phase 6 settings, all optional (see server/.env.example).
+  list = fn name, default ->
+    case System.get_env(name) do
+      nil -> default
+      text -> text |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+    end
+  end
+
+  config :pakchat,
+    # Calls: STUN finds a way through routers (free). TURN_URLS and TURN_SECRET
+    # turn on our own coturn relay for networks where phones can't reach each other.
+    stun_urls: list.("STUN_URLS", ["stun:stun.l.google.com:19302"]),
+    turn_urls: list.("TURN_URLS", []),
+    turn_secret: System.get_env("TURN_SECRET"),
+    # GIFs: PakChat's free KLIPY key. Without it the app hides its GIF tab.
+    klipy_key: System.get_env("KLIPY_KEY")
 end
 
 if config_env() == :dev do

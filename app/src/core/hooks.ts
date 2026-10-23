@@ -9,7 +9,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 
 import type { Found } from '../data/sqliteStorage';
 import { core, type ChatPrefs, type Person, type Presence } from './core';
+import { calls, callLog, onCallLog, type CallLogEntry, type CallView } from './calls';
 import { moving } from './files';
+import { loadStatuses, type StatusPerson } from './status';
+import { savedStickers, type SavedSticker } from './stickers';
 
 type Topic = Parameters<typeof core.on>[0];
 
@@ -96,6 +99,8 @@ export function useChatList(): ChatRow[] | null {
       const chats = await core.client.chats();
       const rows: ChatRow[] = [];
       for (const chat of chats) {
+        // Statuses have their own tab.
+        if (chat.kind === 'status') continue;
         // The newest few, in case the very newest is a disappearing message whose time is up.
         const last = core.forgetExpired(await core.client.messages(chat.id, { limit: 5 })).at(-1);
         const prefs = core.prefs[chat.id] ?? {};
@@ -123,18 +128,46 @@ export function useChat(chatId: string): Chat | null | undefined {
 const PAGE = 60;
 
 /** The newest messages of a chat, oldest first. `more()` reaches further back. */
+type Page = { list: Message[]; read: number };
+
+/**
+ * The newest page of each chat opened (or warmed) lately, kept in memory, so
+ * a chat opens with its messages already drawn instead of empty for a moment.
+ * The database is still read straight after, so nothing stale stays.
+ */
+const pages = new Map<string, Page>();
+// Signing out (or in as someone else) forgets them.
+core.on('auth', () => pages.clear());
+
+async function readPage(chatId: string, limit: number): Promise<Page> {
+  const all = await core.client.messages(chatId, { limit });
+  // Disappearing messages: the ones whose time is up are hidden and removed from the phone.
+  const page = { list: core.forgetExpired(all), read: all.length };
+  if (limit === PAGE) {
+    pages.set(chatId, page);
+    // Only the last few dozen chats are kept.
+    if (pages.size > 40) pages.delete(pages.keys().next().value!);
+  }
+  return page;
+}
+
+/** Reads the newest messages of some chats ahead of time (the top of the chat list). */
+export function warmChats(chatIds: string[]) {
+  void (async () => {
+    for (const id of chatIds) {
+      if (pages.has(id)) continue;
+      try {
+        await readPage(id, PAGE);
+      } catch {
+        return;
+      }
+    }
+  })();
+}
+
 export function useMessages(chatId: string) {
   const [limit, setLimit] = useState(PAGE);
-  const loaded = useLoaded<{ list: Message[]; read: number } | null>(
-    [`messages:${chatId}`, 'auth'],
-    async () => {
-      const all = await core.client.messages(chatId, { limit });
-      // Disappearing messages: the ones whose time is up are hidden and removed from the phone.
-      return { list: core.forgetExpired(all), read: all.length };
-    },
-    null,
-    [chatId, limit],
-  );
+  const loaded = useLoaded<Page | null>([`messages:${chatId}`, 'auth'], () => readPage(chatId, limit), pages.get(chatId) ?? null, [chatId, limit]);
   // A full page means there may be older ones (counted before hiding any, so paging never stops early).
   const hasMore = (loaded?.read ?? 0) >= limit;
   const more = useCallback(() => {
@@ -227,8 +260,10 @@ export function useSearch(query: string): Found[] {
     const t = setTimeout(() => {
       core.storage
         .search(query, 60)
-        .then((r) => {
-          if (seq.current === mine) setFound(r);
+        .then(async (r) => {
+          // Statuses aren't chats you can open: leave them out.
+          const status = new Set((await core.client.chats()).filter((c) => c.kind === 'status').map((c) => c.id));
+          if (seq.current === mine) setFound(r.filter((f) => !status.has(f.chatId)));
         })
         .catch(() => {});
     }, 120);
@@ -252,4 +287,66 @@ export function useNow(ms = 30_000) {
 /** How far a file has moved (0 to 1) while it uploads or downloads, else undefined. */
 export function useFileProgress(tag: string): number | undefined {
   return useCore(['files'], () => moving[tag]);
+}
+
+// ---- Calls ----
+
+let lastView: CallView | null = null;
+let viewStale = true;
+calls.on(() => {
+  viewStale = true;
+});
+const readCall = () => {
+  if (viewStale) {
+    lastView = calls.view();
+    viewStale = false;
+  }
+  return lastView;
+};
+
+/** The call going on now (or ringing), or null. */
+export function useCall(): CallView | null {
+  return useSyncExternalStore(
+    (changed) => calls.on(changed),
+    readCall,
+    readCall,
+  );
+}
+
+/** Every call, newest first, for the Calls tab. */
+export function useCallLog(): CallLogEntry[] | null {
+  const [list, setList] = useState<CallLogEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      void callLog()
+        .then((l) => alive && setList(l))
+        .catch(() => {});
+    load();
+    const off = onCallLog(load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+  return list;
+}
+
+// ---- Status ----
+
+/** My status and everyone else's, newest first (statuses older than a day are gone). */
+export function useStatuses(): { mine: StatusPerson | null; others: StatusPerson[] } | null {
+  return useLoaded<{ mine: StatusPerson | null; others: StatusPerson[] } | null>(
+    ['chats', 'prefs', 'people', 'auth'],
+    async () => (core.state === 'signedIn' ? loadStatuses() : { mine: null, others: [] }),
+    null,
+    [],
+  );
+}
+
+// ---- Stickers ----
+
+/** My saved stickers, newest first. */
+export function useSavedStickers(): SavedSticker[] {
+  return useLoaded(['stickers'], async () => savedStickers(), [], []);
 }

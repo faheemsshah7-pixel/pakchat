@@ -8,6 +8,7 @@ import { BackHandler, FlatList, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeInRight, LinearTransition, ZoomOut } from 'react-native-reanimated';
 
 import { core, isOffline, type Person } from '../core/core';
+import { defaultTimer } from '../core/timer';
 import { useChat, usePeople } from '../core/hooks';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
@@ -75,7 +76,7 @@ export default function NewGroup() {
         await core.client.addMembers(add, picked.map((p) => p.id));
         router.back();
       } else {
-        const chat = await core.client.createGroup(title.trim(), picked.map((p) => p.id), { onlyAdminsSend: onlyAdmins });
+        const chat = await core.client.createGroup(title.trim(), picked.map((p) => p.id), { onlyAdminsSend: onlyAdmins, defaultTimer: defaultTimer() });
         router.replace({ pathname: '/chat/[id]', params: { id: chat.id } });
       }
     } catch (err) {

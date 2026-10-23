@@ -3,39 +3,46 @@
 // The round button on the end is a microphone while the box is empty and turns
 // into "send" (with a little spin) as soon as you type. Your words are kept as
 // a draft if you leave, and the others see "typing…" while you write.
-import type { Chat, Message } from '@pakchat/shared';
+import type { Chat, Gif, Message } from '@pakchat/shared';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, TextInput, View, type TextInputInstance } from 'react-native';
-import Animated, { FadeIn, FadeOut, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { Keyboard, TextInput, View, type TextInputInstance } from 'react-native';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated, { FadeOut, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../icons';
 import { fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
+import { fileLine } from '../format';
 import { lively, rise } from '../motion';
-import { toast } from '../overlays';
-
-const EMOJI = ['😂', '❤️', '👍', '🙏', '😍', '😭', '🔥', '😊', '🤲', '💯', '😅', '🥰', '👌', '😢', '🎉', '🤣', '✨', '🌙'];
+import type { Recorded } from '../../core/voice';
+import { ExtrasPanel } from './ExtrasPanel';
+import { useVoiceRecorder } from './VoiceRecorder';
 
 export function Composer({
   chat,
   replyTo,
   editing,
-  quick,
   onCancel,
   onSend,
   onAttach,
+  onVoice,
+  onGif,
+  onSticker,
 }: {
   chat: Chat;
   replyTo: Message | null;
   editing: Message | null;
-  /** Show the one-tap answers ("Theek hai", "InshaAllah"…). */
-  quick: boolean;
   onCancel: () => void;
   onSend: (text: string, mentions: string[]) => void;
   onAttach: () => void;
+  /** A voice note was recorded (VoiceRecorder.tsx). */
+  onVoice: (v: Recorded) => void;
+  /** A GIF or a sticker was picked in the smiley panel (ExtrasPanel.tsx). */
+  onGif: (g: Gif) => void;
+  onSticker: (from: string | number) => void;
 }) {
   const t = useT();
   const { theme, lang, rtl } = useLook();
@@ -134,8 +141,12 @@ export function Composer({
   const micStyle = useAnimatedStyle(() => ({ opacity: 1 - v.value, transform: [{ scale: interpolate(v.value, [0, 1], [1, 0.4]) }, { rotate: `${v.value * -90}deg` }] }));
   const sendStyle = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ scale: interpolate(v.value, [0, 1], [0.4, 1]) }, { rotate: `${(1 - v.value) * 90}deg` }] }));
 
+  // Voice notes: the mic button records (hold, slide, lock, or tap).
+  const voice = useVoiceRecorder({ enabled: !hasText && !editing, onSend: onVoice });
+  const recording = voice.mode !== 'idle';
+  const locked = voice.mode === 'locked' || voice.mode === 'paused';
+
   const banner = editing ?? replyTo;
-  const quickOnes = [t.quickOk, t.quickInshallah, t.quickSure, t.quickHaha];
 
   return (
     // No layout animation on this outer view: it moves with the keyboard every frame,
@@ -157,47 +168,31 @@ export function Composer({
         </Animated.View>
       )}
 
-      {quick && !hasText && !banner && (
-        <Animated.View entering={FadeIn.delay(150)} exiting={FadeOut.duration(100)}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingHorizontal: 12, paddingTop: 8 }} keyboardShouldPersistTaps="always">
-            {quickOnes.map((q) => (
-              <Pressy key={q} onPress={() => send(q)} label={q} scale={0.93} testID={`quick-${q}`}>
-                <View style={{ height: 34, paddingHorizontal: 14, borderRadius: 12, backgroundColor: theme.glass, justifyContent: 'center' }}>
-                  <Txt size={13} weight="600" color={theme.accInk}>
-                    {q}
-                  </Txt>
-                </View>
-              </Pressy>
-            ))}
-          </ScrollView>
-        </Animated.View>
-      )}
+      {voice.lockHint}
 
-      {emoji && (
-        <Animated.View entering={rise()} exiting={FadeOutDown.duration(120)}>
-          <Glass strong style={{ marginHorizontal: 10, marginTop: 8, padding: 6, borderRadius: 20, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
-            {EMOJI.map((e) => (
-              <Pressy key={e} onPress={() => changed(text + e)} label={e} scale={0.85}>
-                <View style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                  <Txt size={24} align="center">
-                    {e}
-                  </Txt>
-                </View>
-              </Pressy>
-            ))}
-          </Glass>
-        </Animated.View>
+      {emoji && !recording && (
+        <ExtrasPanel
+          onEmoji={(e) => changed(text + e)}
+          onGif={(g) => {
+            setEmoji(false);
+            onGif(g);
+          }}
+          onSticker={(from) => {
+            setEmoji(false);
+            onSticker(from);
+          }}
+        />
       )}
 
       <Glass style={{ marginHorizontal: 10, marginTop: 10, marginBottom: 10, padding: 6, borderRadius: 22 }}>
-        {banner && (
+        {banner && !recording && (
           <Animated.View entering={rise()} exiting={FadeOut.duration(100)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 10, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
               <Txt size={13} weight="700" color={theme.accInk}>
                 {editing ? t.editing : fill(t.replyingTo, { name: banner.author === core.myId ? t.youWord : core.name(banner.author) || '…' })}
               </Txt>
               <Txt size={13} color={theme.muted} lines={1}>
-                {banner.kind === 'poll' ? `${t.poll} ${banner.poll?.question ?? ''}` : (banner.text ?? '')}
+                {banner.kind === 'poll' ? `${t.poll} ${banner.poll?.question ?? ''}` : banner.kind === 'file' && banner.file ? fileLine(banner, t) : (banner.text ?? '')}
               </Txt>
             </View>
             <IconButton
@@ -214,44 +209,66 @@ export function Composer({
           </Animated.View>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
-          <IconButton icon="plus" label={t.attach} look="soft" onPress={onAttach} testID="attach" />
-          <TextInput
-            ref={input}
-            testID="composer"
-            value={text}
-            onChangeText={changed}
-            placeholder={t.message}
-            placeholderTextColor={theme.muted}
-            selectionColor={theme.acc}
-            cursorColor={theme.acc}
-            multiline
-            maxLength={4000}
-            style={[
-              fontStyle(text || null, lang, 16, '400'),
-              { flex: 1, color: theme.text, maxHeight: 132, minHeight: 44, paddingVertical: 10, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center' },
-            ]}
-          />
-          <IconButton icon="emoji" label={t.emoji} onPress={() => setEmoji((e) => !e)} color={emoji ? theme.acc : theme.muted} />
-          <Pressy
-            onPress={() => (hasText ? send() : toast(t.voiceSoon))}
-            label={hasText ? t.send : t.voiceNote}
-            testID="send"
-            scale={0.88}
-          >
-            <LinearGradient
-              colors={theme.grad}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{ width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 20px -8px ${theme.acc}` }}
-            >
-              <Animated.View style={[{ position: 'absolute' }, micStyle]}>
-                <Icon name="mic" size={20} color="#FFFFFF" stroke={2} />
-              </Animated.View>
-              <Animated.View style={[{ position: 'absolute' }, sendStyle]}>
-                <Icon name={editing ? 'check' : 'send'} size={20} color="#FFFFFF" stroke={2} flip />
-              </Animated.View>
-            </LinearGradient>
-          </Pressy>
+          {recording ? (
+            voice.strip
+          ) : (
+            <>
+              <IconButton icon="plus" label={t.attach} look="soft" onPress={onAttach} testID="attach" />
+              <TextInput
+                ref={input}
+                testID="composer"
+                value={text}
+                onChangeText={changed}
+                // The keyboard and the smiley panel take turns, as on WhatsApp.
+                onFocus={() => setEmoji(false)}
+                placeholder={t.message}
+                placeholderTextColor={theme.muted}
+                selectionColor={theme.acc}
+                cursorColor={theme.acc}
+                multiline
+                maxLength={4000}
+                style={[
+                  fontStyle(text || null, lang, 16, '400'),
+                  { flex: 1, color: theme.text, maxHeight: 132, minHeight: 44, paddingVertical: 10, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center' },
+                ]}
+              />
+              <IconButton
+                icon="emoji"
+                label={t.emoji}
+                onPress={() => {
+                  if (!emoji) Keyboard.dismiss();
+                  setEmoji(!emoji);
+                }}
+                color={emoji ? theme.acc : theme.muted}
+                testID="emoji"
+              />
+            </>
+          )}
+          {/* The mic records voice notes; it holds your finger, so it stays put while recording. */}
+          <GestureDetector gesture={voice.gesture}>
+            <Animated.View style={voice.micStyle}>
+              <Pressy
+                onPress={() => (hasText ? send() : undefined)}
+                label={hasText ? t.send : locked ? t.sendVoice : t.voiceNote}
+                testID="send"
+                scale={0.88}
+              >
+                <LinearGradient
+                  colors={theme.grad}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={{ width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 20px -8px ${theme.acc}` }}
+                >
+                  <Animated.View style={[{ position: 'absolute' }, micStyle]}>
+                    <Icon name={locked ? 'send' : 'mic'} size={20} color="#FFFFFF" stroke={2} flip={locked} />
+                  </Animated.View>
+                  <Animated.View style={[{ position: 'absolute' }, sendStyle]}>
+                    <Icon name={editing ? 'check' : 'send'} size={20} color="#FFFFFF" stroke={2} flip />
+                  </Animated.View>
+                </LinearGradient>
+              </Pressy>
+            </Animated.View>
+          </GestureDetector>
         </View>
       </Glass>
     </Animated.View>

@@ -33,7 +33,13 @@ defmodule PakchatWeb.Wire do
   def person_with_ways(%User{} = u), do: Map.merge(person(u), %{phone: u.phone, email: u.email})
 
   def chat(%Chat{} = c, viewer_id) do
-    members = Enum.map(c.members, &%{user_id: &1.user_id, role: &1.role})
+    # Someone's status: only its owner sees who else can see it.
+    visible =
+      if c.kind == "status" and c.created_by != viewer_id,
+        do: Enum.filter(c.members, &(&1.user_id in [c.created_by, viewer_id])),
+        else: c.members
+
+    members = Enum.map(visible, &%{user_id: &1.user_id, role: &1.role})
     admin? = Enum.any?(c.members, &(&1.user_id == viewer_id and &1.role == "admin"))
 
     %{

@@ -123,7 +123,7 @@ describe('files', () => {
     expect(await sara.client.messages(chat.id)).toHaveLength(1);
   }, 20_000);
 
-  test('cancelled while it uploads: never sent, gone from the chat, and not tried again', async () => {
+  test('paused while it uploads (the ✕): stays in the chat, nothing goes, until sent again', async () => {
     const { up, ali, sara, chat } = await two();
     // The upload hangs until we let it finish, like a big file on slow internet.
     let finish: (ok: boolean) => void = () => {};
@@ -139,23 +139,34 @@ describe('files', () => {
     });
     const sent = await ali.client.sendFile(chat.id, photo);
     await started;
-    expect(await ali.client.cancelSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
+    expect(await ali.client.pauseSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
     // Even if the upload still finishes just after, nothing goes.
     finish(true);
     await w.settle();
-    expect(await ali.client.messages(chat.id)).toEqual([]);
+    const [paused] = await ali.client.messages(chat.id);
+    expect(paused.status).toBe('paused');
+    expect(paused.file?.local).toBe('file:///photo.jpg');
     expect(await ali.client.outbox()).toEqual([]);
     expect(await sara.client.messages(chat.id)).toEqual([]);
+    // Pausing twice does nothing.
+    expect(await ali.client.pauseSend(chat.id, { author: ali.id, id: sent.id })).toBe(false);
 
-    // Something already sent can't be taken back this way.
+    // The upload button: it goes, once.
     (ali.client as unknown as { o: { files: unknown } }).o.files = up.files;
-    const done = await ali.client.sendFile(chat.id, photo);
+    expect(await ali.client.resumeSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
     await w.settle();
-    expect(await ali.client.cancelSend(chat.id, { author: ali.id, id: done.id })).toBe(false);
+    const [went] = await ali.client.messages(chat.id);
+    expect(went.status).not.toBe('paused');
+    expect(went.seq).not.toBeNull();
     expect(await sara.client.messages(chat.id)).toHaveLength(1);
+    expect(await ali.storage.getValue(`paused:${sent.id}`)).toBeUndefined();
+
+    // Something already sent can't be paused.
+    expect(await ali.client.pauseSend(chat.id, { author: ali.id, id: sent.id })).toBe(false);
+    expect(await ali.client.resumeSend(chat.id, { author: ali.id, id: sent.id })).toBe(false);
   });
 
-  test('cancelled while the upload fails: not put back to try again', async () => {
+  test('paused while the upload fails: not put back to try again', async () => {
     const { ali, chat } = await two();
     let fail: () => void = () => {};
     const started = new Promise<void>((ready) => {
@@ -168,11 +179,63 @@ describe('files', () => {
     });
     const sent = await ali.client.sendFile(chat.id, photo);
     await started;
-    expect(await ali.client.cancelSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
+    expect(await ali.client.pauseSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
     fail();
     await w.settle();
     expect(await ali.client.outbox()).toEqual([]);
+    expect((await ali.client.messages(chat.id))[0].status).toBe('paused');
+  });
+
+  test('paused, then sent again while the old upload is still stopping: goes once', async () => {
+    const { up, ali, sara, chat } = await two();
+    let fail: () => void = () => {};
+    const started = new Promise<void>((ready) => {
+      (ali.client as unknown as { o: { files: unknown } }).o.files = {
+        upload: () => {
+          ready();
+          return new Promise((_, reject) => (fail = () => reject(new OfflineError('Cancelled'))));
+        },
+      };
+    });
+    const sent = await ali.client.sendFile(chat.id, photo);
+    await started;
+    expect(await ali.client.pauseSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
+    (ali.client as unknown as { o: { files: unknown } }).o.files = up.files;
+    expect(await ali.client.resumeSend(chat.id, { author: ali.id, id: sent.id })).toBe(true);
+    // Only now does the old upload give up: it must not undo the new try.
+    fail();
+    await w.settle();
+    expect(await sara.client.messages(chat.id)).toHaveLength(1);
+    expect(await ali.client.outbox()).toEqual([]);
+  });
+
+  test('deleting a file that has not gone (paused or waiting): it never goes', async () => {
+    const { ali, sara, chat } = await two();
+    // Every upload hangs until let go, then fails like a stopped transfer.
+    const hanging: (() => void)[] = [];
+    let started: () => void = () => {};
+    const first = new Promise<void>((ready) => (started = ready));
+    (ali.client as unknown as { o: { files: unknown } }).o.files = {
+      upload: () => {
+        started();
+        return new Promise((_, reject) => hanging.push(() => reject(new OfflineError('Cancelled'))));
+      },
+    };
+    const a = await ali.client.sendFile(chat.id, photo);
+    const b = await ali.client.sendFile(chat.id, photo);
+    await first;
+    expect(await ali.client.pauseSend(chat.id, { author: ali.id, id: a.id })).toBe(true);
+    await ali.client.deleteHere(chat.id, [
+      { author: ali.id, id: a.id },
+      { author: ali.id, id: b.id },
+    ]);
+    for (const go of hanging) go();
+    await w.settle();
     expect(await ali.client.messages(chat.id)).toEqual([]);
+    expect(await ali.client.outbox()).toEqual([]);
+    expect(await ali.storage.getValue(`paused:${a.id}`)).toBeUndefined();
+    expect(await ali.client.resumeSend(chat.id, { author: ali.id, id: a.id })).toBe(false);
+    expect(await sara.client.messages(chat.id)).toEqual([]);
   });
 
   test('a file message that was never uploaded is ignored', () => {

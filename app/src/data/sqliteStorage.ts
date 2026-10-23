@@ -9,7 +9,7 @@
 // It talks to the database through the small `Db` interface below, so the
 // tests can run it on a computer with Node's own SQLite, and the app with
 // expo-sqlite (see db.ts).
-import type { Chat, Message, OutboxItem, Storage } from '@pakchat/shared';
+import { restoredChat, type Chat, type Message, type OutboxItem, type Storage } from '@pakchat/shared';
 
 export type SqlValue = string | number | null;
 
@@ -18,6 +18,12 @@ export interface Db {
   run(sql: string, params?: SqlValue[]): Promise<void>;
   all<T>(sql: string, params?: SqlValue[]): Promise<T[]>;
   first<T>(sql: string, params?: SqlValue[]): Promise<T | null>;
+}
+
+/** The web addresses in some words ("www.x.pk" becomes "https://www.x.pk"). */
+export function linksIn(text: string): string[] {
+  const found = text.match(/\b(?:https?:\/\/|www\.)[^\s<>"]+[^\s<>".,;:!?)\]'"]/gi) ?? [];
+  return found.map((l) => (/^https?:/i.test(l) ? l : `https://${l}`));
 }
 
 /** One search result. */
@@ -204,6 +210,27 @@ export class SqliteStorage implements Storage {
     return rows.map((r) => ({ chatId: r.chat_id, author: r.author, id: r.msg_id, text: r.text, sentAt: Number(r.sent_at) }));
   }
 
+  // ---- Media, links and docs (a chat's Info) ----
+
+  /**
+   * A chat's photos and videos (`media`), documents and audio files (`docs`),
+   * or messages with a web address in them (`links`), newest first. GIFs and
+   * stickers aren't counted (as on WhatsApp), nor deleted messages.
+   */
+  async shared(chatId: string, which: 'media' | 'docs' | 'links', limit = 500): Promise<Message[]> {
+    const where = {
+      media: "json_extract(json, '$.file.kind') IN ('image', 'video') AND json_extract(json, '$.file.gif') IS NULL",
+      docs: "json_extract(json, '$.file.kind') IN ('doc', 'audio')",
+      links: "(json_extract(json, '$.text') LIKE '%http%' OR json_extract(json, '$.text') LIKE '%www.%')",
+    }[which];
+    const rows = await this.db.all<{ json: string }>(
+      `SELECT json FROM messages WHERE chat_id = ? AND json_extract(json, '$.deleted') IS NOT 1 AND ${where} ORDER BY ord DESC, sent_at DESC LIMIT ?`,
+      [chatId, limit],
+    );
+    const list = rows.map((r) => JSON.parse(r.json) as Message);
+    return which === 'links' ? list.filter((m) => linksIn(m.text ?? '').length > 0) : list;
+  }
+
   // ---- Backups ----
 
   /** Writes a copy of the whole database to `path` (a file that mustn't exist yet), for a backup. */
@@ -231,16 +258,22 @@ export class SqliteStorage implements Storage {
     await this.db.run('ATTACH DATABASE ? AS b', [path]);
     try {
       await this.transaction(async () => {
+        // Messages that hadn't gone (waiting, or paused) stay behind: their files aren't in the backup.
         await this.db.exec(`
-          INSERT OR IGNORE INTO chats (id, last_activity, json) SELECT id, last_activity, json FROM b.chats;
           INSERT OR IGNORE INTO messages (chat_id, author, id, seq, ord, sent_at, json)
             SELECT chat_id, author, id, seq, ord, sent_at, json_remove(json, '$.file.local') FROM b.messages
-            WHERE json_extract(json, '$.status') IS NOT 'queued';
+            WHERE coalesce(json_extract(json, '$.status'), '') NOT IN ('queued', 'paused');
           INSERT INTO search (text, chat_id, author, msg_id, sent_at)
             SELECT s.text, s.chat_id, s.author, s.msg_id, s.sent_at FROM b.search s
             WHERE NOT EXISTS (SELECT 1 FROM search x WHERE x.chat_id = s.chat_id AND x.author = s.author AND x.msg_id = s.msg_id);
           INSERT OR REPLACE INTO kv (key, json) SELECT key, json FROM b.kv WHERE key LIKE 'app:%' AND key <> 'app:lastUser';
         `);
+        // Chats come back as they were: same order, same times (not "just now"
+        // from signing in), with anything that came since counted on top.
+        const rows = await this.db.all<{ backup: string; here: string | null; newest: number | null }>(`
+          SELECT bc.json AS backup, c.json AS here, (SELECT max(m.sent_at) FROM messages m WHERE m.chat_id = bc.id) AS newest
+          FROM b.chats bc LEFT JOIN main.chats c ON c.id = bc.id`);
+        for (const r of rows) await this.putChat(restoredChat(JSON.parse(r.backup) as Chat, r.here ? (JSON.parse(r.here) as Chat) : null, r.newest));
       });
     } finally {
       await this.db.exec('DETACH DATABASE b');

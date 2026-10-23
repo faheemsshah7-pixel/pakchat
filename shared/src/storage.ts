@@ -4,13 +4,14 @@
 //
 // Signal's keys are NOT kept here: they stay inside the Signal module.
 
-import type { Attachment, Ref } from './content';
+import type { Attachment, Ref, StatusQuote } from './content';
 
 export type Role = 'admin' | 'member';
 
 export type Chat = {
   id: string;
-  kind: 'direct' | 'group';
+  /** `status`: someone's status (their photos, videos and words for a day). Its only admin is its owner. */
+  kind: 'direct' | 'group' | 'status';
   members: { userId: string; role: Role }[];
   title?: string;
   description?: string;
@@ -29,7 +30,8 @@ export type Chat = {
   lastActivity: number;
 };
 
-export type MessageStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed';
+/** `paused`: a file I stopped (the ✕) before it went. It waits for me to send it again. */
+export type MessageStatus = 'queued' | 'paused' | 'sent' | 'delivered' | 'read' | 'failed';
 
 /** A group note from the server, like "Ali added Sara". */
 export type SystemEvent = { event: string; by: string; users?: string[]; title?: string; [key: string]: unknown };
@@ -62,8 +64,12 @@ export type Message = {
   editedAt?: number;
   deleted?: boolean;
   pinnedUntil?: number;
-  /** Disappearing messages: when it goes (ms). */
+  /** Disappearing messages, and statuses: when it goes (ms). */
   expiresAt?: number;
+  /** A status in words: its colour (an index into the app's list). */
+  bg?: number;
+  /** A reply to someone's status: a little copy of it. */
+  statusReply?: StatusQuote;
   event?: SystemEvent;
   /** My own messages: how far they got. */
   status?: MessageStatus;
@@ -96,6 +102,26 @@ export type OutboxItem = {
   /** Its place in the queue. */
   added: number;
 };
+
+/**
+ * A chat from a backup, put back on a new phone. The backup's copy wins (its
+ * place in the list, what was read, its timer), with what came since signing
+ * in on this phone counted on top. `newest` is the time of the newest message
+ * the phone now has for it, so the list is in the same order as before.
+ */
+export function restoredChat(backup: Chat, here: Chat | null, newest: number | null): Chat {
+  const chat: Chat = { ...backup };
+  if (here) {
+    // Who's in it and its name come from the server, which this phone asked more recently.
+    for (const k of ['kind', 'members', 'title', 'description', 'photo', 'onlyAdminsSend', 'inviteCode', 'left'] as const) {
+      if (here[k] !== undefined) (chat as Record<string, unknown>)[k] = here[k];
+    }
+    chat.readUpTo = Math.max(backup.readUpTo, here.readUpTo);
+    chat.unread = backup.unread + here.unread;
+  }
+  chat.lastActivity = Math.max(backup.lastActivity, newest ?? 0);
+  return chat;
+}
 
 /** Everything here is async, so SQLite and IndexedDB can sit behind it. */
 export interface Storage {

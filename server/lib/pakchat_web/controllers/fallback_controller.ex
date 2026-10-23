@@ -22,5 +22,6 @@ defmodule PakchatWeb.FallbackController do
   defp status(:forbidden), do: 403
   defp status(:bad_request), do: 400
   defp status(:rate_limited), do: 429
+  defp status(:unavailable), do: 503
   defp status(_), do: 422
 end

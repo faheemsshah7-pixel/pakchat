@@ -1,7 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Calls: the mic and camera, ringing over a locked screen, and keeping a call going in the background. -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-permission android:name="android.permission.CAMERA" />
+  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
   <application>
     <!-- Reply, Mark as read and Mute on a message alert (see ChatAlerts.kt). -->
     <receiver android:name="expo.modules.pakchatsignal.AlertActionReceiver" android:exported="false" />
     <service android:name="expo.modules.pakchatsignal.AlertActionService" android:exported="false" />
+    <!-- Decline and Hang up on a call alert, and the ongoing call (see CallService.kt). -->
+    <receiver android:name="expo.modules.pakchatsignal.CallActionReceiver" android:exported="false" />
+    <service android:name="expo.modules.pakchatsignal.CallActionService" android:exported="false" />
+    <service android:name="expo.modules.pakchatsignal.CallService" android:exported="false" android:foregroundServiceType="microphone|camera" />
   </application>
 </manifest>

@@ -4,18 +4,22 @@
 // download button and its size; while moving, how far it's got; once here, the
 // photo itself (or the video's first frame and a play button). A document is a
 // row with its name and size. Tap to download, or to open once it's here.
-// While it moves, a ring fills up around a ✕, like WhatsApp: tap to stop it
-// (a file still sending is taken back, so nothing half-sent goes out).
+// While it moves, a ring fills up around a ✕, like WhatsApp: tap to stop it.
+// A file I stopped while sending stays in the chat, paused, with an upload
+// button to send it again (delete it from the message menu to take it back).
+// A GIF plays by itself, on a loop, with no sound. A sticker is just the
+// picture, big, with no bubble round it (Bubble.tsx).
 import type { Message } from '@pakchat/shared';
 import { File } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 import { useFileProgress } from '../../core/hooks';
-import { Cancelled, cancelDownload, cancelSend, download, FileBroken, FileGone, haveFile, tagOf } from '../../core/files';
+import { Cancelled, cancelDownload, download, FileBroken, FileGone, haveFile, pauseSend, resumeSend, tagOf } from '../../core/files';
 import { isOffline } from '../../core/core';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -25,6 +29,8 @@ import { Pressy, Txt } from '../kit';
 import { toast } from '../overlays';
 
 const WIDE = 236;
+/** How big a sticker shows. */
+export const STICKER_SHOWN = 150;
 
 export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boolean; selecting: boolean; onPick: () => void }) {
   const t = useT();
@@ -33,14 +39,17 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
   const progress = useFileProgress(tagOf(m.chatId, m));
   const here = haveFile(m);
   const sending = mine && m.status === 'queued';
+  const paused = mine && m.status === 'paused';
   const ink = mine ? theme.bubbleMineText : theme.text;
   const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
 
   async function tap() {
     if (selecting) return onPick();
+    // The upload button: send it again.
+    if (paused) return void resumeSend(m).catch(() => {});
     if (here && !sending) return open(m);
     // The ✕: stop it.
-    if (sending) return void cancelSend(m).catch(() => {});
+    if (sending) return void pauseSend(m).catch(() => {});
     if (progress !== undefined) return cancelDownload(m);
     try {
       await download(m);
@@ -54,6 +63,13 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
   const moving = progress !== undefined || sending;
   const badge = moving ? (
     <Stop progress={progress ?? 0} size={52} label={t.cancel} />
+  ) : paused ? (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }} accessibilityLabel={t.sendAgain} testID="file-paused">
+      <Icon name="upload" size={18} color="#FFFFFF" />
+      <Txt size={12.5} weight="700" color="#FFFFFF">
+        {fileSize(f.size)}
+      </Txt>
+    </View>
   ) : !here ? (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
       <Icon name="download" size={18} color="#FFFFFF" />
@@ -61,9 +77,22 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
         {fileSize(f.size)}
       </Txt>
     </View>
-  ) : f.kind === 'video' ? (
+  ) : f.kind === 'video' && !f.gif ? (
     <Icon name="play" size={24} color="#FFFFFF" />
   ) : null;
+
+  if (f.kind === 'sticker') {
+    // Here: only the picture (a tap or hold goes to the message, as on WhatsApp).
+    if (here && !moving && !paused) return <Image source={{ uri: f.local }} style={{ width: STICKER_SHOWN, height: STICKER_SHOWN }} contentFit="contain" testID="file-sticker" />;
+    return (
+      <Pressy onPress={tap} onLongPress={onPick} label={t.sticker} scale={0.96} testID="file-sticker">
+        <View style={{ width: STICKER_SHOWN, height: STICKER_SHOWN, borderRadius: 24, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
+          {here && <Image source={{ uri: f.local }} style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.6 }} contentFit="contain" />}
+          <View style={{ minWidth: 52, height: 52, paddingHorizontal: 12, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>{badge}</View>
+        </View>
+      </Pressy>
+    );
+  }
 
   if (f.kind === 'image' || f.kind === 'video') {
     const ratio = f.width && f.height ? f.height / f.width : 0.75;
@@ -81,7 +110,11 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
             marginBottom: 4,
           }}
         >
-          {source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={here && f.kind === 'image' ? 0 : 6} transition={150} />}
+          {f.gif && here ? (
+            <GifView uri={f.local!} />
+          ) : (
+            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={here && f.kind === 'image' ? 0 : 6} transition={150} />
+          )}
           {badge && (
             <View
               style={{
@@ -109,7 +142,14 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
               </View>
             </View>
           )}
-          {f.kind === 'video' && !!f.duration && (
+          {f.gif && (
+            <View style={{ position: 'absolute', start: 8, bottom: 6, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.45)' }}>
+              <Txt size={11} weight="800" color="#FFFFFF">
+                GIF
+              </Txt>
+            </View>
+          )}
+          {f.kind === 'video' && !f.gif && !!f.duration && (
             <View
               style={{
                 position: 'absolute',
@@ -176,12 +216,26 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
               justifyContent: 'center',
             }}
           >
-            {moving ? <Stop progress={progress ?? 0} size={40} label={t.cancel} /> : <Icon name="download" size={19} color="#FFFFFF" />}
+            {moving ? (
+              <Stop progress={progress ?? 0} size={40} label={t.cancel} />
+            ) : (
+              <Icon name={paused ? 'upload' : 'download'} size={19} color="#FFFFFF" />
+            )}
           </View>
         )}
       </View>
     </Pressy>
   );
+}
+
+/** A GIF: its little video, playing on a loop with no sound. */
+function GifView({ uri }: { uri: string }) {
+  const player = useVideoPlayer({ uri }, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+  return <VideoView player={player} style={{ width: '100%', height: '100%' }} contentFit="cover" nativeControls={false} pointerEvents="none" />;
 }
 
 /** A ring that fills as the file moves, around a ✕ that stops it. */

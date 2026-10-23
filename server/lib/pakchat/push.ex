@@ -14,7 +14,9 @@ defmodule Pakchat.Push do
   3 seconds gets the push anyway.
 
   Only real messages wake a phone, never ticks or typing, and never the
-  sender's own other devices.
+  sender's own other devices. A call that starts ringing gets a "call" push:
+  it goes at once and only lives a minute, so a phone that was off doesn't
+  ring for a call that's long over.
   """
   import Ecto.Query
   alias Pakchat.Accounts.Device
@@ -30,8 +32,10 @@ defmodule Pakchat.Push do
   `senders` maps each device id to who sent it something, so a person's own
   messages don't wake their own other devices.
   """
-  def wake_offline(senders) do
+  def wake_offline(senders, opts \\ []) do
     device_ids = Map.keys(senders)
+    # Always said, true or false: Oban's "unique" check matches on the keys given.
+    call = %{call: opts[:call] == true}
 
     Repo.all(
       from d in Device,
@@ -42,10 +46,11 @@ defmodule Pakchat.Push do
     |> Enum.each(fn {id, user_id} ->
       if Presence.device_online?(user_id, id) do
         %{device_id: id, if_waiting: true}
+        |> Map.merge(call)
         |> Notify.new(schedule_in: @grace_seconds)
         |> Oban.insert()
       else
-        %{device_id: id} |> Notify.new() |> Oban.insert()
+        %{device_id: id} |> Map.merge(call) |> Notify.new() |> Oban.insert()
       end
     end)
   end

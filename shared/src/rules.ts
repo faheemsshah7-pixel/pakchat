@@ -20,8 +20,15 @@ export const roleOf = (chat: Chat, userId: string) => chat.members.find((m) => m
  * checks here too.
  */
 export function maySend(chat: Chat, userId: string, t: string) {
+  // A status: only its owner posts; the people watching can like it.
+  if (chat.kind === 'status') return userId === statusOwner(chat) || t === 'react';
   if (chat.kind !== 'group' || !chat.onlyAdminsSend) return true;
-  return roleOf(chat, userId) === 'admin' || t === 'react' || t === 'vote';
+  return roleOf(chat, userId) === 'admin' || t === 'react' || t === 'vote' || t === 'call';
+}
+
+/** Whose status this is (the status chat's only admin), or null for other chats. */
+export function statusOwner(chat: Chat) {
+  return chat.kind === 'status' ? (chat.members.find((m) => m.role === 'admin')?.userId ?? null) : null;
 }
 
 /** Does this change to `m`, from `from`, made at the server's time `at`, follow the rules? */

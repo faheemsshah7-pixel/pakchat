@@ -265,6 +265,55 @@ defmodule Pakchat.Chats do
     )
   end
 
+  ## Status
+
+  @doc """
+  Sets who sees my status (my photos, videos and words for 24 hours). Each
+  person's status is a chat of its own, kind "status": me, plus everyone
+  allowed to see it. It's made the first time. Only I can see who is in it
+  (see `PakchatWeb.Wire.chat/2`), and nobody is told they were added or left
+  out (no group notes). Unknown ids are skipped.
+  """
+  def set_status_audience(%User{} = me, user_ids) do
+    ids = user_ids |> List.wrap() |> Enum.uniq() |> List.delete(me.id)
+
+    with :ok <- check_size([me.id | ids]) do
+      ids = existing_users(ids)
+
+      Repo.transaction(fn ->
+        chat = Repo.get_by(Chat, direct_key: status_key(me.id)) || new_status(me.id)
+
+        Repo.delete_all(
+          from m in Member,
+            where: m.chat_id == ^chat.id and m.user_id != ^me.id and m.user_id not in ^ids
+        )
+
+        add_rows(chat.id, ids, "member")
+        Repo.preload(chat, :members, force: true)
+      end)
+    end
+  end
+
+  defp status_key(user_id), do: "status:" <> user_id
+
+  defp new_status(user_id) do
+    Repo.insert!(%Chat{kind: "status", direct_key: status_key(user_id), created_by: user_id},
+      on_conflict: :nothing,
+      conflict_target: :direct_key
+    )
+
+    chat = Repo.get_by!(Chat, direct_key: status_key(user_id))
+    add_rows(chat.id, [user_id], "admin")
+    chat
+  end
+
+  defp existing_users([]), do: []
+
+  defp existing_users(ids) do
+    uuids = for id <- ids, {:ok, uuid} <- [Ecto.UUID.cast(id)], do: uuid
+    Repo.all(from u in User, where: u.id in ^uuids, select: u.id)
+  end
+
   ## Invite links
 
   @doc "Makes a new invite link for a group (the old one stops working). Admins only."

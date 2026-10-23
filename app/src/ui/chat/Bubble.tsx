@@ -5,6 +5,8 @@
 // reply arrow fades in as you pull, ticks when you've pulled enough, and the
 // bubble springs back.
 import type { Message } from '@pakchat/shared';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -17,7 +19,8 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Ticks } from '../ChatRow';
 import { FileBody } from './FileBody';
-import { clock, systemText } from '../format';
+import { VoiceBody } from './VoiceBody';
+import { clock, fileLine, systemText } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
 import { fade, pop, smooth, snappy, tick } from '../motion';
@@ -122,6 +125,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
     borderBottomEndRadius: mine ? (first ? corner : 18) : 18,
   };
   const reactions = Object.entries(m.reactions ?? {});
+  // A sticker has no bubble: just the picture, with the time on a little pill under it.
+  const bare = !m.deleted && m.kind === 'file' && m.file?.kind === 'sticker';
 
   const body = (
     <View style={{ paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
@@ -140,6 +145,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
       )}
       {/* While picking messages, a tap anywhere on the bubble picks it (no jumping, voting or retrying). */}
       {quoted && !m.deleted && <Quote m={quoted} mine={mine} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />}
+      {m.statusReply && !m.deleted && <StatusQuoteView q={m.statusReply} mine={mine} />}
       {m.deleted ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="close" size={14} color={meta} />
@@ -148,10 +154,19 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           </Txt>
         </View>
       ) : m.kind === 'poll' && m.poll ? (
-        <Poll m={m} mine={mine} onVote={(i) => (selecting ? onPress(m) : onVote(m, i))} />
+        <Poll
+          m={m}
+          mine={mine}
+          onVote={(i) => (selecting ? onPress(m) : onVote(m, i))}
+          onView={() => (selecting ? onPress(m) : router.push({ pathname: '/poll-votes', params: { chat: m.chatId, author: m.author, id: m.id } }))}
+        />
       ) : m.kind === 'file' && m.file ? (
         <>
-          <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+          {m.file.kind === 'voice' || m.file.kind === 'audio' ? (
+            <VoiceBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+          ) : (
+            <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+          )}
           {!!m.text && (
             <Text
               style={[
@@ -210,7 +225,31 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               label={m.text ?? ''}
               testID={`msg-${m.text ?? m.id}`}
             >
-              {mine ? (
+              {bare ? (
+                <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18, borderWidth: selected ? 2 : 0, borderColor: theme.acc, padding: selected ? 4 : 0 }}>
+                  {!!name && (
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: theme.glass }}>
+                      <Txt size={12.5} weight="700" color={theme.accInk} lines={1}>
+                        {name}
+                      </Txt>
+                    </View>
+                  )}
+                  {quoted && (
+                    <View style={{ maxWidth: 236, padding: 4, borderRadius: 12, backgroundColor: theme.bubbleIn }}>
+                      <Quote m={quoted} mine={false} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
+                    </View>
+                  )}
+                  <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: theme.glass }}>
+                    {starred && <Icon name="starFilled" size={11} color={theme.muted} />}
+                    {!!m.expiresAt && <Icon name="timer" size={11} color={theme.muted} />}
+                    <Txt size={11} color={theme.muted}>
+                      {clock(m.sentAt)}
+                    </Txt>
+                    {mine && <Ticks status={m.status} size={15} color={theme.muted} />}
+                  </View>
+                </View>
+              ) : mine ? (
                 // The gradient can't round its own corners one by one on Android (it came
                 // out square), so a plain View with the corners clips it instead.
                 <View
@@ -274,7 +313,7 @@ function Quote({ m, mine, onPress }: { m: Message; mine: boolean; onPress: () =>
   const t = useT();
   const { theme } = useLook();
   const who = m.author === core.myId ? t.youWord : core.name(m.author) || '…';
-  const text = m.deleted ? t.deleted : m.kind === 'poll' ? `${t.poll} ${m.poll?.question ?? ''}` : (m.text ?? '');
+  const text = m.deleted ? t.deleted : m.kind === 'poll' ? `${t.poll} ${m.poll?.question ?? ''}` : m.kind === 'file' && m.file ? fileLine(m, t) : (m.text ?? '');
   return (
     <Pressy onPress={onPress} scale={0.98} label={text}>
       <View
@@ -297,6 +336,41 @@ function Quote({ m, mine, onPress }: { m: Message; mine: boolean; onPress: () =>
         </Txt>
       </View>
     </Pressy>
+  );
+}
+
+/** A reply to a status: "Status · Sara" with a little copy of it (the status itself goes after a day). */
+function StatusQuoteView({ q, mine }: { q: NonNullable<Message['statusReply']>; mine: boolean }) {
+  const t = useT();
+  const { theme } = useLook();
+  const who = q.author === core.myId ? t.youWord : core.name(q.author) || '…';
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderStartWidth: 3,
+        borderColor: theme.acc,
+        borderRadius: 8,
+        backgroundColor: mine ? (theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)') : theme.accSoft,
+        paddingStart: 9,
+        marginBottom: 5,
+        marginTop: 2,
+        overflow: 'hidden',
+      }}
+      testID="status-quote"
+    >
+      <View style={{ flex: 1, paddingVertical: 5 }}>
+        <Txt size={13} weight="700" color={theme.accInk} lines={1}>
+          {`${who} · ${t.status}`}
+        </Txt>
+        <Txt size={13} color={theme.muted} lines={2}>
+          {q.text ?? (q.kind === 'video' ? t.videoLabel : t.photoLabel)}
+        </Txt>
+      </View>
+      {q.thumb && <Image source={{ uri: `data:image/jpeg;base64,${q.thumb}` }} style={{ width: 44, height: 52 }} contentFit="cover" />}
+    </View>
   );
 }
 
@@ -342,7 +416,7 @@ function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: bo
 }
 
 /** A poll: each answer is a bar that fills (on a spring) as votes come in. */
-function Poll({ m, mine, onVote }: { m: Message; mine: boolean; onVote: (i: number) => void }) {
+function Poll({ m, mine, onVote, onView }: { m: Message; mine: boolean; onVote: (i: number) => void; onView: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const poll = m.poll!;
@@ -370,6 +444,13 @@ function Poll({ m, mine, onVote }: { m: Message; mine: boolean; onVote: (i: numb
       <Txt size={12} color={theme.muted} align="center">
         {fill(t.votes, { n: voters })}
       </Txt>
+      <Pressy onPress={onView} label={t.viewVotes} scale={0.96} testID="poll-view-votes">
+        <View style={{ borderTopWidth: 1, borderColor: mine ? 'rgba(255,255,255,0.25)' : theme.divider, paddingTop: 8, alignItems: 'center' }}>
+          <Txt size={14} weight="700" color={mine ? theme.bubbleMineText : theme.accInk}>
+            {t.viewVotes}
+          </Txt>
+        </View>
+      </Pressy>
     </View>
   );
 }

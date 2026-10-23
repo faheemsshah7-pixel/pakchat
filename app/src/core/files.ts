@@ -97,7 +97,20 @@ export const uploader: FileUploader = {
   },
 };
 
-export type Picked = { uri: string; mime: string; kind: FileKind; name?: string; size?: number; width?: number; height?: number; duration?: number };
+export type Picked = {
+  uri: string;
+  mime: string;
+  kind: FileKind;
+  name?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  duration?: number;
+  /** A GIF (a short silent video that loops). */
+  gif?: true;
+  /** Send a photo as it is, without making it smaller (the "HD" switch). */
+  hd?: boolean;
+};
 
 /** What kind of file a type is. */
 export function kindOf(mime: string): FileKind {
@@ -123,10 +136,38 @@ async function thumbOf(p: Picked): Promise<string | undefined> {
   }
 }
 
+/** Photos are made this wide (or tall) at most, unless sent in HD, like WhatsApp. */
+const PHOTO_MAX = 1600;
+
+/**
+ * A photo, smaller: at most 1600 px on its long side, as a JPEG at 75%. A
+ * phone photo of 4 MB usually becomes about 300 KB and looks the same on a
+ * phone. A moving .gif stays as it is, and so does a photo that would not get
+ * smaller.
+ */
+async function smaller(p: Picked): Promise<Picked> {
+  if (p.kind !== 'image' || p.hd || p.mime === 'image/gif') return p;
+  try {
+    const ctx = ImageManipulator.manipulate(p.uri);
+    const w = p.width ?? 0;
+    const h = p.height ?? 0;
+    if (Math.max(w, h) > PHOTO_MAX) ctx.resize(w >= h ? { width: PHOTO_MAX } : { height: PHOTO_MAX });
+    const img = await ctx.renderAsync();
+    const saved = await img.saveAsync({ compress: 0.75, format: SaveFormat.JPEG });
+    const size = new File(saved.uri).size;
+    if (p.size && size >= p.size) return p;
+    const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.jpg` : undefined;
+    return { ...p, uri: saved.uri, mime: 'image/jpeg', name, size, width: saved.width, height: saved.height };
+  } catch {
+    return p;
+  }
+}
+
 export class TooBig extends Error {}
 
-/** Sends a picked file to a chat. Throws TooBig over the server's limit. */
-export async function sendPicked(chatId: string, p: Picked, caption?: string) {
+/** Sends a picked file to a chat (photos made smaller first, unless HD). Throws TooBig over the server's limit. */
+export async function sendPicked(chatId: string, picked: Picked, caption?: string, extra: { replyTo?: Ref } = {}) {
+  const p = await smaller(picked);
   const source = new File(p.uri);
   const size = p.size ?? source.size;
   if (size > maxBytes) throw new TooBig(String(maxBytes));
@@ -144,8 +185,20 @@ export async function sendPicked(chatId: string, p: Picked, caption?: string) {
     ...(p.height ? { height: Math.round(p.height) } : {}),
     ...(p.duration ? { duration: Math.round(p.duration) } : {}),
     ...(thumb ? { thumb } : {}),
+    ...(p.gif ? { gif: true as const } : {}),
   };
-  return core.client.sendFile(chatId, file, { caption });
+  try {
+    return await core.client.sendFile(chatId, file, { caption, replyTo: extra.replyTo });
+  } finally {
+    // The smaller photo was only needed for the copy above.
+    if (p.uri !== picked.uri) {
+      try {
+        source.delete();
+      } catch {
+        // Already gone.
+      }
+    }
+  }
 }
 
 /** Sends a file I already have to another chat (forwarding). It's locked again with a new key. */
@@ -158,18 +211,26 @@ export async function forwardFile(chatId: string, m: Message) {
 }
 
 /**
- * The ✕ on a file that's still sending: stops the upload and takes the message
- * back, so nothing half-sent goes out. False if it had already gone.
+ * The ✕ on a file that's still sending, like WhatsApp: the upload stops and the
+ * message stays in the chat, paused, with an upload button (resumeSend). False
+ * if it had already gone.
  */
-export async function cancelSend(m: Message) {
-  fileModule().cancelTransfer(tagOf(m.chatId, m));
-  const taken = await core.client.cancelSend(m.chatId, m);
-  if (!taken) return false;
-  stopped(tagOf(m.chatId, m));
-  await forgetFile(m);
+export async function pauseSend(m: Message) {
+  const tag = tagOf(m.chatId, m);
+  const paused = await core.client.pauseSend(m.chatId, m);
+  // Only after the outbox has let go, so the stopped upload isn't tried again.
+  fileModule().cancelTransfer(tag);
+  if (!paused) return false;
+  stopped(tag);
   core.emit(`messages:${m.chatId}`);
-  core.emit('chats');
   return true;
+}
+
+/** The upload button on a paused file: it sends again (the upload starts over, unless it had finished). */
+export async function resumeSend(m: Message) {
+  const ok = await core.client.resumeSend(m.chatId, m);
+  if (ok) core.emit(`messages:${m.chatId}`);
+  return ok;
 }
 
 // ---- Receiving ----
@@ -260,5 +321,7 @@ export async function maybeDownload(m: Message) {
   if (!net?.isConnected) return;
   const a = autoDownload();
   const on = net.type === Network.NetworkStateType.WIFI || net.type === Network.NetworkStateType.ETHERNET ? a.wifi : a.mobile;
-  if (on.includes(m.file.kind)) await download(m).catch(() => {});
+  // Stickers and GIFs are small and mean nothing until seen, so they always come (as on WhatsApp).
+  const small = m.file.kind === 'sticker' || (m.file.gif && m.file.size <= 8 * 1024 * 1024);
+  if (small || on.includes(m.file.kind)) await download(m).catch(() => {});
 }

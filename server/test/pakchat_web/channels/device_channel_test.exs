@@ -147,7 +147,7 @@ defmodule PakchatWeb.DeviceChannelTest do
 
     # Not now: it's connected. A check in 3 seconds instead.
     assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
-    assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true}
+    assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => false}
     assert DateTime.diff(job.scheduled_at, DateTime.utc_now()) in 1..3
 
     # Still waiting then (a dead connection): it's pushed. Collected: it isn't.

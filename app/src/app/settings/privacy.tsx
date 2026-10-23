@@ -5,11 +5,13 @@ import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
 import { core } from '../../core/core';
+import { defaultTimer, setDefaultTimer } from '../../core/timer';
 import { useAuth, useBlocked } from '../../core/hooks';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
+import { TIMERS, timerLabel } from '../../ui/format';
 import { tick } from '../../ui/motion';
 import { Sheet, toast } from '../../ui/overlays';
 
@@ -20,7 +22,8 @@ export default function Privacy() {
   const { theme } = useLook();
   const { me } = useAuth();
   const blocked = useBlocked();
-  const [open, setOpen] = useState<'last_seen' | 'online' | null>(null);
+  const [open, setOpen] = useState<'last_seen' | 'online' | 'timer' | null>(null);
+  const [timer, setTimer] = useState(defaultTimer);
   const p = me?.privacy ?? { lastSeen: 'everyone', online: 'everyone', readReceipts: true };
 
   const lastSeenChoices: Choice[] = [
@@ -42,8 +45,9 @@ export default function Privacy() {
     }
   }
 
-  const choices = open === 'online' ? onlineChoices : lastSeenChoices;
-  const current = open === 'online' ? p.online : p.lastSeen;
+  const timerChoices: Choice[] = TIMERS.map((s) => ({ value: String(s), label: timerLabel(s, t) }));
+  const choices = open === 'online' ? onlineChoices : open === 'timer' ? timerChoices : lastSeenChoices;
+  const current = open === 'online' ? p.online : open === 'timer' ? String(timer) : p.lastSeen;
 
   return (
     <Screen>
@@ -70,13 +74,20 @@ export default function Privacy() {
             right={<Toggle on={p.readReceipts} onChange={(on) => void change({ read_receipts: on })} label={t.readReceipts} testID="read-receipts" />}
           />
         </Glass>
+        <Section title={t.disappearing} />
+        <Glass>
+          <SettingRow icon="timer" title={t.defaultTimer} sub={timerLabel(timer, t)} onPress={() => setOpen('timer')} testID="privacy-default-timer" />
+        </Glass>
+        <Txt size={13} color={theme.muted} style={{ marginHorizontal: 14, marginTop: 8 }}>
+          {t.defaultTimerNote}
+        </Txt>
         <Section title={t.safety} />
         <Glass>
           <SettingRow icon="flag" title={t.blocked} sub={blocked ? String(blocked.length) : ''} onPress={() => router.push('/settings/blocked')} testID="open-blocked" />
         </Glass>
       </ScrollView>
 
-      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open === 'online' ? t.online2 : t.lastSeenOnline}>
+      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open === 'online' ? t.online2 : open === 'timer' ? t.defaultTimer : t.lastSeenOnline}>
         <View style={{ paddingHorizontal: 16, gap: 4 }}>
           {choices.map((c) => {
             const on = current === c.value;
@@ -90,7 +101,10 @@ export default function Privacy() {
                   tick();
                   const which = open;
                   setOpen(null);
-                  if (!on) void change(which === 'online' ? { online: c.value } : { last_seen: c.value });
+                  if (which === 'timer') {
+                    setDefaultTimer(Number(c.value));
+                    setTimer(Number(c.value));
+                  } else if (!on) void change(which === 'online' ? { online: c.value } : { last_seen: c.value });
                 }}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: on ? theme.accSoft : 'transparent' }}>

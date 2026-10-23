@@ -60,6 +60,8 @@ export interface ServerApi {
   setAdmin(chatId: string, userId: string, admin: boolean): Promise<ServerChat>;
   updateGroup(chatId: string, changes: { title?: string; description?: string; onlyAdminsSend?: boolean }): Promise<ServerChat>;
   lookup(email: string): Promise<{ id: string; name: string } | null>;
+  /** Sets who sees my status; answers my status chat. */
+  statusAudience(userIds: string[]): Promise<ServerChat>;
 }
 
 /** The server said no. `reason` is its word for why, like "not_found". */
@@ -76,10 +78,13 @@ export class ServerError extends Error {
 /** The network is down, or the server didn't answer in time. Worth trying again later. */
 export class OfflineError extends Error {}
 
+/** A GIF from KLIPY (through our server): a small video, and a still-ish preview for the picker. */
+export type Gif = { id: string; mp4: string; preview: string; width: number; height: number };
+
 // The server's shapes, as they come over the wire.
 type WireChat = {
   id: string;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'status';
   seq: number;
   members: { user_id: string; role: Role }[];
   title?: string;
@@ -297,6 +302,30 @@ export class HttpServer implements ServerApi {
 
   async deleteBackup() {
     await this.call('DELETE', '/backup');
+  }
+
+  // ---- Calls, status and GIFs ----
+
+  /** Where calls find a way through (STUN), and our relay (TURN) if there is one, as WebRTC takes them. */
+  async iceServers(): Promise<{ urls: string[]; username?: string; credential?: string }[]> {
+    return (await this.call<{ ice_servers: { urls: string[]; username?: string; credential?: string }[] }>('GET', '/calls/ice')).ice_servers;
+  }
+
+  async statusAudience(userIds: string[]) {
+    return chatFromWire(await this.call<WireChat>('PUT', '/status/audience', { user_ids: userIds }));
+  }
+
+  /** Popular GIFs, or a search. Null when the server has no GIF key (the GIF tab hides). */
+  async gifs(q: string, pos?: string, lang = 'en'): Promise<{ gifs: Gif[]; next: string | null } | null> {
+    const query = new URLSearchParams({ lang });
+    if (q.trim()) query.set('q', q.trim());
+    if (pos) query.set('pos', pos);
+    try {
+      return await this.call<{ gifs: Gif[]; next: string | null }>('GET', `/gifs?${query}`);
+    } catch (err) {
+      if (err instanceof ServerError && err.status === 404) return null;
+      throw err;
+    }
   }
 
   /** The server's links are paths ("/api/files/…"); this makes them whole addresses. */

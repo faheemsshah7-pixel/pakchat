@@ -15,7 +15,7 @@ import type { Role } from '../src/storage';
 
 type User = { id: string; name: string; email: string | null; phone?: string };
 type Device = { uuid: string; userId: string; deviceId: number; token: string; keys: DeviceKeys; ec: OneTimeKey[]; kyber: SignedKey[] };
-type FakeChat = { id: string; kind: 'direct' | 'group'; members: { userId: string; role: Role }[]; seq: number; title?: string; onlyAdminsSend?: boolean };
+type FakeChat = { id: string; kind: 'direct' | 'group' | 'status'; members: { userId: string; role: Role }[]; seq: number; title?: string; onlyAdminsSend?: boolean; owner?: string };
 type Sealed = { user_id: string; device_id: number; type: number; body: string };
 
 const uuid = () => crypto.randomUUID();
@@ -31,6 +31,8 @@ export class FakeServer {
   online = new Map<string, ConnectionHandlers>();
   /** Every locked envelope that ever passed through, so tests can check what the server saw. */
   seen: WireEnvelope[] = [];
+  /** Every call message sent: which chat, from whom, did it ring, to how many devices. */
+  calls: { chatId: string; from: string; ring: boolean; to: number }[] = [];
   /** Misbehave like a weak network (or a server that's up to no good). */
   chaos: { duplicate?: boolean; shuffle?: boolean; reverse?: boolean; rewrite?: (e: WireEnvelope) => WireEnvelope } = {};
   /** The server's clock, so tests can move time on. */
@@ -88,8 +90,8 @@ export class FakeServer {
         }),
       devices: (userId) => call(() => this.devicesOf(userId).map((d) => d.deviceId)),
       bundles: (userId, ids) => call(() => this.bundles(userId, ids)),
-      chats: () => call(() => [...this.chats.values()].filter((c) => this.isMember(c, who().userId)).map((c) => this.wireChat(c))),
-      chat: (id) => call(() => this.wireChat(this.memberChat(who().userId, id))),
+      chats: () => call(() => [...this.chats.values()].filter((c) => this.isMember(c, who().userId)).map((c) => this.wireChat(c, who().userId))),
+      chat: (id) => call(() => this.wireChat(this.memberChat(who().userId, id), who().userId)),
       openDirect: (userId) => call(() => this.wireChat(this.openDirect(who().userId, userId))),
       createGroup: (title, ids, options) => call(() => this.wireChat(this.createGroup(who().userId, title, ids, options?.onlyAdminsSend))),
       addMembers: (id, ids) =>
@@ -125,6 +127,18 @@ export class FakeServer {
           return this.wireChat(chat);
         }),
       lookup: (email) => call(() => [...this.users.values()].find((u) => u.email === email) ?? null),
+      statusAudience: (ids) =>
+        call(() => {
+          const me = who().userId;
+          let chat = [...this.chats.values()].find((c) => c.kind === 'status' && c.owner === me);
+          if (!chat) {
+            chat = { id: uuid(), kind: 'status', members: [], seq: 0, owner: me };
+            this.chats.set(chat.id, chat);
+          }
+          const others = [...new Set(ids)].filter((u) => u !== me && this.users.has(u));
+          chat.members = [{ userId: me, role: 'admin' as Role }, ...others.map((userId) => ({ userId, role: 'member' as Role }))];
+          return this.wireChat(chat, me);
+        }),
     };
   }
 
@@ -269,8 +283,10 @@ export class FakeServer {
     return chat;
   }
 
-  private wireChat(c: FakeChat): ServerChat {
-    const out: ServerChat = { id: c.id, kind: c.kind, seq: c.seq, members: c.members.map((m) => ({ ...m })) };
+  private wireChat(c: FakeChat, viewer?: string): ServerChat {
+    // Someone's status: only its owner sees who else can see it.
+    const visible = c.kind === 'status' && viewer !== c.owner ? c.members.filter((m) => m.userId === c.owner || m.userId === viewer) : c.members;
+    const out: ServerChat = { id: c.id, kind: c.kind, seq: c.seq, members: visible.map((m) => ({ ...m })) };
     if (c.kind === 'group') {
       out.title = c.title;
       out.onlyAdminsSend = !!c.onlyAdminsSend;
@@ -310,6 +326,8 @@ export class FakeServer {
     switch (event) {
       case 'send':
         return this.send(d, p);
+      case 'call':
+        return this.call(d, p);
       case 'ack': {
         const ids = new Set(p.ids as number[]);
         this.pending.set(d.uuid, (this.pending.get(d.uuid) ?? []).filter((e) => !ids.has(e.id)));
@@ -348,7 +366,11 @@ export class FakeServer {
     if (![...envelopes, ...(group ? [group] : [])].every((e) => [2, 3, 7, 8].includes(e.type))) throw new ServerError('bad_request');
     if (chat.onlyAdminsSend && kind === 'message' && chat.members.find((m) => m.userId === sender.userId)?.role !== 'admin') throw new ServerError('admins_only');
     if (chat.kind === 'direct' && group) throw new ServerError('bad_request');
-    if (chat.kind === 'group' && !envelopes.length && !group) throw new ServerError('bad_request');
+    if (chat.kind !== 'direct' && !envelopes.length && !group) throw new ServerError('bad_request');
+    // Someone else's status: likes and resends only, to its owner only.
+    if (chat.kind === 'status' && sender.userId !== chat.owner) {
+      if (!['reaction', 'control'].includes(kind) || group || envelopes.some((e) => e.user_id !== chat.owner)) throw new ServerError('forbidden', 403);
+    }
 
     const recipients = chat.members.flatMap((m) => this.devicesOf(m.userId)).filter((d) => d.uuid !== sender.uuid);
     const k = (u: string, id: number) => `${u}:${id}`;
@@ -381,6 +403,24 @@ export class FakeServer {
     if (group) for (const d of recipients) rows.push([d.uuid, { ...base, id: 0, type: group.type, body: group.body }]);
     this.store(rows);
     return { seq, sent_at: sentAt };
+  }
+
+  /** A call message: no number, straight to the named devices that are in the chat. */
+  private call(sender: Device, p: Record<string, unknown>) {
+    const chat = this.chats.get(p.chat_id as string);
+    if (!chat || !this.isMember(chat, sender.userId) || chat.kind === 'status') throw new ServerError('not_found');
+    const envelopes = (p.envelopes as Sealed[]) ?? [];
+    if (!envelopes.length || !envelopes.every((e) => e.type === 2 || e.type === 3)) throw new ServerError('bad_request');
+    this.calls.push({ chatId: chat.id, from: sender.userId, ring: p.ring === true, to: envelopes.length });
+    const recipients = chat.members.flatMap((m) => this.devicesOf(m.userId)).filter((d) => d.uuid !== sender.uuid);
+    const base = { chat_id: chat.id, seq: null, from: sender.userId, from_device: sender.deviceId, kind: 'call' as const, sent_at: new Date(this.clock()).toISOString() };
+    const rows: [string, WireEnvelope][] = [];
+    for (const e of envelopes) {
+      const d = recipients.find((x) => x.userId === e.user_id && x.deviceId === e.device_id);
+      if (d) rows.push([d.uuid, { ...base, id: 0, type: e.type, body: e.body }]);
+    }
+    this.store(rows);
+    return {};
   }
 
   private receipt(sender: Device, p: Record<string, unknown>) {

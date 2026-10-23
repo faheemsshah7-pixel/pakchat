@@ -122,7 +122,8 @@ export function alertFor(m: Message) {
   if (open && (core.viewing === m.chatId || Date.now() - m.sentAt > 120_000)) return;
   void inLine(async () => {
     const chat = await core.storage.getChat(m.chatId);
-    if (!chat) return;
+    // Statuses never alert (a like or a reply to one comes as a normal message).
+    if (!chat || chat.kind === 'status') return;
     const t = words();
     const fm = fileModule();
     const shown = (await core.storage.getValue<Shown>(SHOWN)) ?? {};

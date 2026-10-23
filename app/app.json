@@ -114,7 +114,12 @@
       ],
       "expo-video",
       "expo-sharing",
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "PakChat uses the microphone for voice notes and calls."
+        }
+      ],
       [
         "expo-contacts",
         {

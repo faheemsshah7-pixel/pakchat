@@ -204,7 +204,7 @@ export function ChatRow({
 /** The ticks on my own messages: a clock while waiting, one tick sent, two delivered, two in colour read. */
 export function Ticks({ status, size = 15, color }: { status?: string; size?: number; color?: string }) {
   const theme = useTheme();
-  if (status === 'queued') return <Icon name="clock" size={size - 2} color={color ?? theme.muted} />;
+  if (status === 'queued' || status === 'paused') return <Icon name="clock" size={size - 2} color={color ?? theme.muted} />;
   if (status === 'failed') return <Icon name="warning" size={size - 1} color={theme.danger} />;
   if (status === 'sent') return <Icon name="tick" size={size} color={color ?? theme.muted} stroke={2.2} />;
   return <Icon name="ticks" size={size} color={status === 'read' ? theme.read : (color ?? theme.muted)} stroke={2.2} />;

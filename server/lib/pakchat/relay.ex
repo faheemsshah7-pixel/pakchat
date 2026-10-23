@@ -21,6 +21,8 @@ defmodule Pakchat.Relay do
   alias Pakchat.Repo
 
   @keep_for_days 30
+  # Call messages (ringing, connection details) are only useful for a minute.
+  @call_seconds 60
   # Locked text is small. Photos and files go to file storage (phase 5).
   @max_body 64 * 1024
   # Signal's message types: 2 normal, 3 the first one (starts a session),
@@ -60,6 +62,7 @@ defmodule Pakchat.Relay do
          :ok <- validate(kind, envelopes, group),
          :ok <- may_send(chat, sender.user_id, kind),
          devices = recipients(chat.id, sender),
+         :ok <- status_viewer(chat, sender.user_id, devices, envelopes, group),
          :ok <- check_devices(chat, kind, devices, envelopes, group, params[:devices]) do
       # In a one-to-one chat, someone who blocked you never gets your
       # messages. You aren't told, as in WhatsApp: it just stays on one tick.
@@ -69,7 +72,7 @@ defmodule Pakchat.Relay do
       {:ok, {seq, stored}} =
         Repo.transaction(fn ->
           seq = Chats.next_seq(chat.id)
-          base = base_row(chat.id, seq, sender, kind, now)
+          base = base_row(chat.id, seq, sender, kind, now, keep_for(chat))
 
           rows =
             direct_rows(base, envelopes, devices, blocked) ++
@@ -79,10 +82,28 @@ defmodule Pakchat.Relay do
           {seq, insert(rows)}
         end)
 
-      deliver(stored)
+      # A status never wakes anyone: it waits until they open PakChat.
+      if chat.kind == "status", do: deliver(stored, wake: false), else: deliver(stored)
       {:ok, %{seq: seq, sent_at: now}}
     end
   end
+
+  # How long an envelope waits to be collected: a status lasts a day, the rest 30 days.
+  defp keep_for(%Chat{kind: "status"}), do: {1, :day}
+  defp keep_for(_chat), do: {@keep_for_days, :day}
+
+  # Someone viewing a status may only send to its owner (a like, or "please
+  # send that again"), never to the others watching it, whom they can't see.
+  defp status_viewer(%Chat{kind: "status", created_by: owner}, user_id, devices, envelopes, group)
+       when user_id != owner do
+    owner_devices = for {^owner, dev, _} <- devices, do: {owner, dev}
+
+    if group == nil and Enum.all?(envelopes, &({&1.user_id, &1.device_id} in owner_devices)),
+      do: :ok,
+      else: {:error, :forbidden}
+  end
+
+  defp status_viewer(_chat, _user_id, _devices, _envelopes, _group), do: :ok
 
   # The first reply in a one-to-one chat from the person who didn't start it
   # (see `Chats.reached_out?/2`).
@@ -129,6 +150,12 @@ defmodule Pakchat.Relay do
     end
   end
 
+  # Only its owner posts to a status. Viewers can like it ("reaction") or ask
+  # for a resend ("control"), to the owner only (see `status_viewer/5`).
+  defp may_send(%Chat{kind: "status", created_by: owner}, user_id, kind) do
+    if user_id == owner or kind in ["reaction", "control"], do: :ok, else: {:error, :forbidden}
+  end
+
   # "Only admins can send messages": everyone else can still react.
   defp may_send(%Chat{only_admins_send: true} = chat, user_id, "message") do
     if Chats.role(chat.id, user_id) == "admin", do: :ok, else: {:error, :admins_only}
@@ -147,8 +174,9 @@ defmodule Pakchat.Relay do
        when group != nil,
        do: {:error, :bad_request}
 
-  defp check_devices(%Chat{kind: "group"}, _kind, _devices, [], nil, _known),
-    do: {:error, :bad_request}
+  defp check_devices(%Chat{kind: kind}, _kind, _devices, [], nil, _known)
+       when kind in ["group", "status"],
+       do: {:error, :bad_request}
 
   defp check_devices(chat, kind, devices, envelopes, _group, known) do
     expected = MapSet.new(devices, fn {user, dev, _} -> {user, dev} end)
@@ -167,7 +195,7 @@ defmodule Pakchat.Relay do
 
     # A group device the sender named that isn't there any more.
     extra =
-      if chat.kind == "group" and is_list(known) and kind != "control",
+      if chat.kind in ["group", "status"] and is_list(known) and kind != "control",
         do: MapSet.union(extra, MapSet.difference(MapSet.new(known), expected)),
         else: extra
 
@@ -184,6 +212,57 @@ defmodule Pakchat.Relay do
   end
 
   defp blocked_by(_chat, _sender_id), do: []
+
+  ## Calls
+
+  @doc """
+  Passes along one call message: ringing, "I'm joining", the connection
+  details (offer, answer, network routes), hanging up. Locked for each device
+  like any message (the server can't see inside), but never numbered or kept
+  for long: a call message older than a minute is no use to anyone.
+
+  `params`:
+    * `envelopes`: `[%{user_id, device_id, type, body}]`, one per device.
+    * `ring`: true when it starts a call. Devices whose app is closed get a
+      push alert straight away, so the phone rings even when it's locked.
+
+  Devices not in the chat are skipped. In a one-to-one chat, someone who
+  blocked you never hears your call ring.
+  """
+  def send_call(%Device{} = sender, chat_id, params) do
+    envelopes = params[:envelopes] || []
+
+    with {:ok, chat} <- member_chat(sender.user_id, chat_id),
+         :ok <- callable(chat),
+         :ok <- validate_call(envelopes) do
+      blocked = blocked_by(chat, sender.user_id)
+      now = DateTime.utc_now()
+      base = base_row(chat.id, nil, sender, "call", now, {@call_seconds, :second})
+
+      stored =
+        direct_rows(base, envelopes, recipients(chat.id, sender), blocked)
+        |> Enum.reject(&is_nil(&1.device_id))
+        |> insert()
+
+      deliver(stored, wake: params[:ring] == true, call: true)
+      :ok
+    end
+  end
+
+  defp callable(%Chat{kind: kind}) when kind in ["direct", "group"], do: :ok
+  defp callable(_chat), do: {:error, :bad_request}
+
+  defp validate_call(envelopes) do
+    targets = Enum.map(envelopes, &{&1.user_id, &1.device_id})
+
+    cond do
+      envelopes == [] or length(envelopes) > 200 -> {:error, :bad_request}
+      Enum.any?(envelopes, &(byte_size(&1.body) > @max_body)) -> {:error, :too_big}
+      Enum.any?(envelopes, &(&1.type not in [2, 3])) -> {:error, :bad_request}
+      length(Enum.uniq(targets)) != length(targets) -> {:error, :bad_request}
+      true -> :ok
+    end
+  end
 
   ## Receipts (the ticks)
 
@@ -308,19 +387,28 @@ defmodule Pakchat.Relay do
 
   ## Collecting
 
-  @doc "True if a message sent since `since` is still waiting for this device (it hasn't collected it)."
-  def waiting?(device_id, %DateTime{} = since) do
+  @doc """
+  True if a message (or, with `kind` "call", a call) sent since `since` is
+  still waiting for this device (it hasn't collected it).
+  """
+  def waiting?(device_id, %DateTime{} = since, kind \\ "message") do
     Repo.exists?(
       from e in Envelope,
-        where: e.device_id == ^device_id and e.kind == "message" and e.sent_at >= ^since
+        where: e.device_id == ^device_id and e.kind == ^kind and e.sent_at >= ^since
     )
   end
 
-  @doc "Envelopes waiting for this device, oldest first, after envelope `after_id`."
+  @doc """
+  Envelopes waiting for this device, oldest first, after envelope `after_id`.
+  Ones past their time (an old call's ringing) aren't sent, even before the
+  hourly clean-up deletes them.
+  """
   def pending(%Device{id: device_id}, after_id \\ 0, limit \\ 200) do
+    now = DateTime.utc_now()
+
     Repo.all(
       from e in Envelope,
-        where: e.device_id == ^device_id and e.id > ^after_id,
+        where: e.device_id == ^device_id and e.id > ^after_id and e.expires_at > ^now,
         order_by: e.id,
         limit: ^limit
     )
@@ -372,9 +460,11 @@ defmodule Pakchat.Relay do
   Pushes saved envelopes to the devices that are online, and wakes the ones
   that aren't with an empty push alert.
   """
-  def deliver([]), do: :ok
+  def deliver(envelopes, opts \\ [])
 
-  def deliver(envelopes) do
+  def deliver([], _opts), do: :ok
+
+  def deliver(envelopes, opts) do
     by_device = Enum.group_by(envelopes, & &1.device_id)
 
     for {device_id, list} <- by_device do
@@ -382,13 +472,19 @@ defmodule Pakchat.Relay do
     end
 
     # Only messages wake a closed app: not ticks, reactions or group notes.
-    by_device
-    |> Enum.map(fn {id, list} ->
-      {id, for(e <- list, e.kind == "message", uniq: true, do: e.sender_id)}
-    end)
-    |> Enum.reject(fn {_id, senders} -> senders == [] end)
-    |> Map.new()
-    |> Push.wake_offline()
+    # A call that starts ringing wakes it too, with a call push.
+    {kind, wake?} =
+      if opts[:call], do: {"call", opts[:wake] == true}, else: {"message", opts[:wake] != false}
+
+    if wake? do
+      by_device
+      |> Enum.map(fn {id, list} ->
+        {id, for(e <- list, e.kind == kind, uniq: true, do: e.sender_id)}
+      end)
+      |> Enum.reject(fn {_id, senders} -> senders == [] end)
+      |> Map.new()
+      |> Push.wake_offline(call: opts[:call] == true)
+    end
 
     :ok
   end
@@ -405,7 +501,9 @@ defmodule Pakchat.Relay do
     end
   end
 
-  defp base_row(chat_id, seq, sender, kind, now) do
+  defp base_row(chat_id, seq, sender, kind, now, keep \\ {@keep_for_days, :day}) do
+    {n, unit} = keep
+
     %{
       chat_id: chat_id,
       seq: seq,
@@ -413,7 +511,7 @@ defmodule Pakchat.Relay do
       sender_device: sender.device_id,
       kind: kind,
       sent_at: now,
-      expires_at: expiry(now)
+      expires_at: DateTime.add(now, n, unit)
     }
   end
 

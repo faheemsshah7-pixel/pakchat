@@ -19,9 +19,9 @@ function fromPicker(a: ImagePicker.ImagePickerAsset): Picked {
   };
 }
 
-/** Photos and videos from the gallery (up to 10 at once). Empty if you closed it. */
-export async function fromGallery(): Promise<Picked[]> {
-  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, selectionLimit: 10, quality: 1 });
+/** Photos and videos from the gallery (up to 10 at once, or just one). Empty if you closed it. */
+export async function fromGallery(many = true): Promise<Picked[]> {
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: many, selectionLimit: many ? 10 : 1, quality: 1 });
   return r.canceled ? [] : r.assets.map(fromPicker);
 }
 
@@ -42,4 +42,10 @@ export async function fromFiles(): Promise<Picked | null> {
   // A photo sent as a document stays a document (sent as it is, never squeezed).
   const kind = kindOf(mime) === 'audio' ? 'audio' : 'doc';
   return { uri: a.uri, mime, kind, name: a.name, size: a.size };
+}
+
+/** One photo, cropped square in the picker (for making a sticker). Null if you closed it. */
+export async function squarePhoto(): Promise<Picked | null> {
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 });
+  return r.canceled || !r.assets[0] ? null : fromPicker(r.assets[0]);
 }

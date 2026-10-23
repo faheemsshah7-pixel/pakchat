@@ -32,6 +32,18 @@ function date(ms: number, ur: boolean) {
   return `${d.getDate()} ${month}${sameYear ? '' : ` ${d.getFullYear()}`}`;
 }
 
+/** "This month", or a month's name ("October", "March 2025" for another year), for Media, links and docs. */
+export function monthLabel(ms: number, t: Strings) {
+  const ur = t.today !== 'Today';
+  const d = new Date(ms);
+  const now = new Date();
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) return t.thisMonth;
+  const month = (ur ? MONTHS_UR : MONTHS_LONG_EN)[d.getMonth()];
+  return d.getFullYear() === now.getFullYear() ? month : `${month} ${d.getFullYear()}`;
+}
+
+const MONTHS_LONG_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
 /** For the chat list: the time today, "Yesterday", the day this week, or the date. */
 export function listTime(ms: number, t: Strings) {
   const ur = t.today !== 'Today';
@@ -94,6 +106,15 @@ export function systemText(m: Message, t: Strings) {
       const s = Number(e.seconds ?? 0);
       return s ? fill(t.sysTimerOn, { name: by, time: timerLabel(s, t) }) : fill(t.sysTimerOff, { name: by });
     }
+    case 'call': {
+      // A call, noted in the chat by this phone (core/calls.ts).
+      const video = e.video === true;
+      if (e.missed === true) return e.group === true ? t.missedGroupCall : video ? t.missedVideoCall : t.missedVoiceCall;
+      const seconds = Number(e.seconds ?? 0);
+      if (!seconds) return video ? t.videoCall : t.voiceCall;
+      const time = duration(seconds * 1000);
+      return fill(e.group === true ? t.groupCallDone : video ? t.videoCallDone : t.voiceCallDone, { time });
+    }
     default:
       return '';
   }
@@ -109,10 +130,23 @@ export function timerLabel(seconds: number, t: Strings) {
   return t.days90;
 }
 
-/** "📷 Photo", "🎥 Video: caption", "📄 notes.pdf" */
-function fileLine(m: Message, t: Strings) {
+/** "📷 Photo", "🎥 Video: caption", "📄 notes.pdf", "GIF", "Sticker" */
+export function fileLine(m: Message, t: Strings) {
   const f = m.file!;
-  const what = f.kind === 'image' ? t.photo : f.kind === 'video' ? t.videoMsg : f.kind === 'voice' ? t.voice : `📄 ${f.name ?? t.document}`;
+  const what =
+    f.kind === 'sticker'
+      ? t.stickerMsg
+      : f.gif
+        ? t.gifMsg
+        : f.kind === 'image'
+          ? t.photo
+          : f.kind === 'video'
+            ? t.videoMsg
+            : f.kind === 'voice'
+              ? t.voice
+              : f.kind === 'audio'
+                ? `🎵 ${f.name ?? t.audioWord}`
+                : `📄 ${f.name ?? t.document}`;
   return m.text ? `${what}: ${m.text}` : what;
 }
 

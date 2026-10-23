@@ -30,6 +30,7 @@ import { fileModule, loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
 import { openStorage } from './db';
 import { backUpIfDue } from './backup';
+import { calls } from './calls';
 import { forgetFile, maybeDownload, uploader } from './files';
 import { alertFor, startPush } from './push';
 
@@ -56,7 +57,7 @@ export type Presence = { online: boolean; lastSeen: string | null };
 /** Someone I saved under my own name, with the number or Gmail I know them by. Only on this phone. */
 export type Contact = { name: string; phone?: string; email?: string; fromPhoneBook?: boolean };
 
-type Topic = 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | 'presence' | 'blocked' | 'files' | 'backup' | `messages:${string}`;
+type Topic = 'calls' | 'stickers' | 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | 'presence' | 'blocked' | 'files' | 'backup' | `messages:${string}`;
 
 // ---- Where the server is ----
 
@@ -216,6 +217,8 @@ class Core {
       if (typing) setTimeout(() => this.clearTyping(chatId, userId), 6_000);
     });
     this.client.on('presence', (p) => this.setPresence(p));
+    // Calls: ringing, answering, connecting (calls.ts).
+    this.client.on('call', (e) => calls.onSignal(e));
   }
 
   private clearTyping(chatId: string, userId: string) {
@@ -270,7 +273,7 @@ class Core {
     void Promise.race([this.client.settled(), fileModule().wait(2_000)])
       .catch(() => {})
       .then(() => {
-        if (move === this.moves && this.awake === 0 && AppState.currentState !== 'active') this.client.stop();
+        if (move === this.moves && this.awake === 0 && AppState.currentState !== 'active' && !calls.live) this.client.stop();
       });
   }
 
@@ -315,7 +318,7 @@ class Core {
    * can't hold the phone awake), and lets go again if PakChat isn't open.
    * The waiting uses the phone's own clock: JavaScript timers stop in the background.
    */
-  private async briefly(fresh: boolean, work: (wait: (ms: number) => Promise<void>) => Promise<void>): Promise<boolean> {
+  async briefly(fresh: boolean, work: (wait: (ms: number) => Promise<void>) => Promise<void>): Promise<boolean> {
     await this.init();
     if (this.state !== 'signedIn') return true;
     const wait = (ms: number) => fileModule().wait(ms);
@@ -338,8 +341,13 @@ class Core {
       return reached || AppState.currentState === 'active';
     } finally {
       this.awake--;
-      if (this.awake === 0 && AppState.currentState !== 'active') this.client.stop();
+      this.letGoIfAway();
     }
+  }
+
+  /** Out of PakChat with nothing to do (no call, no background job): let go of the connection. */
+  letGoIfAway() {
+    if (this.awake === 0 && AppState.currentState !== 'active' && !calls.live && this.state === 'signedIn') this.client.stop();
   }
 
   newId() {

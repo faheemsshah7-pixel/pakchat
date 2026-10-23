@@ -18,17 +18,16 @@ defmodule Pakchat.Push.Fcm do
 
   def configured?, do: account() != nil
 
-  @doc "Sends one alert. `:gone` means the phone's token is no longer valid."
-  def send(token) do
+  @doc """
+  Sends one alert. `:gone` means the phone's token is no longer valid.
+  With `call: true` it says a call is ringing: it lives only a minute (a
+  phone that was off shouldn't ring for a call that's over), and never
+  replaces a waiting message alert.
+  """
+  def send(token, opts \\ []) do
     with %{} = acc <- account(),
          {:ok, access} <- access_token(acc) do
-      body = %{
-        message: %{
-          token: token,
-          android: %{priority: "high", ttl: "86400s", collapse_key: "pakchat-wake"},
-          data: %{wake: "1"}
-        }
-      }
+      body = %{message: Map.put(alert(opts[:call] == true), :token, token)}
 
       case Req.post("https://fcm.googleapis.com/v1/projects/#{acc["project_id"]}/messages:send",
              json: body,
@@ -50,6 +49,21 @@ defmodule Pakchat.Push.Fcm do
       nil -> {:error, :not_configured}
       error -> error
     end
+  end
+
+  @doc false
+  def alert(true = _call) do
+    %{
+      android: %{priority: "high", ttl: "60s", collapse_key: "pakchat-call"},
+      data: %{wake: "1", call: "1"}
+    }
+  end
+
+  def alert(false) do
+    %{
+      android: %{priority: "high", ttl: "86400s", collapse_key: "pakchat-wake"},
+      data: %{wake: "1"}
+    }
   end
 
   # The key file, read once.

@@ -16,17 +16,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
 import { haveFile, loadLimits, sendPicked, TooBig, type Picked } from '../../core/files';
+import { saveSticker, sendGif, sendSticker } from '../../core/stickers';
+import { sendVoice, type Recorded } from '../../core/voice';
+import { calls } from '../../core/calls';
 import { dismissChatAlert } from '../../core/push';
 import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePerson, usePresence, useStarred, useTyping } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
+import { startCall } from '../../ui/CallBar';
 import { Composer } from '../../ui/chat/Composer';
 import { fromCamera, fromFiles, fromGallery } from '../../ui/chat/attachments';
 import { PollSheet } from '../../ui/chat/PollSheet';
 import { dayLabel, fileSize, lastSeen, sameDay, TIMERS, timerLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
-import { Avatar, Button, Field, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
+import { Avatar, Button, Field, Glass, IconButton, Pressy, Screen, Toggle, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
 import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
@@ -62,6 +66,8 @@ export default function ChatScreen() {
   const [pollOpen, setPollOpen] = useState(false);
   const [outgoing, setOutgoing] = useState<Picked[] | null>(null);
   const [caption, setCaption] = useState('');
+  // Photos go smaller unless this is on (files.ts, smaller).
+  const [hd, setHd] = useState(false);
   const [pollKey, setPollKey] = useState(0);
   const [timerOpen, setTimerOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -92,7 +98,10 @@ export default function ChatScreen() {
       focused.current = true;
       // This chat's alert goes, and new messages here don't alert while you're looking.
       core.viewing = id;
-      if (AppState.currentState === 'active') void dismissChatAlert(id);
+      if (AppState.currentState === 'active') {
+        void dismissChatAlert(id);
+        void calls.seenMissed(id);
+      }
       core.setPrefs(id, { markedUnread: false });
       // Coming back to the chat (from its info, say): anything that came meanwhile is read now.
       if (AppState.currentState === 'active') void core.client.markRead(id).catch(() => {});
@@ -217,6 +226,22 @@ export default function ChatScreen() {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }
 
+  /** A voice note from the mic (it answers whatever you were replying to). */
+  function sendVoiceNote(v: Recorded) {
+    const reply = replyTo;
+    setReplyTo(null);
+    void act(() => sendVoice(id, v, reply ? ref(reply) : undefined));
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }
+
+  /** A GIF or sticker from the smiley panel (it answers whatever you were replying to too). */
+  function sendExtra(work: (reply?: Ref) => Promise<unknown>) {
+    const reply = replyTo;
+    setReplyTo(null);
+    void act(() => work(reply ? ref(reply) : undefined));
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }
+
   /** Opens a picker, then shows what was picked with a caption box. */
   async function pick(from: () => Promise<(Picked | null)[]>) {
     setAttach(false);
@@ -228,6 +253,7 @@ export default function ChatScreen() {
       if (ok.length < picked.length) toast(fill(t.fileTooBig, { mb: Math.floor(limit / 1024 / 1024) }));
       if (!ok.length) return;
       setCaption('');
+      setHd(false);
       setOutgoing(ok);
     } catch {
       toast(t.couldNot);
@@ -242,7 +268,7 @@ export default function ChatScreen() {
       for (const [i, p] of list.entries()) {
         try {
           // The caption goes with the first one, as on WhatsApp.
-          await sendPicked(id, p, i === 0 && words ? words : undefined);
+          await sendPicked(id, { ...p, hd }, i === 0 && words ? words : undefined);
         } catch (err) {
           if (err instanceof TooBig) toast(fill(t.fileTooBig, { mb: Math.floor(Number(err.message) / 1024 / 1024) }));
           else throw err;
@@ -308,10 +334,8 @@ export default function ChatScreen() {
 
   const pinned = useMemo(() => [...(list ?? [])].reverse().find((m) => m.pinnedUntil && m.pinnedUntil > now && !m.deleted), [list, now]);
   const mayWrite = chat && !chat.left && !(group && chat.onlyAdminsSend && !amAdmin);
-  const lastIsTheirs = (() => {
-    const last = list?.at(-1);
-    return !!last && last.kind !== 'system' && last.author !== core.myId;
-  })();
+  // Calls: anyone still in the chat (not a group I left, and not myself).
+  const mayCall = !!chat && !chat.left && chat.members.some((mb) => mb.userId !== core.myId);
 
   const header = selecting ? (
     <Animated.View key="pick" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ marginHorizontal: 10, marginTop: 10 }}>
@@ -379,9 +403,13 @@ export default function ChatScreen() {
             </View>
           </View>
         </Pressy>
-        <IconButton icon="video" label={t.videoCall} look="soft" size={42} onPress={() => toast(t.callsSoon)} />
-        <View style={{ width: 6 }} />
-        <IconButton icon="calls" label={t.voiceCall} look="soft" size={42} iconSize={20} onPress={() => toast(t.callsSoon)} />
+        {mayCall && (
+          <>
+            <IconButton icon="video" label={t.videoCall} look="soft" size={42} onPress={() => void startCall(id, true, t)} testID="video-call" />
+            <View style={{ width: 6 }} />
+            <IconButton icon="calls" label={t.voiceCall} look="soft" size={42} iconSize={20} onPress={() => void startCall(id, false, t)} testID="voice-call" />
+          </>
+        )}
         <IconButton icon="more" label={t.moreOptions} size={42} onPress={() => setMenu(true)} testID="chat-menu" />
       </Glass>
     </Animated.View>
@@ -436,6 +464,10 @@ export default function ChatScreen() {
             onViewableItemsChanged={onViewable}
             viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
             keyboardShouldPersistTaps="handled"
+            // Draws only what fills the screen first, so the chat opens quickly.
+            initialNumToRender={14}
+            maxToRenderPerBatch={10}
+            windowSize={11}
             onScrollToIndexFailed={(info) => setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5 }), 250)}
             ListFooterComponent={
               list && !hasMore ? (
@@ -517,10 +549,12 @@ export default function ChatScreen() {
               chat={chat}
               replyTo={replyTo}
               editing={editing}
-              quick={lastIsTheirs}
               onCancel={() => (setReplyTo(null), setEditing(null))}
               onSend={send}
               onAttach={() => setAttach(true)}
+              onVoice={sendVoiceNote}
+              onGif={(g) => sendExtra((r) => sendGif(id, g, r))}
+              onSticker={(from) => sendExtra((r) => sendSticker(id, from, r))}
             />
           ) : (
             <Glass style={{ margin: 10, padding: 14, borderRadius: 18 }}>
@@ -577,6 +611,20 @@ export default function ChatScreen() {
           />
         )}
         {canEdit && <MenuItem icon="edit" label={t.edit} onPress={() => (setEditing(one), setReplyTo(null), done())} testID="pick-edit" />}
+        {one && !one.deleted && one.file?.kind === 'sticker' && haveFile(one) && (
+          <MenuItem
+            icon="sticker"
+            label={t.saveSticker}
+            onPress={() => {
+              const local = one.file!.local!;
+              done();
+              void saveSticker(local)
+                .then(() => toast(t.stickerSaved))
+                .catch(() => toast(t.couldNot));
+            }}
+            testID="pick-save-sticker"
+          />
+        )}
         {one && !one.deleted && mayWrite && (
           <MenuItem
             icon="pin"
@@ -715,6 +763,19 @@ export default function ChatScreen() {
               ),
             )}
           </ScrollView>
+          {outgoing?.some((p) => p.kind === 'image' && p.mime !== 'image/gif') && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4 }}>
+              <View style={{ flex: 1 }}>
+                <Txt size={15} weight="600">
+                  {t.hdQuality}
+                </Txt>
+                <Txt size={12.5} color={theme.muted}>
+                  {hd ? t.hdOnNote : t.hdOffNote}
+                </Txt>
+              </View>
+              <Toggle on={hd} onChange={setHd} label={t.hdQuality} testID="send-hd" />
+            </View>
+          )}
           <Field value={caption} onChangeText={setCaption} placeholder={t.addCaption} maxLength={1000} testID="caption" />
           <Button title={t.send} icon="send" onPress={sendOutgoing} testID="send-file" />
         </View>

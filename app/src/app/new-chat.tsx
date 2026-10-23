@@ -7,6 +7,7 @@ import { FlatList, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { core, isOffline } from '../core/core';
+import { defaultTimer } from '../core/timer';
 import { findFromPhoneBook } from '../core/phoneBook';
 import { usePeople } from '../core/hooks';
 import { fill, useT } from '../i18n';
@@ -71,7 +72,7 @@ export default function NewChat() {
     if (opening.current) return;
     opening.current = true;
     try {
-      const chat = await core.client.openDirect(userId);
+      const chat = await core.client.openDirect(userId, defaultTimer());
       router.replace({ pathname: '/chat/[id]', params: { id: chat.id } });
     } catch (err) {
       setNote(isOffline(err) ? t.offline : t.couldNot);

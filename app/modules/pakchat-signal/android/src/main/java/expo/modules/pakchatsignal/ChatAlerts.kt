@@ -194,7 +194,7 @@ object ChatAlerts {
   }
 
   /** The same picture the app shows: initials on a soft gradient (photos come later). */
-  private fun avatar(a: JSONObject): Bitmap {
+  internal fun avatar(a: JSONObject): Bitmap {
     val size = 192
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
