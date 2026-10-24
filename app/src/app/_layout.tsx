@@ -17,7 +17,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { core } from '../core/core';
 import { useAuth } from '../core/hooks';
 import { calls, takeTappedCall, watchCallTaps } from '../core/calls';
-import { takeTapped, watchTaps } from '../core/push';
+import { LIKE_ALERT, takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { CallBar } from '../ui/CallBar';
 import { ToastHost } from '../ui/overlays';
@@ -72,8 +72,14 @@ function App() {
   useEffect(() => watchCallTaps(() => setTaps((n) => n + 1)), []);
   useEffect(() => {
     if (state !== 'signedIn' || !nav?.key) return;
-    // The plain "New message" alert just opens PakChat.
-    if (tappedPlain) Notifications.clearLastNotificationResponse();
+    // The plain "New message" alert just opens PakChat; "liked your status" opens the Status tab.
+    if (tappedPlain) {
+      Notifications.clearLastNotificationResponse();
+      if (tappedPlain.notification.request.identifier.startsWith(LIKE_ALERT)) {
+        router.navigate('/(tabs)/status');
+        return;
+      }
+    }
     // A ringing call's alert (or its Answer button): the call screen.
     const call = takeTappedCall();
     if (call) {
@@ -81,8 +87,12 @@ function App() {
       else if (call.answer && calls.view()?.state === 'incoming') void calls.answer();
       return;
     }
+    // A message alert: that chat. From inside another chat it takes that chat's
+    // place, so Back still lands on the chat list, like WhatsApp.
     const chatId = takeTapped();
-    if (chatId && chatId !== core.viewing) router.push({ pathname: '/chat/[id]', params: { id: chatId } });
+    if (!chatId || chatId === core.viewing) return;
+    const go = core.viewing ? router.replace : router.push;
+    go({ pathname: '/chat/[id]', params: { id: chatId } });
   }, [taps, tappedPlain, state, nav?.key]);
 
   // The window behind the screens matches the look, so nothing flashes white in Graphite.

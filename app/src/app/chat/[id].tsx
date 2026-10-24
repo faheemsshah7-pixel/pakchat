@@ -16,11 +16,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
 import { haveFile, loadLimits, sendPicked, TooBig, type Picked } from '../../core/files';
-import { saveSticker, sendGif, sendSticker } from '../../core/stickers';
+import { saveSticker, sendGif, sendSticker, unsaveSticker } from '../../core/stickers';
 import { sendVoice, type Recorded } from '../../core/voice';
 import { calls } from '../../core/calls';
+import { slowPhone } from '../../core/phone';
 import { dismissChatAlert } from '../../core/push';
-import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePerson, usePresence, useStarred, useTyping } from '../../core/hooks';
+import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePerson, usePresence, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
@@ -75,6 +76,7 @@ export default function ChatScreen() {
   const [atBottom, setAtBottom] = useState(true);
   // When the newest messages were last on screen: anything from them after that is "unseen".
   const [bottomAt, setBottomAt] = useState(Date.now);
+  const wasAtBottom = useRef(true);
   // Only messages newer than opening the chat get the slide-in (not the ones already there).
   const [openedAt] = useState(Date.now);
   const now = useNow(15_000);
@@ -174,8 +176,13 @@ export default function ChatScreen() {
 
   const onViewable = useCallback(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
     const bottom = viewableItems.some((v) => v.index === 0 || v.index === 1);
+    // Only when it changes (scrolled away from the newest, or back), so scrolling
+    // doesn't redraw the whole chat over and over.
+    if (bottom === wasAtBottom.current) return;
+    wasAtBottom.current = bottom;
+    // Leaving the newest: what arrives from now on is "unseen".
+    if (!bottom) setBottomAt(Date.now());
     setAtBottom(bottom);
-    if (bottom) setBottomAt(Date.now());
   }, []);
 
   const jumpTo = useCallback(
@@ -199,7 +206,15 @@ export default function ChatScreen() {
     });
   }, []);
 
-  const onPress = useCallback((m: Message) => (picked.size ? toggle(m) : undefined), [picked.size, toggle]);
+  // A tap picks while picking. Otherwise a tap on a sticker shows it big, with Save, like WhatsApp.
+  const [stickerShown, setStickerShown] = useState<Message | null>(null);
+  const onPress = useCallback(
+    (m: Message) => {
+      if (picked.size) toggle(m);
+      else if (!m.deleted && m.file?.kind === 'sticker' && haveFile(m)) setStickerShown(m);
+    },
+    [picked.size, toggle],
+  );
   const onLongPress = useCallback(
     (m: Message) => {
       if (m.kind === 'system') return;
@@ -215,6 +230,9 @@ export default function ChatScreen() {
   const canEdit = !!one && one.author === core.myId && one.kind === 'text' && !one.deleted && now - one.sentAt < EDIT_MINUTES * 60_000;
   const canUnsend = pickedList.length > 0 && pickedList.every((m) => !m.deleted && m.seq !== null && (amAdmin || (m.author === core.myId && now - m.sentAt < UNSEND_HOURS * 3_600_000)));
   const allStarred = pickedList.length > 0 && pickedList.every((m) => core.isStarred(m));
+  // One sticker picked (and on this phone): "Save sticker" sits at the top right.
+  const pickedSticker = one && !one.deleted && one.file?.kind === 'sticker' && haveFile(one) ? one.file.local! : null;
+  const stickerSaved = useStickerSaved(pickedSticker ?? stickerShown?.file?.local);
   const done = () => {
     setPicked(new Map());
     setPickMenu(false);
@@ -354,6 +372,12 @@ export default function ChatScreen() {
   // Calls: anyone still in the chat (not a group I left, and not myself).
   const mayCall = !!chat && !chat.left && chat.members.some((mb) => mb.userId !== core.myId);
 
+  // Saving or un-saving a sticker from a message.
+  const toggleSaved = (uri: string, saved: boolean) => {
+    (saved ? unsaveSticker(uri).then(() => toast(t.stickerRemoved)) : saveSticker(uri).then(() => toast(t.stickerSaved))).catch(() => toast(t.couldNot));
+  };
+  // The picked bar gets one more button for a sticker, so they're a little smaller then.
+  const bs = pickedSticker ? 38 : 42;
   const header = selecting ? (
     <Animated.View key="pick" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ marginHorizontal: 10, marginTop: 10 }}>
       <LinearGradient
@@ -362,18 +386,18 @@ export default function ChatScreen() {
         end={{ x: 1, y: 1 }}
         style={{ flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 22, boxShadow: `0 14px 30px -14px ${theme.acc}` }}
       >
-        <IconButton icon="close" label={t.cancelSelection} look="onAccent" onPress={done} size={42} testID="cancel-pick" />
+        <IconButton icon="close" label={t.cancelSelection} look="onAccent" onPress={done} size={bs} testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
           <Txt size={18} weight="700" color="#FFFFFF">
             {fill(t.selected, { n: picked.size })}
           </Txt>
         </View>
-        {one && !one.deleted && mayWrite && <IconButton icon="reply" label={t.reply} look="onAccent" flip size={42} onPress={() => (reply(one), done())} testID="pick-reply" />}
+        {one && !one.deleted && mayWrite && <IconButton icon="reply" label={t.reply} look="onAccent" flip size={bs} onPress={() => (reply(one), done())} testID="pick-reply" />}
         <IconButton
           icon={allStarred ? 'starFilled' : 'star'}
           label={allStarred ? t.unstar : t.star}
           look="onAccent"
-          size={42}
+          size={bs}
           onPress={() => {
             core.setStarred(pickedList, !allStarred);
             toast(allStarred ? t.unstarred : t.starredNote);
@@ -381,12 +405,12 @@ export default function ChatScreen() {
           }}
           testID="pick-star"
         />
-        <IconButton icon="trash" label={t.delete} look="onAccent" size={42} onPress={() => setDeleting(true)} testID="pick-delete" />
+        <IconButton icon="trash" label={t.delete} look="onAccent" size={bs} onPress={() => setDeleting(true)} testID="pick-delete" />
         <IconButton
           icon="forward"
           label={t.forward}
           look="onAccent"
-          size={42}
+          size={bs}
           flip
           onPress={() => {
             const texts = pickedList.filter((m) => m.kind === 'text' && !m.deleted && m.text).map((m) => m.text!);
@@ -397,7 +421,20 @@ export default function ChatScreen() {
           }}
           testID="pick-forward"
         />
-        <IconButton icon="more" label={t.moreOptions} look="onAccent" size={42} onPress={() => setPickMenu(true)} testID="pick-more" />
+        {pickedSticker && (
+          <IconButton
+            icon={stickerSaved ? 'stickerSaved' : 'stickerAdd'}
+            label={stickerSaved ? t.unsaveSticker : t.saveSticker}
+            look="onAccent"
+            size={bs}
+            onPress={() => {
+              done();
+              toggleSaved(pickedSticker, !!stickerSaved);
+            }}
+            testID="pick-save-sticker"
+          />
+        )}
+        <IconButton icon="more" label={t.moreOptions} look="onAccent" size={bs} onPress={() => setPickMenu(true)} testID="pick-more" />
       </LinearGradient>
     </Animated.View>
   ) : (
@@ -483,9 +520,9 @@ export default function ChatScreen() {
             keyboardShouldPersistTaps="handled"
             // Draws only what fills the screen first, so the chat opens quickly; the rest follows.
             initialNumToRender={11}
-            maxToRenderPerBatch={8}
+            maxToRenderPerBatch={slowPhone ? 5 : 8}
             updateCellsBatchingPeriod={30}
-            windowSize={9}
+            windowSize={slowPhone ? 7 : 9}
             onScrollToIndexFailed={(info) => setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5 }), 250)}
             ListFooterComponent={
               list && !hasMore ? (
@@ -523,7 +560,8 @@ export default function ChatScreen() {
                     group={!!group}
                     quoted={m.replyTo ? (byKey.get(keyOf(m.replyTo)) ?? null) : null}
                     first={item.first}
-                    now={now}
+                    // The clock only matters to pinned messages; the rest needn't redraw as it ticks.
+                    now={m.pinnedUntil ? now : 0}
                     starred={!!starred[`${m.chatId}/${m.author}/${m.id}`]}
                     selecting={selecting}
                     selected={picked.has(k)}
@@ -629,20 +667,6 @@ export default function ChatScreen() {
           />
         )}
         {canEdit && <MenuItem icon="edit" label={t.edit} onPress={() => (setEditing(one), setReplyTo(null), done())} testID="pick-edit" />}
-        {one && !one.deleted && one.file?.kind === 'sticker' && haveFile(one) && (
-          <MenuItem
-            icon="sticker"
-            label={t.saveSticker}
-            onPress={() => {
-              const local = one.file!.local!;
-              done();
-              void saveSticker(local)
-                .then(() => toast(t.stickerSaved))
-                .catch(() => toast(t.couldNot));
-            }}
-            testID="pick-save-sticker"
-          />
-        )}
         {one && !one.deleted && mayWrite && (
           <MenuItem
             icon="pin"
@@ -657,6 +681,29 @@ export default function ChatScreen() {
         )}
         <MenuItem icon="select" label={t.selectAll} onPress={() => (setPicked(new Map((list ?? []).filter((m) => m.kind !== 'system').map((m) => [keyOf(m), m]))), setPickMenu(false))} />
       </Popup>
+
+      {/* A sticker shown big after a tap, with Save (or Remove from saved). */}
+      <Sheet visible={!!stickerShown} onClose={() => setStickerShown(null)}>
+        {stickerShown?.file?.local && (
+          <View style={{ alignItems: 'center', gap: 14, paddingBottom: 6 }}>
+            <Image source={{ uri: stickerShown.file.local }} style={{ width: 180, height: 180 }} contentFit="contain" />
+            <Txt size={13} color={theme.muted} align="center">
+              {t.stickerHint}
+            </Txt>
+            <Button
+              title={stickerSaved ? t.unsaveSticker : t.saveSticker}
+              icon={stickerSaved ? 'stickerSaved' : 'stickerAdd'}
+              look={stickerSaved ? 'soft' : 'main'}
+              onPress={() => {
+                const uri = stickerShown.file!.local!;
+                setStickerShown(null);
+                toggleSaved(uri, !!stickerSaved);
+              }}
+              testID="sheet-save-sticker"
+            />
+          </View>
+        )}
+      </Sheet>
 
       {/* Deleting picked messages. */}
       <Dialog

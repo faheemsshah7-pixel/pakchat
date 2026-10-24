@@ -2,7 +2,8 @@
 //
 //   Emoji      tap one to add it to your message
 //   GIF        popular ones, or search; tap one to send it (hidden when the server has no GIFs)
-//   Stickers   mine first (+ makes one from a photo, hold one to remove it), then PakChat's pack
+//   Stickers   the ones I sent lately, then my saved ones (+ makes one from a photo, hold one
+//              to remove it), then PakChat's pack, like WhatsApp's Recent and Favourites
 import type { Gif } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
@@ -10,7 +11,7 @@ import { ActivityIndicator, FlatList, ScrollView, TextInput, View } from 'react-
 import Animated, { FadeOutDown } from 'react-native-reanimated';
 
 import { isOffline } from '../../core/core';
-import { useSavedStickers } from '../../core/hooks';
+import { useRecentStickers, useSavedStickers } from '../../core/hooks';
 import { findGifs, gifsAvailable, PACK, removeSticker, stickerFromPhoto } from '../../core/stickers';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -201,6 +202,7 @@ function StickerTab({ onSticker }: { onSticker: (from: string | number) => void 
   const t = useT();
   const { theme } = useLook();
   const saved = useSavedStickers();
+  const recent = useRecentStickers();
   const [making, setMaking] = useState(false);
 
   async function make() {
@@ -219,11 +221,29 @@ function StickerTab({ onSticker }: { onSticker: (from: string | number) => void 
   }
 
   const tile = { width: 72, height: 72, margin: 4 };
+  const heading = (icon: 'clock' | 'star' | 'sticker', text: string, top: number) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 6, marginTop: top, marginBottom: 4 }}>
+      <Icon name={icon} size={14} color={theme.muted} />
+      <Txt size={12.5} weight="700" color={theme.muted}>
+        {text}
+      </Txt>
+    </View>
+  );
   return (
     <ScrollView contentContainerStyle={{ padding: 8 }}>
-      <Txt size={12.5} weight="700" color={theme.muted} style={{ marginHorizontal: 6, marginBottom: 4 }}>
-        {t.myStickers}
-      </Txt>
+      {recent.length > 0 && (
+        <>
+          {heading('clock', t.recentStickers, 0)}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {recent.map((from) => (
+              <Pressy key={String(from)} onPress={() => onSticker(from)} label={t.sticker} scale={0.9} testID="sticker-recent">
+                <Image source={typeof from === 'number' ? from : { uri: from }} style={tile} contentFit="contain" />
+              </Pressy>
+            ))}
+          </View>
+        </>
+      )}
+      {heading('star', t.myStickers, recent.length > 0 ? 10 : 0)}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         <Pressy onPress={() => void make()} label={t.stickerFromPhoto} scale={0.9} testID="sticker-make">
           <View style={[tile, { borderRadius: 16, borderWidth: 2, borderStyle: 'dashed', borderColor: theme.faint, alignItems: 'center', justifyContent: 'center' }]}>
@@ -246,9 +266,7 @@ function StickerTab({ onSticker }: { onSticker: (from: string | number) => void 
           </Pressy>
         ))}
       </View>
-      <Txt size={12.5} weight="700" color={theme.muted} style={{ marginHorizontal: 6, marginTop: 10, marginBottom: 4 }}>
-        PakChat
-      </Txt>
+      {heading('sticker', 'PakChat', 10)}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {PACK.map((s) => (
           <Pressy key={s.name} onPress={() => onSticker(s.source)} label={t.sticker} scale={0.9} testID={`sticker-${s.name}`}>

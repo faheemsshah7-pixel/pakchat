@@ -12,7 +12,7 @@ import { core, type ChatPrefs, type Person, type Presence } from './core';
 import { calls, callLog, onCallLog, type CallLogEntry, type CallView } from './calls';
 import { moving } from './files';
 import { loadStatuses, type StatusPerson } from './status';
-import { savedStickers, type SavedSticker } from './stickers';
+import { recentStickers, savedAs, savedStickers, type SavedSticker } from './stickers';
 
 type Topic = Parameters<typeof core.on>[0];
 
@@ -368,4 +368,14 @@ export function useStatuses(): { mine: StatusPerson | null; others: StatusPerson
 /** My saved stickers, newest first. */
 export function useSavedStickers(): SavedSticker[] {
   return useLoaded(['stickers'], async () => savedStickers(), [], []);
+}
+
+/** The stickers I sent lately, newest first (see recentStickers). */
+export function useRecentStickers(): (string | number)[] {
+  return useLoaded(['stickers'], async () => recentStickers(), [], []);
+}
+
+/** Whether this sticker picture is one of my saved ones (null while checking, or with no file). */
+export function useStickerSaved(uri: string | null | undefined): boolean | null {
+  return useLoaded(['stickers'], async () => (uri ? !!(await savedAs(uri)) : null), null, [uri]);
 }

@@ -472,7 +472,7 @@ export const en = {
   searchGifs: 'Search GIFs',
   noGifs: 'No GIFs found',
   gifsBy: 'GIFs by KLIPY',
-  myStickers: 'My stickers',
+  myStickers: 'Saved stickers',
   stickerFromPhoto: 'Make a sticker from a photo',
   stickerRemoved: 'Sticker removed',
   saveSticker: 'Save sticker',
@@ -493,6 +493,15 @@ export const en = {
   noLinks: 'No links yet',
   thisMonth: 'This month',
   callingWord: 'Calling…',
+  addPeople: 'Add people',
+  addToCallTitle: 'Add to call',
+  ringingPerson: 'Ringing {name}…',
+  callIsFull: 'The call is full ({count} people)',
+  noOneToAdd: 'No one else to add yet',
+  likedYourStatus: 'Liked your status ❤️',
+  recentStickers: 'Recent',
+  unsaveSticker: 'Remove from saved',
+  stickerHint: 'Saved stickers show first in your sticker panel',
 };
 
 export type Strings = typeof en;
@@ -943,7 +952,7 @@ export const ur: Strings = {
   searchGifs: 'GIF تلاش کریں',
   noGifs: 'کوئی GIF نہیں ملا',
   gifsBy: 'GIFs بشکریہ KLIPY',
-  myStickers: 'میرے اسٹیکرز',
+  myStickers: 'محفوظ اسٹیکرز',
   stickerFromPhoto: 'تصویر سے اسٹیکر بنائیں',
   stickerRemoved: 'اسٹیکر ہٹا دیا',
   saveSticker: 'اسٹیکر محفوظ کریں',
@@ -964,6 +973,15 @@ export const ur: Strings = {
   noLinks: 'ابھی کوئی لنک نہیں',
   thisMonth: 'اس مہینے',
   callingWord: 'کال ہو رہی ہے…',
+  addPeople: 'لوگ شامل کریں',
+  addToCallTitle: 'کال میں شامل کریں',
+  ringingPerson: '{name} کو گھنٹی جا رہی ہے…',
+  callIsFull: 'کال بھر گئی ہے ({count} لوگ)',
+  noOneToAdd: 'ابھی شامل کرنے کے لیے کوئی اور نہیں',
+  likedYourStatus: 'آپ کا اسٹیٹس پسند کیا ❤️',
+  recentStickers: 'حالیہ',
+  unsaveSticker: 'محفوظ سے ہٹائیں',
+  stickerHint: 'محفوظ اسٹیکرز آپ کے اسٹیکر پینل میں سب سے پہلے نظر آتے ہیں',
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

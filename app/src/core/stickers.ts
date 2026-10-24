@@ -4,7 +4,10 @@
 // kind "sticker" and shown big, without a bubble. They come from three places:
 //   the built-in pack   drawn by scripts/make-stickers.py, inside the app
 //   my saved ones       "Save sticker" on one someone sent, kept in PakChat's folder
+//                       (hold a sticker in a chat, or tap it, like WhatsApp's favourites)
 //   made from a photo   a square from the middle of a photo, saved and sent
+//
+// The sticker panel also shows the ones I sent lately ("Recent"), newest first.
 //
 // A GIF is a short silent video (an MP4, much smaller than a real .gif). The
 // GIF tab asks our server for them (it asks KLIPY, so KLIPY never learns who
@@ -44,9 +47,22 @@ export const PACK: { name: string; source: number }[] = [
 /** Stickers are this big (square), like WhatsApp's. */
 export const STICKER_SIZE = 512;
 const MAX_SAVED = 60;
+const MAX_RECENT = 24;
 
-/** One of my saved stickers. */
-export type SavedSticker = { id: string; uri: string };
+/**
+ * One of my saved stickers. `md5` is a fingerprint of the picture, so the same
+ * sticker is known again whoever sent it and wherever its file is.
+ */
+export type SavedSticker = { id: string; uri: string; md5?: string };
+
+/** A file's fingerprint (null when it can't be read). */
+async function fingerprint(uri: string) {
+  try {
+    return await new File(uri).digest('MD5');
+  } catch {
+    return null;
+  }
+}
 
 function stickerFolder() {
   const d = new Directory(Paths.document, 'stickers');
@@ -69,11 +85,36 @@ function keep(list: SavedSticker[]) {
   core.emit('stickers');
 }
 
-/** Keeps a copy of a sticker (from a message, or one I made). Already saved: it moves to the front. */
+/** The saved sticker that is this picture, if I saved it. */
+export async function savedAs(uri: string, list = savedStickers()) {
+  const md5 = await fingerprint(uri);
+  if (!md5) return null;
+  for (const s of list) {
+    // Stickers saved before fingerprints existed get one now.
+    s.md5 ??= (await fingerprint(s.uri)) ?? undefined;
+    if (s.md5 === md5) return s;
+  }
+  return null;
+}
+
+/** Keeps a copy of a sticker (from a message, or one I made) and returns the copy. Already saved: it moves to the front. */
 export async function saveSticker(uri: string) {
+  const list = savedStickers();
+  const already = await savedAs(uri, list);
+  if (already) {
+    keep([already, ...list.filter((s) => s !== already)]);
+    return already.uri;
+  }
   const copy = new File(stickerFolder(), `${core.newId()}.webp`);
   await new File(uri).copy(copy);
-  keep([{ id: core.newId(), uri: copy.uri }, ...savedStickers()]);
+  keep([{ id: core.newId(), uri: copy.uri, md5: (await fingerprint(copy.uri)) ?? undefined }, ...list]);
+  return copy.uri;
+}
+
+/** Takes a sticker out of my saved ones, given any copy of its picture. */
+export async function unsaveSticker(uri: string) {
+  const s = await savedAs(uri);
+  if (s) removeSticker(s.id);
 }
 
 export function removeSticker(id: string) {
@@ -89,7 +130,40 @@ export function removeSticker(id: string) {
   keep(list.filter((s) => s.id !== id));
 }
 
-/** A sticker from a photo: the biggest square from its middle, 512 px, saved to my stickers. Returns its file. */
+/**
+ * The stickers I sent lately, newest first: a file (one of my saved ones) or a
+ * built-in one's `require` number. Ones I've since removed are left out.
+ */
+export function recentStickers(): (string | number)[] {
+  try {
+    const keys = JSON.parse(KV.getItemSync('stickers:recent') ?? '[]') as string[];
+    const out: (string | number)[] = [];
+    for (const k of keys) {
+      if (k.startsWith('pack:')) {
+        const p = PACK.find((s) => s.name === k.slice(5));
+        if (p) out.push(p.source);
+      } else if (new File(k).exists) out.push(k);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Puts a sticker I just sent at the front of Recent. */
+function noteRecent(from: string | number) {
+  const key = typeof from === 'number' ? `pack:${PACK.find((s) => s.source === from)?.name ?? ''}` : from;
+  if (key === 'pack:') return;
+  try {
+    const keys = JSON.parse(KV.getItemSync('stickers:recent') ?? '[]') as string[];
+    KV.setItemSync('stickers:recent', JSON.stringify([key, ...keys.filter((k) => k !== key)].slice(0, MAX_RECENT)));
+    core.emit('stickers');
+  } catch {
+    // Recent is only a convenience.
+  }
+}
+
+/** A sticker from a photo: the biggest square from its middle, 512 px, saved to my stickers. Returns the saved file. */
 export async function stickerFromPhoto(uri: string, width: number, height: number) {
   const side = Math.min(width, height);
   const ctx = ImageManipulator.manipulate(uri);
@@ -97,8 +171,7 @@ export async function stickerFromPhoto(uri: string, width: number, height: numbe
   ctx.resize({ width: STICKER_SIZE, height: STICKER_SIZE });
   const img = await ctx.renderAsync();
   const saved = await img.saveAsync({ compress: 0.8, format: SaveFormat.WEBP });
-  await saveSticker(saved.uri);
-  return saved.uri;
+  return saveSticker(saved.uri);
 }
 
 /**
@@ -125,6 +198,7 @@ export async function sendSticker(chatId: string, from: string | number, replyTo
   const uri = typeof from === 'number' ? await packFile(from) : from;
   const size = new File(uri).size;
   await sendPicked(chatId, { uri, mime: 'image/webp', kind: 'sticker', name: 'sticker.webp', size, width: STICKER_SIZE, height: STICKER_SIZE }, undefined, { replyTo });
+  noteRecent(from);
 }
 
 // ---- GIFs ----
