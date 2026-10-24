@@ -69,6 +69,8 @@ export type CallView = {
   route: AudioRoute;
   routes: AudioRoute[];
   endReason: EndReason | null;
+  /** Calling out: a phone of theirs is ringing now ("Ringing…"; before that, "Calling…"). */
+  ringing: boolean;
 };
 
 /** One call in the Calls tab. */
@@ -216,6 +218,8 @@ class Calls {
     this.emit();
     ready?.(c.id);
     if (!(await this.media(c))) {
+      // Hung up while the mic was starting: nothing more to do (and no "allow the mic" message).
+      if (c.done) return 'started';
       this.end(c, 'permission');
       return 'permission';
     }
@@ -223,9 +227,12 @@ class Calls {
     const audio = fileModule();
     audio.callAudioStart(video);
     this.watchAudio(c);
-    audio.callTone('ringing');
+    // No ringing sound yet: it starts when their phone says it's ringing (like WhatsApp's "Calling…" then "Ringing…").
     // Everyone in the chat rings; closed phones are woken for it.
-    if (!(await this.send(c, { op: 'ring', video, group: c.group }, undefined, true))) {
+    const rang = await this.send(c, { op: 'ring', video, group: c.group }, undefined, true);
+    // Hung up already (before the ring got out): it's over.
+    if (c.done) return 'started';
+    if (!rang) {
       this.end(c, 'offline');
       return 'offline';
     }
@@ -253,6 +260,7 @@ class Calls {
       route: x.video ? 'speaker' : 'earpiece',
       routes: ['earpiece', 'speaker'],
       endReason: null,
+      ringing: false,
       connectedOnce: false,
       declined: new Set(),
       cancel: [],
@@ -362,7 +370,11 @@ class Calls {
       if (chat) c.members = this.othersIn(chat);
     });
     KV.setItemSync(RINGING, JSON.stringify(r));
-    if (announce) void this.showRing(c);
+    if (announce) {
+      void this.showRing(c);
+      // Tell the caller's phone it's ringing here, so it shows "Ringing…".
+      void this.whenConnected(() => this.sendTo(c.chatId, c.id, { op: 'ringing' }, [{ userId: c.from, deviceId: c.fromDevice }])).catch(() => {});
+    }
     c.cancel.push(
       later(ms, () => {
         if (!c.done && c.state === 'incoming') this.end(c, 'missed');
@@ -409,6 +421,13 @@ class Calls {
       case 'ring':
         if (mine || this.finished.includes(s.call) || c) return;
         return this.incoming(e, from);
+      case 'ringing':
+        // Their phone is ringing: "Calling…" becomes "Ringing…", with the ringing sound.
+        if (!c || mine || c.direction !== 'out' || c.state !== 'outgoing' || c.ringing) return;
+        c.ringing = true;
+        fileModule().callTone('ringing');
+        this.ongoing(c);
+        return this.emit();
       case 'join':
         if (!c) return;
         // I answered on another of my phones: this one stops ringing.
@@ -755,7 +774,7 @@ class Calls {
     else if (c.joined && !quiet) fm.callTone('ended');
     try {
       const r = JSON.parse(KV.getItemSync(RINGING) ?? 'null') as Ringing | null;
-      if (r?.id === c.id) KV.removeItem(RINGING);
+      if (r?.id === c.id) KV.removeItemSync(RINGING);
     } catch {
       // Nothing saved.
     }
@@ -858,7 +877,7 @@ class Calls {
     void core.storage.getChat(c.chatId).then((chat) => {
       if (c.done) return;
       const title = chat ? core.chatTitle(chat) : '…';
-      const text = c.state === 'active' ? (c.video ? t.ongoingVideoCall : t.ongoingVoiceCall) : c.direction === 'out' ? t.ringingWord : t.connectingWord;
+      const text = c.state === 'active' ? (c.video ? t.ongoingVideoCall : t.ongoingVoiceCall) : c.direction === 'out' && c.state === 'outgoing' ? (c.ringing ? t.ringingWord : t.callingWord) : t.connectingWord;
       fileModule().callOngoing(
         JSON.stringify({
           callId: c.id,

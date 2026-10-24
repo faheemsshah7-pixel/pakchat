@@ -25,7 +25,7 @@ export function CallBar() {
   const now = useNow(1000);
   if (!call || call.state === 'ended' || calls.screenOpen) return null;
   const title = chat ? core.chatTitle(chat) : '';
-  const line = call.state === 'active' && call.startedAt ? duration(now - call.startedAt) : call.state === 'incoming' ? t.answer : t.ringingWord;
+  const line = call.state === 'active' && call.startedAt ? duration(now - call.startedAt) : call.state === 'incoming' ? t.answer : call.state === 'connecting' ? t.connectingWord : call.ringing ? t.ringingWord : t.callingWord;
   return (
     <Animated.View entering={FadeInUp} exiting={FadeOutUp} style={{ position: 'absolute', top: insets.top + 6, start: 0, end: 0, alignItems: 'center' }} pointerEvents="box-none">
       <Pressy onPress={() => router.push({ pathname: '/call', params: { id: call.id } })} label={t.backToCall} scale={0.96} testID="call-bar">
@@ -52,7 +52,7 @@ export async function startCall(chatId: string, video: boolean, t: Strings) {
     return;
   }
   if (!core.connected) return toast(t.offline);
-  // The screen opens straight away, showing "Ringing…".
+  // The screen opens straight away, showing "Calling…" (then "Ringing…" once their phone rings).
   const r = await calls.start(chatId, video, (id) => router.push({ pathname: '/call', params: { id } }));
   if (r === 'permission') toast(t.callNeedsMic);
   else if (r === 'offline') toast(t.offline);

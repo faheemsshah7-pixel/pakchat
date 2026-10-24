@@ -89,6 +89,14 @@ export type ChatRow = {
   prefs: ChatPrefs;
 };
 
+/**
+ * Every chat as last read, kept in memory, so a chat opens with its name, picture
+ * and message box already there (not a "?" for a moment). Filled by the chat
+ * list and by each chat read; the database is still read straight after.
+ */
+const chatCache = new Map<string, Chat>();
+core.on('auth', () => chatCache.clear());
+
 /** Every chat with its newest message, pinned first, then newest. */
 export function useChatList(): ChatRow[] | null {
   // Names and prefs change the rows too, so listen to those as well.
@@ -97,6 +105,7 @@ export function useChatList(): ChatRow[] | null {
     async () => {
       if (core.state !== 'signedIn') return [];
       const chats = await core.client.chats();
+      for (const chat of chats) chatCache.set(chat.id, chat);
       const rows: ChatRow[] = [];
       for (const chat of chats) {
         // Statuses have their own tab.
@@ -120,7 +129,17 @@ export function useChatList(): ChatRow[] | null {
 const activity = (r: ChatRow) => Math.max(r.chat.lastActivity, r.last?.sentAt ?? 0);
 
 export function useChat(chatId: string): Chat | null | undefined {
-  return useLoaded<Chat | null | undefined>(['chats', 'auth'], () => core.storage.getChat(chatId), undefined, [chatId]);
+  return useLoaded<Chat | null | undefined>(
+    ['chats', 'auth'],
+    async () => {
+      const chat = await core.storage.getChat(chatId);
+      if (chat) chatCache.set(chatId, chat);
+      else chatCache.delete(chatId);
+      return chat;
+    },
+    chatCache.get(chatId),
+    [chatId],
+  );
 }
 
 // ---- One chat's messages ----

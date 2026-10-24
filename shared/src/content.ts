@@ -52,6 +52,7 @@ export type StatusQuote = { author: string; id: string; kind: 'text' | 'image' |
  *   join     I'm in the call now (answering is joining)
  *   here     "I'm already in it", the answer to a join, so the two connect
  *   offer, answer, ice   WebRTC connecting two phones (to one device)
+ *   ringing  my phone is ringing now (the caller's screen goes from "Calling…" to "Ringing…")
  *   leave    I hung up
  *   decline  I said no (or "answered on another of my devices")
  *   busy     I'm on another call
@@ -59,8 +60,8 @@ export type StatusQuote = { author: string; id: string; kind: 'text' | 'image' |
  * The device with the smaller name ("user:device") makes the offer, so two
  * phones never both start (see app/src/calls).
  */
-export type CallOp = 'ring' | 'join' | 'here' | 'offer' | 'answer' | 'ice' | 'leave' | 'decline' | 'busy' | 'media';
-export const CALL_OPS: readonly CallOp[] = ['ring', 'join', 'here', 'offer', 'answer', 'ice', 'leave', 'decline', 'busy', 'media'];
+export type CallOp = 'ring' | 'ringing' | 'join' | 'here' | 'offer' | 'answer' | 'ice' | 'leave' | 'decline' | 'busy' | 'media';
+export const CALL_OPS: readonly CallOp[] = ['ring', 'ringing', 'join', 'here', 'offer', 'answer', 'ice', 'leave', 'decline', 'busy', 'media'];
 export type IceCandidate = { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null };
 export type CallSignal = {
   t: 'call';

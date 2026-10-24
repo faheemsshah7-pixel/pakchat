@@ -8,7 +8,7 @@ import { EDIT_MINUTES, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, BackHandler, FlatList, ScrollView, View, type ListViewToken } from 'react-native';
 import Animated, { FadeIn, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomOut } from 'react-native-reanimated';
@@ -86,6 +86,21 @@ export default function ChatScreen() {
   const keyboard = useAnimatedKeyboard();
   const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(keyboard.height.value, insets.bottom) }));
 
+  // The chat slides in first; the work that changes other screens (marking it
+  // read, which redraws the chat list underneath) waits until it has, so the
+  // slide stays smooth. Half a second at most, in case the "done" never comes.
+  const navigation = useNavigation();
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const done = () => setSettled(true);
+    const off = navigation.addListener('transitionEnd' as never, done);
+    const wait = setTimeout(done, 500);
+    return () => {
+      off();
+      clearTimeout(wait);
+    };
+  }, [navigation]);
+
   // Reading the chat: blue ticks for them, and no more unread here. Only while PakChat is
   // on screen: a chat left open in the background hasn't been read.
   const [onScreen, setOnScreen] = useState(AppState.currentState === 'active');
@@ -98,26 +113,28 @@ export default function ChatScreen() {
       focused.current = true;
       // This chat's alert goes, and new messages here don't alert while you're looking.
       core.viewing = id;
-      if (AppState.currentState === 'active') {
-        void dismissChatAlert(id);
-        void calls.seenMissed(id);
+      if (settled) {
+        if (AppState.currentState === 'active') {
+          void dismissChatAlert(id);
+          void calls.seenMissed(id);
+        }
+        core.setPrefs(id, { markedUnread: false });
+        // Coming back to the chat (from its info, say): anything that came meanwhile is read now.
+        if (AppState.currentState === 'active') void core.client.markRead(id).catch(() => {});
       }
-      core.setPrefs(id, { markedUnread: false });
-      // Coming back to the chat (from its info, say): anything that came meanwhile is read now.
-      if (AppState.currentState === 'active') void core.client.markRead(id).catch(() => {});
       return () => {
         focused.current = false;
         if (core.viewing === id) core.viewing = null;
       };
-    }, [id]),
+    }, [id, settled]),
   );
   useEffect(() => {
-    if (onScreen && focused.current && chat && chat.unread > 0) void core.client.markRead(id).catch(() => {});
-  }, [chat, id, list, onScreen]);
+    if (settled && onScreen && focused.current && chat && chat.unread > 0) void core.client.markRead(id).catch(() => {});
+  }, [chat, id, list, onScreen, settled]);
   // Back in PakChat with this chat open: its alert has been seen.
   useEffect(() => {
-    if (onScreen && focused.current) void dismissChatAlert(id);
-  }, [id, onScreen]);
+    if (settled && onScreen && focused.current) void dismissChatAlert(id);
+  }, [id, onScreen, settled]);
 
   // Back first cancels picking, replying or editing.
   useEffect(() => {
@@ -464,10 +481,11 @@ export default function ChatScreen() {
             onViewableItemsChanged={onViewable}
             viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
             keyboardShouldPersistTaps="handled"
-            // Draws only what fills the screen first, so the chat opens quickly.
-            initialNumToRender={14}
-            maxToRenderPerBatch={10}
-            windowSize={11}
+            // Draws only what fills the screen first, so the chat opens quickly; the rest follows.
+            initialNumToRender={11}
+            maxToRenderPerBatch={8}
+            updateCellsBatchingPeriod={30}
+            windowSize={9}
             onScrollToIndexFailed={(info) => setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5 }), 250)}
             ListFooterComponent={
               list && !hasMore ? (

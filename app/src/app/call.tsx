@@ -1,6 +1,7 @@
 // call.tsx: the call screen, for voice and video, one to one or a group.
 //
-// Ringing: the caller's name, with Decline and Answer. Calling: "Ringing…".
+// Ringing: the caller's name, with Decline and Answer. Calling: "Calling…", then
+// "Ringing…" once their phone is actually ringing (it says so), like WhatsApp.
 // In the call: the time, and the buttons (where the sound goes, camera,
 // switch camera, mute, hang up). A video call fills the screen with the
 // other person, with you small in the corner; a group call shows everyone in
@@ -10,7 +11,7 @@
 // On a locked phone, this screen shows over the lock (CallLockScreen in the
 // native module), but only this screen: leaving it puts the lock back.
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { View, useWindowDimensions } from 'react-native';
@@ -72,24 +73,45 @@ export default function CallScreen() {
     }, [video]),
   );
 
-  // The call is over (its "ended" moment has passed): close.
+  // The call is over: "Call ended" shows for a moment, then back to where you
+  // called from (the chat, or the Calls tab). This screen takes itself off
+  // (not just whatever is on top), and if that didn't work for any reason,
+  // it goes to the chat list rather than staying on an empty screen.
+  const navigation = useNavigation();
+  const closed = useRef(false);
+  const check = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ended = call?.state === 'ended';
   useEffect(() => {
-    if (call) {
-      seen.current = true;
-      return;
-    }
-    if (seen.current || gone) {
-      if (router.canGoBack()) router.back();
+    if (call) seen.current = true;
+    if (closed.current || !((seen.current && (!call || ended)) || gone)) return;
+    const close = () => {
+      if (closed.current) return;
+      closed.current = true;
+      if (navigation.canGoBack()) navigation.goBack();
       else router.replace('/');
-    }
-  }, [call, gone]);
+      // Still showing a second later: go to the chat list.
+      check.current = setTimeout(() => {
+        if (navigation.isFocused()) router.replace('/');
+      }, 1_000);
+    };
+    // Once the call is cleared away, at once; while "Call ended" shows, after a moment.
+    const wait = setTimeout(close, call ? 1_200 : 0);
+    return () => clearTimeout(wait);
+  }, [call, ended, gone, navigation]);
+  useEffect(
+    () => () => {
+      if (check.current) clearTimeout(check.current);
+    },
+    [],
+  );
 
   if (!call) return <View style={{ flex: 1, backgroundColor: '#0B1424' }} />;
   return (
     <View style={{ flex: 1, backgroundColor: '#0B1424' }} testID="call-screen">
       <StatusBar style="light" />
       <LinearGradient colors={['#13233F', '#0B1424']} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} />
-      <Picture call={call} />
+      {/* The video goes before the screen closes, so nothing is left behind on top. */}
+      {!ended && <Picture call={call} />}
       <View style={{ flex: 1, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 18 }} pointerEvents="box-none">
         <Header call={call} t={t} />
         <View style={{ flex: 1 }} pointerEvents="none" />
@@ -99,7 +121,7 @@ export default function CallScreen() {
   );
 }
 
-/** Name, and how the call is going ("Ringing…", "02:15", "Call ended"). */
+/** Name, and how the call is going ("Calling…", then "Ringing…" once their phone rings, "02:15", "Call ended"). */
 function Header({ call, t }: { call: CallView; t: Strings }) {
   const chat = useChat(call.chatId);
   const now = useNow(1000);
@@ -113,7 +135,9 @@ function Header({ call, t }: { call: CallView; t: Strings }) {
           ? t.incomingVideo
           : t.incomingVoice
         : call.state === 'outgoing'
-          ? t.ringingWord
+          ? call.ringing
+            ? t.ringingWord
+            : t.callingWord
           : call.state === 'connecting'
             ? t.connectingWord
             : call.peers.some((p) => p.state === 'reconnecting')

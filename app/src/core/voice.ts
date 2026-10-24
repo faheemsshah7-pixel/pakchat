@@ -179,7 +179,8 @@ export class VoiceSession {
     const out = new File(folder(), `${core.newId()}.m4a`);
     let duration = this.partsMs;
     if (this.parts.length === 1) {
-      new File(this.parts[0]).copy(out);
+      // Copying takes a moment: wait for it, or the piece could be deleted before it's copied.
+      await new File(this.parts[0]).copy(out);
     } else {
       duration = await fileModule().joinAudio(this.parts, out.uri);
     }
@@ -223,8 +224,8 @@ export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref) {
   const files = new Directory(Paths.document, 'files');
   if (!files.exists) files.create({ intermediates: true, idempotent: true });
   const copy = new File(files, `${core.newId()}.m4a`);
-  const from = new File(v.uri);
-  from.move(copy);
+  // Wait for the move to finish before reading its size or sending it.
+  await new File(v.uri).move(copy);
   await core.client.sendFile(
     chatId,
     {

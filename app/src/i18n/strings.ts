@@ -492,6 +492,7 @@ export const en = {
   noDocs: 'No documents yet',
   noLinks: 'No links yet',
   thisMonth: 'This month',
+  callingWord: 'Calling…',
 };
 
 export type Strings = typeof en;
@@ -962,6 +963,7 @@ export const ur: Strings = {
   noDocs: 'ابھی کوئی دستاویز نہیں',
   noLinks: 'ابھی کوئی لنک نہیں',
   thisMonth: 'اس مہینے',
+  callingWord: 'کال ہو رہی ہے…',
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

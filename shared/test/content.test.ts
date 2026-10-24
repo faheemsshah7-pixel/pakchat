@@ -29,3 +29,8 @@ test('anything odd is dropped', () => {
   expect(parse({ t: 'mystery' })).toBeNull();
   expect(parseContent(JSON.stringify({ t: 'text', text: 'no id' }))).toBeNull();
 });
+
+test('"ringing" comes back from a phone that is ringing, so the caller can show it', () => {
+  expect(parse({ t: 'call', call: 'c1', op: 'ringing' })).toEqual({ ...base, t: 'call', call: 'c1', op: 'ringing' });
+  expect(parse({ t: 'call', call: 'c1', op: 'ringing-ish' })).toBeNull();
+});

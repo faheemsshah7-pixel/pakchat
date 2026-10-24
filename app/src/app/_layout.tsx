@@ -9,7 +9,7 @@ import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -111,7 +111,9 @@ function App() {
       <Stack
         screenOptions={{
           headerShown: false,
-          animation: rtl ? 'ios_from_left' : 'ios_from_right',
+          // On Android, the phone's own way of opening a screen (what WhatsApp uses):
+          // the new screen fades in almost at once while sliding in a little.
+          animation: Platform.OS === 'android' ? 'default' : rtl ? 'ios_from_left' : 'ios_from_right',
           contentStyle: { backgroundColor: theme.bg },
         }}
       >
@@ -142,7 +144,7 @@ function App() {
           <Stack.Screen name="restore" />
           <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="viewer" options={{ animation: 'fade' }} />
-          <Stack.Screen name="call" options={{ animation: 'fade', contentStyle: { backgroundColor: '#0B1424' } }} />
+          <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: '#0B1424' } }} />
           <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="settings/status-privacy" />
