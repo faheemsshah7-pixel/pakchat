@@ -106,8 +106,8 @@ object CallAlerts {
       .setOngoing(true)
       .setAutoCancel(false)
       .setContentIntent(screen)
-      // Wakes a locked phone and shows the call screen (see CallLockScreen).
-      .setFullScreenIntent(screen, true)
+      // Wakes a locked phone and shows the incoming call screen (IncomingCallActivity).
+      .setFullScreenIntent(lockScreen(context, callId, json), true)
       .setTimeoutAfter(RING_MS)
       // Phones before Android 8 take the sound from here, not the channel.
       .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), AudioManager.STREAM_RING)
@@ -121,6 +121,7 @@ object CallAlerts {
   /** Stops ringing (answered, declined, or the caller hung up). */
   fun stopRing(context: Context, callId: String) {
     NotificationManagerCompat.from(context).cancel(tag(callId), ID)
+    IncomingCallActivity.close(callId)
   }
 
   /** "Missed voice call" from someone; one alert per chat, with how many. */
@@ -208,6 +209,13 @@ object CallAlerts {
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     return PendingIntent.getActivity(context, "call:$answer:$callId".hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
   }
+
+  /** The incoming call screen over the lock screen. */
+  private fun lockScreen(context: Context, callId: String, json: String): PendingIntent =
+    PendingIntent.getActivity(context, "lock:$callId".hashCode(), IncomingCallActivity.intent(context, json), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+  /** Decline, as the incoming call screen's button. */
+  fun declineIntent(context: Context, callId: String, chatId: String) = action(context, callId, chatId, "decline")
 
   /** Decline or Hang up, handed to the app's JavaScript (CallActionReceiver). */
   private fun action(context: Context, callId: String, chatId: String, what: String): PendingIntent {

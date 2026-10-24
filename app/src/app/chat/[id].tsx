@@ -284,7 +284,8 @@ export default function ChatScreen() {
       const picked = (await from()).filter((p): p is Picked => !!p);
       if (!picked.length) return;
       const limit = await loadLimits();
-      const ok = picked.filter((p) => !p.size || p.size <= limit);
+      // A video over the limit can still go once it's made smaller (HD off); with HD on, sending says it's too big.
+      const ok = picked.filter((p) => !p.size || p.size <= limit || (p.kind === 'video' && !p.gif));
       if (ok.length < picked.length) toast(fill(t.fileTooBig, { mb: Math.floor(limit / 1024 / 1024) }));
       if (!ok.length) return;
       setCaption('');
@@ -299,6 +300,8 @@ export default function ChatScreen() {
     const list = outgoing ?? [];
     const words = caption.trim();
     setOutgoing(null);
+    // Making a video smaller takes a few seconds (longer for a long one).
+    if (!hd && list.some((p) => p.kind === 'video' && !p.gif)) toast(t.videoGettingReady);
     void act(async () => {
       for (const [i, p] of list.entries()) {
         try {
@@ -828,7 +831,7 @@ export default function ChatScreen() {
               ),
             )}
           </ScrollView>
-          {outgoing?.some((p) => p.kind === 'image' && p.mime !== 'image/gif') && (
+          {outgoing?.some((p) => (p.kind === 'image' && p.mime !== 'image/gif') || (p.kind === 'video' && !p.gif)) && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4 }}>
               <View style={{ flex: 1 }}>
                 <Txt size={15} weight="600">

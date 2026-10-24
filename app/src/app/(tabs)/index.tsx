@@ -15,6 +15,7 @@ import { core } from '../../core/core';
 import { useAllPresence, useAllTyping, useAuth, useChatList, useConnected, useLists, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
+import { AlertsCard } from '../../ui/AlertsCard';
 import { ChatRow } from '../../ui/ChatRow';
 import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
@@ -222,23 +223,27 @@ export default function Chats() {
           itemLayoutAnimation={listLayout}
           contentContainerStyle={{ paddingBottom: 96 }}
           ListHeaderComponent={
-            archivedCount > 0 && filter === 'all' ? (
-              <Pressy onPress={() => router.push('/archived')} label={t.archived} scale={0.98} testID="open-archived">
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, height: 52 }}>
-                  <View style={{ width: 50, alignItems: 'center' }}>
-                    <Icon name="archive" size={22} color={theme.accInk} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Txt size={15.5} weight="600">
-                      {t.archived}
+            <>
+              {/* Realme, Xiaomi and the like: turn on Autostart, or alerts don't come. */}
+              {filter === 'all' && !selecting && <AlertsCard />}
+              {archivedCount > 0 && filter === 'all' ? (
+                <Pressy onPress={() => router.push('/archived')} label={t.archived} scale={0.98} testID="open-archived">
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, height: 52 }}>
+                    <View style={{ width: 50, alignItems: 'center' }}>
+                      <Icon name="archive" size={22} color={theme.accInk} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Txt size={15.5} weight="600">
+                        {t.archived}
+                      </Txt>
+                    </View>
+                    <Txt size={13} weight="600" color={theme.accInk}>
+                      {archivedCount}
                     </Txt>
                   </View>
-                  <Txt size={13} weight="600" color={theme.accInk}>
-                    {archivedCount}
-                  </Txt>
-                </View>
-              </Pressy>
-            ) : undefined
+                </Pressy>
+              ) : null}
+            </>
           }
           ListEmptyComponent={
             rows === null ? undefined : (

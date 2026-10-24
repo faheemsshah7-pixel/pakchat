@@ -28,6 +28,10 @@ android {
 dependencies {
   // Message alerts in WhatsApp's style (MessagingStyle, reply buttons): ChatAlerts.kt.
   implementation "androidx.core:core:1.16.0"
+  // Making videos smaller before sending (VideoShrink.kt): Google's Media3, the same
+  // version expo-video plays videos with.
+  implementation "androidx.media3:media3-transformer:1.9.1"
+  implementation "androidx.media3:media3-effect:1.9.1"
   // Reply, Mark as read and Mute hand the work to the app's JavaScript (AlertActionReceiver.kt).
   compileOnly "com.facebook.react:react-android"
 

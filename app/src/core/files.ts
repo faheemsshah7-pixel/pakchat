@@ -108,7 +108,7 @@ export type Picked = {
   duration?: number;
   /** A GIF (a short silent video that loops). */
   gif?: true;
-  /** Send a photo as it is, without making it smaller (the "HD" switch). */
+  /** Send a photo or video as it is, without making it smaller (the "HD" switch). */
   hd?: boolean;
 };
 
@@ -146,6 +146,7 @@ const PHOTO_MAX = 1600;
  * smaller.
  */
 async function smaller(p: Picked): Promise<Picked> {
+  if (p.kind === 'video') return smallerVideo(p);
   if (p.kind !== 'image' || p.hd || p.mime === 'image/gif') return p;
   try {
     const ctx = ImageManipulator.manipulate(p.uri);
@@ -163,9 +164,33 @@ async function smaller(p: Picked): Promise<Picked> {
   }
 }
 
+/**
+ * A video, smaller (VideoShrink.kt): 720 px on its short side, about 2
+ * megabits a second, so a minute is about 15 MB, like WhatsApp. With HD on it
+ * goes as it is (up to the server's 100 MB). A GIF is already small. If it
+ * can't be made smaller, or wouldn't get smaller, it goes as it is.
+ */
+async function smallerVideo(p: Picked): Promise<Picked> {
+  if (p.hd || p.gif) return p;
+  const out = new File(Paths.cache, `small-${core.newId()}.mp4`);
+  try {
+    const r = await fileModule().shrinkVideo(p.uri, out.uri);
+    if (p.size && r.size >= p.size) {
+      out.delete();
+      return p;
+    }
+    const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.mp4` : undefined;
+    return { ...p, uri: r.uri, mime: 'video/mp4', name, size: r.size, ...(r.width && r.height ? { width: r.width, height: r.height } : {}) };
+  } catch (err) {
+    console.log(`[pakchat] video shrink: ${String(err)}`);
+    if (out.exists) out.delete();
+    return p;
+  }
+}
+
 export class TooBig extends Error {}
 
-/** Sends a picked file to a chat (photos made smaller first, unless HD). Throws TooBig over the server's limit. */
+/** Sends a picked file to a chat (photos and videos made smaller first, unless HD). Throws TooBig over the server's limit. */
 export async function sendPicked(chatId: string, picked: Picked, caption?: string, extra: { replyTo?: Ref } = {}) {
   const p = await smaller(picked);
   const source = new File(p.uri);
@@ -190,7 +215,7 @@ export async function sendPicked(chatId: string, picked: Picked, caption?: strin
   try {
     return await core.client.sendFile(chatId, file, { caption, replyTo: extra.replyTo });
   } finally {
-    // The smaller photo was only needed for the copy above.
+    // The smaller photo or video was only needed for the copy above.
     if (p.uri !== picked.uri) {
       try {
         source.delete();

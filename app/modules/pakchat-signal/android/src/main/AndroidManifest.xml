@@ -9,6 +9,16 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+  <!-- The phone makers' "Autostart" settings pages, so PakChat may open them (see Autostart.kt). -->
+  <queries>
+    <package android:name="com.miui.securitycenter" />
+    <package android:name="com.coloros.safecenter" />
+    <package android:name="com.oppo.safe" />
+    <package android:name="com.iqoo.secure" />
+    <package android:name="com.vivo.permissionmanager" />
+    <package android:name="com.huawei.systemmanager" />
+    <package android:name="com.hihonor.systemmanager" />
+  </queries>
   <application>
     <!-- Reply, Mark as read and Mute on a message alert (see ChatAlerts.kt). -->
     <receiver android:name="expo.modules.pakchatsignal.AlertActionReceiver" android:exported="false" />
@@ -16,6 +26,17 @@
     <!-- Decline and Hang up on a call alert, and the ongoing call (see CallService.kt). -->
     <receiver android:name="expo.modules.pakchatsignal.CallActionReceiver" android:exported="false" />
     <service android:name="expo.modules.pakchatsignal.CallActionService" android:exported="false" />
+    <!-- The incoming call screen on a locked phone (see IncomingCallActivity.kt). -->
+    <activity
+        android:name="expo.modules.pakchatsignal.IncomingCallActivity"
+        android:exported="false"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
+        android:launchMode="singleTop"
+        android:taskAffinity="com.pakchat.app.incomingcall"
+        android:excludeFromRecents="true"
+        android:screenOrientation="portrait"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
     <service android:name="expo.modules.pakchatsignal.CallService" android:exported="false" android:foregroundServiceType="microphone|camera" />
   </application>
 </manifest>

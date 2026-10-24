@@ -48,6 +48,14 @@ export type FileModule = {
   callAudioStart(video: boolean): void;
   callRoute(to: AudioRoute): void;
   callVideo(on: boolean): void;
+  /** The phone's maker if it blocks apps in the background ("realme", "xiaomi"…), else null. */
+  autostartBrand(): string | null;
+  /** Opens the maker's Autostart page, or PakChat's app settings. False if neither opened. */
+  openAutostart(): boolean;
+  /** A smaller copy of a video (720 px on its short side), written to `output`. */
+  shrinkVideo(input: string, output: string): Promise<{ uri: string; size: number; width: number; height: number }>;
+  /** Picture-in-picture is wanted now: leaving PakChat shrinks it to a small window (Android 8+). */
+  callPip(on: boolean): void;
   callAudioState(): CallAudioState;
   callTone(kind: 'ringing' | 'busy' | 'ended'): void;
   callStopTone(): void;
@@ -55,6 +63,7 @@ export type FileModule = {
   callFullScreenAllowed(): boolean;
   callOpenFullScreenSettings(): void;
   addListener(event: 'callAudio', fn: (e: CallAudioState) => void): EventSubscription;
+  addListener(event: 'pip', fn: (e: { on: boolean }) => void): EventSubscription;
 };
 
 /** Where a call's sound comes out. */

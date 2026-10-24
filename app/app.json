@@ -32,6 +32,8 @@
     },
     "plugins": [
       "./plugins/withSignal",
+      "./plugins/withScreenSlide",
+      "./plugins/withCallPip",
       "expo-router",
       [
         "expo-splash-screen",

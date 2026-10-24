@@ -14,21 +14,22 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { View, useWindowDimensions } from 'react-native';
+import { FlatList, View } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { RTCView } from 'react-native-webrtc';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
-import { calls, type CallView, type EndReason, type PeerView } from '../core/calls';
+import { calls, MAX_IN_CALL, type CallView, type EndReason, type PeerView } from '../core/calls';
 import { core } from '../core/core';
-import { useCall, useChat, useNow } from '../core/hooks';
-import { useT } from '../i18n';
+import { useCall, useChat, useNow, usePeople } from '../core/hooks';
+import { fill, useT } from '../i18n';
 import type { Strings } from '../i18n/strings';
 import { duration } from '../ui/format';
 import { Icon, type IconName } from '../ui/icons';
-import { Avatar, Pressy, Txt } from '../ui/kit';
+import { Avatar, Field, Pressy, Txt } from '../ui/kit';
 import { tick } from '../ui/motion';
+import { Sheet, toast } from '../ui/overlays';
 
 const INK = '#FFFFFF';
 const SOFT = 'rgba(255,255,255,0.72)';
@@ -42,6 +43,7 @@ export default function CallScreen() {
   const call = useCall();
   const seen = useRef(false);
   const answered = useRef(false);
+  const [adding, setAdding] = useState(false);
 
   // PakChat may have just been started by the ringing alert: bring the call back.
   const [gone, setGone] = useState(false);
@@ -71,6 +73,21 @@ export default function CallScreen() {
         fileModule().callShowOverLock(false, false);
       };
     }, [video]),
+  );
+
+  // Picture-in-picture, like WhatsApp: leaving PakChat during a video call keeps the
+  // video going in a small window (only from this screen, so it never shows a chat).
+  const [small, setSmall] = useState(false);
+  useEffect(() => {
+    const sub = fileModule().addListener('pip', (e) => setSmall(e.on));
+    return () => sub.remove();
+  }, []);
+  const pipOk = video && call?.state === 'active';
+  useFocusEffect(
+    useCallback(() => {
+      fileModule().callPip(pipOk);
+      return () => fileModule().callPip(false);
+    }, [pipOk]),
   );
 
   // The call is over: "Call ended" shows for a moment, then back to where you
@@ -106,6 +123,15 @@ export default function CallScreen() {
   );
 
   if (!call) return <View style={{ flex: 1, backgroundColor: '#0B1424' }} />;
+  // In the small window: only the video, no names or buttons.
+  if (small && !ended) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0B1424' }}>
+        <StatusBar style="light" />
+        {call.group ? <Tiles call={call} /> : <Picture call={call} small />}
+      </View>
+    );
+  }
   return (
     <View style={{ flex: 1, backgroundColor: '#0B1424' }} testID="call-screen">
       <StatusBar style="light" />
@@ -114,10 +140,88 @@ export default function CallScreen() {
       {!ended && <Picture call={call} />}
       <View style={{ flex: 1, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 18 }} pointerEvents="box-none">
         <Header call={call} t={t} />
-        <View style={{ flex: 1 }} pointerEvents="none" />
+        {call.canAdd && call.state === 'active' && (
+          // Top corner, like WhatsApp: add someone, and the call becomes a group call.
+          <View style={{ position: 'absolute', top: insets.top + 4, end: 14 }}>
+            <Pressy onPress={() => setAdding(true)} label={t.addPeople} scale={0.9} testID="call-add">
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="userPlus" size={21} color={INK} stroke={2} />
+              </View>
+            </Pressy>
+          </View>
+        )}
+        {/* A group call shows everyone in tiles, in the space between the name and the buttons. */}
+        {call.group && call.state === 'active' ? <Tiles call={call} /> : <View style={{ flex: 1 }} pointerEvents="none" />}
         {call.state === 'incoming' ? <Ringing call={call} t={t} /> : <Controls call={call} t={t} />}
       </View>
+      <AddPeople call={call} visible={adding} onClose={() => setAdding(false)} />
     </View>
+  );
+}
+
+/** Everyone in the call but me: the chat's other people and anyone added. */
+function othersIn(call: CallView, chat: ReturnType<typeof useChat>) {
+  const inChat = chat ? chat.members.map((m) => m.userId).filter((u) => u !== core.myId) : [];
+  return [...new Set([...inChat, ...call.extra])];
+}
+
+/** Pick someone to add to the call: their phone rings, and they join everyone here. */
+function AddPeople({ call, visible, onClose }: { call: CallView; visible: boolean; onClose: () => void }) {
+  const t = useT();
+  const people = usePeople();
+  const chat = useChat(call.chatId);
+  const [query, setQuery] = useState('');
+  const inCall = new Set([core.myId, ...othersIn(call, chat)]);
+  const q = query.trim().toLowerCase();
+  const list = Object.values(people)
+    .filter((p) => p.name && !inCall.has(p.id) && (!q || p.name.toLowerCase().includes(q)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const full = inCall.size >= MAX_IN_CALL;
+
+  async function add(id: string, name: string) {
+    onClose();
+    setQuery('');
+    tick();
+    if (await calls.add([id])) toast(fill(t.ringingPerson, { name }));
+    else toast(t.couldNot);
+  }
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title={t.addToCallTitle}>
+      {full ? (
+        <Txt size={14.5} align="center" style={{ padding: 24 }}>
+          {fill(t.callIsFull, { count: String(MAX_IN_CALL) })}
+        </Txt>
+      ) : (
+        <View style={{ gap: 8 }}>
+          <View style={{ paddingHorizontal: 16 }}>
+            <Field icon="search" value={query} onChangeText={setQuery} placeholder={t.search} testID="call-add-search" />
+          </View>
+          <FlatList
+            data={list}
+            keyExtractor={(p) => p.id}
+            keyboardShouldPersistTaps="handled"
+            style={{ maxHeight: 380 }}
+            ListEmptyComponent={
+              <Txt size={14} align="center" style={{ padding: 20, opacity: 0.7 }}>
+                {t.noOneToAdd}
+              </Txt>
+            }
+            renderItem={({ item }) => (
+              <Pressy onPress={() => void add(item.id, item.name)} label={item.name} scale={0.98} testID="call-add-person">
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 8 }}>
+                  <Avatar id={item.id} name={item.name} size={42} />
+                  <Txt size={16} weight="600" lines={1} style={{ flex: 1 }}>
+                    {item.name}
+                  </Txt>
+                  <Icon name="userPlus" size={20} color="#22A35A" />
+                </View>
+              </Pressy>
+            )}
+          />
+        </View>
+      )}
+    </Sheet>
   );
 }
 
@@ -125,7 +229,8 @@ export default function CallScreen() {
 function Header({ call, t }: { call: CallView; t: Strings }) {
   const chat = useChat(call.chatId);
   const now = useNow(1000);
-  const title = chat ? core.chatTitle(chat) : '';
+  // Someone was added: everyone's names ("Sara, Bilal").
+  const title = call.extra.length ? othersIn(call, chat).map((u) => core.name(u) || '…').join(', ') : chat ? core.chatTitle(chat) : '';
   const showAvatar = !call.video || call.state !== 'active' || call.group;
   const line =
     call.state === 'ended'
@@ -144,7 +249,7 @@ function Header({ call, t }: { call: CallView; t: Strings }) {
               ? t.reconnecting
               : duration(now - (call.startedAt ?? now));
   return (
-    <View style={{ alignItems: 'center', gap: 8, paddingHorizontal: 20 }}>
+    <View style={{ alignItems: 'center', gap: 8, paddingHorizontal: 60 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Icon name="lock" size={13} color={SOFT} />
         <Txt size={12.5} color={SOFT}>
@@ -207,39 +312,53 @@ function Pulse({ children }: { children: ReactNode }) {
   );
 }
 
-/** The video: the other person full screen and me in the corner, or everyone in tiles. */
-function Picture({ call }: { call: CallView }) {
-  const { width, height } = useWindowDimensions();
+/**
+ * The video of a one-to-one call: the other person full screen and me in the
+ * corner. (A group call's tiles are in Tiles.) Before anyone answers, my own
+ * camera shows dimmed behind the name, as when it rings.
+ */
+function Picture({ call, small }: { call: CallView; small?: boolean }) {
   const insets = useSafeAreaInsets();
-  if (!call.video && !call.group) return null;
-  const peers = call.peers;
-  if (call.group && call.state !== 'incoming') {
-    // Tiles: me plus everyone, two across.
-    const tiles: (PeerView | 'me')[] = ['me', ...peers];
-    const rows = Math.ceil(tiles.length / 2);
-    const top = insets.top + 130;
-    const bottom = insets.bottom + 120;
-    const tileH = Math.max(110, (height - top - bottom) / Math.max(1, rows) - 8);
-    const tileW = tiles.length === 1 ? width - 24 : (width - 32) / 2;
-    return (
-      <View style={{ position: 'absolute', top, start: 12, end: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {tiles.map((p) => (
-          <Tile key={p === 'me' ? 'me' : p.key} call={call} peer={p} w={tileW} h={tileH} />
-        ))}
-      </View>
-    );
-  }
-  const other = peers.find((p) => p.stream && p.video);
+  if (!call.video) return null;
+  const waiting = call.state !== 'active';
+  if (call.group && !waiting) return null;
+  const other = call.peers.find((p) => p.stream && p.video);
   return (
     <>
-      {other?.stream && <RTCView streamURL={other.stream} objectFit="cover" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={0} />}
-      {call.local && call.state !== 'incoming' && (
+      {!waiting && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit="cover" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={0} />}
+      {call.local && !waiting && !small && (
         <Animated.View entering={FadeIn} style={{ position: 'absolute', top: insets.top + 110, end: 14, width: 110, height: 160, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }}>
           <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ flex: 1 }} zOrder={1} />
         </Animated.View>
       )}
-      {call.local && call.state === 'incoming' && <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, opacity: 0.5 }} zOrder={0} />}
+      {call.local && waiting && <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, opacity: 0.5 }} zOrder={0} />}
     </>
+  );
+}
+
+/**
+ * Everyone in a group call (me first), filling the space it's given: two
+ * people one above the other, more in two columns. Sized to its own space,
+ * so it never runs under the name or the buttons.
+ */
+function Tiles({ call }: { call: CallView }) {
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const tiles: (PeerView | 'me')[] = ['me', ...call.peers];
+  const cols = tiles.length <= 2 ? 1 : 2;
+  const rows = Math.ceil(tiles.length / cols);
+  const gap = 8;
+  const w = (box.w - gap * (cols - 1)) / cols;
+  const h = (box.h - gap * (rows - 1)) / rows;
+  return (
+    <View style={{ flex: 1, marginTop: 18, marginBottom: 22, marginHorizontal: 12 }} onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+      {box.h > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+          {tiles.map((p) => (
+            <Tile key={p === 'me' ? 'me' : p.key} call={call} peer={p} w={w} h={h} />
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -252,14 +371,15 @@ function Tile({ call, peer, w, h }: { call: CallView; peer: PeerView | 'me'; w: 
   const muted = me ? call.muted : !peer.audio;
   return (
     <View style={{ width: w, height: h, borderRadius: 18, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }} testID="call-tile">
-      {stream ? <RTCView streamURL={stream} objectFit="cover" mirror={me && call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={me ? 1 : 0} /> : <Avatar id={userId} name={name.replace(/^~ /, '')} size={Math.min(72, h * 0.45)} />}
-      <View style={{ position: 'absolute', start: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
+      {stream ? <RTCView key={me ? 'me' : `${peer.key}:${peer.rev}`} streamURL={stream} objectFit="cover" mirror={me && call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={me ? 1 : 0} /> : <Avatar id={userId} name={name.replace(/^~ /, '')} size={Math.min(72, h * 0.45)} />}
+      {/* The name stays inside the tile, however long. */}
+      <View style={{ position: 'absolute', start: 8, bottom: 8, maxWidth: w - 16, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
         {muted && <Icon name="micOff" size={13} color={INK} />}
-        <Txt size={12} weight="600" color={INK} lines={1}>
+        <Txt size={12} weight="600" color={INK} lines={1} style={{ flexShrink: 1 }}>
           {name}
         </Txt>
         {!me && peer.state !== 'connected' && (
-          <Txt size={11} color={SOFT}>
+          <Txt size={11} color={SOFT} lines={1}>
             {' · '}
             {peer.state === 'reconnecting' ? t.reconnecting : t.connectingWord}
           </Txt>
@@ -296,7 +416,16 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
     <View style={{ gap: 22, opacity: over ? 0.5 : 1 }} pointerEvents={over ? 'none' : 'auto'}>
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
         <Round icon={ROUTE_ICON[call.route]} on={speakerOn} label={`${t.speaker}: ${routeName(call.route, t)}`} onPress={() => calls.setRoute(nextRoute())} testID="call-speaker" />
-        {call.video && <Round icon={call.camera ? 'video' : 'videoOff'} on={!call.camera} label={call.camera ? t.cameraOff : t.cameraOn} onPress={() => calls.setCamera(!call.camera)} testID="call-camera" />}
+        {/* In a voice call it shows once the call is on, and turns it into a video call. */}
+        {(call.video || call.state === 'active') && (
+          <Round
+            icon={call.camera || !call.video ? 'video' : 'videoOff'}
+            on={call.video && !call.camera}
+            label={call.camera ? t.cameraOff : t.cameraOn}
+            onPress={() => void calls.setCamera(!call.camera).then((ok) => !ok && !call.camera && toast(t.couldNot))}
+            testID="call-camera"
+          />
+        )}
         {call.video && call.camera && <Round icon="flipCamera" label={t.flipCamera} onPress={() => calls.flipCamera()} testID="call-flip" />}
         <Round icon={call.muted ? 'micOff' : 'mic'} on={call.muted} label={call.muted ? t.unmute : t.muteMic} onPress={() => (tick(), calls.setMuted(!call.muted))} testID="call-mute" />
       </View>

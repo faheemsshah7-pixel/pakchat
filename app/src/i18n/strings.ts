@@ -462,7 +462,7 @@ export const en = {
   shareStatusWith: 'Share my status with',
   noContactsYet: 'No contacts on PakChat yet.',
   hdQuality: 'HD quality',
-  hdOnNote: 'Sent as it is: sharper, but bigger',
+  hdOnNote: 'Sent as it is (up to 100 MB): sharper, but bigger',
   hdOffNote: 'Made smaller, so it sends fast',
   gifWord: 'GIF',
   stickers: 'Stickers',
@@ -502,6 +502,12 @@ export const en = {
   recentStickers: 'Recent',
   unsaveSticker: 'Remove from saved',
   stickerHint: 'Saved stickers show first in your sticker panel',
+  videoGettingReady: 'Getting the video ready…',
+  alertsCardTitle: 'Turn on alerts',
+  alertsCardText: '{brand} phones stop apps in the background, so messages and calls may not come while PakChat is closed. Turn on Autostart for PakChat, allow background activity in its Battery settings, and let it show on the lock screen.',
+  alertsCardDone: "I've done it",
+  fullScreenCardTitle: 'Show calls on the lock screen',
+  fullScreenCardText: 'Allow PakChat to use full screen, so a call opens its answer screen on a locked phone, like WhatsApp.',
 };
 
 export type Strings = typeof en;
@@ -942,7 +948,7 @@ export const ur: Strings = {
   shareStatusWith: 'ان کے ساتھ اسٹیٹس شیئر کریں',
   noContactsYet: 'ابھی پاک چیٹ پر کوئی کانٹیکٹ نہیں۔',
   hdQuality: 'HD کوالٹی',
-  hdOnNote: 'جیسی ہے ویسی جائے گی: زیادہ صاف، مگر بڑی',
+  hdOnNote: 'جیسی ہے ویسی جائے گی (100 MB تک): زیادہ صاف، مگر بڑی',
   hdOffNote: 'چھوٹی کر کے بھیجی جائے گی، تاکہ جلدی جائے',
   gifWord: 'GIF',
   stickers: 'اسٹیکرز',
@@ -982,6 +988,12 @@ export const ur: Strings = {
   recentStickers: 'حالیہ',
   unsaveSticker: 'محفوظ سے ہٹائیں',
   stickerHint: 'محفوظ اسٹیکرز آپ کے اسٹیکر پینل میں سب سے پہلے نظر آتے ہیں',
+  videoGettingReady: 'ویڈیو تیار ہو رہی ہے…',
+  alertsCardTitle: 'الرٹس آن کریں',
+  alertsCardText: '{brand} فونز پس منظر میں ایپس روک دیتے ہیں، اس لیے PakChat بند ہو تو میسجز اور کالز شاید نہ آئیں۔ PakChat کے لیے Autostart آن کریں، اس کی بیٹری سیٹنگز میں پس منظر کی اجازت دیں، اور لاک اسکرین پر دکھانے کی اجازت دیں۔',
+  alertsCardDone: 'ہو گیا',
+  fullScreenCardTitle: 'لاک اسکرین پر کالز دکھائیں',
+  fullScreenCardText: 'PakChat کو فل اسکرین کی اجازت دیں، تاکہ لاک فون پر کال آئے تو اٹھانے والی اسکرین کھلے، جیسے WhatsApp میں۔',
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

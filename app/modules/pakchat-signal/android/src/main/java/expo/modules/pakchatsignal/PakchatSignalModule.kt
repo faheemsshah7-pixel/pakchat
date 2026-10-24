@@ -130,7 +130,7 @@ class PakchatSignalModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PakchatSignal")
 
-    Events("progress", "callAudio")
+    Events("progress", "callAudio", "pip")
 
     // ---- Files (see FileLock and FileTransfer) ----
 
@@ -219,6 +219,23 @@ class PakchatSignalModule : Module() {
     Function("callRoute") { to: String -> CallAudio.route(context(), to) }
 
     Function("callVideo") { on: Boolean -> CallAudio.setVideo(context(), on) }
+
+    /** The phone's maker if it blocks apps in the background (Realme, Xiaomi…), else null (Autostart.kt). */
+    Function("autostartBrand") { Autostart.brand() }
+
+    /** Opens the maker's Autostart page, or PakChat's app settings. */
+    Function("openAutostart") { Autostart.open(context()) }
+
+    /** A smaller copy of a video, for sending (VideoShrink.kt). */
+    AsyncFunction("shrinkVideo") { input: String, output: String, promise: Promise ->
+      VideoShrink.shrink(context(), input, output, promise)
+    }
+
+    /** Picture-in-picture is wanted (the call screen, in a video call); "pip" says when the small window opens or closes. */
+    Function("callPip") { on: Boolean ->
+      CallPip.onChange = { sendEvent("pip", mapOf("on" to it)) }
+      appContext.currentActivity?.let { CallPip.allow(it, on) }
+    }
 
     Function("callAudioState") { CallAudio.state(context()) }
 
