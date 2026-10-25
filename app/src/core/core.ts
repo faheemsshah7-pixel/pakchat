@@ -263,6 +263,8 @@ class Core {
     this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
     this.unmuteDue();
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.storage.getValue<Partial<AppSettings>>('app:settings')) ?? {}) };
+    // First time with the missed-calls number: start from now, not from every old missed call.
+    if (this.settings.callsSeenAt === undefined) this.setSettings({ callsSeenAt: Date.now() });
     startLock();
     this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
     this.lists = (await this.storage.getValue<ChatList[]>('app:lists')) ?? [];

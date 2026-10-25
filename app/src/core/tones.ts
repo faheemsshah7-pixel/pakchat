@@ -8,6 +8,7 @@
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import { AppState } from 'react-native';
 
+import type { Strings } from '../i18n/strings';
 import { core } from './core';
 
 /** The alert tones (the same names as ChatAlerts.TONES), plus '' (PakChat's own) and 'silent'. */
@@ -71,4 +72,13 @@ export function previewTone(tone: string, volume = 0.8) {
 /** Plays the conversation tone at a loudness, while moving the slider. */
 export function previewVolume(volume: number) {
   play('received', volume);
+}
+
+/** A tone's name to show (alerts use it too, so it lives here and not in TonePicker). */
+export function toneName(tone: string | undefined, t: Strings) {
+  if (tone === undefined) return t.toneDefault;
+  if (tone === '') return t.tonePhone;
+  if (tone === 'silent') return t.toneSilent;
+  const names: Record<string, string> = { chime: t.toneChime, bell: t.toneBell, pop: t.tonePop, drop: t.toneDrop, harp: t.toneHarp, soft: t.toneSoft };
+  return names[tone] ?? tone;
 }

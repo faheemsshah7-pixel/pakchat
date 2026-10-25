@@ -1,5 +1,5 @@
 // new-call.tsx: start a call, like WhatsApp's New call: search your contacts
-// by name and call one (voice or video), or call a number that's on PakChat.
+// by name and call one (voice or video), or type a number or Gmail that's on PakChat.
 // With `fav`, the same list adds someone to Favourites (shown at the top of
 // Calls, and in Chats' Favourites filter).
 import { router, useLocalSearchParams } from 'expo-router';
@@ -143,7 +143,7 @@ export default function NewCall() {
           <Txt size={13.5} color={theme.muted}>
             {t.callANumberNote}
           </Txt>
-          <Field value={number} onChangeText={setNumber} placeholder="+92 300 1234567" keyboardType="phone-pad" autoFocus testID="dial-field" />
+          <Field value={number} onChangeText={setNumber} placeholder="+92 300 1234567 · name@gmail.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoFocus testID="dial-field" />
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Button title={t.voiceCall} icon="calls" busy={busy} disabled={!number.trim()} onPress={() => void callNumber(false)} style={{ flex: 1 }} testID="dial-voice" />
             <Button title={t.videoCall} icon="video" look="soft" disabled={!number.trim() || busy} onPress={() => void callNumber(true)} style={{ flex: 1 }} testID="dial-video" />

@@ -38,7 +38,7 @@ import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
 import { en, ur, type Strings } from '../i18n/strings';
-import { avatarTint, initials } from '../ui/kit';
+import { avatarTint, initials } from '../ui/letters';
 import { core } from './core';
 import { stopAll } from './player';
 

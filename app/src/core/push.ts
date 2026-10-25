@@ -25,9 +25,9 @@ import { AppState } from 'react-native';
 import { fileModule } from '../../modules/pakchat-signal';
 import { en, ur, type Strings } from '../i18n/strings';
 import { preview } from '../ui/format';
-import { avatarTint, initials } from '../ui/kit';
+import { avatarTint, initials } from '../ui/letters';
 import { core, isMuted } from './core';
-import { toneName } from '../ui/TonePicker';
+import { toneName } from './tones';
 
 /** The background task the wake-ups run (defined in background.ts). */
 export const WAKE_TASK = 'pakchat-wake';

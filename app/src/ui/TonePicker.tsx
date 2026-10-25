@@ -2,22 +2,16 @@
 // "Default" follows the tone for all chats (Settings › Notifications).
 import { View } from 'react-native';
 
-import { previewTone, TONES } from '../core/tones';
+import { previewTone, toneName, TONES } from '../core/tones';
 import { useT, type Strings } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from './icons';
 import { Divider, Pressy, Txt } from './kit';
 import { Sheet } from './overlays';
 
-/** A tone's name ('' is the phone's own sound; undefined, for a chat, follows the default). */
-export function toneName(tone: string | undefined, t: Strings) {
-  if (tone === undefined) return t.toneDefault;
-  if (tone === '') return t.tonePhone;
-  if (tone === 'silent') return t.toneSilent;
-  const names: Record<string, string> = { chime: t.toneChime, bell: t.toneBell, pop: t.tonePop, drop: t.toneDrop, harp: t.toneHarp, soft: t.toneSoft };
-  return names[tone] ?? tone;
-}
+export { toneName } from '../core/tones';
 
+/** A tone's name ('' is the phone's own sound; undefined, for a chat, follows the default). */
 export function TonePicker({
   visible,
   value,
