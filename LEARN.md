@@ -1773,3 +1773,82 @@ when you made a call or opened a chat. So:
 - Make a call, a video call and share your screen: calls are the part R8 could break.
 - Send messages both ways, and open an old chat: that's the encryption.
 - Lock a chat, get an alert, and schedule a message: alerts and alarms run in the background.
+
+## Step 32: Faster, like WhatsApp
+
+### "Online" only when the app is open
+Before, a phone that woke up in the background just to collect a message counted as online, so you
+saw "online" when your message got its two grey ticks. Now each phone tells the server whether
+PakChat is on screen: when it connects, and again whenever you open or leave the app. The server
+shows someone as online only while the app is on screen on one of their devices. A phone woken in
+the background stays offline, and its "last seen" doesn't move. The server still knows that phone
+is connected, so it doesn't send it a needless wake-up alert.
+
+### Opening a chat
+- Screens now slide in from the side in a fifth of a second, while the one under them moves back a
+  little, like WhatsApp. Android's own animation took almost half a second.
+- While the chat slides in, only the messages on screen are drawn. The older ones above are drawn
+  straight after, so the phone isn't doing two things at once.
+
+### The keyboard
+The chat used to change its height on every frame while the keyboard slid up, so the phone measured
+and placed every message again 60 times a second. Now the messages and the typing bar just move up
+with the keyboard (cheap), and the height changes once, when the keyboard has stopped.
+
+### Photos and videos
+Drag a full-screen photo or video up or down to close it, like WhatsApp: it follows your finger,
+shrinks a little, the black fades so you see the chat behind, and it closes when you let go. If you
+don't drag far enough, it springs back. This works for profile photos too.
+
+### Screen sharing
+Sharing your screen froze the call on both phones, and could close PakChat on the Realme. The
+phone tried to send its whole screen at full size (almost 3000 pixels tall on a Pixel 8 Pro), and
+its video encoder (the part that squeezes video small enough to send) couldn't take that size. Now
+the shared screen goes at most 1280 pixels on its longer side, about what WhatsApp sends, and it's
+always the whole screen (newer Android first offers "one app", whose picture freezes once you leave
+that app). Also, the call timer no longer shows "-1:-1" for a moment as a call connects.
+
+### If PakChat ever closes by mistake
+The next time it opens, it says so and offers **Copy details**: exactly what went wrong, to paste
+to whoever is fixing it. It catches crashes in the Java and Kotlin code and JavaScript errors as
+they happen, and reads Android's own record for crashes deep in C++ (calls and video).
+
+### Try this
+- Have a friend close PakChat, then send them a message: you see two grey ticks and no "online".
+  When they open PakChat, "online" appears; when they leave it, you see "last seen" with that time.
+- Open and close a few chats and Archived, and tap the typing bar: compare with WhatsApp on the
+  same phone.
+- Open a photo, drag it down a little and let go, then drag it down further.
+- In a video call, share your screen from each phone in turn: the other phone should see it move.
+
+## Step 33: build 5, the last fixes of phase 7
+
+### Screen sharing on Android 11 (the Realme)
+Pressing Share closed PakChat on the Realme. The "Copy details" from step 32 showed why on its first
+try: the calls library (react-native-webrtc) waits up to 10 seconds for screen sharing to start
+using a Java feature (`orTimeout`) that phones only have from Android 12. On Android 11 that line
+doesn't exist, so the app crashed. `app/scripts/fix-webrtc.js` runs after every `npm install` and
+changes that one line in the library to a plain timer that every Android has.
+
+To be sure nothing else like it is hiding, every call the finished app makes into Android or Java
+was listed and compared with Android 11's list. Everything else newer than Android 11 is only used
+after checking the phone's Android version first.
+
+### "PakChat is running" while sharing
+While you share your screen, Android needs a notification on screen. The library builds one but
+looks for a small icon called `ic_notification`, which PakChat didn't have, so Android showed its
+own "PakChat is running" notice instead. Now there's a small screen icon, and the notification
+says "Screen sharing".
+
+### Locked chats
+- Coming back from a chat inside Locked chats asked for your fingerprint again. Now the folder stays
+  open behind its chats, and locks again when you're back on the chat list (or leave PakChat), like
+  WhatsApp.
+- With a secret code, typing it in search no longer jumps straight into the folder. "Locked chats"
+  appears at the top of the results, like WhatsApp, and you tap it to open.
+
+### Try this
+- On the Realme, share your screen in a video call; the Pixel should see it.
+- Lock a chat, open Locked chats, open the chat, go back: the list is still open. Go back to the
+  chat list and pull down to Locked chats again: it asks.
+- Hide Locked chats with a secret code, type the code in search, and tap "Locked chats".

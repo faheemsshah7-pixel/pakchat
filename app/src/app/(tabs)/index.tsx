@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { findBackup } from '../../core/backup';
 import { handOffMedia, type Picked } from '../../core/files';
-import { chatOpen, FOLDER, unlockChat } from '../../core/lock';
+import { chatOpen, FOLDER, leftFolder, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
 import { useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useConnected, useCore, useLists, useSettings, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
@@ -98,6 +98,8 @@ export default function Chats() {
     if (lockedRow && scrolled.current < LOCKED_ROW) requestAnimationFrame(() => list.current?.scrollToOffset({ offset: LOCKED_ROW, animated: false }));
   }, [lockedRow]);
   useFocusEffect(hideLocked);
+  // Back on the list from Locked chats: the folder locks again, like WhatsApp's.
+  useFocusEffect(useCallback(() => leftFolder(), []));
   useEffect(() => {
     if (listHeight) hideLocked();
   }, [listHeight, hideLocked]);

@@ -9,7 +9,7 @@ import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
+import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -21,6 +21,7 @@ import { calls, takeTappedCall, watchCallTaps } from '../core/calls';
 import { LIKE_ALERT, PLAN_ALERT, takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { CallBar } from '../ui/CallBar';
+import { CrashNote } from '../ui/CrashNote';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -130,9 +131,10 @@ function App() {
       <Stack
         screenOptions={{
           headerShown: false,
-          // On Android, the phone's own way of opening a screen (what WhatsApp uses):
-          // the new screen fades in almost at once while sliding in a little.
-          animation: Platform.OS === 'android' ? 'default' : rtl ? 'ios_from_left' : 'ios_from_right',
+          // Like WhatsApp: the new screen slides in quickly from the side (a fifth of a
+          // second) while the one under it moves back a little. Android's own way took
+          // almost half a second and only faded in, which felt slow next to WhatsApp.
+          animation: rtl ? 'ios_from_left' : 'ios_from_right',
           contentStyle: { backgroundColor: theme.bg },
         }}
       >
@@ -164,8 +166,9 @@ function App() {
           <Stack.Screen name="settings/backup" />
           <Stack.Screen name="restore" />
           <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
-          <Stack.Screen name="viewer" options={{ animation: 'fade' }} />
-          <Stack.Screen name="photo" options={{ animation: 'fade' }} />
+          {/* See-through, so the chat shows under a photo dragged away to close it (ui/SwipeToClose.tsx). */}
+          <Stack.Screen name="viewer" options={{ animation: 'fade', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
+          <Stack.Screen name="photo" options={{ animation: 'fade', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: '#0B1424' } }} />
           <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" options={{ animation: 'fade_from_bottom' }} />
@@ -192,6 +195,7 @@ function App() {
       {state === 'signedIn' && <CallBar />}
       {/* App lock covers everything, except a call (you can answer, as on WhatsApp). */}
       {state === 'signedIn' && appLocked && !(call && call.state !== 'ended') && <LockScreen />}
+      {state === 'signedIn' && <CrashNote />}
       <ToastHost />
     </View>
   );

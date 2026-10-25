@@ -428,6 +428,10 @@ export const en7 = {
   groupDeleteChoice: 'Clear its messages and stay in the group, or exit the group and delete the chat.',
   groupsDeleteChoice: '{n} of these are groups you\'re in. Clear their messages and stay, or exit them and delete everything.',
   chatCleared: 'Chat cleared',
+  // After PakChat closed by mistake (core CrashLog)
+  crashTitle: 'PakChat closed by mistake',
+  crashText: 'Copy what went wrong and send it to whoever is fixing PakChat.',
+  copyDetails: 'Copy details',
 };
 
 export const ur7: typeof en7 = {
@@ -827,4 +831,7 @@ export const ur7: typeof en7 = {
   groupDeleteChoice: 'پیغامات صاف کر کے گروپ میں رہیں، یا گروپ چھوڑ کر چیٹ ڈیلیٹ کریں۔',
   groupsDeleteChoice: 'ان میں سے {n} گروپس میں آپ ہیں۔ پیغامات صاف کر کے رہیں، یا انہیں چھوڑ کر سب ڈیلیٹ کریں۔',
   chatCleared: 'چیٹ صاف ہو گئی',
+  crashTitle: 'پاک چیٹ غلطی سے بند ہو گئی',
+  crashText: 'جو مسئلہ ہوا اسے کاپی کر کے پاک چیٹ ٹھیک کرنے والے کو بھیجیں۔',
+  copyDetails: 'تفصیل کاپی کریں',
 };

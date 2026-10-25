@@ -13,6 +13,7 @@ import type { Found } from '../data/sqliteStorage';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { listTime } from '../ui/format';
+import { Icon } from '../ui/icons';
 import { Avatar, Empty, Field, IconButton, Pressy, Screen, Txt, fontStyle } from '../ui/kit';
 import { rise } from '../ui/motion';
 
@@ -26,15 +27,16 @@ export default function Search() {
   const rows = useChatList();
   const found = useSearch(query);
 
-  // The secret code (Chat lock), typed here, opens the hidden Locked chats folder.
+  // The secret code (Chat lock), typed here, shows the hidden Locked chats folder
+  // at the top of the results, like WhatsApp; tapping it opens the folder.
+  const [codeFor, setCodeFor] = useState<string | null>(null);
+  const secret = !only && codeFor === query;
   useEffect(() => {
     if (only || !core.settings.lockedHidden) return;
     let alive = true;
     const wait = setTimeout(() => {
       void isSecretCode(query).then((yes) => {
-        if (!alive || !yes) return;
-        openFolderByCode();
-        router.replace('/locked');
+        if (alive && yes) setCodeFor(query);
       });
     }, 250);
     return () => {
@@ -69,7 +71,32 @@ export default function Search() {
         </View>
       </View>
 
-      {!q ? (
+      {secret && (
+        <Animated.View entering={FadeIn.duration(150)} style={{ paddingHorizontal: 12, paddingTop: 12 }}>
+          <Pressy
+            onPress={() => {
+              openFolderByCode();
+              router.replace('/locked');
+            }}
+            label={t.lockedChats}
+            scale={0.98}
+            testID="found-locked"
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 }}>
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="lock" size={21} color={theme.accInk} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Txt size={15.5} weight="600">
+                  {t.lockedChats}
+                </Txt>
+              </View>
+              <Icon name="chevron" size={18} color={theme.faint} />
+            </View>
+          </Pressy>
+        </Animated.View>
+      )}
+      {secret && sections.length === 0 ? null : !q ? (
         <Animated.View entering={FadeIn.delay(100)}>
           <Empty icon="lock" text={t.searchLocal} />
         </Animated.View>

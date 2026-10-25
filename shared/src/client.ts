@@ -56,6 +56,8 @@ export type ClientOptions = {
   storage: Storage;
   server: ServerApi;
   connect: ConnectionFactory;
+  /** Is the app on screen right now? Only then is this person "online" (see setActive). Left out: always. */
+  active?: () => boolean;
   /** Shown in "Linked devices", like "Pixel 7". */
   deviceName?: string;
   files?: FileUploader;
@@ -252,7 +254,7 @@ export class PakChat {
     if (this.conn) return;
     // Held group messages opened just before the app was killed: finish them.
     void this.inLane(() => this.releaseAll()).catch((err) => this.emit('error', err as Error));
-    this.conn = this.o.connect({ token: this.s.token, deviceUuid: this.s.deviceUuid });
+    this.conn = this.o.connect({ token: this.s.token, deviceUuid: this.s.deviceUuid, active: this.o.active });
     this.conn.open({
       envelopes: (list) => this.receive(list),
       typing: (e) => this.emit('typing', { chatId: e.chat_id, userId: e.user_id, typing: e.typing }),
@@ -261,6 +263,8 @@ export class PakChat {
         this.connected = connected;
         this.emit('connection', connected);
         if (connected) {
+          // Came on screen while joining: the join may have said "not on screen".
+          if (this.o.active) this.setActive(this.o.active());
           void this.flush();
           void this.checkKeys();
         }
@@ -1590,6 +1594,15 @@ export class PakChat {
   /** "Typing…" (never saved). */
   typing(chatId: string, typing: boolean) {
     void this.push('typing', { chat_id: chatId, typing }, 2_000).catch(() => {});
+  }
+
+  /**
+   * The app came on screen (true) or went away (false): I show as "online" only
+   * while it's on screen. A connection made in the background (to collect a
+   * message) says so when it joins, so it never shows me online at all.
+   */
+  setActive(active: boolean) {
+    void this.push('active', { active }, 5_000).catch(() => {});
   }
 
   /** Follow someone's online and last seen. */

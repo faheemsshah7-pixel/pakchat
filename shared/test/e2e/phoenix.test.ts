@@ -56,9 +56,9 @@ function uploaderFor(server: HttpServer): FileUploader {
   };
 }
 
-function newClient(kind: Kind, signal = make[kind](), storage = new MemoryStorage()) {
+function newClient(kind: Kind, signal = make[kind](), storage = new MemoryStorage(), active?: () => boolean) {
   const server = new HttpServer(HTTP);
-  const client = new PakChat({ signal, storage, server, connect: phoenixConnection(SOCKET), deviceName: 'Test', files: uploaderFor(server) });
+  const client = new PakChat({ signal, storage, server, connect: phoenixConnection(SOCKET), active, deviceName: 'Test', files: uploaderFor(server) });
   return { client, signal, storage, server };
 }
 
@@ -67,8 +67,8 @@ const newNumber = () => `0300${String(Math.floor(Math.random() * 1e7)).padStart(
 const sha256 = (text: string) => createHash('sha256').update(text).digest('base64');
 
 /** Signs someone in with a pretend Google account. The same `key` is the same account. */
-async function person(name: string, kind: Kind, key = `${name}-${Date.now()}-${Math.random()}`): Promise<Person> {
-  const { client, signal, storage, server } = newClient(kind);
+async function person(name: string, kind: Kind, key = `${name}-${Date.now()}-${Math.random()}`, active?: () => boolean): Promise<Person> {
+  const { client, signal, storage, server } = newClient(kind, undefined, undefined, active);
   const { id_token } = await helper<{ id_token: string }>('/google_token', { name, key });
   const s = await client.signIn(id_token);
   const p = { name, client, signal, storage, server, id: s.userId, key };
@@ -153,6 +153,30 @@ describe('against the real server', () => {
     await eventually(async () => expect((await ali.storage.getMessage(chat.id, ali.id, m.id))!.status).toBe('read'));
     await sara.client.sendText(chat.id, 'Walaikum Assalam');
     await eventually(async () => expect((await texts(ali, chat.id)).at(-1)).toBe('Sara: Walaikum Assalam'));
+  });
+
+  test('online only while the app is on screen, not when a phone wakes in the background', async () => {
+    let onScreen = false;
+    const sara = await person('Sara', 'node', undefined, () => onScreen);
+    const ali = await person('Ali', 'node');
+    const seen: Record<string, unknown>[] = [];
+    ali.client.on('presence', (p) => void seen.push(p));
+    // Sara's phone is connected (woken to collect a message), but she isn't online.
+    expect(await ali.client.watch(sara.id)).toMatchObject({ online: false });
+    onScreen = true;
+    sara.client.setActive(true);
+    await eventually(async () => expect(seen.at(-1)).toMatchObject({ user_id: sara.id, online: true }));
+    onScreen = false;
+    sara.client.setActive(false);
+    await eventually(async () => expect(seen.at(-1)).toMatchObject({ user_id: sara.id, online: false }));
+    // Connecting again in the background still isn't online; on screen, it is.
+    sara.client.stop();
+    await connected(sara.client);
+    expect(await ali.client.watch(sara.id)).toMatchObject({ online: false });
+    sara.client.stop();
+    onScreen = true;
+    await connected(sara.client);
+    await eventually(async () => expect(await ali.client.watch(sara.id)).toMatchObject({ online: true }));
   });
 
   test('several devices: a new website learns from "stale devices" and gets everything after', async () => {

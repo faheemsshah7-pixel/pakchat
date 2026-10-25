@@ -291,6 +291,8 @@ class Core {
       storage: this.storage,
       server: this.server,
       connect: phoenixConnection(socketUrl(serverUrl())),
+      // Woken in the background to collect a message: not "online" (only on screen).
+      active: () => AppState.currentState === 'active',
       deviceName: Device.modelName ?? 'Android phone',
       newId: () => Crypto.randomUUID(),
       files: uploader,
@@ -405,12 +407,15 @@ class Core {
     if (this.state !== 'signedIn') return;
     if (s === 'active') {
       this.client.start();
+      // Already connected (woken in the background): "online" from now.
+      this.client.setActive(true);
       // Anything scheduled that should have gone while PakChat was away.
       void import('./scheduled').then((m) => m.sendDue()).catch(() => {});
       this.unmuteDue();
       return;
     }
     if (s !== 'background') return;
+    this.client.setActive(false);
     void Promise.race([this.client.settled(), fileModule().wait(2_000)])
       .catch(() => {})
       .then(() => {

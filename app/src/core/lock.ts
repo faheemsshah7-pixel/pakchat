@@ -196,12 +196,20 @@ export function openFolderByCode() {
 /** Left a locked chat (or the folder): it locks again after Settings' time (at once by default). */
 export function leftChat(key: string) {
   if (!open.has(key)) return;
+  // The folder is still there under a chat opened from it, whatever Android does with
+  // the screens below meanwhile; it locks once you're really out of it (leftFolder).
+  if (key === FOLDER && [...fromFolder].some((c) => open.get(c) === null)) return;
   if (core.settings.chatRelock === 0) open.delete(key);
   else open.set(key, Date.now());
   // Back from a chat into the folder: the folder is still open (it only locks once you leave it, or PakChat).
   if (fromFolder.delete(key)) open.set(FOLDER, null);
   if (key === FOLDER) fromFolder.clear();
   core.emit('lock');
+}
+
+/** Back on the chat list: the folder (if it was open) is left behind, so it locks again. */
+export function leftFolder() {
+  if (open.get(FOLDER) === null) leftChat(FOLDER);
 }
 
 /** The secret code's fingerprint (only this is kept). Spaces and case don't count. */

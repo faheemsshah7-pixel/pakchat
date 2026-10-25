@@ -16,6 +16,12 @@ defmodule PakchatWeb.DeviceChannel do
     * `"receipt"` `{chat_id, to, status: "delivered" | "read", seqs}`: the ticks
     * `"typing"`  `{chat_id, typing}`: never saved
     * `"watch"` / `"unwatch"` `{user_id}`: follow someone's online / last seen
+    * `"active"`  `{active}`: the app came on screen (true) or went away (false)
+
+  Joining says `"active"` too. Only a device whose app is on screen makes its
+  person "online", like WhatsApp: a phone that woke in the background just to
+  collect a message stays offline (and keeps its last seen). Push still sees
+  every connected device, so a woken phone isn't woken again.
 
   To the device: `"envelopes"`, `"typing"` and `"presence"`.
   """
@@ -37,7 +43,9 @@ defmodule PakchatWeb.DeviceChannel do
       Process.flag(:trap_exit, true)
       if is_map(params["after"]), do: Relay.ack_upto(device, params["after"])
       send(self(), :after_join)
-      {:ok, assign(socket, :watching, MapSet.new())}
+      # An app too old to say counts as on screen, as before.
+      active = params["active"] != false
+      {:ok, socket |> assign(:watching, MapSet.new()) |> assign(:active, active)}
     else
       {:error, %{reason: "not_yours"}}
     end
@@ -51,7 +59,7 @@ defmodule PakchatWeb.DeviceChannel do
     # an envelope id it has already seen.)
     Phoenix.PubSub.subscribe(Pakchat.PubSub, "relay:" <> device.id)
     Phoenix.PubSub.subscribe(Pakchat.PubSub, "user:" <> device.user_id)
-    {:ok, _} = Presence.track(self(), Presence.topic(device.user_id), device.id, %{})
+    {:ok, _} = Presence.track(self(), Presence.topic(device.user_id), device.id, %{active: socket.assigns.active})
     push_pending(socket)
     {:noreply, socket}
   end
@@ -153,14 +161,27 @@ defmodule PakchatWeb.DeviceChannel do
     {:reply, :ok, assign(socket, :watching, MapSet.delete(socket.assigns.watching, user_id))}
   end
 
+  def handle_in("active", %{"active" => active}, socket) when is_boolean(active) do
+    if active == socket.assigns.active do
+      {:reply, :ok, socket}
+    else
+      device = socket.assigns.device
+      {:ok, _} = Presence.update(self(), Presence.topic(device.user_id), device.id, %{active: active})
+      # Leaving the screen is when they were last seen.
+      unless active, do: Accounts.touch_last_seen(device.user_id)
+      {:reply, :ok, assign(socket, :active, active)}
+    end
+  end
+
   def handle_in(_event, _payload, socket) do
     {:reply, {:error, %{reason: "bad_request"}}, socket}
   end
 
-  # The connection closed: remember when they were last seen.
+  # The connection closed: remember when they were last seen. Not for a
+  # phone that only woke in the background: nobody saw them then.
   @impl true
   def terminate(_reason, socket) do
-    Accounts.touch_last_seen(socket.assigns.device.user_id)
+    if socket.assigns[:active] != false, do: Accounts.touch_last_seen(socket.assigns.device.user_id)
     :ok
   end
 

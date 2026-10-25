@@ -57,6 +57,8 @@ export type FileModule = {
    * cut to `startMs`..`endMs` (0 and 0: all of it), and without where it was filmed.
    */
   shrinkVideo(input: string, output: string, startMs: number, endMs: number, hd: boolean): Promise<{ uri: string; size: number; width: number; height: number }>;
+  /** What made PakChat close by mistake since last asked (a crash's details), or null. Each is told once. */
+  lastCrash(): string | null;
   /** Picture-in-picture is wanted now: leaving PakChat shrinks it to a small window (Android 8+). */
   callPip(on: boolean): void;
   callAudioState(): CallAudioState;

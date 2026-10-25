@@ -133,6 +133,7 @@ class PakchatSignalModule : Module() {
     Events("progress", "callAudio", "pip", "liveStop")
 
     OnCreate {
+      appContext.reactContext?.let { CrashLog.install(it) }
       appContext.reactContext?.let { ScreenWatch.start(it) }
       LiveLocationService.onStop = { sendEvent("liveStop", mapOf<String, Any>()) }
     }
@@ -268,6 +269,15 @@ class PakchatSignalModule : Module() {
     /** A smaller copy of a video, for sending (VideoShrink.kt). */
     AsyncFunction("shrinkVideo") { input: String, output: String, startMs: Double, endMs: Double, hd: Boolean, promise: Promise ->
       VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, promise)
+    }
+
+    /** What made PakChat close by mistake since last asked (CrashLog), or null. */
+    Function("lastCrash") {
+      try {
+        appContext.reactContext?.let { CrashLog.take(it) }
+      } catch (_: Throwable) {
+        null
+      }
     }
 
     /** Picture-in-picture is wanted (the call screen, in a video call); "pip" says when the small window opens or closes. */

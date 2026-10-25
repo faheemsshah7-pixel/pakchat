@@ -205,7 +205,8 @@ export function fileSize(bytes: number) {
 
 /** "1:05" for a video's length in ms. */
 export function duration(ms: number) {
-  const s = Math.round(ms / 1000);
+  // Never below 0:00 (a call's clock can start a moment before the screen's does).
+  const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 

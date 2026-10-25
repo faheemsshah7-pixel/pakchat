@@ -6,7 +6,7 @@
 // controls: play and pause in the middle, and along the bottom the time, the
 // line to drag through it, its length and the sound. One that isn't
 // downloaded yet shows its blurred preview and a download button.
-// Share sends the file to another app.
+// Share sends the file to another app. Drag it up or down to close it.
 import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -29,6 +29,7 @@ import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
+import { SwipeToClose } from '../ui/SwipeToClose';
 
 const keyOf = (m: Message) => `${m.author}/${m.id}`;
 
@@ -43,6 +44,9 @@ export default function Viewer() {
   const [index, setIndex] = useState(0);
   const first = useRef(true);
   const [chrome, setChrome] = useState(true);
+  // Being dragged to close: everything but the picture goes meanwhile.
+  const [dragging, setDragging] = useState(false);
+  const bars = chrome && !dragging;
   const pager = useRef<FlatList<Message>>(null);
 
   // Every photo and video in the chat, oldest first (so swiping left goes to newer ones).
@@ -86,26 +90,28 @@ export default function Viewer() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000000' }}>
+    <View style={{ flex: 1 }}>
       <StatusBar style="light" hidden={!chrome} />
-      <FlatList
-        ref={pager}
-        style={{ flex: 1 }}
-        data={all}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={keyOf}
-        initialScrollIndex={start}
-        getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
-        // Which page it settled on after a swipe (in Urdu the pages run the other way, and so does x).
-        onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(all.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
-        windowSize={3}
-        initialNumToRender={1}
-        renderItem={({ item, index: i }) => <Page m={item} width={width} active={i === index} chrome={chrome} onTap={() => setChrome((c) => !c)} />}
-      />
+      <SwipeToClose onClose={() => router.back()} onDrag={setDragging}>
+        <FlatList
+          ref={pager}
+          style={{ flex: 1 }}
+          data={all}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={keyOf}
+          initialScrollIndex={start}
+          getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+          // Which page it settled on after a swipe (in Urdu the pages run the other way, and so does x).
+          onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(all.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
+          windowSize={3}
+          initialNumToRender={1}
+          renderItem={({ item, index: i }) => <Page m={item} width={width} active={i === index} chrome={bars} onTap={() => setChrome((c) => !c)} />}
+        />
+      </SwipeToClose>
 
-      {chrome && (
+      {bars && (
         <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <IconButton icon="back" label={t.back} onPress={() => router.back()} flip look="onAccent" size={42} testID="viewer-back" />
           <View style={{ flex: 1 }}>
@@ -125,7 +131,7 @@ export default function Viewer() {
       )}
 
       {/* The caption (above a video's controls). */}
-      {chrome && !!m?.text && (
+      {bars && !!m?.text && (
         <Animated.View
           entering={FadeIn.duration(150)}
           exiting={FadeOut.duration(120)}
@@ -225,7 +231,8 @@ function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: ()
   return (
     <View style={{ flex: 1 }}>
       <Pressable style={{ flex: 1 }} onPress={onTap}>
-        <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" testID="viewer-video" />
+        {/* A texture (not Android's default surface), so it moves and shrinks with your finger when dragged to close. */}
+        <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" surfaceType="textureView" testID="viewer-video" />
       </Pressable>
       {(chrome || !playing) && (
         <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>

@@ -33,7 +33,7 @@
 import { MAX_CALL_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device } from '@pakchat/shared';
 import { router } from 'expo-router';
 import KV from 'expo-sqlite/kv-store';
-import { AppState } from 'react-native';
+import { AppState, Dimensions } from 'react-native';
 import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, type MediaStream } from 'react-native-webrtc';
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
@@ -160,6 +160,19 @@ type PcEvents = {
 /** The camera's picture: smaller and slower with "Use less data for calls". */
 function cameraSize() {
   return core.settings.lessDataCalls ? { width: 320, height: 240, frameRate: 15 } : { width: 640, height: 480, frameRate: 24 };
+}
+
+/**
+ * How a shared screen is captured. The whole screen, never just one app (Android 14
+ * and later offer "one app" first; that app's picture freezes once you leave it).
+ * And at most 1280 pixels on its longer side, about what WhatsApp sends: a phone's
+ * full screen (nearly 3000 pixels tall on a Pixel 8 Pro) is more than many phones'
+ * video encoders take, and then the other phone only sees a frozen picture.
+ */
+function screenSize() {
+  const { width, height, scale } = Dimensions.get('screen');
+  const longest = Math.max(width, height) * scale;
+  return { createConfigForDefaultDisplay: true, resolutionScale: longest > 1280 ? 1280 / longest : 1 };
 }
 
 type TrackEvents = { addEventListener(type: 'ended', fn: () => void): void };
@@ -1006,7 +1019,7 @@ class Calls {
     if (!c || c.done || c.state !== 'active' || c.sharing || !c.localStream) return false;
     let stream: MediaStream;
     try {
-      stream = await mediaDevices.getDisplayMedia({});
+      stream = await mediaDevices.getDisplayMedia({ android: screenSize() });
     } catch {
       return false;
     }

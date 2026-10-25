@@ -605,6 +605,57 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert_receive %Message{topic: ^ali_topic, event: "presence", payload: %{online: false}}
   end
 
+  test "a phone woken in the background isn't online, and keeps its last seen", ctx do
+    %{ali: ali, sara: sara} = ctx
+    a = online(ali.token, ali.device)
+    assert %{online: false, last_seen: nil} = watch(a, sara.user)
+
+    # Sara's phone wakes to collect a message: connected, but not on screen.
+    s = online(sara.token, sara.device, %{"active" => false})
+    assert Pakchat.Presence.device_online?(sara.user.id, sara.device.id)
+    assert %{online: false} = watch(a, sara.user)
+
+    # It goes back to sleep: no "last seen" from that.
+    offline(s)
+    Process.sleep(50)
+    assert Accounts.get_user(sara.user.id).last_seen_at == nil
+  end
+
+  test "opening the app makes you online; leaving it is your last seen", ctx do
+    %{ali: ali, sara: sara} = ctx
+    a = online(ali.token, ali.device)
+    watch(a, sara.user)
+    ali_topic = "device:" <> ali.device.id
+
+    s = online(sara.token, sara.device, %{"active" => false})
+    refute_receive %Message{topic: ^ali_topic, event: "presence", payload: %{online: true}}, 100
+
+    # Sara opens PakChat.
+    ref = push(s, "active", %{"active" => true})
+    assert_reply ref, :ok
+    assert_receive %Message{topic: ^ali_topic, event: "presence", payload: %{online: true}}
+    assert Accounts.get_user(sara.user.id).last_seen_at == nil
+
+    # And leaves it (the connection may stay open a moment longer).
+    ref = push(s, "active", %{"active" => false})
+    assert_reply ref, :ok
+
+    assert_receive %Message{
+      topic: ^ali_topic,
+      event: "presence",
+      payload: %{online: false, last_seen: %DateTime{}}
+    }
+  end
+
+  test "online if any one of your devices is on screen", ctx do
+    %{ali: ali, sara: sara} = ctx
+    other = linked(sara.user)
+    online(sara.token, sara.device, %{"active" => false})
+    online(other.token, other.device)
+    a = online(ali.token, ali.device)
+    assert %{online: true} = watch(a, sara.user)
+  end
+
   ## Rate limits
 
   test "flooding a chat is stopped", ctx do

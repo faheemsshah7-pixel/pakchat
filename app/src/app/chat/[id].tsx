@@ -10,7 +10,7 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, BackHandler, FlatList, StyleSheet, View, type ListViewToken } from 'react-native';
-import Animated, { FadeIn, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, KeyboardState, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
@@ -143,9 +143,24 @@ function ChatScreen() {
   const focused = useRef(true);
   const selecting = picked.size > 0;
 
-  // The keyboard pushes everything up, frame by frame, as it slides in.
+  // The keyboard pushes the messages and the typing bar up as it slides in.
+  // While it moves they're only shifted (cheap, nothing is measured again); the
+  // space under them changes once, when it has stopped. Changing that space
+  // every frame made the whole chat lay itself out again 60 times a second,
+  // which is what made the keyboard feel slow on some phones.
   const keyboard = useAnimatedKeyboard();
-  const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(keyboard.height.value, insets.bottom) }));
+  const rest = useSharedValue(0);
+  useAnimatedReaction(
+    () => (keyboard.state.value === KeyboardState.OPEN || keyboard.state.value === KeyboardState.CLOSED ? keyboard.height.value : -1),
+    (h) => {
+      if (h >= 0) rest.value = h;
+    },
+  );
+  const lift = useAnimatedStyle(() => {
+    const now = Math.max(keyboard.height.value, insets.bottom);
+    const settledAt = Math.max(rest.value, insets.bottom);
+    return { paddingBottom: settledAt, transform: [{ translateY: settledAt - now }] };
+  });
 
   // The chat slides in first; the work that changes other screens (marking it
   // read, which redraws the chat list underneath) waits until it has, so the
@@ -626,6 +641,7 @@ function ChatScreen() {
     </Animated.View>
   );
 
+  const wallpaper = prefs.wallpaper ?? settings.wallpaper;
   if (chat === null) {
     return (
       <Screen>
@@ -640,10 +656,11 @@ function ChatScreen() {
   }
 
   return (
-    <Screen bottom={false} style={{ paddingTop: 0 }} backdrop={<Backdrop wp={prefs.wallpaper ?? settings.wallpaper} />}>
+    <Screen bottom={false} style={{ paddingTop: 0 }} backdrop={<Backdrop wp={wallpaper} />}>
+      {/* A flat bar across the top, under the phone's status bar too, like WhatsApp's. It stays
+          put; what's under it rides up with the keyboard (and slides under it meanwhile). */}
+      <View style={{ zIndex: 2, paddingTop: insets.top, backgroundColor: theme.dark ? '#17181C' : '#FFFFFF', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(11,27,54,0.08)' }}>{header}</View>
       <Animated.View style={[{ flex: 1 }, lift]}>
-        {/* A flat bar across the top, under the phone's status bar too, like WhatsApp's. */}
-        <View style={{ zIndex: 2, paddingTop: insets.top, backgroundColor: theme.dark ? '#17181C' : '#FFFFFF', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(11,27,54,0.08)' }}>{header}</View>
 
         {pinned && !selecting && (
           <Animated.View entering={rise()} exiting={FadeOut}>
@@ -679,7 +696,9 @@ function ChatScreen() {
             initialNumToRender={11}
             maxToRenderPerBatch={slowPhone ? 5 : 8}
             updateCellsBatchingPeriod={30}
-            windowSize={slowPhone ? 7 : 9}
+            // Until the chat has slid in, nothing past the screen is drawn, so the slide
+            // stays smooth; the messages further up follow straight after.
+            windowSize={settled ? (slowPhone ? 7 : 9) : 1}
             onScrollToIndexFailed={(info) => setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5 }), 250)}
             ListFooterComponent={
               list && !hasMore ? (

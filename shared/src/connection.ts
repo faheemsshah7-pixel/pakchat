@@ -40,15 +40,20 @@ export interface Connection {
   push(event: string, payload: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>;
 }
 
-/** Makes a connection for a signed-in device. */
-export type ConnectionFactory = (session: { token: string; deviceUuid: string }) => Connection;
+/**
+ * Makes a connection for a signed-in device. `active`: is the app on screen
+ * right now? Asked every time the channel joins (again). Only an app on screen
+ * shows its person as "online"; one that woke in the background to collect a
+ * message doesn't, like WhatsApp. Left out, the device counts as on screen.
+ */
+export type ConnectionFactory = (session: { token: string; deviceUuid: string; active?: () => boolean }) => Connection;
 
 /**
  * The real connection. `socketUrl` is the server's socket address, like
  * "wss://example.com/socket" (or "ws://localhost:4000/socket" on the Mac).
  */
 export function phoenixConnection(socketUrl: string): ConnectionFactory {
-  return ({ token, deviceUuid }) => {
+  return ({ token, deviceUuid, active }) => {
     let socket: Socket | null = null;
     let channel: Channel | null = null;
     let joined = false;
@@ -76,7 +81,7 @@ export function phoenixConnection(socketUrl: string): ConnectionFactory {
         socket.onClose(() => dropped(h));
         socket.connect();
 
-        channel = socket.channel(`device:${deviceUuid}`, {});
+        channel = socket.channel(`device:${deviceUuid}`, () => ({ active: active?.() ?? true }));
         channel.on('envelopes', (p: { envelopes: WireEnvelope[] }) => h.envelopes(p.envelopes));
         channel.on('typing', (p: TypingEvent) => h.typing(p));
         channel.on('presence', (p: Record<string, unknown>) => h.presence(p));
