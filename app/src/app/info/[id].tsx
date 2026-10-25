@@ -25,6 +25,7 @@ import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
 import { rise } from '../../ui/motion';
 import { startCall } from '../../ui/CallBar';
 import { ReportSheet } from '../../ui/ReportSheet';
+import { LeftGroupChoices } from '../../ui/DeleteChats';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
 import { MuteSheet, mutedLine } from '../../ui/MuteSheet';
 
@@ -46,6 +47,7 @@ export default function Info() {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
   const [leaving, setLeaving] = useState(false);
+  const [leftChoices, setLeftChoices] = useState<'left' | 'ask' | null>(null);
   const [timerOpen, setTimerOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -141,7 +143,10 @@ export default function Info() {
               <CameraBadge size={32} />
             </Pressy>
           ) : (
-            <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+            // Tap to see it full screen, or "No profile photo", like WhatsApp.
+            <Pressy onPress={() => router.push({ pathname: '/photo', params: { id, title } })} label={t.profilePhoto} scale={0.95} testID="info-photo">
+              <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+            </Pressy>
           )}
           <Txt size={24} weight="800" align="center" style={{ marginTop: 10 }} testID="info-title">
             {title}
@@ -339,7 +344,10 @@ export default function Info() {
             </>
           )}
           {group ? (
-            !chat.left && (
+            chat.left ? (
+              // Left: delete it or clear it, like WhatsApp's "Delete group".
+              <SettingRow icon="trash" title={t.deleteGroup} danger chevron={false} onPress={() => setLeftChoices('ask')} testID="delete-group" />
+            ) : (
               <SettingRow icon="leave" title={ann ? t.leaveCommunity : t.leaveGroup} danger chevron={false} onPress={() => setLeaving(true)} testID={ann ? 'exit-community' : 'leave-group'} />
             )
           ) : (
@@ -436,7 +444,7 @@ export default function Info() {
       <ChatLockSheet visible={lockOpen} chatId={id} onClose={() => setLockOpen(false)} />
       <ReportSheet visible={reporting} chatId={id} group={group} userId={group ? null : other} onClose={() => setReporting(false)} />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => core.mute(id, ms)} />
-      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!chat.photo} chatId={id} />
+      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!chat.photo} chatId={id} title={title} />
 
       {/* Announcements: nobody leaves them alone, they exit the community (and its groups), as on WhatsApp. */}
       <Dialog
@@ -475,12 +483,16 @@ export default function Info() {
             testID: 'confirm-leave',
             onPress: () => {
               setLeaving(false);
-              void act(() => core.client.removeMember(id, core.myId));
+              void act(async () => {
+                await core.client.removeMember(id, core.myId);
+                setLeftChoices('left');
+              });
             },
           },
           { label: t.cancel, onPress: () => setLeaving(false) },
         ]}
       />
+      <LeftGroupChoices chatId={id} name={title} visible={leftChoices !== null} justLeft={leftChoices === 'left'} onClose={() => setLeftChoices(null)} />
     </Screen>
   );
 }

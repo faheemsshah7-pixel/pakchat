@@ -15,7 +15,6 @@ import { useLook } from '../theme/ThemeProvider';
 import { ChatRow } from '../ui/ChatRow';
 import { Empty, Screen, TopBar, Txt } from '../ui/kit';
 import { LockedGate } from '../ui/LockedGate';
-import { rise } from '../ui/motion';
 
 export default function Locked() {
   const open = useCore(['lock'], () => chatOpen(FOLDER));
@@ -42,7 +41,7 @@ function Folder() {
         contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 40 }}
         ListEmptyComponent={rows ? <Empty icon="lock" text={t.noLockedChats} /> : undefined}
         renderItem={({ item, index }) => (
-          <Animated.View entering={index < 12 ? rise(index * 28) : undefined}>
+          <Animated.View>
             <View>
               <ChatRow
                 row={item}

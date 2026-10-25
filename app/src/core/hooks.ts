@@ -132,6 +132,8 @@ async function chatRows(keep: (chat: Chat) => boolean): Promise<ChatRow[]> {
     // A chat with nothing in it yet (just made, or deleted here) only shows once it has something,
     // unless it's a group: groups always show.
     if (!last && chat.kind === 'direct' && !prefs.draft) continue;
+    // Deleted here: gone from the list until something new comes in.
+    if (!last && prefs.deletedAt) continue;
     rows.push({ chat, title: core.chatTitle(chat), other: core.otherPerson(chat), last: last ?? null, prefs, mentioned });
   }
   rows.sort((a, b) => (b.prefs.pinnedAt ?? 0) - (a.prefs.pinnedAt ?? 0) || activity(b) - activity(a));

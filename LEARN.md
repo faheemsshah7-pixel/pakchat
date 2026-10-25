@@ -1726,3 +1726,50 @@ in its cache (`core/photos.ts`), so a photo is fetched once.
   sharing": your camera comes back.
 - Call the other phone twice and miss a call: Calls shows "(2)" and a 1 on the tab until you open it.
 - In Settings, search "less": "Use less data for calls" comes up.
+
+## Step 31: The last build of Phase 7, and R8
+
+### Why build 2 closed as soon as it opened
+When PakChat starts, its code files load one after another, and each file first loads the files it
+needs. Build 2 made the picture part (`kit.tsx`) read live data, so it now needed `hooks.ts`. But the
+calls code also needed the picture part, for the letters on a caller's picture. That made a loop:
+calls → pictures → hooks → calls. So `hooks.ts` ran while the calls code was only half loaded, used
+it, found nothing there, and Android closed the app.
+
+The fix: the letters and colours moved to their own small file (`ui/letters.ts`) that needs nothing
+else, and so did tone names (`core/tones.ts`). A new test (`test/importOrder.test.ts`) loads the
+files in the same order the phone does, from every file, and fails if anything uses a half-loaded
+file. The automated checks before only read the code; this one walks it the way the phone does.
+
+### What's new
+- **Round pictures**, like WhatsApp. Communities keep a rounded square, which is how WhatsApp tells
+  them apart.
+- **Tap a picture** in the chat list: it pops up bigger, with Message, Voice call, Video call and
+  Info. Tap the photo (or the big one in Info) to see it full screen, or "No profile photo".
+- **Delete chat** now really takes a chat off the list (until someone writes again). For a group
+  you're still in it asks: **Clear chat** (stay in it) or **Exit and delete**. After you leave a
+  group it offers **Delete group** or **Clear chat**, and a left group shows Delete group in its
+  info and at the bottom of the chat. **Clear chat** is also in the ⋮ menu when you select chats.
+
+### R8: a smaller app
+Android apps are written in Java and Kotlin, and turned into `.dex` files. Most of that code comes
+from libraries, and PakChat only uses part of each one. **R8** is Google's tool that reads all of it,
+throws away what's never used, and gives what's left short names. The app gets smaller and a bit
+quicker to start.
+
+The risk: some code is only reached **by name** from native code (C++ and Rust: calls, encryption,
+animations). R8 can't see those uses, so it might throw that code away, and the app would crash only
+when you made a call or opened a chat. So:
+- Every library's own "keep" rules were checked, and we added our own (in `app.json`,
+  `extraProguardRules`) for WebRTC (calls), libsignal (encryption), worklets and Reanimated
+  (animations), Nitro (Google sign-in) and our own native module.
+- After building, a checker compares the new APK with the old one: every class and method that a
+  native library asks for by name (377 names) and every screen and service in the manifest must still
+  be there.
+- **Resource shrinking** (removing unused pictures and sounds) stays off. React Native finds images,
+  and Android finds our alert tones, by name while the app runs, which that tool can't see.
+
+### Try this
+- Make a call, a video call and share your screen: calls are the part R8 could break.
+- Send messages both ways, and open an old chat: that's the encryption.
+- Lock a chat, get an alert, and schedule a message: alerts and alarms run in the background.

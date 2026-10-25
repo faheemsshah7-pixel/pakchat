@@ -76,6 +76,8 @@ export type ChatPrefs = {
    * `list`: ours, stays in the list with a lock, and never shows its words.
    */
   lock?: 'folder' | 'list';
+  /** Deleted from the list (WhatsApp's Delete chat): hidden until a message comes. */
+  deletedAt?: number;
 };
 
 /** Settings only this phone has (phase 7). */
@@ -954,14 +956,20 @@ class Core {
     this.emit('chats');
   }
 
-  /** Deletes a whole chat from this phone (it comes back if someone writes again). */
-  async deleteChatHere(chatId: string) {
+  /** Clear chat: every message goes from this phone, and the chat stays in the list. */
+  async clearChat(chatId: string) {
     const all = await this.storage.listMessages(chatId, { limit: 100_000 });
     for (const m of all) await forgetFile(m);
     await this.client.deleteHere(chatId, all);
-    this.setPrefs(chatId, { archived: false, pinnedAt: undefined });
+    if (this.prefs[chatId]?.deletedAt) this.setPrefs(chatId, { deletedAt: undefined });
     this.emit(`messages:${chatId}`);
     this.emit('chats');
+  }
+
+  /** Delete chat: its messages go from this phone and it leaves the list, until someone writes again (like WhatsApp). */
+  async deleteChatHere(chatId: string) {
+    await this.clearChat(chatId);
+    this.setPrefs(chatId, { archived: false, pinnedAt: undefined, markedUnread: false, deletedAt: Date.now() });
   }
 
   /** Disappearing messages whose time is up are removed from the phone, not just hidden. */

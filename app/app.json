@@ -35,6 +35,7 @@
       "./plugins/withCallPip",
       "./plugins/withCropDone",
       "./plugins/withScreenShare",
+      "./plugins/withNativeKeeps",
       "expo-router",
       [
         "expo-splash-screen",
@@ -110,8 +111,9 @@
               "arm64-v8a"
             ],
             "useLegacyPackaging": true,
-            "enableMinifyInReleaseBuilds": false,
-            "enableShrinkResourcesInReleaseBuilds": false
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "extraProguardRules": "# PakChat: what R8 (code shrinking) must never remove or rename.\n# Code reached from native C++/Rust by name (JNI), which R8 can't see.\n-keep class com.swmansion.worklets.** { *; }\n-keep class com.swmansion.reanimated.** { *; }\n-keep class com.margelo.nitro.** { *; }\n-keep class org.webrtc.** { *; }\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class org.signal.libsignal.** { *; }\n-keep class org.rustls.platformverifier.** { *; }\n# Our own native module and app classes (encryption, alerts, calls, services).\n-keep class expo.modules.pakchatsignal.** { *; }\n-keep class com.pakchat.app.** { *; }\n# Readable crash reports: keep file names and line numbers.\n-keepattributes SourceFile,LineNumberTable"
           }
         }
       ],

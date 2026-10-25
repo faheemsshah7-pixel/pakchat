@@ -26,6 +26,7 @@ import { defaultTimer } from '../../core/timer';
 import { useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePerson, usePresence, useSettings, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
 import { Backdrop } from '../../ui/chat/Backdrop';
 import { chatOpen, leftChat } from '../../core/lock';
+import { LeftGroupChoices } from '../../ui/DeleteChats';
 import { LockedGate } from '../../ui/LockedGate';
 import { ExportSheet } from '../../ui/ExportSheet';
 import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
@@ -130,6 +131,7 @@ function ChatScreen() {
   const [timerOpen, setTimerOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [leftChoices, setLeftChoices] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   // When the newest messages were last on screen: anything from them after that is "unseen".
   const [bottomAt, setBottomAt] = useState(Date.now);
@@ -775,13 +777,17 @@ function ChatScreen() {
               />
             </>
           ) : (
-            <Glass style={{ margin: 10, padding: 14, borderRadius: 18 }}>
+            <Glass style={{ margin: 10, padding: 14, borderRadius: 18, gap: 10 }}>
               <Txt size={14} color={theme.muted} align="center">
                 {chat.left ? t.notInGroup : t.onlyAdminsNote}
               </Txt>
+              {/* Left: WhatsApp's "Delete group" right there (or clear it). */}
+              {chat.left && <Button title={t.deleteGroup} icon="trash" look="soft" onPress={() => setLeftChoices(true)} testID="chat-delete-group" />}
             </Glass>
           ))}
       </Animated.View>
+
+      <LeftGroupChoices chatId={id} name={chat ? core.chatTitle(chat) : ''} visible={leftChoices} onClose={() => setLeftChoices(false)} />
 
       {/* The ⋮ menu of the chat. */}
       <Popup visible={menu} onClose={() => setMenu(false)}>
@@ -946,7 +952,7 @@ function ChatScreen() {
             danger: true,
             onPress: () => {
               setClearing(false);
-              void act(() => core.deleteChatHere(id));
+              void act(() => core.clearChat(id));
             },
           },
           { label: t.cancel, onPress: () => setClearing(false) },

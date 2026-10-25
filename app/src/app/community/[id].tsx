@@ -246,11 +246,13 @@ export default function Community() {
         <Animated.View entering={pop()} style={{ alignItems: 'center', gap: 6, paddingVertical: 12 }}>
           {admin ? (
             <Pressy onPress={() => setPhotoOpen(true)} label={t.profilePhoto} scale={0.95} testID="community-photo">
-              <Avatar id={id} name={name} size={88} group />
+              <Avatar id={id} name={name} size={88} group square />
               <CameraBadge size={30} />
             </Pressy>
           ) : (
-            <Avatar id={id} name={name} size={88} group />
+            <Pressy onPress={() => router.push({ pathname: '/photo', params: { id, title: name } })} label={t.profilePhoto} scale={0.95} testID="community-photo-view">
+              <Avatar id={id} name={name} size={88} group square />
+            </Pressy>
           )}
           <Txt size={22} weight="800" align="center" testID="community-name">
             {name}
@@ -546,7 +548,7 @@ export default function Community() {
         ]}
       />
       <ReportSheet visible={reporting} onClose={() => setReporting(false)} chatId={id} group userId={null} />
-      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!community.photo} chatId={id} />
+      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!community.photo} chatId={id} title={name} />
     </Screen>
   );
 }

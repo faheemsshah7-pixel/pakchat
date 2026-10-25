@@ -43,7 +43,7 @@ export default function NewCommunity() {
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 12 }}>
         <View style={{ alignItems: 'center', marginVertical: 8 }}>
           <Animated.View entering={pop()}>
-            <Avatar id={title || 'new-community'} name={title} size={96} group />
+            <Avatar id={title || 'new-community'} name={title} size={96} group square />
           </Animated.View>
         </View>
         <Txt size={13.5} color={theme.muted} align="center">

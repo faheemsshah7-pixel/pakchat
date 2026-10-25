@@ -20,7 +20,7 @@ import { Pressy, Txt } from './kit';
 import { rise, smooth } from './motion';
 
 /** Keeps something on screen while it animates out. `p` goes 0 → 1 when opening and back when closing. */
-function useOpenClose(visible: boolean) {
+export function useOpenClose(visible: boolean) {
   const [mounted, setMounted] = useState(visible);
   const p = useSharedValue(0);
   // Opening: show it straight away (setting state while rendering is React's way to follow a prop).
@@ -37,7 +37,7 @@ function useOpenClose(visible: boolean) {
   return { mounted, p };
 }
 
-function Backdrop({ p, onClose, dim = 0.35 }: { p: { value: number }; onClose: () => void; dim?: number }) {
+export function Backdrop({ p, onClose, dim = 0.35 }: { p: { value: number }; onClose: () => void; dim?: number }) {
   const style = useAnimatedStyle(() => ({ opacity: interpolate(p.value, [0, 1], [0, 1], 'clamp') }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(5,12,28,${dim})` }, style]}>

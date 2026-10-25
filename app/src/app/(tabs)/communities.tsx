@@ -88,7 +88,7 @@ function CommunityCard({ row }: { row: CommunityRow }) {
     <Glass style={{ borderRadius: 22, overflow: 'hidden' }}>
       <Pressy onPress={open} label={title} scale={0.99} testID="community-card">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-          <Avatar id={community.id} name={title} size={48} group />
+          <Avatar id={community.id} name={title} size={48} group square />
           <View style={{ flex: 1 }}>
             <Txt size={17} weight="800" lines={1}>
               {title}

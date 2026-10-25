@@ -21,6 +21,8 @@ import { AlertsCard } from '../../ui/AlertsCard';
 import { ChatRow } from '../../ui/ChatRow';
 import { fromGallery } from '../../ui/chat/attachments';
 import { MuteSheet } from '../../ui/MuteSheet';
+import { DeleteChats } from '../../ui/DeleteChats';
+import { PhotoPeek } from '../../ui/PhotoPeek';
 import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
@@ -50,7 +52,8 @@ export default function Chats() {
   const [menu, setMenu] = useState(false);
   const [pickMenu, setPickMenu] = useState(false);
   const [muting, setMuting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [chatAction, setChatAction] = useState<'delete' | 'clear' | null>(null);
+  const [peek, setPeek] = useState<Row | null>(null);
   // The list whose chip you held down (for Edit / Delete), and the one being deleted.
   const [heldList, setHeldList] = useState<string | null>(null);
   const [deletingList, setDeletingList] = useState<string | null>(null);
@@ -227,7 +230,7 @@ export default function Chats() {
         <IconButton icon="pin" label={allPinned ? t.unpinChat : t.pinChat} look="onAccent" onPress={() => forPicked((r) => pinAll(r, !allPinned))} />
         <IconButton icon="muted" label={allMuted ? t.unmute : t.mute} look="onAccent" onPress={() => (allMuted ? forPicked((r) => core.unmute(r.chat.id)) : setMuting(true))} />
         <IconButton icon="archive" label={t.archive} look="onAccent" onPress={() => (archive(pickedRows, t), setPicked(new Set()))} testID="archive-picked" />
-        <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setConfirmDelete(true)} />
+        <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setChatAction('delete')} />
         <IconButton icon="more" label={t.moreOptions} look="onAccent" onPress={() => setPickMenu(true)} />
       </LinearGradient>
     </Animated.View>
@@ -376,7 +379,7 @@ export default function Chats() {
                 </View>
               </Pressy>
             ) : (
-              <Animated.View entering={rows && index < 12 ? rise(index * 28) : undefined} exiting={FadeOut.duration(160)}>
+              <Animated.View exiting={FadeOut.duration(160)}>
                 <ChatRow
                   row={it.row}
                   typing={Object.keys(typing[it.row.chat.id] ?? {}).filter((id) => id !== myId)}
@@ -390,6 +393,7 @@ export default function Chats() {
                   }}
                   onPin={() => pin(it.row)}
                   onArchive={() => archive(it.row, t)}
+                  onAvatar={it.row.prefs.lock ? undefined : () => setPeek(it.row)}
                 />
               </Animated.View>
             )
@@ -425,6 +429,7 @@ export default function Chats() {
             setPickMenu(false);
           }}
         />
+        <MenuItem icon="trash" label={t.clearChat} onPress={() => (setPickMenu(false), setChatAction('clear'))} testID="clear-picked" />
       </Popup>
 
       <Popup visible={heldList !== null} onClose={() => setHeldList(null)} top={200}>
@@ -470,25 +475,16 @@ export default function Chats() {
         ]}
       />
 
-      <Dialog
-        visible={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={fill(t.deleteChats, { n: picked.size })}
-        text={t.deleteChatsNote}
-        buttons={[
-          {
-            label: t.delete,
-            danger: true,
-            testID: 'confirm-delete-chats',
-            onPress: () => {
-              setConfirmDelete(false);
-              forPicked((r) => void core.deleteChatHere(r.chat.id));
-            },
-          },
-          { label: t.cancel, onPress: () => setConfirmDelete(false) },
-        ]}
+      <DeleteChats
+        rows={pickedRows}
+        mode={chatAction}
+        onClose={(done) => {
+          setChatAction(null);
+          if (done) setPicked(new Set());
+        }}
       />
       <CameraSheet visible={camera} onClose={() => setCamera(false)} onTaken={sendTaken} onGallery={() => void fromGallery().then(sendTaken).catch(() => setCamera(false))} />
+      <PhotoPeek row={peek} onClose={() => setPeek(null)} />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => forPicked((r) => core.mute(r.chat.id, ms))} />
     </Screen>
   );

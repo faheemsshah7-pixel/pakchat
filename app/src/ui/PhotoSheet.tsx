@@ -1,6 +1,8 @@
 // PhotoSheet.tsx: change or remove a photo, like WhatsApp's: my profile photo,
 // or (`chatId`) a group's or community's, for its admins. The photo is cropped
-// square, made smaller and uploaded (core/photos.ts).
+// square, made smaller and uploaded (core/photos.ts). With a photo, View photo
+// shows it full screen.
+import { router } from 'expo-router';
 import { View } from 'react-native';
 
 import { core, isOffline } from '../core/core';
@@ -34,7 +36,7 @@ export function CameraBadge({ size = 26 }: { size?: number }) {
   );
 }
 
-export function PhotoSheet({ visible, onClose, has, chatId }: { visible: boolean; onClose: () => void; has: boolean; chatId?: string }) {
+export function PhotoSheet({ visible, onClose, has, chatId, title }: { visible: boolean; onClose: () => void; has: boolean; chatId?: string; title?: string }) {
   const t = useT();
 
   const save = async (photo: string) => {
@@ -67,6 +69,14 @@ export function PhotoSheet({ visible, onClose, has, chatId }: { visible: boolean
 
   return (
     <Sheet visible={visible} onClose={onClose} title={has ? t.changePhoto : t.addPhoto}>
+      {has && (
+        <MenuItem
+          icon="eye"
+          label={t.viewPhoto}
+          onPress={() => (onClose(), router.push({ pathname: '/photo', params: { id: chatId ?? core.myId, title: title ?? '' } }))}
+          testID="photo-view"
+        />
+      )}
       <MenuItem icon="photo" label={t.choosePhoto} onPress={() => void choose()} testID="photo-choose" />
       {has && <MenuItem icon="trash" label={t.removePhoto} danger onPress={() => void remove()} testID="photo-remove" />}
     </Sheet>

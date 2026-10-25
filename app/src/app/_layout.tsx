@@ -165,6 +165,7 @@ function App() {
           <Stack.Screen name="restore" />
           <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="viewer" options={{ animation: 'fade' }} />
+          <Stack.Screen name="photo" options={{ animation: 'fade' }} />
           <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: '#0B1424' } }} />
           <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" options={{ animation: 'fade_from_bottom' }} />

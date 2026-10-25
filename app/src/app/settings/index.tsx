@@ -242,7 +242,7 @@ export default function Settings() {
         </View>
       </Sheet>
 
-      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!me?.photo} />
+      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!me?.photo} title={me?.name} />
       <Dialog
         visible={archivingAll}
         onClose={() => setArchivingAll(false)}

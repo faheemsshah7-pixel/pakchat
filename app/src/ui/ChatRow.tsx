@@ -30,6 +30,7 @@ export function ChatRow({
   onLongPress,
   onPin,
   onArchive,
+  onAvatar,
 }: {
   row: Row;
   typing: string[];
@@ -40,6 +41,8 @@ export function ChatRow({
   onLongPress: () => void;
   onPin: () => void;
   onArchive: () => void;
+  /** Tapping the picture (not while picking): it pops up bigger, like WhatsApp. */
+  onAvatar?: () => void;
 }) {
   const t = useT();
   const theme = useTheme();
@@ -134,7 +137,9 @@ export function ChatRow({
             >
               <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }, pickedStyle]} />
               <View>
-                <Avatar id={chat.id} name={title} size={50} online={online} group={chat.kind === 'group'} />
+                <Pressy onPress={onAvatar} disabled={!onAvatar || selecting} label={t.profilePhoto} scale={0.92} testID={`avatar-${title}`}>
+                  <Avatar id={chat.id} name={title} size={50} online={online} group={chat.kind === 'group'} />
+                </Pressy>
                 {selected && (
                   <View
                     style={{

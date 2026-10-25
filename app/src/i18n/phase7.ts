@@ -410,6 +410,24 @@ export const en7 = {
   lessDataCallsSub: 'Calls use less mobile data. The sound and picture may not be as clear.',
   // One message: "Delete message?", like WhatsApp
   deleteOneMessage: 'Delete message?',
+  // Photos full screen, and deleting or clearing chats, like WhatsApp
+  noProfilePhoto: 'No profile photo',
+  viewPhoto: 'View photo',
+  deleteChatOne: 'Delete this chat?',
+  deleteChatsGone: 'Their messages are removed from this phone and the chats leave your list. A chat comes back if someone writes again.',
+  exitAndDelete: 'Exit and delete',
+  exitAndDeleteNote: 'You\'ll leave {n} groups first. Nobody is told you deleted them, only that you left.',
+  exitCommunityFirst: 'Exit the community first to delete its announcements',
+  clearChats: 'Clear {n} chats?',
+  chatsCleared: 'Chats cleared',
+  // Leaving or deleting a group: clear it or delete it, like WhatsApp
+  youLeftName: 'You left "{name}"',
+  leftChoicesNote: 'Keep the chat to read later, clear its messages, or delete it from your list.',
+  deleteGroup: 'Delete group',
+  keepChat: 'Keep',
+  groupDeleteChoice: 'Clear its messages and stay in the group, or exit the group and delete the chat.',
+  groupsDeleteChoice: '{n} of these are groups you\'re in. Clear their messages and stay, or exit them and delete everything.',
+  chatCleared: 'Chat cleared',
 };
 
 export const ur7: typeof en7 = {
@@ -793,4 +811,20 @@ export const ur7: typeof en7 = {
   lessDataCalls: 'کالز میں کم ڈیٹا استعمال کریں',
   lessDataCallsSub: 'کالز کم موبائل ڈیٹا استعمال کریں گی۔ آواز اور تصویر شاید اتنی صاف نہ ہو۔',
   deleteOneMessage: 'پیغام ڈیلیٹ کریں؟',
+  noProfilePhoto: 'کوئی پروفائل فوٹو نہیں',
+  viewPhoto: 'فوٹو دیکھیں',
+  deleteChatOne: 'یہ چیٹ ڈیلیٹ کریں؟',
+  deleteChatsGone: 'ان کے پیغامات اس فون سے ہٹ جائیں گے اور چیٹس فہرست سے نکل جائیں گی۔ کوئی دوبارہ لکھے تو چیٹ واپس آ جائے گی۔',
+  exitAndDelete: 'چھوڑیں اور ڈیلیٹ کریں',
+  exitAndDeleteNote: 'پہلے آپ {n} گروپ چھوڑ دیں گے۔ کسی کو ڈیلیٹ کا نہیں بتایا جائے گا، صرف یہ کہ آپ نکل گئے۔',
+  exitCommunityFirst: 'اعلانات ڈیلیٹ کرنے کے لیے پہلے کمیونٹی چھوڑیں',
+  clearChats: '{n} چیٹس صاف کریں؟',
+  chatsCleared: 'چیٹس صاف ہو گئیں',
+  youLeftName: 'آپ نے "{name}" چھوڑ دیا',
+  leftChoicesNote: 'چیٹ بعد میں پڑھنے کے لیے رکھیں، اس کے پیغامات صاف کریں، یا اسے فہرست سے ڈیلیٹ کریں۔',
+  deleteGroup: 'گروپ ڈیلیٹ کریں',
+  keepChat: 'رکھیں',
+  groupDeleteChoice: 'پیغامات صاف کر کے گروپ میں رہیں، یا گروپ چھوڑ کر چیٹ ڈیلیٹ کریں۔',
+  groupsDeleteChoice: 'ان میں سے {n} گروپس میں آپ ہیں۔ پیغامات صاف کر کے رہیں، یا انہیں چھوڑ کر سب ڈیلیٹ کریں۔',
+  chatCleared: 'چیٹ صاف ہو گئی',
 };

@@ -352,22 +352,40 @@ export function Button({
  * Someone's (or a group's) picture: their photo once it's on the phone, else
  * their letters on a colour. `photo`: a value to show instead of theirs.
  */
-export function Avatar({ id, name, size = 50, online, group, photo }: { id: string; name: string; size?: number; online?: boolean; group?: boolean; photo?: string | null }) {
+/** Round, like WhatsApp; `square` (a rounded square) is for communities, as WhatsApp draws them. */
+export function Avatar({
+  id,
+  name,
+  size = 50,
+  online,
+  group,
+  square,
+  photo,
+}: {
+  id: string;
+  name: string;
+  size?: number;
+  online?: boolean;
+  group?: boolean;
+  square?: boolean;
+  photo?: string | null;
+}) {
   const theme = useTheme();
   const uri = useCore(['photos', 'people', 'auth'], () => photoUri(photo !== undefined ? photo : core.photoOf(id)));
   const tints = theme.dark ? TINTS_DARK : TINTS_SKY;
   const [a, b, ink] = tints[hash(id) % tints.length];
   const dot = Math.round(size * 0.3);
+  const radius = square ? size * 0.3 : size / 2;
   return (
     <View style={{ width: size, height: size }}>
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size * 0.34, backgroundColor: a }} contentFit="cover" transition={150} />
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: radius, backgroundColor: a }} contentFit="cover" transition={150} />
       ) : (
         <LinearGradient
           colors={[a, b]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={{ width: size, height: size, borderRadius: size * 0.34, alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: size, height: size, borderRadius: radius, alignItems: 'center', justifyContent: 'center' }}
         >
           {group && !name ? (
             <Icon name="group" size={size * 0.5} color={ink} />
