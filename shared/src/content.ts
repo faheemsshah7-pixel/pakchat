@@ -64,8 +64,13 @@ export type SharedContact = { name: string; phones: string[]; emails?: string[];
 /** A place. `live`: sharing where I am until this time (ms); the moves come as `live` changes. */
 export type Place = { lat: number; lng: number; name?: string; address?: string; live?: number };
 
-/** A call planned for later, with an optional call link. */
-export type CallPlan = { title: string; at: number; video: boolean; link?: string; about?: string };
+/**
+ * A call planned for later, with an optional call link. Or (`general`) an event
+ * from the 📎, like WhatsApp's: a name, when it starts (and `end`s), where
+ * (`place`), and a call only when `call` says so. People answer Going (vote 0)
+ * or Not going (vote 1) with a `vote` change, as on a poll.
+ */
+export type CallPlan = { title: string; at: number; video: boolean; link?: string; about?: string; end?: number; place?: string; general?: true; call?: true };
 
 /**
  * A call message: never shown as a bubble, never saved. One call (`call`, its
@@ -403,6 +408,16 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
         if (!isText(x.about, 1000)) return null;
         out.about = x.about;
       }
+      if (x.end !== undefined) {
+        if (!isCount(x.end) || x.end < x.at) return null;
+        out.end = x.end;
+      }
+      if (x.place !== undefined) {
+        if (!isText(x.place, 300)) return null;
+        out.place = x.place;
+      }
+      if (x.general === true) out.general = true;
+      if (x.call === true) out.call = true;
       return out;
     }
     case 'edit':

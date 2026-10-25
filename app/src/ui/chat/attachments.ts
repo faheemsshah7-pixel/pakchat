@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { kindOf, type Picked } from '../../core/files';
 import { outsideFor } from '../../core/lock';
+import { GALLERY_MAX, galleryAllowed, openGallery } from './Gallery';
 
 function fromPicker(a: ImagePicker.ImagePickerAsset): Picked {
   const video = a.type === 'video';
@@ -20,9 +21,19 @@ function fromPicker(a: ImagePicker.ImagePickerAsset): Picked {
   };
 }
 
-/** Photos and videos from the gallery (up to 10 at once, or just one). Empty if you closed it. */
+/**
+ * Photos and videos from the gallery: up to 100 at once in PakChat's own
+ * gallery (Gallery.tsx), like WhatsApp, or just one. Without access to the
+ * gallery (or from its ⋯), the phone's own picker. Empty if you closed it.
+ */
 export async function fromGallery(many = true): Promise<Picked[]> {
-  const r = await outsideFor(() => ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: many, selectionLimit: many ? 10 : 1, quality: 1 }));
+  if (many && (await galleryAllowed())) {
+    const got = await openGallery(GALLERY_MAX);
+    if (got !== 'system') return got;
+  }
+  const r = await outsideFor(() =>
+    ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: many, selectionLimit: many ? GALLERY_MAX : 1, quality: 1 }),
+  );
   return r.canceled ? [] : r.assets.map(fromPicker);
 }
 

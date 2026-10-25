@@ -110,6 +110,21 @@ describe('in a chat', () => {
     expect(plan).toMatchObject({ kind: 'event', plan: { title: 'Revision', video: true } });
   });
 
+  test('an event: when it ends, where, and who is going', async () => {
+    const { ali, sara, chat } = await two();
+    const at = w.now() + 86_400_000;
+    const m = await ali.client.sendPlan(chat.id, { title: 'Dinner', at, end: at + 7_200_000, place: 'Clifton', video: false, general: true });
+    await w.settle();
+    const [got] = await sara.client.messages(chat.id);
+    expect(got).toMatchObject({ kind: 'event', plan: { title: 'Dinner', end: at + 7_200_000, place: 'Clifton', general: true } });
+    expect(got.plan?.call).toBeUndefined();
+    await sara.client.vote(chat.id, { author: ali.id, id: m.id }, [0]);
+    await w.settle();
+    const [mine] = await ali.client.messages(chat.id);
+    expect(mine.votes).toEqual({ [sara.id]: [0] });
+    expect(parseContent(wrap({ t: 'event', title: 'x', at: 10, end: 5, video: false }))).toBeNull();
+  });
+
   test('Undo: a held message can be taken back before it goes, and nothing reaches them', async () => {
     const { ali, sara, chat } = await two();
     const m = await ali.client.sendText(chat.id, 'oops', { hold: 5_000 });

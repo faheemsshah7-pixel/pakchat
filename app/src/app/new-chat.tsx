@@ -12,6 +12,7 @@ import { findFromPhoneBook } from '../core/phoneBook';
 import { usePeople, usePerson } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
+import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
 import { rise } from '../ui/motion';
 import { toast } from '../ui/overlays';
@@ -129,7 +130,17 @@ export default function NewChat() {
       <Glass style={{ marginHorizontal: 12 }}>
         <SettingRow icon="group" title={t.newGroup} onPress={() => router.replace('/new-group')} testID="to-new-group" />
         <Divider />
-        <SettingRow icon="userPlus" title={t.newContact} onPress={() => router.push('/contact')} testID="new-contact" />
+        <SettingRow
+          icon="userPlus"
+          title={t.newContact}
+          onPress={() => router.push('/contact')}
+          right={
+            <Pressy onPress={() => router.push({ pathname: '/qr', params: { tab: 'scan' } })} label={t.scanCode} hitSlop={8} testID="new-contact-qr">
+              <Icon name="qr" size={22} color={theme.accInk} />
+            </Pressy>
+          }
+          testID="new-contact"
+        />
         <Divider />
         <SettingRow icon="contacts" title={syncing ? t.connecting : t.findContacts} sub={t.findContactsNote} onPress={syncing ? undefined : phoneBook} testID="find-contacts" />
       </Glass>

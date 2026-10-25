@@ -23,7 +23,7 @@ import KV from 'expo-sqlite/kv-store';
 import { AppState } from 'react-native';
 
 import { fileModule } from '../../modules/pakchat-signal';
-import { en, ur, type Strings } from '../i18n/strings';
+import { en, fill, ur, type Strings } from '../i18n/strings';
 import { preview } from '../ui/format';
 import { avatarTint, initials } from '../ui/letters';
 import { core, isMuted } from './core';
@@ -159,8 +159,9 @@ export function alertFor(m: Message) {
         lines: next.lines,
         locked,
         tone,
+        vibrate: core.settings.vibrate !== false,
         avatar: locked ? { ...avatarTint('pakchat'), letters: 'P' } : { ...avatarTint(core.otherPerson(chat) ?? chat.id), letters: initials(title) },
-        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats, toneChannel: t.toneChannel, toneName: toneName(tone, t) },
+        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats, toneChannel: t.toneChannel, toneName: toneName(tone, t), defaultToneName: t.tonePhone, noVibrate: t.noVibration },
       }),
     );
   });
@@ -168,15 +169,35 @@ export function alertFor(m: Message) {
 
 /**
  * Someone reacted to my message. A like on my status gets its own alert, like
- * WhatsApp's "Sara liked your status" (tap it for the Status tab). Not for one
- * taken back, nor an old one caught up later.
+ * WhatsApp's "Sara liked your status" (tap it for the Status tab). In a chat,
+ * "Sara reacted 👍 to: "See you at 5"" (Settings › Notifications › Reactions),
+ * unless the chat is muted or locked, or I'm looking at it. Not for one taken
+ * back, nor an old one caught up later.
  */
 export function alertReaction(e: { message: Message; from: string; emoji: string; at: number }) {
-  if (Date.now() - e.at > 10 * 60_000) return;
+  if (Date.now() - e.at > 10 * 60_000 || e.from === core.myId) return;
   void inLine(async () => {
     const chat = await core.storage.getChat(e.message.chatId);
-    if (chat?.kind !== 'status') return;
+    if (!chat) return;
     const t = words();
+    if (chat.kind !== 'status') {
+      const prefs = core.prefs[chat.id] ?? {};
+      if (core.settings.reactionAlerts === false || isMuted(prefs) || prefs.lock || prefs.archived || e.message.author !== core.myId) return;
+      if (core.viewing === chat.id && AppState.currentState === 'active') return;
+      const what = preview(e.message, t, false).slice(0, 80);
+      const who = core.name(e.from) || t.newMessage;
+      await Notifications.scheduleNotificationAsync({
+        identifier: `${LIKE_ALERT}${e.message.id}:${e.from}`,
+        content: {
+          title: chat.kind === 'group' ? core.chatTitle(chat) : who,
+          body: fill(chat.kind === 'group' ? t.reactedToGroup : t.reactedTo, { name: who, emoji: e.emoji, text: what }),
+          data: { chatId: chat.id },
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+        },
+        trigger: { channelId: CHANNEL },
+      }).catch(() => {});
+      return;
+    }
     await Notifications.scheduleNotificationAsync({
       identifier: `${LIKE_ALERT}${e.message.id}:${e.from}`,
       content: { title: core.name(e.from) || t.newMessage, body: t.likedYourStatus, priority: Notifications.AndroidNotificationPriority.HIGH },

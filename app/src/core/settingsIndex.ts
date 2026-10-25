@@ -7,15 +7,15 @@ import type { IconName } from '../ui/icons';
 
 export type Entry = { title: string; where: string; icon: IconName; to: Href | null };
 
-/** Every setting, and the page it's on (null: the Settings page itself). */
+/** Every setting, and the page it's on. */
 function entries(t: Strings): Entry[] {
   const privacy = { where: t.privacy, to: '/settings/privacy' as const };
   const notifications = { where: t.notifications, to: '/settings/notifications' as const };
   const storage = { where: t.storage, to: '/settings/storage' as const };
-  const lock = { where: t.appLock, to: '/settings/lock' as const };
-  const backup = { where: t.backup, to: '/settings/backup' as const };
-  const account = { where: t.signInWays, to: '/settings/account' as const };
-  const here = { where: t.settings, to: null };
+  const backup = { where: `${t.chatsWord} › ${t.backup}`, to: '/settings/backup' as const };
+  const account = { where: t.accountWord, to: '/settings/account' as const };
+  const chats = { where: t.chatsWord, to: '/settings/chats' as const };
+  const lock = { where: `${t.privacy} › ${t.appLock}`, to: '/settings/lock' as const };
   return [
     { title: t.privacy, icon: 'lock', ...privacy },
     { title: t.lastSeenOnline, icon: 'eye', ...privacy },
@@ -41,13 +41,23 @@ function entries(t: Strings): Entry[] {
     { title: t.signInWays, icon: 'key', ...account },
     { title: t.linkGoogle, icon: 'globe', ...account },
     { title: t.linkPhone, icon: 'calls', ...account },
-    { title: t.language, icon: 'globe', where: t.settings, to: '/settings/language' },
-    { title: t.wallpaper, icon: 'wallpaper', where: t.chatsWord, to: '/wallpaper' },
-    { title: t.appearance, icon: 'palette', ...here },
-    { title: t.accentColour, icon: 'palette', ...here },
-    { title: t.linkPreviews, icon: 'link', ...here },
-    { title: t.keepArchived, icon: 'archive', ...here },
-    { title: t.archiveAll, icon: 'archive', ...here },
+    { title: t.serverAddress, icon: 'server', ...account },
+    { title: t.logOut, icon: 'logout', ...account },
+    { title: t.profileWord, icon: 'user', where: t.settings, to: '/settings/profile' },
+    { title: t.about, icon: 'info', where: t.profileWord, to: '/settings/profile' },
+    { title: t.qrCode, icon: 'qr', where: t.settings, to: '/qr' },
+    { title: t.appLanguage, icon: 'globe', where: t.settings, to: '/settings/language' },
+    { title: t.listsWord, icon: 'lists', where: t.settings, to: '/settings/lists' },
+    { title: t.manageStorage, icon: 'doc', where: t.storage, to: '/settings/manage-storage' },
+    { title: t.helpWord, icon: 'info', where: t.settings, to: '/settings/help' },
+    { title: t.appInfo, icon: 'info', where: t.helpWord, to: '/settings/help' },
+    { title: t.chatsWord, icon: 'chat', ...chats },
+    { title: t.themeWord, icon: 'palette', ...chats },
+    { title: t.accentColour, icon: 'palette', ...chats },
+    { title: t.wallpaper, icon: 'wallpaper', ...chats },
+    { title: t.linkPreviews, icon: 'link', ...chats },
+    { title: t.keepArchived, icon: 'archive', ...chats },
+    { title: t.archiveAll, icon: 'archive', ...chats },
   ];
 }
 

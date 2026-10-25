@@ -12,6 +12,7 @@ defmodule PakchatWeb.MeController do
   `PATCH /api/me` with any of: name, about, photo, and
   `privacy: {last_seen: "everyone" | "contacts" | "nobody",
   online: "everyone" | "same", photo: "everyone" | "contacts" | "nobody",
+  about: "everyone" | "contacts" | "nobody", groups: "everyone" | "contacts",
   read_receipts: true | false}`. A new photo deletes the old one's file.
   """
   def update(conn, params) do
@@ -23,6 +24,8 @@ defmodule PakchatWeb.MeController do
       |> put_if(privacy, "last_seen", "last_seen_visibility")
       |> put_if(privacy, "online", "online_visibility")
       |> put_if(privacy, "photo", "photo_visibility")
+      |> put_if(privacy, "about", "about_visibility")
+      |> put_if(privacy, "groups", "groups_visibility")
       |> put_if(privacy, "read_receipts", "read_receipts")
 
     was = conn.assigns.user.photo

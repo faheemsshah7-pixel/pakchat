@@ -46,7 +46,8 @@ export function CallBar() {
 }
 
 /** The call buttons (chat header, Calls tab, contact page): start, and open the call screen. */
-export async function startCall(chatId: string, video: boolean, t: Strings) {
+/** Calls a chat. `invite`: a new group call's others, rung once the first one answers. */
+export async function startCall(chatId: string, video: boolean, t: Strings, invite?: string[]) {
   if (calls.live) {
     const now = calls.view();
     if (now?.chatId === chatId) router.push({ pathname: '/call', params: { id: now.id } });
@@ -58,7 +59,7 @@ export async function startCall(chatId: string, video: boolean, t: Strings) {
   // A call link joins the call going on there (or starts one, which rings nobody).
   const open = (id: string) => router.push({ pathname: '/call', params: { id } });
   const link = (await core.storage.getChat(chatId))?.callLink;
-  const r = link ? await calls.joinLink(chatId, video, open) : await calls.start(chatId, video, open);
+  const r = link ? await calls.joinLink(chatId, video, open) : await calls.start(chatId, video, open, invite);
   if (r === 'permission') toast(t.callNeedsMic);
   else if (r === 'offline') toast(t.offline);
   else if (r === 'busy') toast(t.alreadyInCall);

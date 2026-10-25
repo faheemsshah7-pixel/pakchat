@@ -10,7 +10,7 @@ import Animated, { FadeIn, FadeInRight, LinearTransition, ZoomOut } from 'react-
 import { core, isOffline, type Person } from '../core/core';
 import { defaultTimer } from '../core/timer';
 import { useChat, usePeople } from '../core/hooks';
-import { useT } from '../i18n';
+import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
@@ -72,11 +72,17 @@ export default function NewGroup() {
   async function finish() {
     setBusy(true);
     try {
+      // Someone whose privacy (Settings › Privacy › Groups) doesn't let me add them is left out: say so, like WhatsApp.
+      const missing = (members: { userId: string }[]) => picked.filter((p) => !members.some((m) => m.userId === p.id));
       if (add) {
-        await core.client.addMembers(add, picked.map((p) => p.id));
+        const chat = await core.client.addMembers(add, picked.map((p) => p.id));
+        const left = missing(chat.members);
+        if (left.length) toast(fill(t.couldntAdd, { names: left.map((p) => p.name).join(', ') }), undefined, 5000);
         router.back();
       } else {
         const chat = await core.client.createGroup(title.trim(), picked.map((p) => p.id), { onlyAdminsSend: onlyAdmins, defaultTimer: defaultTimer() });
+        const left = missing(chat.members);
+        if (left.length) toast(fill(t.couldntAdd, { names: left.map((p) => p.name).join(', ') }), undefined, 5000);
         router.replace({ pathname: '/chat/[id]', params: { id: chat.id } });
       }
     } catch (err) {

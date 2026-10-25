@@ -130,7 +130,7 @@ class PakchatSignalModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PakchatSignal")
 
-    Events("progress", "callAudio", "pip", "liveStop")
+    Events("progress", "callAudio", "pip", "liveStop", "voiceEar")
 
     OnCreate {
       appContext.reactContext?.let { CrashLog.install(it) }
@@ -229,6 +229,20 @@ class PakchatSignalModule : Module() {
     AsyncFunction("joinAudio") { parts: List<String>, to: String, promise: Promise ->
       slowly(promise) { AudioJoin.join(parts.map { path(it) }, path(to)).toDouble() }
     }
+
+    // ---- A voice note held to the ear (see VoiceEar) ----
+
+    /** Watches the ear sensor while a voice note plays; "voiceEar" says {near} (and {done} for the ear player). */
+    Function("voiceWatch") { on: Boolean -> VoiceEar.watch(context(), on) { sendEvent("voiceEar", it) } }
+
+    Function("voiceEarPlay") { uri: String, fromMs: Int, speed: Double -> VoiceEar.play(context(), uri, fromMs, speed.toFloat()) }
+
+    Function("voiceEarPosition") { VoiceEar.position() }
+
+    /** Stops the ear player; answers where it got to (ms), or -1. */
+    Function("voiceEarStop") { VoiceEar.stop(context()) }
+
+    Function("voiceEarOff") { VoiceEar.off(context()) }
 
     // ---- Calls (see CallAlerts, CallAudio, CallService, CallLockScreen) ----
 

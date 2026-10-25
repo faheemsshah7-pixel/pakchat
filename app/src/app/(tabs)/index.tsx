@@ -28,6 +28,8 @@ import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { listLayout, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
+import { AddToListSheet } from '../../ui/AddToListSheet';
+import { ChatLockSheet } from '../../ui/ChatLockSheet';
 
 // The chips above the chats. `list:<id>` is one of your own lists.
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
@@ -208,6 +210,12 @@ export default function Chats() {
   const allMuted = pickedRows.length > 0 && pickedRows.every((r) => r.prefs.muted);
   const allFav = pickedRows.length > 0 && pickedRows.every((r) => r.prefs.favourite);
   const anyUnread = pickedRows.some((r) => r.chat.unread > 0 || r.prefs.markedUnread);
+  // One chat picked: its own things (View contact, Lock chat, Block), like WhatsApp's ⋮.
+  const onePicked = pickedRows.length === 1 ? pickedRows[0] : null;
+  const onePerson = onePicked?.chat.kind === 'direct' && onePicked.other && onePicked.other !== myId ? onePicked.other : null;
+  const [listFor, setListFor] = useState<string[] | null>(null);
+  const [lockFor, setLockFor] = useState<string | null>(null);
+  const [blockFor, setBlockFor] = useState<string | null>(null);
 
   function forPicked(fn: (r: Row) => void) {
     pickedRows.forEach(fn);
@@ -424,6 +432,54 @@ export default function Chats() {
         />
         <MenuItem icon="heart" label={allFav ? t.removeFavourite : t.addFavourite} onPress={() => forPicked((r) => core.setPrefs(r.chat.id, { favourite: !allFav }))} />
         <MenuItem
+          icon="text"
+          label={t.addToList}
+          onPress={() => {
+            setListFor(pickedRows.map((r) => r.chat.id));
+            setPicked(new Set());
+            setPickMenu(false);
+          }}
+          testID="picked-add-to-list"
+        />
+        {onePerson && (
+          <MenuItem
+            icon="info"
+            label={t.viewContact}
+            onPress={() => {
+              const id = onePicked!.chat.id;
+              setPicked(new Set());
+              setPickMenu(false);
+              router.push({ pathname: '/info/[id]', params: { id } });
+            }}
+            testID="picked-view-contact"
+          />
+        )}
+        {onePicked && !onePicked.chat.left && (
+          <MenuItem
+            icon="lock"
+            label={t.lockChat}
+            onPress={() => {
+              setLockFor(onePicked.chat.id);
+              setPicked(new Set());
+              setPickMenu(false);
+            }}
+            testID="picked-lock"
+          />
+        )}
+        {onePerson && (
+          <MenuItem
+            icon="flag"
+            label={t.block}
+            danger
+            onPress={() => {
+              setBlockFor(onePerson);
+              setPicked(new Set());
+              setPickMenu(false);
+            }}
+            testID="picked-block"
+          />
+        )}
+        <MenuItem
           icon="select"
           label={t.selectAll}
           onPress={() => {
@@ -487,6 +543,30 @@ export default function Chats() {
       />
       <CameraSheet visible={camera} onClose={() => setCamera(false)} onTaken={sendTaken} onGallery={() => void fromGallery().then(sendTaken).catch(() => setCamera(false))} />
       <PhotoPeek row={peek} onClose={() => setPeek(null)} />
+      <AddToListSheet visible={!!listFor} chatIds={listFor ?? []} onClose={() => setListFor(null)} />
+      {lockFor && <ChatLockSheet visible chatId={lockFor} onClose={() => setLockFor(null)} />}
+      <Dialog
+        visible={!!blockFor}
+        onClose={() => setBlockFor(null)}
+        title={fill(t.blockName, { name: blockFor ? core.plainName(blockFor) : '' })}
+        buttons={[
+          {
+            label: t.block,
+            danger: true,
+            testID: 'confirm-block-picked',
+            onPress: () => {
+              const who = blockFor;
+              setBlockFor(null);
+              if (who)
+                void core
+                  .block(who, true)
+                  .then(() => toast(t.blocked))
+                  .catch(() => toast(t.couldNot));
+            },
+          },
+          { label: t.cancel, onPress: () => setBlockFor(null) },
+        ]}
+      />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => forPicked((r) => core.mute(r.chat.id, ms))} />
     </Screen>
   );

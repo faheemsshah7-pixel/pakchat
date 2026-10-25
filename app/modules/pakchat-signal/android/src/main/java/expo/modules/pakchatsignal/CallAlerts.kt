@@ -70,6 +70,35 @@ object CallAlerts {
     m.createNotificationChannels(listOf(ring, missed, ongoing))
   }
 
+  /**
+   * The ringing channel for a ringtone picked in Settings › Notifications › Calls:
+   * "" is the phone's own (calls_ringing); one of PakChat's tones (ChatAlerts.TONES)
+   * rings on its own channel, since a channel's sound is fixed once it's made.
+   */
+  private fun ringChannel(context: Context, tone: String, words: JSONObject): String {
+    if (Build.VERSION.SDK_INT < 26 || tone !in ChatAlerts.TONES) return RING_CHANNEL
+    val id = "$RING_CHANNEL-$tone"
+    val m = manager(context)
+    if (m.getNotificationChannel(id) != null) return id
+    val name = words.optString("ringChannel", "Calls") + " (" + words.optString("toneName", tone) + ")"
+    m.createNotificationChannel(
+      NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
+        setSound(
+          ringUri(context, tone),
+          AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
+        )
+        enableVibration(true)
+        vibrationPattern = longArrayOf(0, 1000, 1000)
+        lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        setBypassDnd(false)
+      },
+    )
+    return id
+  }
+
+  private fun ringUri(context: Context, tone: String): android.net.Uri =
+    if (tone in ChatAlerts.TONES) android.net.Uri.parse("android.resource://${context.packageName}/raw/pakchat_tone_$tone") else RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+
   private fun tag(callId: String) = "call:$callId"
 
   /** Rings: shows the incoming call. */
@@ -93,7 +122,8 @@ object CallAlerts {
       open(context, callId, chatId, answer = true),
     )
     if (o.optBoolean("video")) style.setIsVideo(true)
-    val builder = NotificationCompat.Builder(context, RING_CHANNEL)
+    val tone = o.optString("tone", "")
+    val builder = NotificationCompat.Builder(context, ringChannel(context, tone, words))
       .setSmallIcon(R.drawable.pakchat_call)
       .setColor(Color.parseColor("#2F6BF0"))
       .setStyle(style)
@@ -110,7 +140,7 @@ object CallAlerts {
       .setFullScreenIntent(lockScreen(context, callId, json), true)
       .setTimeoutAfter(RING_MS)
       // Phones before Android 8 take the sound from here, not the channel.
-      .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), AudioManager.STREAM_RING)
+      .setSound(ringUri(context, tone), AudioManager.STREAM_RING)
       .setVibrate(longArrayOf(0, 1000, 1000))
     val n = builder.build()
     // Repeat the ringtone until the alert goes away.

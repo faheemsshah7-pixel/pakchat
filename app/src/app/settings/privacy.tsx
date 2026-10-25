@@ -1,12 +1,14 @@
-// settings/privacy.tsx: who sees your last seen and online, blue ticks, and blocked people.
-// These are kept on the server (it's the one that hands out "last seen").
+// settings/privacy.tsx: who sees your last seen and online, photo and About, blue ticks,
+// who can add you to groups, and blocked people. These are kept on the server (it's the
+// one that hands out "last seen" and adds people to groups). And, like WhatsApp's
+// Privacy › Calls: Silence unknown callers and Protect IP address in calls (this phone).
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
 import { core } from '../../core/core';
 import { defaultTimer, setDefaultTimer } from '../../core/timer';
-import { useAuth, useBlocked } from '../../core/hooks';
+import { useAuth, useBlocked, useSettings } from '../../core/hooks';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
@@ -22,9 +24,10 @@ export default function Privacy() {
   const { theme } = useLook();
   const { me } = useAuth();
   const blocked = useBlocked();
-  const [open, setOpen] = useState<'last_seen' | 'online' | 'photo' | 'timer' | null>(null);
+  const settings = useSettings();
+  const [open, setOpen] = useState<'last_seen' | 'online' | 'photo' | 'about' | 'groups' | 'timer' | null>(null);
   const [timer, setTimer] = useState(defaultTimer);
-  const p = me?.privacy ?? { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone' };
+  const p = me?.privacy ?? { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone', about: 'everyone', groups: 'everyone' };
 
   const lastSeenChoices: Choice[] = [
     { value: 'everyone', label: t.everyone },
@@ -35,9 +38,13 @@ export default function Privacy() {
     { value: 'everyone', label: t.everyone },
     { value: 'same', label: t.sameAsLastSeen },
   ];
+  const groupsChoices: Choice[] = [
+    { value: 'everyone', label: t.everyone },
+    { value: 'contacts', label: t.myContacts },
+  ];
   const labelOf = (list: Choice[], v: string) => list.find((c) => c.value === v)?.label ?? v;
 
-  async function change(privacy: { last_seen?: string; online?: string; photo?: string; read_receipts?: boolean }) {
+  async function change(privacy: { last_seen?: string; online?: string; photo?: string; about?: string; groups?: string; read_receipts?: boolean }) {
     try {
       await core.updateMe({ privacy });
     } catch {
@@ -46,8 +53,9 @@ export default function Privacy() {
   }
 
   const timerChoices: Choice[] = TIMERS.map((s) => ({ value: String(s), label: timerLabel(s, t) }));
-  const choices = open === 'online' ? onlineChoices : open === 'timer' ? timerChoices : lastSeenChoices;
-  const current = open === 'online' ? p.online : open === 'timer' ? String(timer) : open === 'photo' ? p.photo : p.lastSeen;
+  const choices = open === 'online' ? onlineChoices : open === 'timer' ? timerChoices : open === 'groups' ? groupsChoices : lastSeenChoices;
+  const current = open === 'online' ? p.online : open === 'timer' ? String(timer) : open === 'photo' ? p.photo : open === 'about' ? p.about : open === 'groups' ? p.groups : p.lastSeen;
+  const titles = { online: t.online2, timer: t.defaultTimer, photo: t.profilePhoto, about: t.about, groups: t.groups, last_seen: t.lastSeenOnline };
 
   return (
     <Screen>
@@ -69,6 +77,10 @@ export default function Privacy() {
           <Divider />
           <SettingRow icon="photo" title={t.profilePhoto} sub={labelOf(lastSeenChoices, p.photo)} onPress={() => setOpen('photo')} testID="privacy-photo" />
           <Divider />
+          <SettingRow icon="info" title={t.about} sub={labelOf(lastSeenChoices, p.about)} onPress={() => setOpen('about')} testID="privacy-about" />
+          <Divider />
+          <SettingRow icon="group" title={t.groups} sub={labelOf(groupsChoices, p.groups)} onPress={() => setOpen('groups')} testID="privacy-groups" />
+          <Divider />
           <SettingRow
             icon="ticks"
             title={t.readReceipts}
@@ -83,13 +95,38 @@ export default function Privacy() {
         <Txt size={13} color={theme.muted} style={{ marginHorizontal: 14, marginTop: 8 }}>
           {t.defaultTimerNote}
         </Txt>
+        <Section title={t.calls} />
+        <Glass>
+          <SettingRow
+            icon="muted"
+            title={t.silenceUnknown}
+            sub={t.silenceUnknownSub}
+            chevron={false}
+            right={<Toggle on={!!settings.silenceUnknown} onChange={(on) => core.setSettings({ silenceUnknown: on })} label={t.silenceUnknown} testID="privacy-silence-unknown" />}
+          />
+          <Divider />
+          <SettingRow
+            icon="shield"
+            title={t.protectIp}
+            sub={t.protectIpSub}
+            chevron={false}
+            right={<Toggle on={!!settings.protectIp} onChange={(on) => core.setSettings({ protectIp: on })} label={t.protectIp} testID="privacy-protect-ip" />}
+          />
+        </Glass>
         <Section title={t.safety} />
         <Glass>
           <SettingRow icon="flag" title={t.blocked} sub={blocked ? String(blocked.length) : ''} onPress={() => router.push('/settings/blocked')} testID="open-blocked" />
+          <Divider />
+          <SettingRow icon="fingerprint" title={t.appLock} sub={settings.appLock ? t.onWord : t.appLockSub} onPress={() => router.push('/settings/lock')} testID="open-lock" />
         </Glass>
       </ScrollView>
 
-      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open === 'online' ? t.online2 : open === 'timer' ? t.defaultTimer : open === 'photo' ? t.profilePhoto : t.lastSeenOnline}>
+      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open ? titles[open] : ''}>
+        {open === 'groups' && (
+          <Txt size={13.5} color={theme.muted} style={{ marginHorizontal: 20, marginBottom: 8 }}>
+            {t.groupsPrivacyNote}
+          </Txt>
+        )}
         <View style={{ paddingHorizontal: 16, gap: 4 }}>
           {choices.map((c) => {
             const on = current === c.value;
@@ -106,7 +143,10 @@ export default function Privacy() {
                   if (which === 'timer') {
                     setDefaultTimer(Number(c.value));
                     setTimer(Number(c.value));
-                  } else if (!on) void change(which === 'online' ? { online: c.value } : which === 'photo' ? { photo: c.value } : { last_seen: c.value });
+                  } else if (!on)
+                    void change(
+                      which === 'online' ? { online: c.value } : which === 'photo' ? { photo: c.value } : which === 'about' ? { about: c.value } : which === 'groups' ? { groups: c.value } : { last_seen: c.value },
+                    );
                 }}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: on ? theme.accSoft : 'transparent' }}>

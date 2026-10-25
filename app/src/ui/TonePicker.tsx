@@ -16,20 +16,23 @@ export function TonePicker({
   visible,
   value,
   forChat,
+  ringtone,
   onPick,
   onClose,
 }: {
   visible: boolean;
   value: string | undefined;
   forChat: boolean;
+  /** For calls: no "Silent" (a call that doesn't ring is Silence unknown callers' job), and its own title. */
+  ringtone?: boolean;
   onPick: (tone: string | undefined) => void;
   onClose: () => void;
 }) {
   const t = useT();
   const { theme } = useLook();
-  const options: (string | undefined)[] = [...(forChat ? [undefined] : []), '', ...TONES, 'silent'];
+  const options: (string | undefined)[] = [...(forChat ? [undefined] : []), '', ...TONES, ...(ringtone ? [] : ['silent'])];
   return (
-    <Sheet visible={visible} onClose={onClose} title={t.notificationTone}>
+    <Sheet visible={visible} onClose={onClose} title={ringtone ? t.ringtone : t.notificationTone}>
       <View style={{ paddingHorizontal: 12 }}>
         {options.map((o, i) => {
           const on = o === value;

@@ -46,6 +46,9 @@ export default function Storage() {
     <Screen>
       <TopBar title={t.storage} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 30 }}>
+        <Glass style={{ marginBottom: 12 }}>
+          <SettingRow icon="folder" title={t.manageStorage} sub={t.manageStorageSub} onPress={() => router.push('/settings/manage-storage')} testID="manage-storage" />
+        </Glass>
         <Glass style={{ flexDirection: 'row', gap: 12, padding: 14, alignItems: 'center' }}>
           <Icon name="download" size={22} color={theme.accInk} />
           <View style={{ flex: 1 }}>

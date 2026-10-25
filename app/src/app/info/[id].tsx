@@ -2,8 +2,10 @@
 //
 // The big picture shrinks away as you scroll, and the name slides into the bar
 // at the top. Admins can rename the group, add and remove people, choose
-// who may send, and approve who joins (and let in those waiting). A
-// community's announcements group has "Exit community" instead of leaving.
+// who may send, edit its info or add people (Group permissions), and approve
+// who joins (and let in those waiting). A community's announcements group has
+// "Exit community" instead of leaving. Someone's info also shows the groups
+// you're both in, and Add to Favourites and Add to list, like WhatsApp's.
 import { formatPhone, roleOf } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -14,6 +16,7 @@ import { core } from '../../core/core';
 import { defaultTimer } from '../../core/timer';
 import { useBlocked, useChat, useChatList, useChatPrefs, usePeople, usePerson, usePresence } from '../../core/hooks';
 import { ChatLockSheet } from '../../ui/ChatLockSheet';
+import { AddToListSheet } from '../../ui/AddToListSheet';
 import { ExportSheet } from '../../ui/ExportSheet';
 import { TonePicker, toneName } from '../../ui/TonePicker';
 import { fill, useT } from '../../i18n';
@@ -52,6 +55,7 @@ export default function Info() {
   const [reporting, setReporting] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [muting, setMuting] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
   const [requests, setRequests] = useState<{ userId: string; at: number }[]>([]);
   const community = useChat(chat?.communityId ?? '');
   const rows = useChatList();
@@ -92,6 +96,11 @@ export default function Info() {
   const ann = group && !!chat.announcements;
   const title = core.chatTitle(chat);
   const amAdmin = group && roleOf(chat, core.myId) === 'admin';
+  // Group permissions: with them on, anyone in it may edit its info, or add people.
+  const canEditInfo = group && !ann && !chat.left && (amAdmin || !!chat.membersEdit);
+  const canAdd = group && !ann && !chat.left && (amAdmin || !!chat.membersAdd);
+  // Groups we're both in (not ones I left), like WhatsApp's "Groups in common".
+  const common = !group && other && other !== core.myId ? (rows ?? []).filter((r) => r.chat.kind === 'group' && !r.chat.left && r.chat.members.some((m) => m.userId === other)) : [];
   const isBlocked = !!other && !!blocked?.some((p) => p.id === other);
   // Messaging myself: no calls, blocking or reporting, like WhatsApp.
   const self = core.isSelfChat(chat);
@@ -131,13 +140,13 @@ export default function Info() {
             {title}
           </Txt>
         </Animated.View>
-        {amAdmin && <IconButton icon="edit" label={t.groupName} size={42} onPress={() => (setName(chat.title ?? ''), setRenaming(true))} testID="rename-group" />}
+        {canEditInfo && <IconButton icon="edit" label={t.groupName} size={42} onPress={() => (setName(chat.title ?? ''), setRenaming(true))} testID="rename-group" />}
       </Glass>
 
       <Animated.ScrollView onScroll={onScroll} scrollEventThrottle={16} contentContainerStyle={{ paddingBottom: 40 }}>
         <Animated.View style={[{ alignItems: 'center', paddingTop: 18, gap: 6 }, big]}>
           {/* Admins change the group's photo (Announcements has its community's: change it there). */}
-          {amAdmin && !ann && !chat.left ? (
+          {canEditInfo ? (
             <Pressy onPress={() => setPhotoOpen(true)} label={t.profilePhoto} scale={0.95} testID="group-photo">
               <Avatar id={id} name={title} size={104} group />
               <CameraBadge size={32} />
@@ -195,6 +204,22 @@ export default function Info() {
           </Glass>
         )}
 
+        {!group && other && other !== core.myId && (
+          <Glass style={{ marginHorizontal: 12, marginTop: 12 }}>
+            <SettingRow
+              icon="heart"
+              title={prefs.favourite ? t.removeFavourite : t.addFavourite}
+              onPress={() => {
+                core.setPrefs(id, { favourite: !prefs.favourite });
+                toast(prefs.favourite ? t.removedFavourite : t.addedFavourite);
+              }}
+              testID="info-favourite"
+            />
+            <Divider />
+            <SettingRow icon="text" title={t.addToList} onPress={() => setListOpen(true)} testID="info-add-to-list" />
+          </Glass>
+        )}
+
         <Glass style={{ marginHorizontal: 12, marginTop: 16 }}>
           <SettingRow icon="photo" title={t.media} onPress={() => router.push({ pathname: '/media/[id]', params: { id } })} testID="info-media" />
           <Divider />
@@ -238,6 +263,20 @@ export default function Info() {
                 icon="lock"
                 title={t.onlyAdminsSend}
                 right={<Toggle on={!!chat.onlyAdminsSend} onChange={(on) => void act(() => core.client.updateGroup(id, { onlyAdminsSend: on }))} label={t.onlyAdminsSend} />}
+              />
+              <Divider />
+              <SettingRow
+                icon="edit"
+                title={t.membersEditInfo}
+                sub={t.membersEditInfoSub}
+                right={<Toggle on={!!chat.membersEdit} onChange={(on) => void act(() => core.client.updateGroup(id, { membersEdit: on }))} label={t.membersEditInfo} testID="members-edit-toggle" />}
+              />
+              <Divider />
+              <SettingRow
+                icon="group"
+                title={t.membersAddOthers}
+                sub={t.membersAddOthersSub}
+                right={<Toggle on={!!chat.membersAdd} onChange={(on) => void act(() => core.client.updateGroup(id, { membersAdd: on }))} label={t.membersAddOthers} testID="members-add-toggle" />}
               />
               <Divider />
               <SettingRow
@@ -292,6 +331,32 @@ export default function Info() {
           </>
         )}
 
+        {common.length > 0 && (
+          <>
+            <Section title={fill(common.length === 1 ? t.oneGroupInCommon : t.groupsInCommon, { n: common.length })} />
+            <Glass style={{ marginHorizontal: 12 }}>
+              {common.map((r, i) => (
+                <View key={r.chat.id}>
+                  {i > 0 && <Divider />}
+                  <Pressy onPress={() => router.push({ pathname: '/chat/[id]', params: { id: r.chat.id } })} label={r.title} scale={0.98} testID={`common-${r.title}`}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
+                      <Avatar id={r.chat.id} name={r.title} size={42} group />
+                      <View style={{ flex: 1 }}>
+                        <Txt size={15.5} weight="600" lines={1}>
+                          {r.title}
+                        </Txt>
+                        <Txt size={13} color={theme.muted} lines={1}>
+                          {r.chat.members.map((m) => (m.userId === core.myId ? t.youWord : core.name(m.userId))).filter(Boolean).join(', ')}
+                        </Txt>
+                      </View>
+                    </View>
+                  </Pressy>
+                </View>
+              ))}
+            </Glass>
+          </>
+        )}
+
         {group && !!chat.communityId && (
           <Glass style={{ marginHorizontal: 12, marginTop: 12 }}>
             <SettingRow icon="community" title={community?.title ?? t.community} sub={ann ? t.announcementsExitNote : t.partOfCommunity} onPress={() => router.push({ pathname: '/community/[id]', params: { id: chat.communityId! } })} testID="info-community" />
@@ -302,10 +367,14 @@ export default function Info() {
           <>
             <Section title={fill(t.members, { n: chat.members.length })} />
             <Glass style={{ marginHorizontal: 12 }}>
-              {amAdmin && !chat.left && !ann && (
+              {canAdd && (
                 <>
                   <SettingRow icon="userPlus" title={t.addMembers} onPress={() => router.push({ pathname: '/new-group', params: { add: id } })} testID="add-members" />
                   <Divider />
+                </>
+              )}
+              {amAdmin && !chat.left && !ann && (
+                <>
                   <SettingRow icon="link" title={t.inviteLink} sub={t.inviteViaLink} onPress={() => router.push({ pathname: '/invite/[id]', params: { id } })} testID="invite-link" />
                   <Divider />
                 </>
@@ -442,6 +511,7 @@ export default function Info() {
       <TonePicker visible={toneOpen} value={prefs.tone} forChat onPick={(tone) => core.setPrefs(id, { tone })} onClose={() => setToneOpen(false)} />
       <ExportSheet visible={exportOpen} chatId={id} onClose={() => setExportOpen(false)} />
       <ChatLockSheet visible={lockOpen} chatId={id} onClose={() => setLockOpen(false)} />
+      <AddToListSheet visible={listOpen} chatIds={[id]} onClose={() => setListOpen(false)} />
       <ReportSheet visible={reporting} chatId={id} group={group} userId={group ? null : other} onClose={() => setReporting(false)} />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => core.mute(id, ms)} />
       <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!chat.photo} chatId={id} title={title} />

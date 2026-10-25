@@ -22,6 +22,7 @@ import { LIKE_ALERT, PLAN_ALERT, takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { CallBar } from '../ui/CallBar';
 import { CrashNote } from '../ui/CrashNote';
+import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -76,11 +77,15 @@ function App() {
   useEffect(() => watchCallTaps(() => setTaps((n) => n + 1)), []);
   useEffect(() => {
     if (state !== 'signedIn' || !nav?.key) return;
-    // The plain "New message" alert just opens PakChat; "liked your status" opens the Status tab.
+    // The plain "New message" alert just opens PakChat; "liked your status" opens the Status tab, a reaction its chat.
     if (tappedPlain) {
       Notifications.clearLastNotificationResponse();
       if (tappedPlain.notification.request.identifier.startsWith(LIKE_ALERT)) {
-        router.navigate('/(tabs)/status');
+        // A reaction in a chat opens that chat; a like on my status, the Status tab.
+        const chatId = (tappedPlain.notification.request.content.data as { chatId?: string } | null)?.chatId;
+        if (chatId) {
+          if (chatId !== core.viewing) router.push({ pathname: '/chat/[id]', params: { id: chatId } });
+        } else router.navigate('/(tabs)/status');
         return;
       }
       // A scheduled call starting: its chat (Join is on its message there).
@@ -163,6 +168,12 @@ function App() {
           <Stack.Screen name="settings/account" />
           <Stack.Screen name="settings/notifications" />
           <Stack.Screen name="settings/storage" />
+          <Stack.Screen name="settings/manage-storage" />
+          <Stack.Screen name="qr" />
+          <Stack.Screen name="settings/chats" />
+          <Stack.Screen name="settings/profile" />
+          <Stack.Screen name="settings/lists" />
+          <Stack.Screen name="settings/help" />
           <Stack.Screen name="settings/backup" />
           <Stack.Screen name="restore" />
           <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
@@ -196,6 +207,7 @@ function App() {
       {/* App lock covers everything, except a call (you can answer, as on WhatsApp). */}
       {state === 'signedIn' && appLocked && !(call && call.state !== 'ended') && <LockScreen />}
       {state === 'signedIn' && <CrashNote />}
+      {state === 'signedIn' && <GalleryHost />}
       <ToastHost />
     </View>
   );

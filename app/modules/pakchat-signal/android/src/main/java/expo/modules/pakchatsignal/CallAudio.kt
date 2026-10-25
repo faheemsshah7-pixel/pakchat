@@ -36,7 +36,7 @@ object CallAudio {
   private var proximity: PowerManager.WakeLock? = null
   private var tones: ToneGenerator? = null
   private var ringing = false
-  private var active = false
+  @Volatile private var active = false
   private var video = false
   /** What you picked last; null lets PakChat choose (headphones first). */
   private var chosen: String? = null
@@ -44,8 +44,16 @@ object CallAudio {
 
   private fun audio(context: Context) = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+  // Everything here runs under one lock: JavaScript calls in on its own thread while
+  // Android reports headphones coming and going on the main one. Without it, a
+  // late "devices changed" could turn the ear sensor back on just after the call
+  // ended, and the screen kept going dark near your hand until PakChat was closed.
+
   /** Starts call mode. Video calls start on the loudspeaker, voice calls at the earpiece. */
+  @Synchronized
   fun start(context: Context, isVideo: Boolean, changed: (Map<String, Any?>) -> Unit) {
+    // A voice note at the ear stops: the call has the sound and the ear sensor now.
+    VoiceEar.off(context)
     val am = audio(context)
     onChange = changed
     video = isVideo
@@ -65,10 +73,16 @@ object CallAudio {
     apply(context)
   }
 
+  /** In a call now (VoiceEar keeps out of the way then). */
+  fun inCall() = active
+
   /** Ends call mode and gives the sound back to other apps. */
+  @Synchronized
   fun stop(context: Context) {
     // The ringing beep stops with the call; a "busy" or "ended" beep is left to finish.
     if (ringing) stopTone()
+    // Off whatever happened before: the screen must never go dark near your hand outside a call.
+    near(context, false)
     if (!active) return
     active = false
     val am = audio(context)
@@ -83,17 +97,18 @@ object CallAudio {
     am.mode = AudioManager.MODE_NORMAL
     focus?.let { am.abandonAudioFocusRequest(it) }
     focus = null
-    near(context, false)
     onChange = null
   }
 
   /** You picked where the sound goes: "earpiece", "speaker", "headset" or "bluetooth". */
+  @Synchronized
   fun route(context: Context, to: String) {
     chosen = to
     apply(context)
   }
 
   /** The camera was turned on or off: video calls default to the loudspeaker. */
+  @Synchronized
   fun setVideo(context: Context, on: Boolean) {
     if (video == on) return
     video = on
@@ -115,6 +130,7 @@ object CallAudio {
 
   private var appContext: Context? = null
 
+  @Synchronized
   private fun changedDevices() {
     val context = appContext ?: return
     // Headphones plugged in or out: if what you picked is gone, choose again.
@@ -182,7 +198,7 @@ object CallAudio {
   }
 
   private fun near(context: Context, on: Boolean) {
-    if (on) {
+    if (on && active) {
       if (proximity == null) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (!pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return

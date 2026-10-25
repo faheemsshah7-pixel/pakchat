@@ -22,15 +22,18 @@ defmodule PakchatWeb.Wire do
         last_seen: u.last_seen_visibility,
         online: u.online_visibility,
         photo: u.photo_visibility,
+        about: u.about_visibility,
+        groups: u.groups_visibility,
         read_receipts: u.read_receipts
       }
     }
   end
 
-  @doc "Someone else: only what anyone may see (their photo only if `viewer` may see it)."
+  @doc "Someone else: only what anyone may see (their photo and About only if `viewer` may see them)."
   def person(%User{} = u, viewer \\ nil) do
     photo = if Pakchat.Privacy.can_see_photo?(viewer, u), do: u.photo
-    %{id: u.id, name: u.name, about: u.about, photo: photo}
+    about = if Pakchat.Privacy.can_see_about?(viewer, u), do: u.about
+    %{id: u.id, name: u.name, about: about, photo: photo}
   end
 
   @doc "Someone who messaged me first: also how to reach them (see `Chats.reached_out?/2`)."
@@ -73,6 +76,8 @@ defmodule PakchatWeb.Wire do
           call_link: c.call_link,
           groups_by_members: c.groups_by_members,
           join_approval: c.join_approval,
+          members_edit: c.members_edit,
+          members_add: c.members_add,
           # Whoever made it: a community's owner, the only one who can deactivate it.
           created_by: c.created_by
         }

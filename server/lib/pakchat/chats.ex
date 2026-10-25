@@ -143,6 +143,8 @@ defmodule Pakchat.Chats do
     with :ok <- check_size(member_ids),
          :ok <- check_users_exist(member_ids),
          :ok <- check_valid(changeset) do
+      member_ids = [me.id | addable(me.id, member_ids -- [me.id])]
+
       in_transaction(fn ->
         chat = Repo.insert!(changeset)
         add_rows(chat.id, [me.id], "admin")
@@ -157,9 +159,14 @@ defmodule Pakchat.Chats do
     if changeset.valid?, do: :ok, else: {:error, changeset}
   end
 
-  @doc ~s(Changes the name, description, photo or "only admins can send". Admins only.)
+  @doc """
+  Changes the name, description, photo or settings. Admins only, except that
+  with "Edit group info" on for everyone, anyone in it may change its name,
+  description and photo.
+  """
   def update_group(%User{} = me, chat_id, attrs) do
-    with {:ok, chat} <- admin_group(me, chat_id),
+    with {:ok, chat} <- get_group(me, chat_id),
+         :ok <- may_edit(chat, me.id, attrs),
          changeset = Chat.group_changeset(chat, attrs),
          :ok <- check_valid(changeset) do
       in_transaction(fn ->
@@ -196,13 +203,19 @@ defmodule Pakchat.Chats do
     note(chat.id, me.id, Map.put(changeset.changes, :event, "changed"))
   end
 
-  @doc "Adds people to a group (or a community). Admins only."
+  @doc """
+  Adds people to a group (or a community). Admins only, unless the group lets
+  everyone add people. Someone whose Privacy › Groups doesn't allow me isn't
+  added (as on WhatsApp, an invite link is the way to ask them).
+  """
   def add_members(%User{} = me, chat_id, user_ids) do
-    with {:ok, chat} <- admin_group(me, chat_id),
+    with {:ok, chat} <- get_group(me, chat_id),
+         :ok <- may_add(chat, me.id),
          old = Enum.map(chat.members, & &1.user_id),
          new = Enum.uniq(List.wrap(user_ids)) -- old,
          :ok <- check_size(new ++ old),
          :ok <- check_users_exist(new),
+         new = addable(me.id, new),
          {:ok, _} <- add_and_note(chat, me.id, new, "added") do
       get_chat(me, chat.id)
     end
@@ -999,6 +1012,45 @@ defmodule Pakchat.Chats do
     with {:ok, chat} <- get_group(me, chat_id), :ok <- require_admin(chat, me.id) do
       {:ok, chat}
     end
+  end
+
+  # Group permissions: what everyone (not only admins) may do.
+  @info_fields ~w(title description photo)
+
+  defp may_edit(chat, user_id, attrs) do
+    cond do
+      require_admin(chat, user_id) == :ok -> :ok
+      group_lets_members?(chat, :members_edit) and Map.keys(attrs) -- @info_fields == [] -> :ok
+      true -> {:error, :forbidden}
+    end
+  end
+
+  defp may_add(chat, user_id) do
+    if require_admin(chat, user_id) == :ok or group_lets_members?(chat, :members_add),
+      do: :ok,
+      else: {:error, :forbidden}
+  end
+
+  # Only a plain group (not a community, nor its announcements, nor a call link's).
+  defp group_lets_members?(
+         %Chat{kind: "group", announcements: false, call_link: false} = chat,
+         field
+       ),
+       do: Map.get(chat, field) == true
+
+  defp group_lets_members?(_chat, _field), do: false
+
+  # Those of `user_ids` whose Privacy › Groups lets `adder_id` add them.
+  defp addable(_adder_id, []), do: []
+
+  defp addable(adder_id, user_ids) do
+    allowed =
+      from(u in User, where: u.id in ^user_ids)
+      |> Repo.all()
+      |> Enum.filter(&Pakchat.Privacy.can_add_to_group?(adder_id, &1))
+      |> MapSet.new(& &1.id)
+
+    Enum.filter(user_ids, &MapSet.member?(allowed, &1))
   end
 
   defp require_admin(chat, user_id) do

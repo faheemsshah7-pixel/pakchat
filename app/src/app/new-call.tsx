@@ -1,15 +1,17 @@
 // new-call.tsx: start a call, like WhatsApp's New call: search your contacts
 // by name and call one (voice or video), or type a number or Gmail that's on PakChat.
 // With `fav`, the same list adds someone to Favourites (shown at the top of
-// Calls, and in Chats' Favourites filter).
+// Calls, and in Chats' Favourites filter). "New group call" picks several:
+// the first one rings, and the rest as soon as they answer (calls.ts).
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
 
+import { MAX_IN_CALL } from '../core/calls';
 import { core, isOffline } from '../core/core';
 import { defaultTimer } from '../core/timer';
 import { useFavouriteChats, usePeople } from '../core/hooks';
-import { useT } from '../i18n';
+import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { startCall } from '../ui/CallBar';
 import { Icon } from '../ui/icons';
@@ -28,6 +30,18 @@ export default function NewCall() {
   const [dialing, setDialing] = useState(false);
   const [number, setNumber] = useState('');
   const [busy, setBusy] = useState(false);
+  // New group call: who's picked (in the order picked).
+  const [group, setGroup] = useState<string[] | null>(null);
+  const togglePick = (userId: string) =>
+    setGroup((g) => {
+      const list = g ?? [];
+      if (list.includes(userId)) return list.filter((u) => u !== userId);
+      if (list.length + 1 >= MAX_IN_CALL) {
+        toast(fill(t.callIsFull, { count: String(MAX_IN_CALL) }));
+        return list;
+      }
+      return [...list, userId];
+    });
 
   // Who's a favourite already: their one-to-one chat is.
   const favourite = useMemo(() => new Set(favs.filter((c) => c.kind === 'direct').map((c) => core.otherPerson(c))), [favs]);
@@ -44,13 +58,13 @@ export default function NewCall() {
 
   // A second tap while the chat is opening does nothing.
   const opening = useRef(false);
-  async function call(userId: string, video: boolean) {
+  async function call(userId: string, video: boolean, invite?: string[]) {
     if (opening.current) return;
     opening.current = true;
     try {
       const chat = await core.client.openDirect(userId, defaultTimer());
       router.back();
-      await startCall(chat.id, video, t);
+      await startCall(chat.id, video, t, invite);
     } catch (err) {
       toast(isOffline(err) ? t.offline : t.couldNot);
     } finally {
@@ -92,12 +106,14 @@ export default function NewCall() {
 
   return (
     <Screen>
-      <TopBar title={fav ? t.addFavourite : t.newCall} onBack={() => router.back()} />
+      <TopBar title={fav ? t.addFavourite : group ? (group.length ? fill(t.selected, { n: group.length }) : t.newGroupCall) : t.newCall} onBack={() => (group ? setGroup(null) : router.back())} />
       <View style={{ paddingHorizontal: 14, paddingBottom: 10 }}>
         <Field value={query} onChangeText={setQuery} placeholder={t.searchNameOrNumber} icon="search" autoCorrect={false} testID="call-search" />
       </View>
-      {!fav && !query.trim() && (
+      {!fav && !group && !query.trim() && (
         <Glass style={{ marginHorizontal: 12 }}>
+          <SettingRow icon="group" title={t.newGroupCall} onPress={() => setGroup([])} testID="new-group-call" />
+          <Divider />
           <SettingRow icon="dialpad" title={t.callANumber} onPress={() => setDialing(true)} testID="call-a-number" />
           <Divider />
           <SettingRow icon="userPlus" title={t.newContact} onPress={() => router.push('/contact')} />
@@ -118,13 +134,17 @@ export default function NewCall() {
         ItemSeparatorComponent={Divider}
         renderItem={({ item, index }) => (
           <Animated.View entering={rise(Math.min(index, 10) * 25)}>
-            <Pressy onPress={() => (fav ? void toggleFavourite(item.id) : void call(item.id, false))} label={item.name} scale={0.98} testID={`call-person-${item.name}`}>
+            <Pressy onPress={() => (group ? togglePick(item.id) : fav ? void toggleFavourite(item.id) : void call(item.id, false))} label={item.name} scale={0.98} testID={`call-person-${item.name}`}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 8 }}>
                 <Avatar id={item.id} name={item.name.replace(/^~ /, '')} size={44} />
                 <Txt size={15.5} weight="600" lines={1} style={{ flex: 1 }}>
                   {item.name}
                 </Txt>
-                {fav ? (
+                {group ? (
+                  <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: group.includes(item.id) ? theme.acc : theme.faint, backgroundColor: group.includes(item.id) ? theme.acc : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                    {group.includes(item.id) && <Icon name="check" size={15} color="#FFFFFF" stroke={2.6} />}
+                  </View>
+                ) : fav ? (
                   <Icon name="heart" size={21} color={favourite.has(item.id) ? theme.acc : theme.faint} />
                 ) : (
                   <>
@@ -137,6 +157,14 @@ export default function NewCall() {
           </Animated.View>
         )}
       />
+
+      {/* New group call: voice or video, once someone is picked. */}
+      {group && group.length > 0 && (
+        <Animated.View entering={rise()} style={{ flexDirection: 'row', gap: 10, padding: 14 }}>
+          <Button title={t.voiceCall} icon="calls" onPress={() => void call(group[0], false, group.slice(1))} style={{ flex: 1 }} testID="group-call-voice" />
+          <Button title={t.videoCall} icon="video" look="soft" onPress={() => void call(group[0], true, group.slice(1))} style={{ flex: 1 }} testID="group-call-video" />
+        </Animated.View>
+      )}
 
       <Sheet visible={dialing} onClose={() => setDialing(false)} title={t.callANumber}>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 12 }}>

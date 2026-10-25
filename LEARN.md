@@ -1852,3 +1852,66 @@ says "Screen sharing".
 - Lock a chat, open Locked chats, open the chat, go back: the list is still open. Go back to the
   chat list and pull down to Locked chats again: it asks.
 - Hide Locked chats with a secret code, type the code in search, and tap "Locked chats".
+
+## Step 34: build 6, closer to WhatsApp
+
+Build 6 goes through WhatsApp screen by screen (the "PakChat vs WhatsApp" page) and fills the
+gaps. PakChat keeps its own look, except where you chose WhatsApp's: Status, Settings and the
+gallery. Channels come in a later phase.
+
+### Messages
+- `*bold*`, `_italic_`, `~strike~`, `` `code` ``, `> quote` lines and `- ` or `1. ` lists show
+  styled (`app/src/core/richText.ts`, `ui/chat/RichText.tsx`). Links, emails and numbers can be
+  tapped; hold one for Call, Open, Email or Copy. A long message ends in "Read more".
+- A message that's only one to three emoji shows big, with no bubble.
+- Opening a chat with unread messages shows "3 unread messages" and starts there. While you scroll,
+  a pill at the top says which day you're on.
+- 🔍 in a chat's ⋮ searches only that chat, with ↑ ↓ through the matches. Search on the chat list
+  has filters (photos, videos, links, GIFs, audio, documents, polls, unread) and shows contacts.
+- A draft shows as a green "Draft:" in the chat list.
+- The "+" after the reactions opens every emoji.
+- 📎 › Event: a name, when it starts and ends, where, and a call if you like. People answer
+  Going or Not going, and everyone is reminded when it starts.
+
+### Voice notes at your ear
+While a voice note plays, raise the phone to your ear: the screen goes dark and the note carries on
+quietly from the earpiece (`VoiceEar.kt`), as on WhatsApp. Take it away and it pauses.
+
+### Calls
+- In a video call, drag your own small picture to any corner; tap it to swap the two.
+- When a call rings, "Message" declines it with a quick reply (or one you type).
+- Calls › New call › New group call picks several people at once.
+- Settings › Notifications › Ringtone picks the call ringtone. Settings › Privacy › Calls has
+  "Silence unknown callers" and "Protect IP address in calls". Protect IP sends the call through
+  your own relay, so it only works once the relay from Phase 6 is running on the Mac.
+
+### Groups and privacy
+- Group info › Group permissions: whether members may edit the group's name, picture and
+  description, and whether they may add others.
+- Settings › Privacy › About and Groups: who sees your About, and who may add you to groups
+  (people who can't are left out, and the one adding sees why). These are kept on the server, so
+  build 6 adds a migration (`mix ecto.migrate`).
+- Contact info shows "Groups in common", and has Add to favourites and Add to list.
+
+### Settings, like WhatsApp
+Settings is now you at the top (tap for your Profile: photo, name, about, number), then Account,
+Privacy, Lists, Chats, Notifications, Storage and data, App language and Help. The Sky/Graphite
+look and accent colours are in Chats › Theme. The server address and Log out are in Account. The
+QR next to your name is your code: someone scans it in PakChat (Settings › QR, or the QR on
+New contact) and your chat opens.
+
+Storage and data › Manage storage shows what PakChat keeps on the phone: files over 5 MB, and
+each chat's files biggest first. Pick some and delete them to free space.
+
+### Status and the gallery
+- Status is a row of round photos, "Add status" first, then new ones with a coloured ring, then
+  seen ones, then muted ones.
+- 📎 › Gallery is PakChat's own (`ui/chat/Gallery.tsx`): recent photos and videos, albums at the
+  top, up to 100 at once, straight into the editor. The folder icon opens the phone's own picker.
+
+### Try this
+- Send `*hi* _there_ ~old~` and a phone number; tap the number.
+- Play a voice note and hold the phone to your ear.
+- Make an event and answer Going from the other phone.
+- Scan the Pixel's QR code with the Realme.
+- Pick 40 photos from the gallery and send them.

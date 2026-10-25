@@ -7,7 +7,10 @@
 // line to drag through it, its length and the sound. One that isn't
 // downloaded yet shows its blurred preview and a download button.
 // Share sends the file to another app. Drag it up or down to close it.
+// Along the top, like WhatsApp: Star, Forward, and ⋮ with Reply, Show in chat,
+// All media, Share and Delete.
 import type { Message } from '@pakchat/shared';
+import { UNSEND_HOURS } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -21,13 +24,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, isOffline } from '../core/core';
 import { Cancelled, download, FileBroken, FileGone, haveFile, tagOf } from '../core/files';
-import { useFileProgress } from '../core/hooks';
+import { useChat, useFileProgress, useNow, useStarred } from '../core/hooks';
 import { outsideFor } from '../core/lock';
 import { useT } from '../i18n';
 import { clock, dayLabel, duration, fileSize } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
-import { toast } from '../ui/overlays';
+import { Dialog, MenuItem, Popup, toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
 import { SwipeToClose } from '../ui/SwipeToClose';
 
@@ -79,6 +82,31 @@ export default function Viewer() {
   const m = all?.[index] ?? null;
   const f = m?.file;
   const who = m ? (m.author === core.myId ? t.youWord : core.name(m.author) || '…') : '';
+  const starred = useStarred();
+  const chatInfo = useChat(chat);
+  const [menu, setMenu] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const now = useNow(60_000);
+  const isStarred = !!m && !!starred[`${m.chatId}/${m.author}/${m.id}`];
+  const amAdmin = chatInfo?.kind === 'group' && chatInfo.members.some((mb) => mb.userId === core.myId && mb.role === 'admin');
+  const canUnsend = !!m && m.seq !== null && (amAdmin || (m.author === core.myId && now - m.sentAt < UNSEND_HOURS * 3_600_000));
+  const key = m ? `${m.author}/${m.id}` : '';
+  // Back to the chat, at this message (and replying to it).
+  const toChat = (params: { jump?: string; reply?: string }) => router.dismissTo({ pathname: '/chat/[id]', params: { id: chat, ...params } });
+  const forward = () => {
+    if (!m || !haveFile(m)) return toast(t.downloadFirst);
+    router.push({ pathname: '/forward', params: { texts: '[]', files: JSON.stringify([[m.chatId, m.author, m.id]]) } });
+  };
+  const share = () => {
+    if (f?.local && m && haveFile(m)) void outsideFor(() => Sharing.shareAsync(f.local!, { mimeType: f.mime })).catch(() => {});
+  };
+  const remove = (everyone: boolean) => {
+    setDeleting(false);
+    if (!m) return;
+    const gone = m;
+    void (everyone ? core.client.deleteForEveryone(chat, { author: gone.author, id: gone.id }) : core.deleteForMe([gone])).catch(() => toast(t.couldNot));
+    if ((all?.length ?? 0) <= 1) router.back();
+  };
 
   if (!all) {
     return (
@@ -124,11 +152,42 @@ export default function Viewer() {
               </Txt>
             )}
           </View>
-          {!!f?.local && haveFile(m!) && (
-            <IconButton icon="forward" label={t.share} look="onAccent" size={42} flip onPress={() => void outsideFor(() => Sharing.shareAsync(f.local!, { mimeType: f.mime })).catch(() => {})} testID="viewer-share" />
+          {!!m && (
+            <IconButton
+              icon={isStarred ? 'starFilled' : 'star'}
+              label={isStarred ? t.unstar : t.star}
+              look="onAccent"
+              size={42}
+              onPress={() => {
+                core.setStarred([m], !isStarred);
+                toast(isStarred ? t.unstarred : t.starredNote);
+              }}
+              testID="viewer-star"
+            />
           )}
+          {!!m && haveFile(m) && <IconButton icon="forward" label={t.forward} look="onAccent" size={42} flip onPress={forward} testID="viewer-forward" />}
+          <IconButton icon="more" label={t.moreOptions} look="onAccent" size={42} onPress={() => setMenu(true)} testID="viewer-more" />
         </Animated.View>
       )}
+
+      <Popup visible={menu} onClose={() => setMenu(false)} top={insets.top + 50}>
+        {!chatInfo?.left && <MenuItem icon="reply" label={t.reply} onPress={() => (setMenu(false), toChat({ jump: key, reply: key }))} testID="viewer-reply" />}
+        <MenuItem icon="chat" label={t.showInChat} onPress={() => (setMenu(false), toChat({ jump: key }))} testID="viewer-show" />
+        <MenuItem icon="photo" label={t.allMedia} onPress={() => (setMenu(false), router.push({ pathname: '/media/[id]', params: { id: chat } }))} testID="viewer-all-media" />
+        {!!m && haveFile(m) && <MenuItem icon="upload" label={t.share} onPress={() => (setMenu(false), share())} testID="viewer-share" />}
+        <MenuItem icon="trash" label={t.delete} danger onPress={() => (setMenu(false), setDeleting(true))} testID="viewer-delete" />
+      </Popup>
+
+      <Dialog
+        visible={deleting}
+        onClose={() => setDeleting(false)}
+        title={t.deleteOneMessage}
+        buttons={[
+          ...(canUnsend ? [{ label: t.deleteForEveryone, danger: true, onPress: () => remove(true), testID: 'viewer-delete-everyone' }] : []),
+          { label: t.deleteForMe, danger: true, onPress: () => remove(false), testID: 'viewer-delete-me' },
+          { label: t.cancel, onPress: () => setDeleting(false) },
+        ]}
+      />
 
       {/* The caption (above a video's controls). */}
       {bars && !!m?.text && (

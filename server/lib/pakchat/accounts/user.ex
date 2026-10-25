@@ -10,8 +10,10 @@ defmodule Pakchat.Accounts.User do
   @last_seen_choices ~w(everyone contacts nobody)
   # "same" means: the same people who can see your last seen.
   @online_choices ~w(everyone same)
-  # Who sees my profile photo.
+  # Who sees my profile photo, and my About.
   @photo_choices ~w(everyone contacts nobody)
+  # Who can add me to groups (WhatsApp's Privacy › Groups).
+  @groups_choices ~w(everyone contacts)
 
   schema "users" do
     field :google_sub, :string
@@ -25,6 +27,8 @@ defmodule Pakchat.Accounts.User do
     field :last_seen_visibility, :string, default: "everyone"
     field :online_visibility, :string, default: "everyone"
     field :photo_visibility, :string, default: "everyone"
+    field :about_visibility, :string, default: "everyone"
+    field :groups_visibility, :string, default: "everyone"
     field :read_receipts, :boolean, default: true
     field :last_seen_at, :utc_datetime_usec
 
@@ -91,6 +95,8 @@ defmodule Pakchat.Accounts.User do
       :last_seen_visibility,
       :online_visibility,
       :photo_visibility,
+      :about_visibility,
+      :groups_visibility,
       :read_receipts
     ])
     |> validate_required([:name])
@@ -100,5 +106,7 @@ defmodule Pakchat.Accounts.User do
     |> validate_inclusion(:last_seen_visibility, @last_seen_choices)
     |> validate_inclusion(:online_visibility, @online_choices)
     |> validate_inclusion(:photo_visibility, @photo_choices)
+    |> validate_inclusion(:about_visibility, @photo_choices)
+    |> validate_inclusion(:groups_visibility, @groups_choices)
   end
 end

@@ -41,6 +41,8 @@ import { en, ur, type Strings } from '../i18n/strings';
 import { avatarTint, initials } from '../ui/letters';
 import { core } from './core';
 import { stopAll } from './player';
+import { tuneSdp } from './sdp';
+import { toneName } from './tones';
 
 /** How long a call rings before it's "missed" (the same on both sides). */
 export const RING_MS = 45_000;
@@ -141,6 +143,8 @@ type Live = Omit<CallView, 'peers' | 'local'> & {
   members: string[];
   /** Which chat to use to reach someone added to the call (their one-to-one chat with me). */
   links: Map<string, string>;
+  /** New group call (Calls › New group call): the others, rung once the first one answers. */
+  invite: string[];
   cancel: (() => void)[];
   done: boolean;
 };
@@ -268,12 +272,14 @@ class Calls {
    * Calls everyone in a chat. `ready` is told the call's id as soon as it
    * exists (to open the call screen while the mic and camera start).
    */
-  async start(chatId: string, video: boolean, ready?: (callId: string) => void): Promise<'started' | 'busy' | 'offline' | 'permission'> {
+  async start(chatId: string, video: boolean, ready?: (callId: string) => void, invite: string[] = []): Promise<'started' | 'busy' | 'offline' | 'permission'> {
     if (this.call && !this.call.done) return this.call.chatId === chatId ? 'started' : 'busy';
     const chat = await core.storage.getChat(chatId);
     if (!chat || chat.kind === 'status') return 'offline';
     if (!core.client.isConnected) return 'offline';
     const me = core.client.device;
+    // Fetched now, while it rings, so it connects sooner once they answer.
+    void this.iceServers();
     const c = this.fresh({
       id: core.newId(),
       chatId,
@@ -287,6 +293,7 @@ class Calls {
       members: this.othersIn(chat),
       canAdd: chat.kind === 'direct',
     });
+    c.invite = chat.kind === 'direct' ? invite : [];
     this.call = c;
     this.emit();
     ready?.(c.id);
@@ -329,6 +336,7 @@ class Calls {
     return {
       extra: [],
       links: new Map(),
+      invite: [],
       ...x,
       startedAt: null,
       peers: new Map(),
@@ -598,8 +606,10 @@ class Calls {
         title,
         text: c.group ? (c.video ? t.incomingGroupVideo : t.incomingGroupVoice) : c.video ? t.incomingVideo : t.incomingVoice,
         video: c.video,
+        // The ringtone picked in Settings › Notifications › Calls ('' is the phone's own).
+        tone: core.settings.callTone ?? '',
         avatar: { ...avatarTint(c.group ? c.chatId : c.from), letters: initials(title) },
-        words: { ringChannel: t.callsChannel, missedChannel: t.missedCallsChannel, ongoingChannel: t.ongoingCallsChannel, answer: t.answer, decline: t.decline },
+        words: { ringChannel: t.callsChannel, missedChannel: t.missedCallsChannel, ongoingChannel: t.ongoingCallsChannel, answer: t.answer, decline: t.decline, toneName: toneName(core.settings.callTone, t) },
       }),
     );
   }
@@ -708,6 +718,8 @@ class Calls {
 
   private async incoming(e: CallEvent, from: Device) {
     const s = e.signal;
+    // Fetched while it rings, so answering connects sooner.
+    void this.iceServers();
     // How long ago it was rung (by the server's clock, which phones roughly share).
     const age = Date.now() - e.at;
     const fresh = age < RING_MS - 3_000 || Math.abs(age) > 120_000;
@@ -737,6 +749,12 @@ class Calls {
       // Rung while the phone was off long enough that it's already over.
       this.remember(s.call);
       return this.logMissed(e.chatId, s.call, e.from, !!s.video, !!s.group, e.at);
+    }
+    // Silence unknown callers (Settings › Privacy › Calls), like WhatsApp: someone not in my
+    // contacts doesn't ring; it's in Calls and the alerts as a missed call.
+    if (core.settings.silenceUnknown && !s.group && !extra.length && !core.isContact(e.from)) {
+      this.remember(s.call);
+      return this.logMissed(e.chatId, s.call, e.from, !!s.video, false, e.at);
     }
     this.ring({ ...ringing, until: Date.now() + left }, left, true);
   }
@@ -813,7 +831,11 @@ class Calls {
 
   private async connection(c: Live, p: Peer) {
     if (p.pc) return p.pc;
-    const pc = new RTCPeerConnection({ iceServers: await this.iceServers(), bundlePolicy: 'max-bundle' });
+    const iceServers = await this.iceServers();
+    // Protect IP address in calls (Settings › Privacy): only through our relay, so the
+    // other phone never learns my address. Only when there is a relay to go through.
+    const relay = !!core.settings.protectIp && iceServers.some((x) => [x.urls].flat().some((u) => /^turns?:/i.test(u)));
+    const pc = new RTCPeerConnection({ iceServers, bundlePolicy: 'max-bundle', iceTransportPolicy: relay ? 'relay' : 'all' });
     if (p.pc) {
       pc.close();
       return p.pc;
@@ -851,8 +873,9 @@ class Calls {
     try {
       const pc = await this.connection(c, p);
       if (c.done) return;
-      const offer = (await pc.createOffer(restart ? { iceRestart: true } : {})) as { sdp: string; type: 'offer' };
-      await pc.setLocalDescription(offer);
+      const made = (await pc.createOffer(restart ? { iceRestart: true } : {})) as { sdp: string; type: 'offer' };
+      const offer = { type: 'offer' as const, sdp: tuneSdp(made.sdp) };
+      await pc.setLocalDescription(new RTCSessionDescription(offer));
       void this.saveData(p);
       await this.send(c, { op: 'offer', sdp: offer.sdp }, [p]);
     } catch (err) {
@@ -876,8 +899,9 @@ class Calls {
     }
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
     await this.flushIce(p);
-    const answer = (await pc.createAnswer()) as { sdp: string; type: 'answer' };
-    await pc.setLocalDescription(answer);
+    const made = (await pc.createAnswer()) as { sdp: string; type: 'answer' };
+    const answer = { type: 'answer' as const, sdp: tuneSdp(made.sdp) };
+    await pc.setLocalDescription(new RTCSessionDescription(answer));
     void this.saveData(p);
     if (c.state === 'outgoing') c.state = 'connecting';
     this.emit();
@@ -920,6 +944,12 @@ class Calls {
         c.state = 'active';
         fileModule().callStopTone();
         this.ongoing(c);
+        // A new group call: everyone else rings now.
+        if (c.invite.length) {
+          const invite = c.invite;
+          c.invite = [];
+          void this.add(invite);
+        }
       }
     } else if (state === 'disconnected' || state === 'failed') {
       if (p.state === 'connected') p.state = 'reconnecting';
@@ -1150,24 +1180,38 @@ class Calls {
     c.done = true;
     c.endReason = reason;
     c.state = 'ended';
-    for (const stop of c.cancel) stop();
+    // Each step on its own: one that fails mustn't stop the rest, above all the
+    // phone leaving call mode (callEnded), or the screen would keep going dark
+    // near your hand and the "Ongoing call" alert would stay.
+    const step = (what: string, work: () => void) => {
+      try {
+        work();
+      } catch (err) {
+        console.log(`[pakchat] call end: ${what}: ${String(err)}`);
+      }
+    };
+    const fm = fileModule();
+    step('call mode', () => fm.callEnded());
+    step('ringing', () => fm.callStopRing(c.id));
+    for (const stop of c.cancel) step('timer', stop);
     c.cancel = [];
-    for (const p of c.peers.values()) this.closePeer(p);
+    for (const p of c.peers.values()) step('connection', () => this.closePeer(p));
     if (c.screenStream) {
-      c.screenStream.release();
+      const screen = c.screenStream;
+      step('screen', () => screen.release());
       c.screenStream = null;
       c.sharing = false;
     }
     if (c.localStream) {
-      for (const t of c.localStream.getTracks()) t.stop();
-      c.localStream.release();
+      const local = c.localStream;
+      step('camera and mic', () => {
+        for (const t of local.getTracks()) t.stop();
+        local.release();
+      });
       c.localStream = null;
     }
-    this.audioWatch?.remove();
+    step('sound watch', () => this.audioWatch?.remove());
     this.audioWatch = null;
-    const fm = fileModule();
-    fm.callStopRing(c.id);
-    fm.callEnded();
     if (c.direction === 'out' && (reason === 'busy' || reason === 'declined')) fm.callTone('busy');
     else if (c.joined && !quiet) fm.callTone('ended');
     try {

@@ -18,13 +18,14 @@ import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt, useKeyboar
 import { pop, rise } from '../ui/motion';
 
 export default function ListScreen() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  // chats: a new list's first chats (from "Add to list" › New list).
+  const { id, chats } = useLocalSearchParams<{ id?: string; chats?: string }>();
   const t = useT();
   const { theme } = useLook();
   const old = useLists().find((l) => l.id === id);
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left);
   const [name, setName] = useState(old?.name ?? '');
-  const [picked, setPicked] = useState<Set<string>>(new Set(old?.chatIds ?? []));
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(old?.chatIds ?? startWith(chats)));
   const lift = useKeyboardLift();
 
   function toggle(chatId: string) {
@@ -89,4 +90,13 @@ export default function ListScreen() {
       </Animated.View>
     </Screen>
   );
+}
+
+function startWith(chats: string | undefined): string[] {
+  try {
+    const list: unknown = chats ? JSON.parse(chats) : [];
+    return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string') : [];
+  } catch {
+    return [];
+  }
 }

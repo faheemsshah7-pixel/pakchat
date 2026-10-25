@@ -46,6 +46,12 @@ export type FileModule = {
   /** Ends everything native about a call: the alert, call mode, the lock-screen view. */
   callEnded(): void;
   callAudioStart(video: boolean): void;
+  /** A voice note at the ear (VoiceEar.kt): watch the ear sensor while one plays. */
+  voiceWatch(on: boolean): void;
+  voiceEarPlay(uri: string, fromMs: number, speed: number): void;
+  voiceEarPosition(): number;
+  voiceEarStop(): number;
+  voiceEarOff(): void;
   callRoute(to: AudioRoute): void;
   callVideo(on: boolean): void;
   /** The phone's maker if it blocks apps in the background ("realme", "xiaomi"…), else null. */
@@ -87,6 +93,7 @@ export type FileModule = {
   transcribe(uri: string, language: string): Promise<string>;
   addListener(event: 'liveStop', fn: () => void): EventSubscription;
   addListener(event: 'pip', fn: (e: { on: boolean }) => void): EventSubscription;
+  addListener(event: 'voiceEar', fn: (e: { near?: boolean; done?: boolean }) => void): EventSubscription;
 };
 
 /** Where a call's sound comes out. */

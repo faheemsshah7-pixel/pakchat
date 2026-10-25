@@ -442,7 +442,7 @@ export class PakChat {
       members: sc.members,
       left: false,
     };
-    for (const k of ['title', 'description', 'photo', 'onlyAdminsSend', 'inviteCode', 'inviteExpiresAt', 'inviteMaxUses', 'inviteUses', 'communityId', 'announcements', 'callLink', 'groupsByMembers', 'joinApproval', 'createdBy'] as const) {
+    for (const k of ['title', 'description', 'photo', 'onlyAdminsSend', 'inviteCode', 'inviteExpiresAt', 'inviteMaxUses', 'inviteUses', 'communityId', 'announcements', 'callLink', 'groupsByMembers', 'joinApproval', 'membersEdit', 'membersAdd', 'createdBy'] as const) {
       if (sc[k] !== undefined) (chat as Record<string, unknown>)[k] = sc[k];
     }
     await this.o.storage.putChat(chat);
@@ -1304,6 +1304,10 @@ export class PakChat {
       m.plan = { title: c.title, at: c.at, video: c.video };
       if (c.link) m.plan.link = c.link;
       if (c.about) m.plan.about = c.about;
+      if (c.end) m.plan.end = c.end;
+      if (c.place) m.plan.place = c.place;
+      if (c.general) m.plan.general = true;
+      if (c.call) m.plan.call = true;
     } else {
       m.poll = { question: c.question, options: c.options, multi: c.multi };
     }

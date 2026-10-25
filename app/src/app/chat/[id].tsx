@@ -8,8 +8,8 @@ import { EDIT_MINUTES, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, BackHandler, FlatList, StyleSheet, View, type ListViewToken } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { AppState, BackHandler, FlatList, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
 import Animated, { FadeIn, FadeOut, KeyboardState, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,6 +27,7 @@ import { useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePers
 import { Backdrop } from '../../ui/chat/Backdrop';
 import { chatOpen, leftChat } from '../../core/lock';
 import { LeftGroupChoices } from '../../ui/DeleteChats';
+import { AddToListSheet } from '../../ui/AddToListSheet';
 import { LockedGate } from '../../ui/LockedGate';
 import { ExportSheet } from '../../ui/ExportSheet';
 import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
@@ -36,12 +37,15 @@ import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
 import { startCall } from '../../ui/CallBar';
 import { AttachMenu, type AttachKind } from '../../ui/chat/AttachMenu';
 import { CameraSheet } from '../../ui/chat/CameraSheet';
+import { EmojiPicker } from '../../ui/chat/EmojiPicker';
+import { LinkSheetHost } from '../../ui/chat/RichText';
 import { Composer } from '../../ui/chat/Composer';
 import { ContactShare } from '../../ui/chat/ContactShare';
 import { fromAudio, fromFiles, fromGallery } from '../../ui/chat/attachments';
 import { LocationSheet } from '../../ui/chat/LocationSheet';
 import { MediaComposer, type Ready } from '../../ui/chat/MediaComposer';
 import { PollSheet } from '../../ui/chat/PollSheet';
+import { EventSheet } from '../../ui/chat/EventSheet';
 import type { RoundVideo } from '../../ui/chat/RoundRecorder';
 import { ScheduledBar } from '../../ui/chat/ScheduledBar';
 import { ReportSheet } from '../../ui/ReportSheet';
@@ -54,7 +58,7 @@ import { Marquee } from '../../ui/Marquee';
 import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
-type Item = { key: string; kind: 'msg'; m: Message; first: boolean } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'typing' };
+type Item = { key: string; kind: 'msg'; m: Message; first: boolean } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
 
 const keyOf = (m: Pick<Message, 'author' | 'id'>) => `${m.author}/${m.id}`;
 const quoteKind = (m: Message): ChatQuote['kind'] =>
@@ -81,7 +85,9 @@ export default function ChatRoute() {
 }
 
 function ChatScreen() {
-  const { id, quote: quoteParam, media } = useLocalSearchParams<{ id: string; quote?: string; media?: string }>();
+  // jump: "author/id" of a message to scroll to and flash (from search, or a photo's "Show in chat").
+  // reply: "author/id" of a message to answer (a photo's Reply, in the viewer).
+  const { id, quote: quoteParam, media, jump, reply: replyParam } = useLocalSearchParams<{ id: string; quote?: string; media?: string; jump?: string; reply?: string }>();
   const t = useT();
   const { theme } = useLook();
   const insets = useSafeAreaInsets();
@@ -113,10 +119,15 @@ function ChatScreen() {
   const [exportOpen, setExportOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  // ⋮ › Search: the box in the bar, with up and down (below).
+  const [searching, setSearching] = useState(false);
+  const [searchText, setSearchText] = useState('');
   const [muting, setMuting] = useState(false);
   const [pickMenu, setPickMenu] = useState(false);
   const [attach, setAttach] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
+  const [eventOpen, setEventOpen] = useState(false);
   // Picked photos, videos and files, in the editor before they go (MediaComposer.tsx).
   // Opened from the chat list's 📷 (send-to.tsx): the editor starts with what was taken.
   const [outgoing, setOutgoing] = useState<Picked[] | null>(() => (media ? takeHandOff() : null));
@@ -214,15 +225,17 @@ function ChatScreen() {
 
   // Back first cancels picking, replying or editing.
   useEffect(() => {
-    if (!selecting && !replyTo && !editing) return;
+    if (!selecting && !replyTo && !editing && !searching) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSearching(false);
+      setSearchText('');
       setPicked(new Map());
       setReplyTo(null);
       setEditing(null);
       return true;
     });
     return () => sub.remove();
-  }, [selecting, replyTo, editing]);
+  }, [selecting, replyTo, editing, searching]);
 
   // A disappearing message goes when its time is up, even if nothing else changes on screen.
   useEffect(() => {
@@ -230,6 +243,14 @@ function ChatScreen() {
   }, [list, now]);
 
   const byKey = useMemo(() => new Map((list ?? []).map((m) => [keyOf(m), m])), [list]);
+
+  // "3 unread messages": how many were unread when the chat opened (before it's marked read),
+  // shown above the first of them, like WhatsApp. It goes once I send something.
+  const [unreadOpen, setUnreadOpen] = useState<number | null>(null);
+  if (unreadOpen === null && chat) setUnreadOpen(chat.unread);
+  const unreadMark = unreadAt(list, unreadOpen, openedAt);
+  const unreadKey = unreadMark?.key;
+  const unreadN = unreadMark?.n ?? 0;
 
   // Newest first (the list is upside down, so the newest sits at the bottom), with day labels between days.
   const items = useMemo<Item[]>(() => {
@@ -241,14 +262,24 @@ function ChatScreen() {
       const prev = ms[i - 1];
       const first = !prev || prev.author !== m.author || prev.kind === 'system' || !sameDay(prev.sentAt, m.sentAt) || m.sentAt - prev.sentAt > 5 * 60_000;
       out.push({ key: keyOf(m), kind: 'msg', m, first });
+      if (unreadKey === keyOf(m)) out.push({ key: 'unread', kind: 'unread', text: unreadN === 1 ? t.oneUnread : fill(t.nUnread, { n: unreadN }) });
       if (!prev || !sameDay(prev.sentAt, m.sentAt)) out.push({ key: `day-${m.sentAt}`, kind: 'day', text: dayLabel(m.sentAt, t) });
     }
     return out;
-  }, [list, typing.length, t]);
+  }, [list, typing.length, t, unreadKey, unreadN]);
 
   const unseen = atBottom ? 0 : (list ?? []).filter((m) => m.kind !== 'system' && m.author !== core.myId && m.sentAt > bottomAt).length;
 
+  // The day of the messages at the top, floating there while you scroll (WhatsApp's date pill).
+  const [pill] = useState(makePill);
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const onViewable = useCallback(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+    const top = viewableItems.reduce<ListViewToken | null>((a, v) => (v.index != null && (!a || (a.index ?? 0) < v.index) ? v : a), null)?.item as Item | undefined;
+    if (top?.kind === 'msg') pill.setText(dayLabel(top.m.sentAt, tRef.current));
+    else if (top?.kind === 'day') pill.setText(top.text);
     const bottom = viewableItems.some((v) => v.index === 0 || v.index === 1);
     // Only when it changes (scrolled away from the newest, or back), so scrolling
     // doesn't redraw the whole chat over and over.
@@ -257,16 +288,104 @@ function ChatScreen() {
     // Leaving the newest: what arrives from now on is "unseen".
     if (!bottom) setBottomAt(Date.now());
     setAtBottom(bottom);
-  }, []);
+  }, [pill]);
 
-  const jumpTo = useCallback(
-    (m: Pick<Message, 'author' | 'id'>) => {
-      const index = items.findIndex((it) => it.key === keyOf(m));
-      if (index >= 0) listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
-      else if (hasMore) more();
-    },
-    [items, hasMore, more],
-  );
+  // Going to a message: older pages load until it's there, then it scrolls into view and flashes.
+  // Coming back with a new one (Show in chat, from the viewer) goes there too.
+  const [jumping, setJumping] = useState<string | null>(jump ?? null);
+  const [lastJump, setLastJump] = useState(jump);
+  if (jump !== lastJump) {
+    setLastJump(jump);
+    if (jump) setJumping(jump);
+  }
+  // Reply (from the viewer): the message, once it's loaded, is what the next message answers.
+  const [replyWanted, setReplyWanted] = useState(replyParam);
+  const [lastReply, setLastReply] = useState(replyParam);
+  if (replyParam !== lastReply) {
+    setLastReply(replyParam);
+    setReplyWanted(replyParam);
+  }
+  if (replyWanted && byKey.has(replyWanted)) {
+    setReplyWanted(undefined);
+    setEditing(null);
+    setReplyTo(byKey.get(replyWanted)!);
+  }
+  const [flash, setFlash] = useState<string | null>(null);
+  const jumpTo = useCallback((m: Pick<Message, 'author' | 'id'>) => setJumping(keyOf(m)), []);
+  useEffect(() => {
+    if (!jumping || !list) return;
+    const index = items.findIndex((it) => it.key === jumping);
+    if (index < 0 && hasMore) {
+      more();
+      return;
+    }
+    const go = setTimeout(() => {
+      setJumping(null);
+      if (index < 0) return;
+      setFlash(jumping);
+      listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+    }, 0);
+    return () => clearTimeout(go);
+  }, [jumping, items, list, hasMore, more]);
+  useEffect(() => {
+    if (!flash) return;
+    const off = setTimeout(() => setFlash(null), 1600);
+    return () => clearTimeout(off);
+  }, [flash]);
+
+  // Opening with unread messages further up than the screen shows: start at the "unread" strip.
+  const startedAtUnread = useRef(false);
+  useEffect(() => {
+    if (startedAtUnread.current || !unreadKey || jump) return;
+    startedAtUnread.current = true;
+    const index = items.findIndex((it) => it.kind === 'unread');
+    if (index > 8) setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false }), 60);
+  }, [unreadKey, items, jump]);
+
+  // ---- Searching this chat (⋮ › Search): the box in the bar, with up and down through what's found ----
+  const [hits, setHits] = useState<{ author: string; id: string }[]>([]);
+  const [hit, setHit] = useState(0);
+  useEffect(() => {
+    if (!searching) return;
+    const q = searchText.trim();
+    let alive = true;
+    const wait = setTimeout(() => {
+      if (!q) {
+        if (alive) setHits([]);
+        return;
+      }
+      void core.storage
+        .search(q, 500)
+        .then((found) => {
+          if (!alive) return;
+          const here = found.filter((f) => f.chatId === id);
+          setHits(here);
+          setHit(0);
+          if (here.length) setJumping(keyOf(here[0]));
+        })
+        .catch(() => {});
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(wait);
+    };
+  }, [searching, searchText, id]);
+  const stepHit = (by: number) => {
+    // Up is older (further into the list), down is newer.
+    const next = hit + by;
+    if (next < 0 || next >= hits.length) return;
+    tick();
+    setHit(next);
+    setJumping(keyOf(hits[next]));
+  };
+  const stopSearch = () => {
+    setSearching(false);
+    setSearchText('');
+    setHits([]);
+  };
+
+  // The "+" on the reactions bar: any emoji.
+  const [reactingTo, setReactingTo] = useState<Message | null>(null);
 
   // ---- Picking messages ----
 
@@ -466,7 +585,10 @@ function ChatScreen() {
     else if (k === 'audio') void pick(async () => [await fromAudio()]);
     else if (k === 'location') next(() => setLocationOpen(true));
     else if (k === 'contact') next(() => setContactOpen(true));
-    else {
+    else if (k === 'event') {
+      setPollKey((n) => n + 1);
+      next(() => setEventOpen(true));
+    } else {
       setPollKey((n) => n + 1);
       next(() => setPollOpen(true));
     }
@@ -559,7 +681,29 @@ function ChatScreen() {
   };
   // The picked bar gets one more button for a sticker, so they're a little smaller then.
   const bs = pickedSticker ? 38 : 42;
-  const header = selecting ? (
+  const header = searching && !selecting ? (
+    <Animated.View key="search" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
+      <IconButton icon="back" label={t.back} onPress={stopSearch} flip size={42} iconSize={23} testID="search-close" />
+      <TextInput
+        value={searchText}
+        onChangeText={setSearchText}
+        placeholder={t.searchInChat}
+        placeholderTextColor={theme.muted}
+        autoFocus
+        returnKeyType="search"
+        onSubmitEditing={() => stepHit(1)}
+        style={{ flex: 1, color: theme.text, fontSize: 16, paddingHorizontal: 6 }}
+        testID="chat-search-field"
+      />
+      {!!searchText.trim() && (
+        <Txt size={12.5} color={theme.muted} testID="chat-search-count">
+          {hits.length ? fill(t.nOfM, { n: hit + 1, m: hits.length }) : t.noResults}
+        </Txt>
+      )}
+      <IconButton icon="up" label={t.olderMatch} size={40} onPress={() => stepHit(1)} testID="search-up" />
+      <IconButton icon="down" label={t.newerMatch} size={40} onPress={() => stepHit(-1)} testID="search-down" />
+    </Animated.View>
+  ) : selecting ? (
     <Animated.View key="pick" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="close" label={t.cancelSelection} onPress={done} size={bs} testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
@@ -690,6 +834,9 @@ function ChatScreen() {
             onEndReached={more}
             onEndReachedThreshold={0.4}
             onViewableItemsChanged={onViewable}
+            onScrollBeginDrag={pill.show}
+            onScrollEndDrag={pill.hideSoon}
+            onMomentumScrollEnd={pill.hideSoon}
             viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
             keyboardShouldPersistTaps="handled"
             // Draws only what fills the screen first, so the chat opens quickly; the rest follows.
@@ -724,6 +871,7 @@ function ChatScreen() {
             }
             renderItem={({ item }) => {
               if (item.kind === 'day') return <DayLabel text={item.text} />;
+              if (item.kind === 'unread') return <UnreadStrip text={item.text} />;
               if (item.kind === 'typing') return <TypingDots name={group ? core.name(typing[0]) : undefined} />;
               const m = item.m;
               const isNew = m.sentAt > openedAt;
@@ -741,6 +889,7 @@ function ChatScreen() {
                     starred={!!starred[`${m.chatId}/${m.author}/${m.id}`]}
                     selecting={selecting}
                     selected={picked.has(k)}
+                    flash={flash === k}
                     onPress={onPress}
                     onLongPress={onLongPress}
                     onReply={reply}
@@ -748,12 +897,14 @@ function ChatScreen() {
                     onReaction={react}
                     onQuote={jumpTo}
                     onRetry={retry}
-                    above={showBar ? <ReactionBar mine={m.author === core.myId} current={m.reactions?.[core.myId]} onPick={(e) => react(m, e)} /> : undefined}
+                    above={showBar ? <ReactionBar mine={m.author === core.myId} current={m.reactions?.[core.myId]} onPick={(e) => react(m, e)} onMore={() => setReactingTo(m)} /> : undefined}
                   />
                 </Animated.View>
               );
             }}
           />
+
+          <DatePill pill={pill} />
 
           {/* Back to the newest, when you've scrolled up. */}
           {!atBottom && (
@@ -806,12 +957,24 @@ function ChatScreen() {
           ))}
       </Animated.View>
 
+      <LinkSheetHost />
+      <AddToListSheet visible={listOpen} chatIds={[id]} onClose={() => setListOpen(false)} />
+      <EmojiPicker
+        visible={!!reactingTo}
+        onClose={() => setReactingTo(null)}
+        onPick={(e) => {
+          const m = reactingTo;
+          setReactingTo(null);
+          if (m) react(m, e);
+        }}
+      />
+
       <LeftGroupChoices chatId={id} name={chat ? core.chatTitle(chat) : ''} visible={leftChoices} onClose={() => setLeftChoices(false)} />
 
       {/* The ⋮ menu of the chat. */}
       <Popup visible={menu} onClose={() => setMenu(false)}>
         <MenuItem icon="info" label={group ? t.groupInfo : t.contactInfo} onPress={() => (setMenu(false), router.push({ pathname: '/info/[id]', params: { id } }))} />
-        <MenuItem icon="search" label={t.search} onPress={() => (setMenu(false), router.push({ pathname: '/search', params: { chat: id } }))} />
+        <MenuItem icon="search" label={t.search} onPress={() => (setMenu(false), setSearching(true))} testID="menu-search" />
         <MenuItem
           icon={prefs.muted ? 'bell' : 'muted'}
           label={prefs.muted ? t.unmute : t.mute}
@@ -822,6 +985,7 @@ function ChatScreen() {
           }}
         />
         <MenuItem icon="timer" label={t.disappearing} onPress={() => (setMenu(false), setTimerOpen(true))} testID="menu-timer" />
+        <MenuItem icon="text" label={t.addToList} onPress={() => (setMenu(false), setListOpen(true))} testID="menu-add-to-list" />
         <MenuItem icon="wallpaper" label={t.wallpaper} onPress={() => (setMenu(false), router.push({ pathname: '/wallpaper', params: { chat: id } }))} testID="menu-wallpaper" />
         {!chat?.onlyAdminsSend && <MenuItem icon="calendar" label={t.scheduleCall} onPress={() => (setMenu(false), setPlanOpen(true))} testID="menu-schedule-call" />}
         <MenuItem icon="export" label={t.exportChat} onPress={() => (setMenu(false), setExportOpen(true))} testID="menu-export" />
@@ -1042,6 +1206,18 @@ function ChatScreen() {
         }}
       />
 
+      <EventSheet
+        key={`event-${pollKey}`}
+        visible={eventOpen}
+        onClose={() => setEventOpen(false)}
+        onSend={(e) => {
+          setEventOpen(false);
+          listRef.current?.scrollToOffset({ offset: 0, animated: true });
+          const { call, ...rest } = e;
+          void act(() => core.client.sendPlan(id, { ...rest, general: true, video: call === 'video', ...(call ? { call: true as const } : {}) }));
+        }}
+      />
+
       {/* Disappearing messages. */}
       <Sheet visible={timerOpen} onClose={() => setTimerOpen(false)} title={t.disappearing}>
         <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 4 }}>
@@ -1106,7 +1282,8 @@ function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => voi
 }
 
 /** The six quick reactions over a held message. They pop in one after another. */
-function ReactionBar({ mine, current, onPick }: { mine: boolean; current?: string; onPick: (emoji: string) => void }) {
+function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current?: string; onPick: (emoji: string) => void; onMore: () => void }) {
+  const t = useT();
   const { theme } = useLook();
   return (
     <Animated.View entering={pop()} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3 }}>
@@ -1122,7 +1299,100 @@ function ReactionBar({ mine, current, onPick }: { mine: boolean; current?: strin
             </Pressy>
           </Animated.View>
         ))}
+        {/* Any other emoji (or the one I picked from there, shown here). */}
+        <Animated.View entering={pop(30 + REACTIONS.length * 30)}>
+          <Pressy onPress={current && !REACTIONS.includes(current) ? () => onPick(current) : onMore} label={t.moreReactions} scale={0.8} testID="react-more">
+            <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: current && !REACTIONS.includes(current) ? theme.accSoft : theme.glass }}>
+              {current && !REACTIONS.includes(current) ? (
+                <Txt size={24} align="center">
+                  {current}
+                </Txt>
+              ) : (
+                <Icon name="plus" size={20} color={theme.muted} />
+              )}
+            </View>
+          </Pressy>
+        </Animated.View>
       </Glass>
+    </Animated.View>
+  );
+}
+
+/** Where "N unread messages" goes: above the Nth newest message from someone else, until I send one. */
+function unreadAt(list: Message[] | null, unread: number | null, openedAt: number) {
+  if (!unread || !list) return null;
+  if (list.some((m) => m.author === core.myId && m.sentAt > openedAt)) return null;
+  let n = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (m.kind === 'system' || m.author === core.myId) continue;
+    n++;
+    if (n === unread || i === 0) return { key: keyOf(m), n: unread };
+  }
+  return null;
+}
+
+/** "3 unread messages", across the chat above the first of them. */
+function UnreadStrip({ text }: { text: string }) {
+  const { theme } = useLook();
+  return (
+    <View style={{ marginVertical: 8, marginHorizontal: -14, paddingVertical: 6, backgroundColor: theme.glass, alignItems: 'center' }} testID="unread-strip">
+      <Txt size={12.5} weight="700" color={theme.sectionText}>
+        {text}
+      </Txt>
+    </View>
+  );
+}
+
+type Pill = ReturnType<typeof makePill>;
+
+/** The floating date's state, kept out of the chat screen so scrolling doesn't redraw the whole chat. */
+function makePill() {
+  let text = '';
+  let shown = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const subs = new Set<() => void>();
+  const tell = () => subs.forEach((f) => f());
+  return {
+    subscribe(f: () => void) {
+      subs.add(f);
+      return () => {
+        subs.delete(f);
+      };
+    },
+    get: () => (shown ? text : ''),
+    setText(next: string) {
+      if (next === text) return;
+      text = next;
+      if (shown) tell();
+    },
+    show() {
+      clearTimeout(timer);
+      if (shown) return;
+      shown = true;
+      tell();
+    },
+    hideSoon() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        shown = false;
+        tell();
+      }, 1400);
+    },
+  };
+}
+
+function DatePill({ pill }: { pill: Pill }) {
+  const { theme } = useLook();
+  const text = useSyncExternalStore(pill.subscribe, pill.get);
+  if (!text) return null;
+  return (
+    <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(200)} pointerEvents="none" style={{ position: 'absolute', top: 8, alignSelf: 'center' }}>
+      <View style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, backgroundColor: theme.dark ? '#22252C' : '#FFFFFF', boxShadow: `0 2px 8px -3px ${theme.shadow}` }}>
+        <Txt size={12.5} weight="600" color={theme.sectionText}>
+          {text}
+        </Txt>
+      </View>
     </Animated.View>
   );
 }

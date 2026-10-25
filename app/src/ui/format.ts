@@ -2,6 +2,7 @@
 import type { Message } from '@pakchat/shared';
 
 import { core, reasonOf } from '../core/core';
+import { plainText } from '../core/richText';
 import { fill, type Strings } from '../i18n';
 
 const DAY = 86_400_000;
@@ -156,7 +157,7 @@ export function fileLine(m: Message, t: Strings) {
               : f.kind === 'audio'
                 ? `🎵 ${f.name ?? t.audioWord}`
                 : `📄 ${f.name ?? t.document}`;
-  return m.text ? `${what}: ${m.text}` : what;
+  return m.text ? `${what}: ${plainText(m.text)}` : what;
 }
 
 /** What a message is, in one line: its words, or "📍 Location", "👤 Ali", "📅 Call: Team"… */
@@ -165,8 +166,9 @@ export function bodyLine(m: Message, t: Strings) {
   if (m.kind === 'file' && m.file) return fileLine(m, t);
   if (m.kind === 'location') return `📍 ${m.location?.live ? t.liveLocation : (m.location?.name ?? t.location)}`;
   if (m.kind === 'contact') return `👤 ${m.contacts?.map((c) => c.name).join(', ') ?? t.contactWord}`;
-  if (m.kind === 'event') return `📅 ${t.eventWord}: ${m.plan?.title ?? ''}`;
-  return m.text ?? '';
+  if (m.kind === 'event') return `📅 ${m.plan?.general ? t.eventTile : t.eventWord}: ${m.plan?.title ?? ''}`;
+  // Without the *bold* and _italic_ marks, like WhatsApp's list and alerts.
+  return plainText(m.text ?? '');
 }
 
 /** The one line under a chat's name in the list. */

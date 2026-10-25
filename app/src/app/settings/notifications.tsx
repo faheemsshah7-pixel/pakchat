@@ -2,6 +2,7 @@
 // The alert shows who wrote and what they said, unlocked on the phone itself.
 // Also the tone for chats without their own, one for groups, and conversation
 // tones (the little sounds while a chat is open) with how loud they are.
+// Like WhatsApp's: Vibrate, Reaction notifications, and the calls' Ringtone.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
@@ -22,7 +23,7 @@ export default function NotificationsScreen() {
   const { theme } = useLook();
   const [state, setState] = useState<PushState>(pushState);
   const settings = useSettings();
-  const [picking, setPicking] = useState<'messages' | 'groups' | null>(null);
+  const [picking, setPicking] = useState<'messages' | 'groups' | 'calls' | null>(null);
   const [volume, setVolume] = useState<number | null>(null);
 
   useEffect(() => {
@@ -59,6 +60,21 @@ export default function NotificationsScreen() {
             chevron={false}
             right={<Toggle on={settings.conversationTones} onChange={(on) => core.setSettings({ conversationTones: on })} label={t.conversationTones} testID="conversation-tones" />}
           />
+          <Divider />
+          <SettingRow
+            icon="bell"
+            title={t.vibrateWord}
+            chevron={false}
+            right={<Toggle on={settings.vibrate !== false} onChange={(on) => core.setSettings({ vibrate: on })} label={t.vibrateWord} testID="alerts-vibrate" />}
+          />
+          <Divider />
+          <SettingRow
+            icon="smile"
+            title={t.reactionNotifications}
+            sub={t.reactionNotificationsSub}
+            chevron={false}
+            right={<Toggle on={settings.reactionAlerts !== false} onChange={(on) => core.setSettings({ reactionAlerts: on })} label={t.reactionNotifications} testID="alerts-reactions" />}
+          />
           {settings.conversationTones && (
             <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 2 }}>
               <Txt size={13} weight="600" color={theme.sectionText}>
@@ -83,12 +99,18 @@ export default function NotificationsScreen() {
         <Glass>
           <SettingRow icon="group" title={t.notificationTone} sub={toneName(settings.groupTone ?? settings.defaultTone, t)} onPress={() => setPicking('groups')} testID="group-tone" />
         </Glass>
+
+        <Section title={t.calls} />
+        <Glass>
+          <SettingRow icon="calls" title={t.ringtone} sub={toneName(settings.callTone ?? '', t)} onPress={() => setPicking('calls')} testID="call-ringtone" />
+        </Glass>
       </ScrollView>
       <TonePicker
         visible={picking !== null}
-        value={picking === 'groups' ? (settings.groupTone ?? settings.defaultTone) : settings.defaultTone}
+        value={picking === 'groups' ? (settings.groupTone ?? settings.defaultTone) : picking === 'calls' ? (settings.callTone ?? '') : settings.defaultTone}
         forChat={false}
-        onPick={(tone) => core.setSettings(picking === 'groups' ? { groupTone: tone ?? '' } : { defaultTone: tone ?? '' })}
+        ringtone={picking === 'calls'}
+        onPick={(tone) => core.setSettings(picking === 'groups' ? { groupTone: tone ?? '' } : picking === 'calls' ? { callTone: tone ?? '' } : { defaultTone: tone ?? '' })}
         onClose={() => setPicking(null)}
       />
     </Screen>

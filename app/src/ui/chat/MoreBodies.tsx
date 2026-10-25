@@ -321,48 +321,97 @@ export function LinkBody({ link, mine }: { link: LinkPreview; mine: boolean }) {
   );
 }
 
-/** A planned call: what, when, and Join once it's time. */
+/**
+ * A planned call: what, when, and Join once it's time. Or an event from the 📎:
+ * when it starts and ends, where, Join if it has a call, and Going / Not going.
+ */
 export function EventBody({ m, mine }: { m: Message; mine: boolean }) {
   const t = useT();
   const { theme } = useLook();
   const now = useNow(30_000);
   const p = m.plan!;
   const soon = p.at - now < 10 * 60_000;
-  const over = now - p.at > 3 * 3_600_000;
+  const over = now - (p.end ?? p.at) > (p.end ? 0 : 3 * 3_600_000);
+  const hasCall = !p.general || !!p.call;
+  const votes = Object.values(m.votes ?? {});
+  const going = votes.filter((v) => v[0] === 0).length;
+  const myAnswer = m.votes?.[core.myId]?.[0];
   // A call link goes to its own call; otherwise the call is in this chat.
   const join = () => {
-    const code = p.link ? /\/calllink\/([A-Za-z0-9_-]+)/.exec(p.link)?.[1] : undefined;
+    const code = p.link ? (/\/calllink\/([A-Za-z0-9_-]+)/.exec(p.link)?.[1] ?? p.link) : undefined;
     if (code) router.push({ pathname: '/calllink/[code]', params: { code } });
     else void startCall(m.chatId, p.video, t);
   };
+  const answer = (i: number) => {
+    if (m.deleted) return;
+    void core.client.vote(m.chatId, { author: m.author, id: m.id }, myAnswer === i ? [] : [i]).catch((err) => toast(isOffline(err) ? t.offline : t.couldNot));
+  };
+  const openPlace = () => void Linking.openURL(`geo:0,0?q=${encodeURIComponent(p.place!)}`).catch(() => void Linking.openURL(`https://www.openstreetmap.org/search?query=${encodeURIComponent(p.place!)}`).catch(() => {}));
+  const when = p.end ? `${whenLabel(p.at, t)} – ${new Date(p.end).toDateString() === new Date(p.at).toDateString() ? clock(p.end) : whenLabel(p.end, t)}` : whenLabel(p.at, t);
+  const soft = mine ? 'rgba(255,255,255,0.18)' : theme.accSoft;
+  const softInk = mine ? theme.bubbleMineText : theme.accInk;
   return (
     <View style={{ width: WIDE, gap: 8, marginBottom: 2 }} testID="event">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name={p.video ? 'video' : 'calls'} size={21} color={theme.accInk} />
+          <Icon name={p.general ? 'calendar' : p.video ? 'video' : 'calls'} size={21} color={theme.accInk} />
         </View>
         <View style={{ flex: 1 }}>
           <Txt size={15} weight="700" color={inkOf(mine, theme)} lines={2}>
             {p.title}
           </Txt>
           <Txt size={12.5} color={metaOf(mine, theme)}>
-            {whenLabel(p.at, t)}
+            {over && p.general ? `${t.eventOver} · ${when}` : when}
           </Txt>
         </View>
       </View>
+      {!!p.place && (
+        <Pressy onPress={openPlace} label={p.place} scale={0.98} testID="event-place">
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="place" size={15} color={softInk} />
+            <Txt size={13.5} color={softInk} lines={2} style={{ flex: 1 }}>
+              {p.place}
+            </Txt>
+          </View>
+        </Pressy>
+      )}
       {!!p.about && (
         <Txt size={13.5} color={inkOf(mine, theme)} lines={4}>
           {p.about}
         </Txt>
       )}
-      {!over && (
+      {hasCall && !over && (
         <Pressy onPress={() => (soon ? join() : toast(fill(t.callStartsAt, { when: whenLabel(p.at, t) })))} label={t.joinCall} scale={0.97} testID="event-join">
-          <View style={{ alignItems: 'center', paddingVertical: 9, borderRadius: 12, backgroundColor: soon ? theme.acc : mine ? 'rgba(255,255,255,0.18)' : theme.accSoft }}>
-            <Txt size={14} weight="700" color={soon ? '#FFFFFF' : mine ? theme.bubbleMineText : theme.accInk}>
+          <View style={{ alignItems: 'center', paddingVertical: 9, borderRadius: 12, backgroundColor: soon ? theme.acc : soft }}>
+            <Txt size={14} weight="700" color={soon ? '#FFFFFF' : softInk}>
               {t.joinCall}
             </Txt>
           </View>
         </Pressy>
+      )}
+      {p.general && (
+        <>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {[t.goingWord, t.notGoingWord].map((label, i) => {
+              const on = myAnswer === i;
+              return (
+                <Pressy key={label} onPress={() => answer(i)} label={label} scale={0.96} style={{ flex: 1 }} testID={i === 0 ? 'event-going' : 'event-not-going'}>
+                  <View style={{ alignItems: 'center', paddingVertical: 8, borderRadius: 12, backgroundColor: on ? theme.acc : soft, flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+                    {on && <Icon name="check" size={14} color="#FFFFFF" stroke={2.6} />}
+                    <Txt size={13.5} weight="700" color={on ? '#FFFFFF' : softInk}>
+                      {label}
+                    </Txt>
+                  </View>
+                </Pressy>
+              );
+            })}
+          </View>
+          {going > 0 && (
+            <Txt size={12} color={metaOf(mine, theme)}>
+              {fill(t.nGoing, { n: going })}
+            </Txt>
+          )}
+        </>
       )}
     </View>
   );

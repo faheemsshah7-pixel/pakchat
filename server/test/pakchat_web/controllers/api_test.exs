@@ -24,6 +24,8 @@ defmodule PakchatWeb.ApiTest do
       assert body["name"] == "Ali Khan"
 
       assert body["privacy"] == %{
+               "about" => "everyone",
+               "groups" => "everyone",
                "last_seen" => "contacts",
                "online" => "same",
                "photo" => "everyone",

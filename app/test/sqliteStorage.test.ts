@@ -198,6 +198,28 @@ describe('media, links and docs', () => {
     expect((await s.shared('c1', 'links')).map((m) => m.id)).toEqual(['l1']);
   });
 
+  test('every chat\'s photos, GIFs, polls and links, and the files kept, biggest first', async () => {
+    const s = await SqliteStorage.open(nodeDb());
+    await s.putMessage(msg('p1', 1, { kind: 'file', file: file('image', { local: 'file:///p1', size: 300 }) }) as never);
+    await s.putMessage({ ...msg('p2', 2, { kind: 'file', file: file('image', { size: 900, local: 'file:///p2' }) }), chatId: 'c2' } as never);
+    await s.putMessage(msg('g1', 3, { kind: 'file', file: file('video', { gif: true }) }) as never);
+    await s.putMessage(msg('v1', 4, { kind: 'file', file: file('video', { size: 50, local: 'file:///v1' }) }) as never);
+    await s.putMessage(msg('o1', 5, { kind: 'poll', poll: { question: 'Tea?', options: ['Yes', 'No'] } }) as never);
+    await s.putMessage(msg('l1', 6, { text: 'see https://dawn.com' }));
+    expect((await s.allOf('image')).map((m) => m.id)).toEqual(['p2', 'p1']);
+    expect((await s.allOf('video')).map((m) => m.id)).toEqual(['v1']);
+    expect((await s.allOf('gif')).map((m) => m.id)).toEqual(['g1']);
+    expect((await s.allOf('poll')).map((m) => m.id)).toEqual(['o1']);
+    expect((await s.allOf('links')).map((m) => m.id)).toEqual(['l1']);
+    expect((await s.keptFiles()).map((m) => m.id)).toEqual(['p2', 'p1', 'v1']);
+    expect((await s.keptFiles({ chatId: 'c1' })).map((m) => m.id)).toEqual(['p1', 'v1']);
+    expect((await s.keptFiles({ atLeast: 100 })).map((m) => m.id)).toEqual(['p2', 'p1']);
+    expect(await s.keptByChat()).toEqual([
+      { chatId: 'c2', bytes: 900, count: 1 },
+      { chatId: 'c1', bytes: 350, count: 2 },
+    ]);
+  });
+
   test('finding web addresses in words', () => {
     expect(linksIn('see https://pak.chat/a?b=1, and www.x.pk.')).toEqual(['https://pak.chat/a?b=1', 'https://www.x.pk']);
     expect(linksIn('nothing here')).toEqual([]);

@@ -36,6 +36,9 @@ export type Chat = {
   groupsByMembers?: boolean;
   /** A group: its admins approve who joins. */
   joinApproval?: boolean;
+  /** A group: everyone (not only admins) may edit its name, photo and description; and add people. */
+  membersEdit?: boolean;
+  membersAdd?: boolean;
   /** Who made it (a community's owner, the only one who can deactivate it). */
   createdBy?: string;
   /** Disappearing messages, in seconds. 0 or missing: off. */
@@ -158,6 +161,8 @@ export const CHAT_SERVER_FIELDS = [
   'callLink',
   'groupsByMembers',
   'joinApproval',
+  'membersEdit',
+  'membersAdd',
   'createdBy',
   'left',
 ] as const;

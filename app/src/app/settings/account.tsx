@@ -2,17 +2,20 @@
 // phone number; you can sign in with either. Remove one only while the other is
 // there. A Gmail or number that already has its own PakChat account can't be added
 // (later, its owner will be asked to agree).
+//
+// Also where the server is (change it when the Mac's Wi-Fi address changes, no
+// need to log out), and Log out.
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { core, reasonOf } from '../../core/core';
+import { core, reasonOf, serverUrl } from '../../core/core';
 import { googleIdToken } from '../../core/google';
 import { useAuth } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { Button, Divider, Field, Glass, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
+import { Button, Divider, Field, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { phoneError } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 
@@ -27,6 +30,19 @@ export default function Account() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [server, setServer] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
+
+  async function saveServer() {
+    const typed = (server ?? '').trim();
+    setServer(null);
+    if (!typed) return;
+    try {
+      await core.changeServer(/^https?:\/\//.test(typed) ? typed : `http://${typed}`);
+    } catch {
+      toast(t.couldNot);
+    }
+  }
 
   function startAdding() {
     setSentTo('');
@@ -88,8 +104,9 @@ export default function Account() {
 
   return (
     <Screen>
-      <TopBar title={t.signInWays} onBack={() => router.back()} />
+      <TopBar title={t.accountWord} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 12, gap: 14 }}>
+        <Section title={t.signInWays} />
         <Glass>
           <SettingRow
             icon="globe"
@@ -126,7 +143,53 @@ export default function Account() {
             {t.lastSignIn}
           </Txt>
         )}
+        <Glass>
+          {/* Where the server is. Change it here when the Mac's Wi-Fi address changes (no need to log out). */}
+          <SettingRow icon="server" title={t.serverAddress} sub={serverUrl().replace(/^https?:\/\//, '')} onPress={() => setServer(serverUrl())} testID="open-server" />
+        </Glass>
+        <Glass>
+          <SettingRow icon="logout" title={t.logOut} danger chevron={false} onPress={() => setLeaving(true)} testID="log-out" />
+        </Glass>
       </ScrollView>
+
+      <Sheet visible={server !== null} onClose={() => setServer(null)} title={t.serverAddress}>
+        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 12 }}>
+          <Txt size={13} color={theme.muted}>
+            {t.serverAddressHint}
+          </Txt>
+          <Field
+            value={server ?? ''}
+            onChangeText={setServer}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder="http://192.168.1.10:4000"
+            icon="server"
+            onSubmitEditing={saveServer}
+            testID="me-server"
+          />
+          <Button title={t.save} onPress={saveServer} disabled={!(server ?? '').trim()} testID="me-server-save" />
+        </View>
+      </Sheet>
+
+      <Dialog
+        visible={leaving}
+        onClose={() => setLeaving(false)}
+        title={t.logOut}
+        text={t.logOutSure}
+        buttons={[
+          {
+            label: t.logOut,
+            danger: true,
+            testID: 'confirm-log-out',
+            onPress: () => {
+              setLeaving(false);
+              void core.signOut();
+            },
+          },
+          { label: t.cancel, onPress: () => setLeaving(false) },
+        ]}
+      />
 
       <Sheet visible={adding} onClose={() => setAdding(false)} title={t.linkPhone}>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 12 }}>

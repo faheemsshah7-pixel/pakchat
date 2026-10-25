@@ -19,6 +19,11 @@ test('every word must match; nothing typed finds nothing', () => {
   expect(titles('   ')).toEqual([]);
 });
 
+test('Theme is under Chats, like WhatsApp', () => {
+  expect(settingsMatching('theme', en)[0]).toMatchObject({ where: en.chatsWord, to: '/settings/chats' });
+  expect(settingsMatching('server', en)[0]).toMatchObject({ where: en.accountWord, to: '/settings/account' });
+});
+
 test('works in Urdu too', () => {
   expect(titles(ur.wallpaper, ur)).toContain(ur.wallpaper);
 });

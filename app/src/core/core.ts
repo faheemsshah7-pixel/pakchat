@@ -68,6 +68,8 @@ export type ChatPrefs = {
   favourite?: boolean;
   markedUnread?: boolean;
   draft?: string;
+  /** When the draft was last typed: a chat with a draft goes to the top of the list, like WhatsApp. */
+  draftAt?: number;
   /** Its own alert tone (ChatAlerts.TONES), or "silent". Missing: the default. */
   tone?: string;
   wallpaper?: Wallpaper;
@@ -109,6 +111,16 @@ export type AppSettings = {
   lessDataCalls?: boolean;
   /** When I last looked at Calls: missed calls since then are the number on its tab. */
   callsSeenAt?: number;
+  /** Settings › Privacy › Calls: people not in my contacts don't ring (a missed call instead), like WhatsApp. */
+  silenceUnknown?: boolean;
+  /** Settings › Privacy › Calls: calls only through PakChat's relay, so others never see my address. */
+  protectIp?: boolean;
+  /** Settings › Notifications: buzz with message alerts (default on). */
+  vibrate?: boolean;
+  /** Settings › Notifications: an alert when someone reacts to my message (default on). */
+  reactionAlerts?: boolean;
+  /** Settings › Notifications: the ringtone for calls ('' is the phone's own). */
+  callTone?: string;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -623,7 +635,7 @@ class Core {
   }
 
   /** Changes my name, about, or privacy. The server answers with the new me. */
-  async updateMe(change: { name?: string; about?: string; photo?: string; privacy?: { last_seen?: string; online?: string; photo?: string; read_receipts?: boolean } }) {
+  async updateMe(change: { name?: string; about?: string; photo?: string; privacy?: { last_seen?: string; online?: string; photo?: string; about?: string; groups?: string; read_receipts?: boolean } }) {
     await this.saveMe(meFromWire(await this.call<Parameters<typeof meFromWire>[0]>('PATCH', '/me', change)));
   }
 

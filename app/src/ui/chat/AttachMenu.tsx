@@ -3,7 +3,7 @@
 // on a soft tile of its own colour (no "AI images").
 //
 //   Gallery   Camera   Document   Audio
-//   Location  Contact  Poll
+//   Location  Contact  Poll     Event
 import { Modal, Pressable, View } from 'react-native';
 import Animated, { FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +14,7 @@ import { Icon, type IconName } from '../icons';
 import { Glass, Pressy, Txt } from '../kit';
 import { pop, rise, tick } from '../motion';
 
-export type AttachKind = 'gallery' | 'camera' | 'document' | 'audio' | 'location' | 'contact' | 'poll';
+export type AttachKind = 'gallery' | 'camera' | 'document' | 'audio' | 'location' | 'contact' | 'poll' | 'event';
 
 /** Each tile's colour, the same in light and dark (the tile behind it is soft). */
 const TILES: { key: AttachKind; icon: IconName; tint: string; testID: string }[] = [
@@ -25,6 +25,7 @@ const TILES: { key: AttachKind; icon: IconName; tint: string; testID: string }[]
   { key: 'location', icon: 'place', tint: '#18A86B', testID: 'attach-location' },
   { key: 'contact', icon: 'card', tint: '#1C9BD6', testID: 'attach-contact' },
   { key: 'poll', icon: 'poll', tint: '#D9A400', testID: 'attach-poll' },
+  { key: 'event', icon: 'calendar', tint: '#E0457B', testID: 'attach-event' },
 ];
 
 export function AttachMenu({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (k: AttachKind) => void }) {
@@ -39,6 +40,7 @@ export function AttachMenu({ visible, onClose, onPick }: { visible: boolean; onC
     location: t.location,
     contact: t.contact,
     poll: t.pollWord,
+    event: t.eventTile,
   };
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>

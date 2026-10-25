@@ -232,6 +232,52 @@ export class SqliteStorage implements Storage {
     return which === 'links' ? list.filter((m) => linksIn(m.text ?? '').length > 0) : list;
   }
 
+  /**
+   * Messages of one kind from every chat, newest first: Search's filters (Photos,
+   * Videos, Links, GIFs, Audio, Docs, Polls), like WhatsApp's. Not deleted ones.
+   */
+  async allOf(which: 'image' | 'video' | 'gif' | 'audio' | 'doc' | 'poll' | 'links', limit = 300): Promise<Message[]> {
+    const where = {
+      image: "json_extract(json, '$.file.kind') = 'image' AND json_extract(json, '$.file.once') IS NULL",
+      video: "json_extract(json, '$.file.kind') = 'video' AND json_extract(json, '$.file.gif') IS NULL AND json_extract(json, '$.file.once') IS NULL",
+      gif: "json_extract(json, '$.file.gif') IS NOT NULL",
+      audio: "json_extract(json, '$.file.kind') IN ('voice', 'audio') AND json_extract(json, '$.file.once') IS NULL",
+      doc: "json_extract(json, '$.file.kind') = 'doc'",
+      poll: "json_extract(json, '$.kind') = 'poll'",
+      links: "(json_extract(json, '$.text') LIKE '%http%' OR json_extract(json, '$.text') LIKE '%www.%')",
+    }[which];
+    const rows = await this.db.all<{ json: string }>(
+      `SELECT json FROM messages WHERE json_extract(json, '$.deleted') IS NOT 1 AND ${where} ORDER BY sent_at DESC LIMIT ?`,
+      [limit],
+    );
+    const list = rows.map((r) => JSON.parse(r.json) as Message);
+    return which === 'links' ? list.filter((m) => linksIn(m.text ?? '').length > 0) : list;
+  }
+
+  /**
+   * Files kept on this phone, biggest first (Manage storage): from one chat, or
+   * from all of them at least `atLeast` bytes big.
+   */
+  async keptFiles(options: { chatId?: string; atLeast?: number; limit?: number } = {}): Promise<Message[]> {
+    const rows = await this.db.all<{ json: string }>(
+      `SELECT json FROM messages WHERE json_extract(json, '$.file.local') IS NOT NULL AND json_extract(json, '$.deleted') IS NOT 1
+       AND (? IS NULL OR chat_id = ?) AND COALESCE(json_extract(json, '$.file.size'), 0) >= ?
+       ORDER BY json_extract(json, '$.file.size') DESC LIMIT ?`,
+      [options.chatId ?? null, options.chatId ?? null, options.atLeast ?? 0, options.limit ?? 500],
+    );
+    return rows.map((r) => JSON.parse(r.json) as Message);
+  }
+
+  /** How much each chat's kept files take, biggest first (Manage storage). */
+  async keptByChat(): Promise<{ chatId: string; bytes: number; count: number }[]> {
+    const rows = await this.db.all<{ chat_id: string; bytes: number; count: number }>(
+      `SELECT chat_id, SUM(COALESCE(json_extract(json, '$.file.size'), 0)) AS bytes, COUNT(*) AS count FROM messages
+       WHERE json_extract(json, '$.file.local') IS NOT NULL AND json_extract(json, '$.deleted') IS NOT 1
+       GROUP BY chat_id ORDER BY bytes DESC`,
+    );
+    return rows.map((r) => ({ chatId: r.chat_id, bytes: Number(r.bytes), count: Number(r.count) }));
+  }
+
   // ---- Backups ----
 
   /** Writes a copy of the whole database to `path` (a file that mustn't exist yet), for a backup. */

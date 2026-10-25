@@ -1,7 +1,8 @@
 defmodule PakchatWeb.GroupController do
   @moduledoc """
   Groups: making them, changing them, people, admins and invite links.
-  Only admins can change a group. Anyone can leave.
+  Only admins can change a group, unless they let everyone edit its info or
+  add people (Group permissions). Anyone can leave.
   """
   use PakchatWeb, :controller
   alias Pakchat.{Chats, RateLimit}
@@ -15,7 +16,9 @@ defmodule PakchatWeb.GroupController do
     "photo",
     "only_admins_send",
     "groups_by_members",
-    "join_approval"
+    "join_approval",
+    "members_edit",
+    "members_add"
   ]
 
   @doc "`POST /api/groups` with `{title, member_ids, description?}`."

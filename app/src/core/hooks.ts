@@ -160,7 +160,7 @@ export function useCommunities(): CommunityRow[] | null {
     .sort((a, b) => Math.max(0, ...b.groups.map(activity)) - Math.max(0, ...a.groups.map(activity)));
 }
 
-const activity = (r: ChatRow) => Math.max(r.chat.lastActivity, r.last?.sentAt ?? 0);
+const activity = (r: ChatRow) => Math.max(r.chat.lastActivity, r.last?.sentAt ?? 0, r.prefs.draft ? (r.prefs.draftAt ?? 0) : 0);
 
 export function useChat(chatId: string): Chat | null | undefined {
   return useLoaded<Chat | null | undefined>(

@@ -88,7 +88,7 @@ export function Composer({
     latest.current = text;
   }, [text]);
   const saveDraft = (words: string) => {
-    if ((core.prefs[chat.id]?.draft ?? '') !== (words.trim() ? words : '')) core.setPrefs(chat.id, { draft: words.trim() ? words : undefined });
+    if ((core.prefs[chat.id]?.draft ?? '') !== (words.trim() ? words : '')) core.setPrefs(chat.id, words.trim() ? { draft: words, draftAt: Date.now() } : { draft: undefined, draftAt: undefined });
   };
   useEffect(() => {
     if (editing) return;

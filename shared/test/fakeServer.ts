@@ -186,7 +186,7 @@ export class FakeServer {
 
   private me(userId: string): Me {
     const u = this.users.get(userId)!;
-    return { id: u.id, email: u.email, phone: u.phone ?? null, name: u.name, privacy: { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone' } };
+    return { id: u.id, email: u.email, phone: u.phone ?? null, name: u.name, privacy: { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone', about: 'everyone', groups: 'everyone' } };
   }
 
   private byToken(token: string) {

@@ -14,8 +14,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { FlatList, View } from 'react-native';
-import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { FlatList, useWindowDimensions, View } from 'react-native';
+import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
+import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
 import { RTCView } from 'react-native-webrtc';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,7 +29,7 @@ import type { Strings } from '../i18n/strings';
 import { duration } from '../ui/format';
 import { Icon, type IconName } from '../ui/icons';
 import { Avatar, Field, Pressy, Txt } from '../ui/kit';
-import { tick } from '../ui/motion';
+import { smooth, tick } from '../ui/motion';
 import { Sheet, toast } from '../ui/overlays';
 
 const INK = '#FFFFFF';
@@ -318,24 +319,71 @@ function Pulse({ children }: { children: ReactNode }) {
  * camera shows dimmed behind the name, as when it rings.
  */
 function Picture({ call, small }: { call: CallView; small?: boolean }) {
+  const t = useT();
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  // Tap the small picture to swap it with the big one; drag it to any corner (WhatsApp does both).
+  const [swapped, setSwapped] = useState(false);
+  const x = useSharedValue(0);
+  const y = useSharedValue(0);
+  const from = useSharedValue({ x: 0, y: 0 });
+  // How far it can go from the top corner it starts in: across, and down to above the buttons.
+  const across = -(width - 28 - SELF_W);
+  const down = Math.max(0, height - insets.top - insets.bottom - 110 - SELF_H - 250);
+  const drag = usePanGesture({
+    activeOffsetX: [-8, 8],
+    activeOffsetY: [-8, 8],
+    onActivate: () => {
+      'worklet';
+      from.value = { x: x.value, y: y.value };
+    },
+    onUpdate: (e) => {
+      'worklet';
+      x.value = from.value.x + e.translationX;
+      y.value = from.value.y + e.translationY;
+    },
+    onDeactivate: (e) => {
+      'worklet';
+      // To the nearest corner, helped along by how it was thrown.
+      const nx = x.value + e.velocityX * 0.1;
+      const ny = y.value + e.velocityY * 0.1;
+      x.value = withSpring(nx < across / 2 ? across : 0, smooth);
+      y.value = withSpring(ny > down / 2 ? down : 0, smooth);
+    },
+  });
+  const moved = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }, { translateY: y.value }] }));
+
   if (!call.video) return null;
   const waiting = call.state !== 'active';
   if (call.group && !waiting) return null;
   const other = call.peers.find((p) => p.stream && p.video);
+  const flip = swapped && !!other?.stream && !!call.local;
+  const full = { position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 } as const;
   return (
     <>
       {/* A shared screen shows whole; a face fills the screen. */}
-      {!waiting && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={0} />}
+      {!waiting && flip && call.local && <RTCView key="me-big" streamURL={call.local} objectFit="cover" mirror={call.front} style={full} zOrder={0} />}
+      {!waiting && !flip && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={full} zOrder={0} />}
       {call.local && !waiting && !small && (
-        <Animated.View entering={FadeIn} style={{ position: 'absolute', top: insets.top + 110, end: 14, width: 110, height: 160, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }}>
-          <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ flex: 1 }} zOrder={1} />
-        </Animated.View>
+        <GestureDetector gesture={drag}>
+          <Animated.View entering={FadeIn} style={[{ position: 'absolute', top: insets.top + 110, end: 14, width: SELF_W, height: SELF_H, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }, moved]}>
+            <Pressy onPress={() => other?.stream && setSwapped((v) => !v)} label={t.swapVideo} scale={0.96} style={{ flex: 1 }} testID="call-self-view">
+              {flip && other?.stream ? (
+                <RTCView key={`small-${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={{ flex: 1 }} zOrder={1} />
+              ) : (
+                <RTCView key="me-small" streamURL={call.local} objectFit="cover" mirror={call.front} style={{ flex: 1 }} zOrder={1} />
+              )}
+            </Pressy>
+          </Animated.View>
+        </GestureDetector>
       )}
-      {call.local && waiting && <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, opacity: 0.5 }} zOrder={0} />}
+      {call.local && waiting && <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ ...full, opacity: 0.5 }} zOrder={0} />}
     </>
   );
 }
+
+const SELF_W = 110;
+const SELF_H = 160;
 
 /**
  * Everyone in a group call (me first), filling the space it's given: two
@@ -396,12 +444,56 @@ function Tile({ call, peer, w, h }: { call: CallView; peer: PeerView | 'me'; w: 
   );
 }
 
-/** Decline and Answer. */
+/** Decline and Answer, and (one to one) Message: decline with a quick reply, like WhatsApp. */
 function Ringing({ call, t }: { call: CallView; t: Strings }) {
+  const [replying, setReplying] = useState(false);
+  const [own, setOwn] = useState('');
+  const quick = [t.declineQuick1, t.declineQuick2, t.declineQuick3, t.declineQuick4];
+  const declineWith = (text: string) => {
+    const words = text.trim();
+    setReplying(false);
+    void calls.decline();
+    if (words) void core.client.sendText(call.chatId, words).catch(() => toast(t.couldNot));
+  };
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 30 }}>
-      <Round icon="endCall" color={RED} label={t.decline} onPress={() => void calls.decline()} testID="call-decline" big />
-      <Round icon={call.video ? 'video' : 'calls'} color={GREEN} label={t.answer} onPress={() => void calls.answer()} testID="call-answer" big />
+    <View style={{ gap: 26 }}>
+      {!call.group && (
+        <View style={{ alignItems: 'center' }}>
+          <Pressy onPress={() => setReplying(true)} label={t.declineWithMessage} scale={0.94} testID="call-decline-message">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.16)' }}>
+              <Icon name="chat" size={18} color={INK} />
+              <Txt size={14} weight="600" color={INK}>
+                {t.message}
+              </Txt>
+            </View>
+          </Pressy>
+        </View>
+      )}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 30 }}>
+        <Round icon="endCall" color={RED} label={t.decline} onPress={() => void calls.decline()} testID="call-decline" big />
+        <Round icon={call.video ? 'video' : 'calls'} color={GREEN} label={t.answer} onPress={() => void calls.answer()} testID="call-answer" big />
+      </View>
+      <Sheet visible={replying} onClose={() => setReplying(false)} title={t.declineWithMessage}>
+        <View style={{ paddingHorizontal: 16, gap: 6, paddingBottom: 6 }}>
+          {quick.map((q, i) => (
+            <Pressy key={q} onPress={() => declineWith(q)} label={q} scale={0.98} testID={`decline-quick-${i}`}>
+              <View style={{ paddingHorizontal: 14, paddingVertical: 13, borderRadius: 14 }}>
+                <Txt size={15.5}>{q}</Txt>
+              </View>
+            </Pressy>
+          ))}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Field value={own} onChangeText={setOwn} placeholder={t.writeYourOwn} returnKeyType="send" onSubmitEditing={() => declineWith(own)} testID="decline-own" />
+            </View>
+            <Pressy onPress={() => declineWith(own)} label={t.send} scale={0.9} disabled={!own.trim()} testID="decline-own-send">
+              <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center', opacity: own.trim() ? 1 : 0.5 }}>
+                <Icon name="send" size={20} color={INK} />
+              </View>
+            </Pressy>
+          </View>
+        </View>
+      </Sheet>
     </View>
   );
 }

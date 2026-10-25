@@ -4,12 +4,13 @@
 // you pull, you feel a tick when you've pulled far enough, and the row springs
 // back when you let go. Your finger's speed carries into the spring.
 import { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../core/core';
+import { plainText } from '../core/richText';
 import type { ChatRow as Row } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
@@ -96,7 +97,8 @@ export function ChatRow({
     // A chat locked in the list never shows its words: only whether something new came.
     // (Inside the unlocked Locked chats folder they show, like WhatsApp.)
     if (prefs.lock === 'list') return { text: unread ? t.newMessage : t.lockedChat, color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
-    if (prefs.draft) return { text: `${t.draft} ${prefs.draft}`, color: theme.danger, weight: '400' as const };
+    // "Draft:" in green, then the words, like WhatsApp.
+    if (prefs.draft) return { label: t.draft, text: plainText(prefs.draft).replace(/\s+/g, ' '), color: theme.muted, weight: '400' as const };
     return { text: preview(last, t, chat.kind === 'group'), color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
   }, [typing, prefs.draft, prefs.lock, last, chat, t, theme]);
 
@@ -177,6 +179,11 @@ export function ChatRow({
                   {mine && <Ticks status={last.status} size={16} />}
                   <View style={{ flex: 1 }}>
                     <Txt size={14} lines={1} color={line.color} weight={line.weight}>
+                      {'label' in line && (
+                        <Text style={{ color: theme.online, fontWeight: '600' }} testID="draft-label">
+                          {`${line.label} `}
+                        </Text>
+                      )}
                       {line.text}
                     </Txt>
                   </View>

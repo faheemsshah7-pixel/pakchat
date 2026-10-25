@@ -16,7 +16,7 @@ export type Me = {
   name: string;
   about?: string | null;
   photo?: string | null;
-  privacy: { lastSeen: string; online: string; readReceipts: boolean; photo: string };
+  privacy: { lastSeen: string; online: string; readReceipts: boolean; photo: string; about: string; groups: string };
 };
 
 export type SignedIn = {
@@ -36,7 +36,7 @@ export type Match = { hash: string; user: { id: string; name: string; about?: st
 /** A chat as the server sends it: who's in it, and its counter. */
 export type ServerChat = Pick<
   Chat,
-  'id' | 'kind' | 'members' | 'title' | 'description' | 'photo' | 'onlyAdminsSend' | 'inviteCode' | 'inviteExpiresAt' | 'inviteMaxUses' | 'inviteUses' | 'communityId' | 'announcements' | 'callLink' | 'groupsByMembers' | 'joinApproval' | 'createdBy'
+  'id' | 'kind' | 'members' | 'title' | 'description' | 'photo' | 'onlyAdminsSend' | 'inviteCode' | 'inviteExpiresAt' | 'inviteMaxUses' | 'inviteUses' | 'communityId' | 'announcements' | 'callLink' | 'groupsByMembers' | 'joinApproval' | 'membersEdit' | 'membersAdd' | 'createdBy'
 > & {
   seq: number;
 };
@@ -103,11 +103,13 @@ type WireChat = {
   call_link?: boolean;
   groups_by_members?: boolean;
   join_approval?: boolean;
+  members_edit?: boolean;
+  members_add?: boolean;
   created_by?: string | null;
 };
 
 /** What a group's (or a community's) admins can change. */
-export type GroupChanges = { title?: string; description?: string; photo?: string; onlyAdminsSend?: boolean; groupsByMembers?: boolean; joinApproval?: boolean };
+export type GroupChanges = { title?: string; description?: string; photo?: string; onlyAdminsSend?: boolean; groupsByMembers?: boolean; joinApproval?: boolean; membersEdit?: boolean; membersAdd?: boolean };
 
 /** An invite link, as the "Join group?" screen shows it. */
 export type InviteInfo = {
@@ -144,7 +146,7 @@ export const REQUESTED = 'requested' as const;
 
 export type ReportReason = 'spam' | 'abuse' | 'scam' | 'other';
 
-type WireMe = { id: string; email: string | null; phone?: string | null; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean; photo?: string } };
+type WireMe = { id: string; email: string | null; phone?: string | null; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean; photo?: string; about?: string; groups?: string } };
 
 type WireBundle = {
   device_id: number;
@@ -185,6 +187,8 @@ export function chatFromWire(c: WireChat): ServerChat {
     chat.callLink = c.call_link === true;
     chat.groupsByMembers = c.groups_by_members === true;
     chat.joinApproval = c.join_approval === true;
+    chat.membersEdit = c.members_edit === true;
+    chat.membersAdd = c.members_add === true;
     if (c.created_by) chat.createdBy = c.created_by;
   }
   return chat;
@@ -202,7 +206,7 @@ export function meFromWire(u: WireMe): Me {
     name: u.name,
     about: u.about,
     photo: u.photo,
-    privacy: { lastSeen: u.privacy.last_seen, online: u.privacy.online, readReceipts: u.privacy.read_receipts, photo: u.privacy.photo ?? 'everyone' },
+    privacy: { lastSeen: u.privacy.last_seen, online: u.privacy.online, readReceipts: u.privacy.read_receipts, photo: u.privacy.photo ?? 'everyone', about: u.privacy.about ?? 'everyone', groups: u.privacy.groups ?? 'everyone' },
   };
 }
 
@@ -486,6 +490,8 @@ export class HttpServer implements ServerApi {
     if (changes.onlyAdminsSend !== undefined) body.only_admins_send = changes.onlyAdminsSend;
     if (changes.groupsByMembers !== undefined) body.groups_by_members = changes.groupsByMembers;
     if (changes.joinApproval !== undefined) body.join_approval = changes.joinApproval;
+    if (changes.membersEdit !== undefined) body.members_edit = changes.membersEdit;
+    if (changes.membersAdd !== undefined) body.members_add = changes.membersAdd;
     return chatFromWire(await this.call<WireChat>('PATCH', `/groups/${encodeURIComponent(chatId)}`, body));
   }
 

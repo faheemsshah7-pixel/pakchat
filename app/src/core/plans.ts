@@ -8,7 +8,7 @@ import * as Notifications from 'expo-notifications';
 import { core } from './core';
 import { PLAN_ALERT, alertChannel, words } from './push';
 
-export type PlanNote = { chatId: string; author: string; id: string; title: string; at: number; video: boolean; link?: string };
+export type PlanNote = { chatId: string; author: string; id: string; title: string; at: number; video: boolean; link?: string; general?: true; call?: true };
 
 const KEY = 'app:callPlans';
 /** A call shows in "Upcoming" until this long after it started. */
@@ -38,22 +38,22 @@ export async function notePlan(m: Message) {
     await Notifications.cancelScheduledNotificationAsync(alertId(m)).catch(() => {});
     return;
   }
-  const note: PlanNote = { chatId: m.chatId, author: m.author, id: m.id, title: m.plan.title, at: m.plan.at, video: m.plan.video, ...(m.plan.link ? { link: m.plan.link } : {}) };
+  const note: PlanNote = { chatId: m.chatId, author: m.author, id: m.id, title: m.plan.title, at: m.plan.at, video: m.plan.video, ...(m.plan.link ? { link: m.plan.link } : {}), ...(m.plan.general ? { general: true as const } : {}), ...(m.plan.call ? { call: true as const } : {}) };
   await save([...all.filter((p) => p.at > old), note]);
   if (note.at > Date.now() + 5_000) {
     const t = words();
     await Notifications.scheduleNotificationAsync({
       identifier: alertId(note),
-      content: { title: note.title, body: note.video ? t.videoCallStarting : t.voiceCallStarting, data: { chatId: note.chatId }, priority: Notifications.AndroidNotificationPriority.HIGH },
+      content: { title: note.title, body: note.general && !note.call ? t.eventStartingNow : note.video ? t.videoCallStarting : t.voiceCallStarting, data: { chatId: note.chatId }, priority: Notifications.AndroidNotificationPriority.HIGH },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: note.at, channelId: alertChannel },
     }).catch(() => {});
   }
 }
 
-/** Scheduled calls from now on (and ones that started in the last two hours), soonest first. */
+/** Scheduled calls from now on (and ones that started in the last two hours), soonest first. Events without a call aren't calls. */
 export async function upcomingPlans() {
   const old = Date.now() - PLAN_SHOWS_MS;
-  return (await load()).filter((p) => p.at > old).sort((a, b) => a.at - b.at);
+  return (await load()).filter((p) => p.at > old && (!p.general || p.call)).sort((a, b) => a.at - b.at);
 }
 
 /** Signing out: forget them, and their reminders. */

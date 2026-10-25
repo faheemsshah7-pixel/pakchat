@@ -32,6 +32,10 @@ defmodule Pakchat.Chats.Chat do
     field :groups_by_members, :boolean, default: false
     # A group: its admins approve who joins.
     field :join_approval, :boolean, default: false
+
+    # A group: everyone (not only admins) may change its name, photo and description, and add people.
+    field :members_edit, :boolean, default: false
+    field :members_add, :boolean, default: false
     belongs_to :creator, Pakchat.Accounts.User, foreign_key: :created_by
     has_many :members, Pakchat.Chats.Member
     timestamps(type: :utc_datetime_usec)
@@ -45,7 +49,9 @@ defmodule Pakchat.Chats.Chat do
       :photo,
       :only_admins_send,
       :groups_by_members,
-      :join_approval
+      :join_approval,
+      :members_edit,
+      :members_add
     ])
     |> validate_required([:title])
     |> validate_length(:title, min: 1, max: 100)

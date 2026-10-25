@@ -28,6 +28,7 @@ import { duration } from '../format';
 import { Icon } from '../icons';
 import { IconButton, Txt } from '../kit';
 import { snappy, thud, tick } from '../motion';
+import { pickedOf } from './Gallery';
 import { toast } from '../overlays';
 
 const MAX_VIDEO_S = 120;
@@ -320,28 +321,4 @@ function Recent({ onPick }: { onPick: (p: Picked[]) => void }) {
       )}
     </View>
   );
-}
-
-const MIMES: Record<string, string> = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  webp: 'image/webp',
-  heic: 'image/heic',
-  heif: 'image/heif',
-  gif: 'image/gif',
-  mp4: 'video/mp4',
-  m4v: 'video/mp4',
-  '3gp': 'video/3gpp',
-  webm: 'video/webm',
-  mkv: 'video/x-matroska',
-  mov: 'video/quicktime',
-};
-
-/** A gallery photo or video, ready for the editor. */
-function pickedOf(a: MediaLibrary.Asset): Picked {
-  const video = a.mediaType === 'video';
-  const ext = (/\.([a-z0-9]+)$/i.exec(a.filename)?.[1] ?? '').toLowerCase();
-  const mime = MIMES[ext] ?? (video ? 'video/mp4' : 'image/jpeg');
-  return { uri: a.uri, mime, kind: video ? 'video' : 'image', name: a.filename, width: a.width, height: a.height, ...(video ? { duration: Math.round(a.duration * 1000) } : {}) };
 }

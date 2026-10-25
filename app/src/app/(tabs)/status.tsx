@@ -1,9 +1,10 @@
-// (tabs)/status.tsx: Status, updates that last 24 hours.
+// (tabs)/status.tsx: Status, updates that last 24 hours, like WhatsApp's.
 //
-// At the top, my status: tap to see it (or to add one), or use the pencil
-// (words on a colour) and camera (a photo or video) buttons. Below, everyone
-// else's: new ones first with a coloured ring, then the ones I've seen, then
-// the ones I muted (hold a row to mute or unmute). Tap to watch.
+// A sideways row of round photos: first "Add status" (me, with a +; tap to see
+// mine, or to add one), then everyone else's: new ones first with a coloured
+// ring, then the ones I've seen, then the ones I muted (faded; hold one to
+// mute or unmute). Tap to watch. The pencil (words on a colour) and camera
+// (a photo or video) at the top add one too.
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -13,12 +14,15 @@ import Svg, { Circle } from 'react-native-svg';
 import { core } from '../../core/core';
 import { useAuth, useStatuses, usePeople } from '../../core/hooks';
 import type { StatusPerson } from '../../core/status';
-import { fill, useT } from '../../i18n';
+import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { listTime } from '../../ui/format';
-import { Avatar, IconButton, Pressy, Screen, Section, Txt } from '../../ui/kit';
+import { Icon } from '../../ui/icons';
+import { Avatar, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { rise } from '../../ui/motion';
 import { MenuItem, Sheet } from '../../ui/overlays';
+
+const PHOTO = 60;
+const CELL = 76;
 
 export default function Status() {
   const t = useT();
@@ -35,58 +39,52 @@ export default function Status() {
   const muted = others.filter((p) => p.muted);
   const open = (p: StatusPerson) => router.push({ pathname: '/status/[id]', params: { id: p.chat.id } });
   const mineCount = mine?.items.length ?? 0;
+  const add = () => router.push({ pathname: '/status-new', params: { kind: 'media' } });
 
   return (
     <Screen bottom={false}>
-      <View style={{ paddingTop: 18, paddingHorizontal: 20, paddingBottom: 6, flexDirection: 'row', alignItems: 'center' }}>
+      <View style={{ paddingTop: 18, paddingHorizontal: 20, paddingBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <Txt size={27} weight="800" style={{ letterSpacing: -0.9, flex: 1 }}>
           {t.status}
         </Txt>
+        <IconButton icon="text" label={t.textStatus} onPress={() => router.push({ pathname: '/status-new', params: { kind: 'text' } })} color={theme.muted} testID="status-text" />
+        <IconButton icon="camera" label={t.photoStatus} onPress={add} color={theme.muted} testID="status-media" />
         <IconButton icon="lock" label={t.statusPrivacy} onPress={() => router.push('/settings/status-privacy')} color={theme.muted} testID="status-privacy" />
       </View>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 120 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
         <Animated.View entering={rise()}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, paddingVertical: 10 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10, gap: 4 }} testID="status-row-list">
+            {/* Add status: me, with a +. */}
             <Pressy
-              onPress={() => (mineCount ? router.push({ pathname: '/status/[id]', params: { id: mine!.chat.id } }) : router.push({ pathname: '/status-new', params: { kind: 'text' } }))}
-              label={t.myStatus}
-              scale={0.98}
-              style={{ flex: 1 }}
+              onPress={() => (mineCount ? router.push({ pathname: '/status/[id]', params: { id: mine!.chat.id } }) : add())}
+              onLongPress={add}
+              label={mineCount ? t.myStatus : t.addStatus}
+              scale={0.94}
               testID="my-status"
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <Ring count={mineCount} seen={false} color={theme.acc} muted={theme.muted}>
-                  <Avatar id={myId} name={me?.name ?? ''} size={50} />
-                </Ring>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Txt size={16} weight="700">
-                    {t.myStatus}
-                  </Txt>
-                  <Txt size={13} color={theme.muted} lines={1}>
-                    {mineCount ? fill(t.statusUpdates, { n: mineCount, time: listTime(mine!.latest, t) }) : t.tapToAddStatus}
-                  </Txt>
+              <View style={{ width: CELL, alignItems: 'center', gap: 6 }}>
+                <View>
+                  <Ring count={mineCount} seen={false} color={theme.acc} muted={theme.muted}>
+                    <Avatar id={myId} name={me?.name ?? ''} size={PHOTO} />
+                  </Ring>
+                  <Pressy onPress={add} label={t.addStatus} scale={0.85} style={{ position: 'absolute', end: 0, bottom: 0 }} testID="add-status">
+                    <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, borderWidth: 2, borderColor: theme.bg, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="plus" size={13} color="#FFFFFF" stroke={3} />
+                    </View>
+                  </Pressy>
                 </View>
+                <Txt size={12} weight="600" lines={1} align="center">
+                  {mineCount ? t.myStatus : t.addStatus}
+                </Txt>
               </View>
             </Pressy>
-            <IconButton icon="text" label={t.textStatus} look="soft" size={42} iconSize={19} onPress={() => router.push({ pathname: '/status-new', params: { kind: 'text' } })} testID="status-text" />
-            <IconButton icon="camera" label={t.photoStatus} look="soft" size={42} iconSize={20} onPress={() => router.push({ pathname: '/status-new', params: { kind: 'media' } })} testID="status-media" />
-          </View>
+            {[...fresh, ...seen, ...muted].map((p, i) => (
+              <StatusCircle key={p.chat.id} p={p} i={i} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
+            ))}
+          </ScrollView>
         </Animated.View>
-
-        {fresh.length > 0 && <Section title={t.recentUpdates} />}
-        {fresh.map((p, i) => (
-          <Row key={p.chat.id} p={p} i={i} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
-        ))}
-        {seen.length > 0 && <Section title={t.viewedUpdates} />}
-        {seen.map((p, i) => (
-          <Row key={p.chat.id} p={p} i={i} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
-        ))}
-        {muted.length > 0 && <Section title={t.mutedUpdates} />}
-        {muted.map((p, i) => (
-          <Row key={p.chat.id} p={p} i={i} onPress={() => open(p)} onLongPress={() => setHeld(p)} faded />
-        ))}
         {all && !others.length && (
-          <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 40, paddingHorizontal: 30 }}>
+          <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 30, paddingHorizontal: 30 }}>
             {t.noStatuses}
           </Txt>
         )}
@@ -108,25 +106,20 @@ export default function Status() {
   );
 }
 
-function Row({ p, i, onPress, onLongPress, faded }: { p: StatusPerson; i: number; onPress: () => void; onLongPress: () => void; faded?: boolean }) {
-  const t = useT();
+/** One person in the row: their photo in its ring, and their name. */
+function StatusCircle({ p, i, onPress, onLongPress }: { p: StatusPerson; i: number; onPress: () => void; onLongPress: () => void }) {
   const { theme } = useLook();
   const name = core.name(p.owner) || '…';
   return (
-    <Animated.View entering={i < 12 ? rise(i * 25) : undefined} style={{ opacity: faded ? 0.6 : 1 }}>
-      <Pressy onPress={onPress} onLongPress={onLongPress} label={name} scale={0.98} testID="status-row">
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, paddingVertical: 9 }}>
-          <Ring count={p.items.length} seen={p.seen} color={theme.acc} muted={theme.muted}>
-            <Avatar id={p.owner} name={name.replace(/^~ /, '')} size={50} />
+    <Animated.View entering={i < 8 ? rise(40 + i * 25) : undefined} style={{ opacity: p.muted ? 0.5 : 1 }}>
+      <Pressy onPress={onPress} onLongPress={onLongPress} label={name} scale={0.94} testID="status-row">
+        <View style={{ width: CELL, alignItems: 'center', gap: 6 }}>
+          <Ring count={p.items.length} seen={p.seen || !!p.muted} color={theme.acc} muted={theme.faint}>
+            <Avatar id={p.owner} name={name.replace(/^~ /, '')} size={PHOTO} />
           </Ring>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Txt size={16} weight="700" lines={1}>
-              {name}
-            </Txt>
-            <Txt size={13} color={theme.muted}>
-              {listTime(p.latest, t)}
-            </Txt>
-          </View>
+          <Txt size={12} weight={p.seen ? '400' : '600'} color={p.seen ? theme.muted : theme.text} lines={1} align="center">
+            {name.replace(/^~ /, '')}
+          </Txt>
         </View>
       </Pressy>
     </Animated.View>
@@ -135,7 +128,7 @@ function Row({ p, i, onPress, onLongPress, faded }: { p: StatusPerson; i: number
 
 /** The ring around a picture: one piece per status, coloured until seen. */
 function Ring({ count, seen, color, muted, children }: { count: number; seen: boolean; color: string; muted: string; children: ReactNode }) {
-  const size = 60;
+  const size = PHOTO + 10;
   const r = size / 2 - 2;
   const round = 2 * Math.PI * r;
   const gap = count > 1 ? 6 : 0;

@@ -1,4 +1,4 @@
-# One phone: Graphite look, a green accent, then Urdu (every screen right to left), and back.
+# One phone: Graphite look, a green accent (Settings › Chats › Theme), then Urdu (every screen right to left), and back.
 # Settings opens from the chat list's ⋮ menu (the bottom bar has Communities now).
 appId: com.pakchat.app
 ---
@@ -21,9 +21,13 @@ appId: com.pakchat.app
 - tapOn:
     id: menu-settings
 - tapOn:
+    id: open-chats-settings
+- tapOn:
     id: mode-graphite
 - tapOn:
     id: accent-green
+- tapOn:
+    id: back
 - tapOn:
     id: open-language
 - tapOn:
@@ -46,9 +50,13 @@ appId: com.pakchat.app
 - tapOn:
     id: back
 - tapOn:
+    id: open-chats-settings
+- tapOn:
     id: mode-sky
 - tapOn:
     id: accent-blue
+- tapOn:
+    id: back
 - assertVisible: Settings
 - tapOn:
     id: back

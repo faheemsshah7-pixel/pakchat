@@ -35,6 +35,7 @@ import { CropTool, fit, type Rect } from './editor/CropTool';
 import { TrimStrip } from './editor/TrimStrip';
 import { EMOJI } from './ExtrasPanel';
 import { OnceToggle } from './VoiceRecorder';
+import { GALLERY_MAX } from './Gallery';
 
 export type Ready = Picked & { caption?: string };
 
@@ -151,11 +152,11 @@ export function MediaComposer({
   }
 
   async function addMore() {
-    if (drafts.length >= 30) return;
+    if (drafts.length >= GALLERY_MAX) return;
     const more = await onMore().catch(() => []);
     if (!more.length) return;
     if (d) await flatten(d).catch(() => d);
-    setDrafts((all) => [...all, ...more.map((m) => ({ key: core.newId(), p: m, caption: '', strokes: [], layers: [] }))].slice(0, 30));
+    setDrafts((all) => [...all, ...more.map((m) => ({ key: core.newId(), p: m, caption: '', strokes: [], layers: [] }))].slice(0, GALLERY_MAX));
     setAt(drafts.length);
     setTool(null);
   }

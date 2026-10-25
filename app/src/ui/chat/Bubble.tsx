@@ -11,16 +11,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
+import { emojiOnly } from '../../core/richText';
 import { slowPhone } from '../../core/phone';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Ticks } from '../ChatRow';
 import { FileBody } from './FileBody';
 import { ChatQuoteView, ContactBody, EventBody, LinkBody, LocationBody, OnceBody, RoundBody } from './MoreBodies';
+import { BigEmoji, RichWords } from './RichText';
 import { VoiceBody } from './VoiceBody';
 import { bodyLine, clock, systemText } from '../format';
 import { Icon } from '../icons';
@@ -41,6 +43,8 @@ type Props = {
   starred: boolean;
   selecting: boolean;
   selected: boolean;
+  /** Just jumped to (from search or a quoted reply): it lights up for a moment. */
+  flash?: boolean;
   onPress: (m: Message) => void;
   onLongPress: (m: Message) => void;
   onReply: (m: Message) => void;
@@ -72,7 +76,7 @@ function SystemNote({ m }: { m: Message }) {
   );
 }
 
-function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above }: Props) {
+function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above }: Props) {
   const t = useT();
   const { theme, rtl, lang } = useLook();
   const mine = m.author === core.myId;
@@ -83,6 +87,10 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   useEffect(() => {
     picked.value = withTiming(selected ? 1 : 0, fade);
   }, [selected, picked]);
+  const lit = useSharedValue(0);
+  useEffect(() => {
+    if (flash) lit.value = withSequence(withTiming(1, { duration: 200 }), withDelay(700, withTiming(0, { duration: 500 })));
+  }, [flash, lit]);
 
   // Towards the middle of the screen: right for theirs, left for mine (the other way round in Urdu).
   const dir = (mine ? -1 : 1) * (rtl ? -1 : 1);
@@ -115,6 +123,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
     return { opacity: interpolate(pull, [10, PULL], [0, 1], 'clamp'), transform: [{ scale: interpolate(pull, [0, PULL], [0.5, 1], 'clamp') }] };
   });
   const highlight = useAnimatedStyle(() => ({ opacity: picked.value }));
+  const flashing = useAnimatedStyle(() => ({ opacity: lit.value }));
 
   const name = group && !mine && first ? core.name(m.author) || '…' : '';
   const urdu = !!m.text && hasUrdu(m.text);
@@ -128,7 +137,9 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   };
   const reactions = Object.entries(m.reactions ?? {});
   // A sticker (and a round video) has no bubble: just the picture, with the time on a little pill under it.
-  const bare = !m.deleted && m.kind === 'file' && (m.file?.kind === 'sticker' || (!!m.file?.round && !m.file.once));
+  // One to three emoji on their own are shown big, with no bubble either (like WhatsApp).
+  const big = !m.deleted && m.kind === 'text' && !quoted && !m.link && !m.forwarded && !m.quote && !m.statusReply ? emojiOnly(m.text ?? '') : 0;
+  const bare = big > 0 || (!m.deleted && m.kind === 'file' && (m.file?.kind === 'sticker' || (!!m.file?.round && !m.file.once)));
 
   const body = (
     <View style={{ paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
@@ -185,7 +196,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left', maxWidth: 236 },
               ]}
             >
-              <Words text={m.text} mentions={m.mentions} />
+              <RichWords text={m.text} mentions={m.mentions} color={mine ? theme.bubbleMineText : theme.text} mine={mine} />
             </Text>
           )}
         </>
@@ -198,7 +209,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left' },
             ]}
           >
-            <Words text={m.text ?? ''} mentions={m.mentions} />
+            <RichWords text={m.text ?? ''} mentions={m.mentions} color={mine ? theme.bubbleMineText : theme.text} mine={mine} />
           </Text>
         </>
       )}
@@ -223,6 +234,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
     <View style={{ marginTop: first ? 6 : 2 }}>
       {/* The picked-message tint, only while picking (one less layer per bubble while scrolling). */}
       {(selecting || selected) && <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }, highlight]} />}
+      {flash && <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }, flashing]} />}
       {above}
       <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
         {/* The reply arrow, waiting behind the bubble. */}
@@ -254,7 +266,9 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                       <Quote m={quoted} mine={false} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
                     </View>
                   )}
-                  {m.file?.round ? (
+                  {big > 0 ? (
+                    <BigEmoji text={m.text ?? ''} count={big} />
+                  ) : m.file?.round ? (
                     <RoundBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
                   ) : (
                     <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
@@ -305,29 +319,6 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         </GestureDetector>
       </View>
     </View>
-  );
-}
-
-/** Words, with @mentions in the accent colour. */
-function Words({ text, mentions }: { text: string; mentions?: string[] }) {
-  const { theme } = useLook();
-  if (!mentions?.length) return <>{text}</>;
-  const names = mentions.map((id) => `@${core.plainName(id)}`).filter((n) => n.length > 1);
-  if (!names.length) return <>{text}</>;
-  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const parts = text.split(new RegExp(`(${escaped.join('|')})`, 'g'));
-  return (
-    <>
-      {parts.map((part, i) =>
-        names.includes(part) ? (
-          <Text key={i} style={{ color: theme.mention, fontWeight: '600' }}>
-            {part}
-          </Text>
-        ) : (
-          part
-        ),
-      )}
-    </>
   );
 }
 

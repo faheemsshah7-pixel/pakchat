@@ -45,6 +45,8 @@ export function changeAllowed(chat: Chat, m: Message, change: Change, from: stri
     case 'react':
       return !m.deleted;
     case 'vote':
+      // An event's answer: Going (0) or Not going (1).
+      if (m.kind === 'event') return !m.deleted && !!m.plan?.general && change.options.length <= 1 && change.options.every((o) => o <= 1);
       return m.kind === 'poll' && !m.deleted && !!m.poll && change.options.every((o) => o < m.poll!.options.length) && (m.poll.multi || change.options.length <= 1);
     case 'pin':
       return !m.deleted;
