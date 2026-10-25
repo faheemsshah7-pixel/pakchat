@@ -1,18 +1,19 @@
 // viewer.tsx: photos and videos full screen, on black, like WhatsApp.
 //
 // It opens on the one you tapped, and you can swipe left and right through
-// every photo and video in the chat (or use the arrows at the sides). A strip
-// along the bottom shows them all small: tap one to jump there. Tap the
-// picture to hide everything else; tap again to bring it back. A video plays
-// when you reach it, with the phone's own controls. One that isn't downloaded
-// yet shows its blurred preview and a download button.
+// every photo and video in the chat. Tap the picture to hide everything else;
+// tap again to bring it back. A video plays when you reach it, with our own
+// controls: play and pause in the middle, and along the bottom the time, the
+// line to drag through it, its length and the sound. One that isn't
+// downloaded yet shows its blurred preview and a download button.
 // Share sends the file to another app.
 import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEventListener } from 'expo';
+import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -21,11 +22,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { core, isOffline } from '../core/core';
 import { Cancelled, download, FileBroken, FileGone, haveFile, tagOf } from '../core/files';
 import { useFileProgress } from '../core/hooks';
+import { outsideFor } from '../core/lock';
 import { useT } from '../i18n';
-import { clock, fileSize, listTime } from '../ui/format';
+import { clock, dayLabel, duration, fileSize } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { Slider } from '../ui/Slider';
 
 const keyOf = (m: Message) => `${m.author}/${m.id}`;
 
@@ -41,7 +44,6 @@ export default function Viewer() {
   const first = useRef(true);
   const [chrome, setChrome] = useState(true);
   const pager = useRef<FlatList<Message>>(null);
-  const strip = useRef<FlatList<Message>>(null);
 
   // Every photo and video in the chat, oldest first (so swiping left goes to newer ones).
   useEffect(() => {
@@ -74,17 +76,6 @@ export default function Viewer() {
   const f = m?.file;
   const who = m ? (m.author === core.myId ? t.youWord : core.name(m.author) || '…') : '';
 
-  // The strip follows along.
-  useEffect(() => {
-    if (all?.length) strip.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
-  }, [index, all?.length]);
-
-  function go(to: number) {
-    if (!all || to < 0 || to >= all.length) return;
-    setIndex(to);
-    pager.current?.scrollToIndex({ index: to, animated: true });
-  }
-
   if (!all) {
     return (
       <View style={{ flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }}>
@@ -111,7 +102,7 @@ export default function Viewer() {
         onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(all.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
         windowSize={3}
         initialNumToRender={1}
-        renderItem={({ item, index: i }) => <Page m={item} width={width} active={i === index} onTap={() => setChrome((c) => !c)} />}
+        renderItem={({ item, index: i }) => <Page m={item} width={width} active={i === index} chrome={chrome} onTap={() => setChrome((c) => !c)} />}
       />
 
       {chrome && (
@@ -123,49 +114,27 @@ export default function Viewer() {
             </Txt>
             {!!m && (
               <Txt size={12.5} color="rgba(255,255,255,0.75)">
-                {listTime(m.sentAt, t)} · {clock(m.sentAt)}
+                {dayLabel(m.sentAt, t)}, {clock(m.sentAt)}
               </Txt>
             )}
           </View>
           {!!f?.local && haveFile(m!) && (
-            <IconButton icon="forward" label={t.share} look="onAccent" size={42} flip onPress={() => void Sharing.shareAsync(f.local!, { mimeType: f.mime }).catch(() => {})} testID="viewer-share" />
+            <IconButton icon="forward" label={t.share} look="onAccent" size={42} flip onPress={() => void outsideFor(() => Sharing.shareAsync(f.local!, { mimeType: f.mime })).catch(() => {})} testID="viewer-share" />
           )}
         </Animated.View>
       )}
 
-      {/* The arrows, at the sides. */}
-      {chrome && index > 0 && (
-        <View style={{ position: 'absolute', top: '50%', marginTop: -22, start: 6 }}>
-          <IconButton icon="back" label={t.previous} onPress={() => go(index - 1)} look="onAccent" size={44} flip testID="viewer-previous" />
-        </View>
-      )}
-      {chrome && index < all.length - 1 && (
-        <View style={{ position: 'absolute', top: '50%', marginTop: -22, end: 6 }}>
-          <IconButton icon="chevron" label={t.next} onPress={() => go(index + 1)} look="onAccent" size={44} flip testID="viewer-next" />
-        </View>
-      )}
-
-      {chrome && (
-        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} style={{ position: 'absolute', start: 0, end: 0, bottom: 0, paddingBottom: insets.bottom + 8, backgroundColor: 'rgba(0,0,0,0.55)' }}>
-          {!!m?.text && (
-            <Txt size={15} color="#FFFFFF" style={{ paddingHorizontal: 16, paddingTop: 12 }} lines={4}>
-              {m.text}
-            </Txt>
-          )}
-          {all.length > 1 && (
-            <FlatList
-              ref={strip}
-              data={all}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={keyOf}
-              contentContainerStyle={{ paddingHorizontal: 10, paddingTop: 10, gap: 4 }}
-              getItemLayout={(_, i) => ({ length: 52, offset: 10 + 52 * i, index: i })}
-              initialScrollIndex={Math.max(0, start - 3)}
-              onScrollToIndexFailed={() => {}}
-              renderItem={({ item, index: i }) => <Thumb m={item} on={i === index} onPress={() => go(i)} />}
-            />
-          )}
+      {/* The caption (above a video's controls). */}
+      {chrome && !!m?.text && (
+        <Animated.View
+          entering={FadeIn.duration(150)}
+          exiting={FadeOut.duration(120)}
+          pointerEvents="none"
+          style={{ position: 'absolute', start: 0, end: 0, bottom: insets.bottom + (f?.kind === 'video' && haveFile(m) ? VIDEO_BAR : 0), paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' }}
+        >
+          <Txt size={15} color="#FFFFFF" lines={4}>
+            {m.text}
+          </Txt>
         </Animated.View>
       )}
     </View>
@@ -173,7 +142,7 @@ export default function Viewer() {
 }
 
 /** One photo or video, the width of the screen. */
-function Page({ m, width, active, onTap }: { m: Message; width: number; active: boolean; onTap: () => void }) {
+function Page({ m, width, active, chrome, onTap }: { m: Message; width: number; active: boolean; chrome: boolean; onTap: () => void }) {
   const t = useT();
   const f = m.file!;
   const here = haveFile(m);
@@ -194,7 +163,7 @@ function Page({ m, width, active, onTap }: { m: Message; width: number; active: 
       {here && f.kind === 'video' ? (
         // Only the one on screen has a player (they're heavy), and it stops when you swipe away.
         active ? (
-          <Video uri={f.local!} />
+          <Video uri={f.local!} chrome={chrome} onTap={onTap} />
         ) : (
           <Pressable style={{ flex: 1 }} onPress={onTap} />
         )
@@ -219,25 +188,92 @@ function Page({ m, width, active, onTap }: { m: Message; width: number; active: 
   );
 }
 
-/** A small square in the strip. */
-function Thumb({ m, on, onPress }: { m: Message; on: boolean; onPress: () => void }) {
-  const f = m.file!;
-  const source = f.kind === 'image' && f.local ? { uri: f.local } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
-  return (
-    <Pressy onPress={onPress} scale={0.92} label={f.kind}>
-      <View style={{ width: 48, height: 48, borderRadius: 8, overflow: 'hidden', borderWidth: on ? 2 : 0, borderColor: '#FFFFFF', backgroundColor: 'rgba(255,255,255,0.12)', opacity: on ? 1 : 0.7 }}>
-        {source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" />}
-        {f.kind === 'video' && (
-          <View style={{ position: 'absolute', bottom: 2, start: 3 }}>
-            <Icon name="video" size={12} color="#FFFFFF" />
-          </View>
-        )}
-      </View>
-    </Pressy>
-  );
+/** Turns a player's sound off or on. */
+function muteVideo(player: VideoPlayer, muted: boolean) {
+  player.muted = muted;
 }
 
-function Video({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (p) => p.play());
-  return <VideoView player={player} style={{ flex: 1 }} nativeControls contentFit="contain" testID="viewer-video" />;
+/** The height of a video's controls along the bottom. */
+const VIDEO_BAR = 64;
+
+/** A video, playing, with WhatsApp-like controls that hide and show with a tap. */
+function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: () => void }) {
+  const t = useT();
+  const insets = useSafeAreaInsets();
+  const player = useVideoPlayer(uri, (p) => {
+    p.timeUpdateEventInterval = 0.25;
+    p.play();
+  });
+  const [playing, setPlaying] = useState(true);
+  const [at, setAt] = useState(0);
+  const [length, setLength] = useState(0);
+  const [muted, setMuted] = useState(false);
+  // While the line is being dragged, it shows where you are, not where the video is.
+  const [dragging, setDragging] = useState<number | null>(null);
+  useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => setAt(currentTime));
+  useEventListener(player, 'statusChange', ({ status }) => {
+    if (status === 'readyToPlay' && player.duration > 0) setLength(player.duration);
+  });
+  useEventListener(player, 'playToEnd', () => {
+    player.seekBy(-player.currentTime);
+    setAt(0);
+  });
+  const shown = dragging ?? (length ? Math.min(1, at / length) : 0);
+  const toggle = () => (playing ? player.pause() : player.play());
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Pressable style={{ flex: 1 }} onPress={onTap}>
+        <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" testID="viewer-video" />
+      </Pressable>
+      {(chrome || !playing) && (
+        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <Pressy onPress={toggle} label={playing ? t.pause : t.play} scale={0.9} testID="viewer-play">
+            <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name={playing ? 'pause' : 'play'} size={30} color="#FFFFFF" />
+            </View>
+          </Pressy>
+        </Animated.View>
+      )}
+      {chrome && (
+        <Animated.View
+          entering={FadeIn.duration(150)}
+          exiting={FadeOut.duration(120)}
+          style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: VIDEO_BAR + insets.bottom, paddingBottom: insets.bottom, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.45)' }}
+        >
+          <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>
+            {duration(shown * length * 1000)}
+          </Txt>
+          <View style={{ flex: 1 }}>
+            <Slider
+              value={shown}
+              onChange={setDragging}
+              onDone={(v) => {
+                player.seekBy(v * length - player.currentTime);
+                setAt(v * length);
+                setDragging(null);
+              }}
+              label={t.videoLabel}
+              testID="viewer-seek"
+            />
+          </View>
+          <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>
+            {duration(length * 1000)}
+          </Txt>
+          <IconButton
+            icon={muted ? 'speakerOff' : 'speaker'}
+            label={muted ? t.unmute : t.mute}
+            look="onAccent"
+            size={38}
+            onPress={() => {
+              muteVideo(player, !muted);
+              setMuted(!muted);
+            }}
+            testID="viewer-mute"
+          />
+        </Animated.View>
+      )}
+    </View>
+  );
 }

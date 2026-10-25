@@ -8,16 +8,20 @@ import type { Chat, Message } from '@pakchat/shared';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { Found } from '../data/sqliteStorage';
-import { core, type ChatPrefs, type Person, type Presence } from './core';
+import { broadcast, broadcasts, sentTo, summaryOf, type Broadcast, type BroadcastSent } from './broadcasts';
+import { core, type AppSettings, type ChatPrefs, type Person, type Presence } from './core';
 import { calls, callLog, onCallLog, type CallLogEntry, type CallView } from './calls';
 import { moving } from './files';
 import { loadStatuses, type StatusPerson } from './status';
+import { isAppLocked } from './lock';
+import { upcomingPlans, type PlanNote } from './plans';
+import { scheduled, type Planned } from './scheduled';
 import { recentStickers, savedAs, savedStickers, type SavedSticker } from './stickers';
 
 type Topic = Parameters<typeof core.on>[0];
 
 /** Re-renders when any of `topics` changes, and returns `read()`. `read` must return the same object when nothing changed. */
-function useCore<T>(topics: Topic[], read: () => T): T {
+export function useCore<T>(topics: Topic[], read: () => T): T {
   const key = topics.join('|');
   const subscribe = useCallback(
     (changed: () => void) => {
@@ -87,6 +91,8 @@ export type ChatRow = {
   other: string | null;
   last: Message | null;
   prefs: ChatPrefs;
+  /** Something unread @mentions me or replies to me: an "@" on the row, like WhatsApp. */
+  mentioned: boolean;
 };
 
 /**
@@ -99,31 +105,57 @@ core.on('auth', () => chatCache.clear());
 
 /** Every chat with its newest message, pinned first, then newest. */
 export function useChatList(): ChatRow[] | null {
-  // Names and prefs change the rows too, so listen to those as well.
-  return useLoaded<ChatRow[] | null>(
-    ['chats', 'prefs', 'people', 'auth'],
-    async () => {
-      if (core.state !== 'signedIn') return [];
-      const chats = await core.client.chats();
-      for (const chat of chats) chatCache.set(chat.id, chat);
-      const rows: ChatRow[] = [];
-      for (const chat of chats) {
-        // Statuses have their own tab.
-        if (chat.kind === 'status') continue;
-        // The newest few, in case the very newest is a disappearing message whose time is up.
-        const last = core.forgetExpired(await core.client.messages(chat.id, { limit: 5 })).at(-1);
-        const prefs = core.prefs[chat.id] ?? {};
-        // A chat with nothing in it yet (just made, or deleted here) only shows once it has something,
-        // unless it's a group: groups always show.
-        if (!last && chat.kind === 'direct' && !prefs.draft) continue;
-        rows.push({ chat, title: core.chatTitle(chat), other: core.otherPerson(chat), last: last ?? null, prefs });
-      }
-      rows.sort((a, b) => (b.prefs.pinnedAt ?? 0) - (a.prefs.pinnedAt ?? 0) || activity(b) - activity(a));
-      return rows;
-    },
+  // Chats in the Locked chats folder only show there (useLockedChats).
+  return useLoaded<ChatRow[] | null>(['chats', 'prefs', 'people', 'auth'], () => chatRows((c) => core.prefs[c.id]?.lock !== 'folder'), null, []);
+}
+
+/** The chats in the Locked chats folder (only once it's opened). */
+export function useLockedChats(): ChatRow[] | null {
+  return useLoaded<ChatRow[] | null>(['chats', 'prefs', 'people', 'auth'], () => chatRows((c) => core.prefs[c.id]?.lock === 'folder'), null, []);
+}
+
+async function chatRows(keep: (chat: Chat) => boolean): Promise<ChatRow[]> {
+  if (core.state !== 'signedIn') return [];
+  const chats = await core.client.chats();
+  for (const chat of chats) chatCache.set(chat.id, chat);
+  const rows: ChatRow[] = [];
+  for (const chat of chats) {
+    // Statuses have their own tab, communities theirs, and call links are in Calls.
+    if (chat.kind === 'status' || chat.kind === 'community' || chat.callLink || !keep(chat)) continue;
+    // The newest few, in case the very newest is a disappearing message whose time is up.
+    // In a group, the unread ones too (up to 50), to see if any is for me.
+    const unread = chat.kind === 'group' ? Math.min(chat.unread, 50) : 0;
+    const recent = core.forgetExpired(await core.client.messages(chat.id, { limit: Math.max(5, unread) }));
+    const last = recent.at(-1);
+    const mentioned = unread > 0 && recent.slice(-unread).some((m) => m.author !== core.myId && !m.deleted && (m.mentions?.includes(core.myId) || m.replyTo?.author === core.myId));
+    const prefs = core.prefs[chat.id] ?? {};
+    // A chat with nothing in it yet (just made, or deleted here) only shows once it has something,
+    // unless it's a group: groups always show.
+    if (!last && chat.kind === 'direct' && !prefs.draft) continue;
+    rows.push({ chat, title: core.chatTitle(chat), other: core.otherPerson(chat), last: last ?? null, prefs, mentioned });
+  }
+  rows.sort((a, b) => (b.prefs.pinnedAt ?? 0) - (a.prefs.pinnedAt ?? 0) || activity(b) - activity(a));
+  return rows;
+}
+
+/** My communities, each with its groups on this phone (announcements first), for the Communities tab. */
+export type CommunityRow = { community: Chat; groups: ChatRow[] };
+
+export function useCommunities(): CommunityRow[] | null {
+  const rows = useChatList();
+  const all = useLoaded<Chat[] | null>(
+    ['chats', 'auth'],
+    async () => (core.state === 'signedIn' ? (await core.client.chats()).filter((c) => c.kind === 'community' && !c.left) : []),
     null,
     [],
   );
+  if (!all || !rows) return null;
+  return all
+    .map((community) => ({
+      community,
+      groups: rows.filter((r) => r.chat.communityId === community.id && !r.chat.left).sort((a, b) => Number(!!b.chat.announcements) - Number(!!a.chat.announcements)),
+    }))
+    .sort((a, b) => Math.max(0, ...b.groups.map(activity)) - Math.max(0, ...a.groups.map(activity)));
 }
 
 const activity = (r: ChatRow) => Math.max(r.chat.lastActivity, r.last?.sentAt ?? 0);
@@ -254,6 +286,11 @@ export function useBlocked() {
 const NO_PREFS: ChatPrefs = {};
 
 /** One chat's own settings on this phone (muted, pinned…), kept up to date. */
+/** This phone's own settings (phase 7). */
+export function useSettings(): AppSettings {
+  return useCore(['settings'], () => core.settings);
+}
+
 export function useChatPrefs(chatId: string): ChatPrefs {
   return useCore(['prefs'], () => core.prefs[chatId] ?? NO_PREFS);
 }
@@ -280,8 +317,8 @@ export function useSearch(query: string): Found[] {
       core.storage
         .search(query, 60)
         .then(async (r) => {
-          // Statuses aren't chats you can open: leave them out.
-          const status = new Set((await core.client.chats()).filter((c) => c.kind === 'status').map((c) => c.id));
+          // Statuses aren't chats you can open, and a locked chat's words never show here: leave them out.
+          const status = new Set((await core.client.chats()).filter((c) => c.kind === 'status' || !!core.prefs[c.id]?.lock).map((c) => c.id));
           if (seq.current === mine) setFound(r.filter((f) => !status.has(f.chatId)));
         })
         .catch(() => {});
@@ -351,6 +388,23 @@ export function useCallLog(): CallLogEntry[] | null {
   return list;
 }
 
+/** My favourite chats (Calls tab, and New call's "Add favourite"), even one with nothing in it yet. */
+export function useFavouriteChats(): Chat[] {
+  return useLoaded<Chat[]>(
+    ['chats', 'prefs', 'people', 'auth'],
+    async () => (core.state === 'signedIn' ? (await core.client.chats()).filter((c) => core.prefs[c.id]?.favourite && c.kind !== 'status' && c.kind !== 'community' && !c.callLink) : []),
+    [],
+    [],
+  );
+}
+
+/** Missed calls since I last looked at Calls: the number on its tab, like WhatsApp. */
+export function useMissedCalls(): number {
+  const list = useCallLog();
+  const seen = useSettings().callsSeenAt ?? 0;
+  return (list ?? []).filter((e) => e.missed && e.direction === 'in' && e.at > seen).length;
+}
+
 // ---- Status ----
 
 /** My status and everyone else's, newest first (statuses older than a day are gone). */
@@ -379,3 +433,55 @@ export function useRecentStickers(): (string | number)[] {
 export function useStickerSaved(uri: string | null | undefined): boolean | null {
   return useLoaded(['stickers'], async () => (uri ? !!(await savedAs(uri)) : null), null, [uri]);
 }
+
+/** Messages scheduled for later in a chat (scheduled.ts), soonest first. */
+export function useScheduled(chatId: string): Planned[] {
+  return useLoaded(['scheduled'], async () => scheduled(chatId), [], [chatId]);
+}
+
+/** My broadcast lists, newest first. */
+export function useBroadcasts(): Broadcast[] | null {
+  return useLoaded<Broadcast[] | null>(['broadcasts', 'auth'], () => broadcasts(), null, []);
+}
+
+export function useBroadcast(id: string): Broadcast | null | undefined {
+  return useLoaded<Broadcast | null | undefined>(['broadcasts'], () => broadcast(id), undefined, [id]);
+}
+
+/** What went to a list, each with how it's doing ("12 of 20 read"), kept fresh as the ticks change. */
+export function useBroadcastSent(listId: string) {
+  const sent = useLoaded<BroadcastSent[]>(['broadcasts'], () => sentTo(listId), [], [listId]);
+  const chats = [...new Set(sent.flatMap((s) => s.to.map((x) => x.chatId)))];
+  return useLoaded(
+    ['broadcasts', ...chats.map((c) => `messages:${c}` as const)],
+    () => Promise.all(sent.map(async (s) => ({ sent: s, ...(await summaryOf(s)) }))),
+    [],
+    [sent],
+  );
+}
+
+/** Scheduled calls coming up (Calls tab). */
+export function useUpcomingPlans(): PlanNote[] {
+  return useLoaded<PlanNote[]>(['calls', 'auth'], () => upcomingPlans(), [], []);
+}
+
+/** Who's in a call link's call now (Calls tab, and the link's page). */
+export function useLinkCall(chatId: string | null) {
+  return useLoaded(['calls'], async () => (chatId ? calls.linkCall(chatId) : null), null, [chatId]);
+}
+
+/** My call links (chats of their own, kept out of the chat list), newest first. */
+export function useCallLinks(): Chat[] {
+  return useLoaded<Chat[]>(
+    ['chats', 'auth'],
+    async () => (core.state === 'signedIn' ? (await core.client.chats()).filter((c) => c.callLink && !c.left).sort((a, b) => b.lastActivity - a.lastActivity) : []),
+    [],
+    [],
+  );
+}
+
+/** App lock is showing. */
+export function useAppLocked(): boolean {
+  return useCore(['lock', 'settings'], () => isAppLocked());
+}
+

@@ -15,11 +15,11 @@
 // the person who left can't read what comes next.
 
 import type { Connection, ConnectionFactory, WireEnvelope } from './connection';
-import type { Attachment, Body, CallSignal, Change, Content, Payload, Ref, StatusQuote } from './content';
-import { isBody, isChange, parseContent, writeContent } from './content';
+import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content, LinkPreview, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
+import { isBody, isChange, LIVE_MAX_MS, parseContent, writeContent } from './content';
 import { randomId } from './ids';
 import { changeAllowed, maySend, statusOwner } from './rules';
-import type { Me, ServerApi, ServerChat, SignedIn } from './server';
+import type { GroupChanges, Me, ServerApi, ServerChat, SignedIn } from './server';
 import { OfflineError, ServerError } from './server';
 import type { DeviceKeys, PreKeys, SignalApi } from './signal';
 import { errorCode, SEALED, SignalError } from './signal';
@@ -48,8 +48,8 @@ export type FileUploader = {
   upload(chatId: string, local: string, message: Ref): Promise<Pick<Attachment, 'id' | 'key' | 'digest'>>;
 };
 
-/** A file on this device, about to be sent. */
-export type OutgoingFile = Omit<Attachment, 'id' | 'key' | 'digest'> & { local: string };
+/** A file on this device, about to be sent. `poster`: a video's sharp first frame, for this phone only. */
+export type OutgoingFile = Omit<Attachment, 'id' | 'key' | 'digest'> & { local: string; poster?: string };
 
 export type ClientOptions = {
   signal: SignalApi;
@@ -68,6 +68,8 @@ export type Events = {
   message: (m: Message) => void;
   /** A new message from someone else just arrived (once per message): for alerts. */
   arrived: (m: Message) => void;
+  /** Someone reacted to one of my messages (or liked my status): for alerts. `at` is when they did. */
+  reacted: (e: { message: Message; from: string; emoji: string; at: number }) => void;
   chat: (c: Chat) => void;
   typing: (e: { chatId: string; userId: string; typing: boolean }) => void;
   presence: (p: Record<string, unknown>) => void;
@@ -76,14 +78,22 @@ export type Events = {
   securityCodeChanged: (e: { userId: string }) => void;
   /** A call message (ringing, connecting, hanging up). Never saved: the app's call code handles it. */
   call: (e: CallEvent) => void;
+  /** A group note with nothing to show in the chat: someone asked to join, a group was suggested for a community, or one of those was answered. */
+  notice: (e: { chatId: string; event: string }) => void;
   /** Something went wrong that the app might want to log. */
   error: (err: Error) => void;
 };
+
+/** Group notes that only tell the app to look again (its admins' lists), never a line in the chat. */
+const QUIET_NOTES = ['requested', 'request_done', 'suggested', 'suggestion_done'];
 
 export type Device = { userId: string; deviceId: number };
 
 /** A call message from one device (see `CallSignal` in content.ts). `at` is the server's time. */
 export type CallEvent = { chatId: string; from: string; fromDevice: number; signal: CallSignal & { id: string }; at: number };
+
+/** What any message may carry. `hold`: wait this long (ms) before it goes, for "Undo". */
+export type SendExtra = { replyTo?: Ref; mentions?: string[]; forwarded?: boolean; status?: StatusQuote; quote?: ChatQuote; hold?: number };
 
 /** A status lasts a day. */
 export const STATUS_MS = 24 * 3600_000;
@@ -103,7 +113,9 @@ const MAX_HELD = 500;
 const HOLD_MS = 7 * 24 * 3600_000;
 
 const deviceKey = (d: Device) => `${d.userId}:${d.deviceId}`;
-const kindFor = (p: Payload): OutboxItem['kind'] => (p.t === 'react' || p.t === 'vote' ? 'reaction' : 'message');
+// Reactions, votes, "opened" and live location moves never wake a phone (the server lets them
+// through as reactions, which also go in groups where only admins send).
+const kindFor = (p: Payload): OutboxItem['kind'] => (p.t === 'react' || p.t === 'vote' || p.t === 'opened' || p.t === 'live' ? 'reaction' : 'message');
 // Retry notes go unlocked (the other side can't open anything from us), and are plain ASCII.
 const toB64 = (text: string) => btoa(text);
 const fromB64 = (b64: string) => atob(b64);
@@ -408,6 +420,11 @@ export class PakChat {
     });
   }
 
+  /** Keeps a chat the server just answered with (joining by a link, a new community). */
+  adopt(sc: ServerChat): Promise<Chat> {
+    return this.inLane(() => this.saveChat(sc));
+  }
+
   /** Saves the server's view of a chat, keeping what only this device knows. */
   private async saveChat(sc: ServerChat, old?: Chat | null): Promise<Chat> {
     old ??= await this.o.storage.getChat(sc.id);
@@ -421,7 +438,7 @@ export class PakChat {
       members: sc.members,
       left: false,
     };
-    for (const k of ['title', 'description', 'photo', 'onlyAdminsSend', 'inviteCode'] as const) {
+    for (const k of ['title', 'description', 'photo', 'onlyAdminsSend', 'inviteCode', 'inviteExpiresAt', 'inviteMaxUses', 'inviteUses', 'communityId', 'announcements', 'callLink', 'groupsByMembers', 'joinApproval', 'createdBy'] as const) {
       if (sc[k] !== undefined) (chat as Record<string, unknown>)[k] = sc[k];
     }
     await this.o.storage.putChat(chat);
@@ -497,15 +514,19 @@ export class PakChat {
     return this.inLane(() => this.saveChat(sc));
   }
 
-  async updateGroup(chatId: string, changes: { title?: string; description?: string; onlyAdminsSend?: boolean }) {
+  async updateGroup(chatId: string, changes: GroupChanges) {
     const sc = await this.o.server.updateGroup(chatId, changes);
     return this.inLane(() => this.saveChat(sc));
   }
 
   // ---- Sending ----
 
-  /** `bg`: a status in words, on one of the app's colours. `status`: replying to someone's status. */
-  sendText(chatId: string, text: string, extra: { replyTo?: Ref; mentions?: string[]; forwarded?: boolean; bg?: number; status?: StatusQuote } = {}) {
+  /**
+   * `bg`: a status in words, on one of the app's colours. `status`: replying to someone's status.
+   * `quote`: replying privately to a group message. `link`: the card for a web address in it.
+   * `hold`: wait this long (ms) before it goes, so it can be taken back ("Undo", see `takeBack`).
+   */
+  sendText(chatId: string, text: string, extra: SendExtra & { bg?: number; link?: LinkPreview } = {}) {
     if (text.trim() === '') throw new Error('Nothing to send');
     const body: Body = { t: 'text', text };
     if (extra.mentions?.length) body.mentions = extra.mentions;
@@ -513,27 +534,86 @@ export class PakChat {
     if (extra.forwarded) body.forwarded = true;
     if (extra.bg !== undefined) body.bg = extra.bg;
     if (extra.status) body.status = extra.status;
-    return this.sendBody(chatId, body);
+    if (extra.quote) body.quote = extra.quote;
+    if (extra.link) body.link = extra.link;
+    return this.sendBody(chatId, body, undefined, extra.hold);
   }
 
   /**
    * Sends a photo, video, voice note or document. It shows at once; the file is
    * locked and uploaded by the outbox (through `files.upload`), then the message goes.
    */
-  sendFile(chatId: string, file: OutgoingFile, extra: { caption?: string; replyTo?: Ref; mentions?: string[]; forwarded?: boolean; status?: StatusQuote } = {}) {
+  sendFile(chatId: string, file: OutgoingFile, extra: SendExtra & { caption?: string } = {}) {
     if (!this.o.files) throw new Error('This device cannot send files');
-    const { local, ...meta } = file;
+    // Only what the others should get: never this phone's own notes about the file.
+    const { local, poster, transcript: _words, ...meta } = file as OutgoingFile & { transcript?: string };
     const body: Body = { t: 'file', file: { ...meta, id: PENDING, key: '', digest: '' } };
     if (extra.caption?.trim()) body.caption = extra.caption;
     if (extra.mentions?.length) body.mentions = extra.mentions;
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
     if (extra.status) body.status = extra.status;
-    return this.sendBody(chatId, body, local);
+    if (extra.quote) body.quote = extra.quote;
+    return this.sendBody(chatId, body, local, extra.hold, poster);
   }
 
-  sendPoll(chatId: string, question: string, options: string[], multi = false) {
-    return this.sendBody(chatId, { t: 'poll', question, options, multi });
+  sendPoll(chatId: string, question: string, options: string[], multi = false, hold?: number) {
+    return this.sendBody(chatId, { t: 'poll', question, options, multi }, undefined, hold);
+  }
+
+  /** A place, or (with `live`, the time it ends) my live location; send the moves with `moveLive`. */
+  sendLocation(chatId: string, place: Place, extra: { replyTo?: Ref; forwarded?: boolean; hold?: number } = {}) {
+    const body: Body = { t: 'location', lat: place.lat, lng: place.lng };
+    if (place.name) body.name = place.name;
+    if (place.address) body.address = place.address;
+    if (place.live) body.live = place.live;
+    if (extra.replyTo) body.replyTo = extra.replyTo;
+    if (extra.forwarded) body.forwarded = true;
+    return this.sendBody(chatId, body, undefined, extra.hold);
+  }
+
+  /** One or more contact cards. */
+  sendContacts(chatId: string, cards: SharedContact[], extra: { replyTo?: Ref; forwarded?: boolean; hold?: number } = {}) {
+    const body: Body = { t: 'contact', cards };
+    if (extra.replyTo) body.replyTo = extra.replyTo;
+    if (extra.forwarded) body.forwarded = true;
+    return this.sendBody(chatId, body, undefined, extra.hold);
+  }
+
+  /** A call planned for later. */
+  sendPlan(chatId: string, plan: CallPlan) {
+    return this.sendBody(chatId, { t: 'event', ...plan });
+  }
+
+  /** I opened someone's view once message. */
+  opened(chatId: string, target: Ref) {
+    return this.sendChange(chatId, { t: 'opened', target });
+  }
+
+  /** My live location moved (or, with `stop`, I stopped sharing it). */
+  moveLive(chatId: string, target: Ref, lat: number, lng: number, stop = false) {
+    const change: Change = { t: 'live', target, lat, lng };
+    if (stop) change.stop = true;
+    return this.sendChange(chatId, change);
+  }
+
+  /**
+   * "Undo" on a message sent with `hold`: if it's still waiting, it never goes
+   * and is gone from here. False if it's too late (it went, or is going).
+   */
+  takeBack(chatId: string, ref: Ref): Promise<boolean> {
+    const { storage } = this.o;
+    return this.inLane(async () => {
+      if (ref.author !== this.s.userId) return false;
+      const item = (await storage.listOutbox()).find((o) => o.id === ref.id);
+      if (!item?.held || item.notBefore <= this.now()) return false;
+      this.stopSending(ref.id);
+      await storage.transaction(async () => {
+        await storage.deleteOutbox(ref.id);
+        await storage.deleteMessage(chatId, ref.author, ref.id);
+      });
+      return true;
+    });
   }
 
   edit(chatId: string, messageId: string, text: string, mentions?: string[]) {
@@ -629,7 +709,7 @@ export class PakChat {
     return { ...payload, v: 1, id: this.newId(), chat: chatId, at: this.now() } as Content;
   }
 
-  private async sendBody(chatId: string, body: Body, local?: string): Promise<Message> {
+  private async sendBody(chatId: string, body: Body, local?: string, hold?: number, poster?: string): Promise<Message> {
     const content = this.content(chatId, body);
     const parsed = parseContent(writeContent(content));
     if (!parsed) throw new Error('That message is not allowed (too long, or empty)');
@@ -639,9 +719,10 @@ export class PakChat {
       const m = this.toMessage(chat, parsed as Content & Body, this.s.userId, this.s.deviceId, null, now);
       m.status = 'queued';
       if (m.file && local) m.file.local = local;
+      if (m.file && poster) m.file.poster = poster;
       await this.o.storage.transaction(async () => {
         await this.o.storage.putMessage(m);
-        await this.queue(content, kindFor(content), { author: m.author, id: m.id });
+        await this.queue(content, kindFor(content), { author: m.author, id: m.id }, undefined, content.id, hold);
         await this.o.storage.putChat({ ...chat, lastActivity: now });
       });
       return m;
@@ -674,8 +755,12 @@ export class PakChat {
     return chat;
   }
 
-  private async queue(content: Content, kind: OutboxItem['kind'], message?: Ref, to?: Device[], id = content.id) {
+  private async queue(content: Content, kind: OutboxItem['kind'], message?: Ref, to?: Device[], id = content.id, hold?: number) {
     const item: OutboxItem = { id, chatId: content.chat, kind, content: writeContent(content), tries: 0, notBefore: 0, added: this.now() };
+    if (hold && hold > 0) {
+      item.notBefore = this.now() + hold;
+      item.held = true;
+    }
     if (message) item.message = message;
     if (to) item.to = to;
     await this.o.storage.putOutbox(item);
@@ -702,19 +787,34 @@ export class PakChat {
       do {
         this.flushAgain = false;
         while (this.connected) {
-          const [item] = await this.o.storage.listOutbox();
+          const item = this.nextToSend(await this.o.storage.listOutbox());
           if (!item) break;
-          const wait = item.notBefore - this.now();
-          if (wait > 0) {
-            this.later(wait);
-            break;
-          }
           if (!(await this.sendOne(item))) break;
         }
       } while (this.flushAgain && this.connected);
     } finally {
       this.flushing = false;
     }
+  }
+
+  /**
+   * The oldest item that may go now. One waiting to try again holds up
+   * everything after it; one held for "Undo" holds up only its own chat, so a
+   * message there can't overtake it. Null (with a timer set) when nothing may go yet.
+   */
+  private nextToSend(list: OutboxItem[]): OutboxItem | null {
+    const heldChats = new Set<string>();
+    let soonest = Infinity;
+    for (const item of list) {
+      if (heldChats.has(item.chatId)) continue;
+      const wait = item.notBefore - this.now();
+      if (wait <= 0) return item;
+      soonest = Math.min(soonest, wait);
+      if (!item.held) break;
+      heldChats.add(item.chatId);
+    }
+    if (soonest < Infinity) this.later(soonest);
+    return null;
   }
 
   private later(ms: number) {
@@ -1174,6 +1274,8 @@ export class PakChat {
       if (c.forwarded) m.forwarded = true;
       if (c.bg !== undefined) m.bg = c.bg;
       if (c.status) m.statusReply = c.status;
+      if (c.quote) m.quote = c.quote;
+      if (c.link) m.link = c.link;
     } else if (c.t === 'file') {
       m.file = { ...c.file };
       if (c.caption) m.text = c.caption;
@@ -1181,6 +1283,23 @@ export class PakChat {
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
       if (c.status) m.statusReply = c.status;
+      if (c.quote) m.quote = c.quote;
+    } else if (c.t === 'location') {
+      m.location = { lat: c.lat, lng: c.lng };
+      if (c.name) m.location.name = c.name;
+      if (c.address) m.location.address = c.address;
+      // A live location can't last longer than 8 hours, whatever the sender's phone says.
+      if (c.live) m.location.live = Math.min(c.live, at + LIVE_MAX_MS);
+      if (c.replyTo) m.replyTo = c.replyTo;
+      if (c.forwarded) m.forwarded = true;
+    } else if (c.t === 'contact') {
+      m.contacts = c.cards;
+      if (c.replyTo) m.replyTo = c.replyTo;
+      if (c.forwarded) m.forwarded = true;
+    } else if (c.t === 'event') {
+      m.plan = { title: c.title, at: c.at, video: c.video };
+      if (c.link) m.plan.link = c.link;
+      if (c.about) m.plan.about = c.about;
     } else {
       m.poll = { question: c.question, options: c.options, multi: c.multi };
     }
@@ -1213,6 +1332,8 @@ export class PakChat {
       return true;
     }
     if (!changeAllowed(chat, m, c, from, at)) return false;
+    // Someone else's new reaction to my message, to tell the app.
+    let reacted: string | null = null;
     switch (c.t) {
       case 'edit':
         m.text = c.text;
@@ -1222,10 +1343,24 @@ export class PakChat {
         break;
       case 'delete':
         m.deleted = true;
-        for (const k of ['text', 'mentions', 'replyTo', 'poll', 'votes', 'reactions', 'pinnedUntil'] as const) delete m[k];
+        for (const k of ['text', 'mentions', 'replyTo', 'poll', 'votes', 'reactions', 'pinnedUntil', 'quote', 'link', 'location', 'contacts', 'plan'] as const) delete m[k];
+        break;
+      case 'opened':
+        // On my other devices it's gone too; on the sender's, it says who opened it.
+        if (from === this.s.userId) {
+          m.opened = true;
+          if (m.file) delete m.file.thumb;
+        }
+        if (m.author === this.s.userId && from !== this.s.userId) m.openedBy = [...new Set([...(m.openedBy ?? []), from])];
+        break;
+      case 'live':
+        if (!m.location) break;
+        m.location = { ...m.location, lat: c.lat, lng: c.lng, updatedAt: at };
+        if (c.stop) m.location.live = Math.min(m.location.live ?? at, at);
         break;
       case 'react':
         m.reactions ??= {};
+        if (c.emoji && m.reactions[from] !== c.emoji && from !== this.s.userId && m.author === this.s.userId) reacted = c.emoji;
         if (c.emoji) m.reactions[from] = c.emoji;
         else delete m.reactions[from];
         break;
@@ -1241,6 +1376,7 @@ export class PakChat {
     }
     await storage.putMessage(m);
     this.emit('message', m);
+    if (reacted) this.emit('reacted', { message: m, from, emoji: reacted, at });
     return true;
   }
 
@@ -1269,7 +1405,12 @@ export class PakChat {
     const data = (e.data ?? {}) as SystemEvent;
     const users = Array.isArray(data.users) ? (data.users as string[]) : [];
     const at = Date.parse(e.sent_at) || this.now();
-    const meGone = (data.event === 'removed' || data.event === 'left') && users.includes(this.s.userId);
+    if (QUIET_NOTES.includes(data.event)) {
+      this.emit('notice', { chatId: e.chat_id, event: data.event });
+      return;
+    }
+    // A deactivated community (and its announcements) has nobody in it any more.
+    const meGone = ((data.event === 'removed' || data.event === 'left') && users.includes(this.s.userId)) || data.event === 'deactivated';
     const chat = meGone ? await this.o.storage.getChat(e.chat_id) : await this.refreshChat(e.chat_id);
     if (!chat) return;
 

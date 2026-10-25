@@ -10,6 +10,8 @@ defmodule Pakchat.Accounts.User do
   @last_seen_choices ~w(everyone contacts nobody)
   # "same" means: the same people who can see your last seen.
   @online_choices ~w(everyone same)
+  # Who sees my profile photo.
+  @photo_choices ~w(everyone contacts nobody)
 
   schema "users" do
     field :google_sub, :string
@@ -22,6 +24,7 @@ defmodule Pakchat.Accounts.User do
     field :photo, :string
     field :last_seen_visibility, :string, default: "everyone"
     field :online_visibility, :string, default: "everyone"
+    field :photo_visibility, :string, default: "everyone"
     field :read_receipts, :boolean, default: true
     field :last_seen_at, :utc_datetime_usec
 
@@ -87,6 +90,7 @@ defmodule Pakchat.Accounts.User do
       :photo,
       :last_seen_visibility,
       :online_visibility,
+      :photo_visibility,
       :read_receipts
     ])
     |> validate_required([:name])
@@ -95,5 +99,6 @@ defmodule Pakchat.Accounts.User do
     |> validate_length(:photo, max: 500)
     |> validate_inclusion(:last_seen_visibility, @last_seen_choices)
     |> validate_inclusion(:online_visibility, @online_choices)
+    |> validate_inclusion(:photo_visibility, @photo_choices)
   end
 end

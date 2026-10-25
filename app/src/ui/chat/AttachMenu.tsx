@@ -1,0 +1,94 @@
+// AttachMenu.tsx: what the 📎 in the message bar opens. PakChat's own look: a
+// frosted card that rises from the bar with a little stagger, each thing to send
+// on a soft tile of its own colour (no "AI images").
+//
+//   Gallery   Camera   Document   Audio
+//   Location  Contact  Poll
+import { Modal, Pressable, View } from 'react-native';
+import Animated, { FadeOutDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useT } from '../../i18n';
+import { useLook } from '../../theme/ThemeProvider';
+import { Icon, type IconName } from '../icons';
+import { Glass, Pressy, Txt } from '../kit';
+import { pop, rise, tick } from '../motion';
+
+export type AttachKind = 'gallery' | 'camera' | 'document' | 'audio' | 'location' | 'contact' | 'poll';
+
+/** Each tile's colour, the same in light and dark (the tile behind it is soft). */
+const TILES: { key: AttachKind; icon: IconName; tint: string; testID: string }[] = [
+  { key: 'gallery', icon: 'photo', tint: '#7C5CFA', testID: 'attach-photo' },
+  { key: 'camera', icon: 'camera', tint: '#F0507A', testID: 'attach-camera' },
+  { key: 'document', icon: 'doc', tint: '#3D7BF6', testID: 'attach-doc' },
+  { key: 'audio', icon: 'music', tint: '#F08A24', testID: 'attach-audio' },
+  { key: 'location', icon: 'place', tint: '#18A86B', testID: 'attach-location' },
+  { key: 'contact', icon: 'card', tint: '#1C9BD6', testID: 'attach-contact' },
+  { key: 'poll', icon: 'poll', tint: '#D9A400', testID: 'attach-poll' },
+];
+
+export function AttachMenu({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (k: AttachKind) => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const insets = useSafeAreaInsets();
+  const label: Record<AttachKind, string> = {
+    gallery: t.gallery,
+    camera: t.camera,
+    document: t.document,
+    audio: t.audio,
+    location: t.location,
+    contact: t.contact,
+    poll: t.pollWord,
+  };
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
+      <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel={t.close}>
+        {visible && (
+          <Animated.View entering={rise()} exiting={FadeOutDown.duration(130)} style={{ position: 'absolute', start: 10, end: 10, bottom: insets.bottom + 76 }}>
+            <Pressable onPress={() => {}}>
+              <Glass strong style={{ borderRadius: 28, paddingVertical: 14, paddingHorizontal: 6, boxShadow: `0 22px 44px -18px ${theme.shadow}` }} testID="attach-menu">
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 10 }}>
+                  {TILES.map((x, i) => (
+                    <Animated.View key={x.key} entering={pop(40 + i * 35)} style={{ width: '25%', alignItems: 'center' }}>
+                      <Pressy
+                        onPress={() => {
+                          tick();
+                          onPick(x.key);
+                        }}
+                        label={label[x.key]}
+                        testID={x.testID}
+                        scale={0.88}
+                      >
+                        <View style={{ alignItems: 'center', gap: 7, paddingVertical: 4 }}>
+                          <View
+                            style={{
+                              width: 56,
+                              height: 56,
+                              borderRadius: 20,
+                              // A soft tile of the colour, with the colour's own ring.
+                              backgroundColor: `${x.tint}${theme.dark ? '33' : '1F'}`,
+                              borderWidth: 1,
+                              borderColor: `${x.tint}55`,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transform: [{ rotate: i % 2 ? '3deg' : '-3deg' }],
+                            }}
+                          >
+                            <Icon name={x.icon} size={25} color={x.tint} stroke={2} />
+                          </View>
+                          <Txt size={12.5} weight="600" align="center">
+                            {label[x.key]}
+                          </Txt>
+                        </View>
+                      </Pressy>
+                    </Animated.View>
+                  ))}
+                </View>
+              </Glass>
+            </Pressable>
+          </Animated.View>
+        )}
+      </Pressable>
+    </Modal>
+  );
+}

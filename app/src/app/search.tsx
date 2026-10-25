@@ -2,12 +2,13 @@
 // database (the "search" table in sqliteStorage.ts), so it's instant, works
 // offline, and nothing you type ever leaves the phone.
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { SectionList, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useChatList, useSearch } from '../core/hooks';
+import { isSecretCode, openFolderByCode } from '../core/lock';
 import type { Found } from '../data/sqliteStorage';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
@@ -24,6 +25,23 @@ export default function Search() {
   const [query, setQuery] = useState('');
   const rows = useChatList();
   const found = useSearch(query);
+
+  // The secret code (Chat lock), typed here, opens the hidden Locked chats folder.
+  useEffect(() => {
+    if (only || !core.settings.lockedHidden) return;
+    let alive = true;
+    const wait = setTimeout(() => {
+      void isSecretCode(query).then((yes) => {
+        if (!alive || !yes) return;
+        openFolderByCode();
+        router.replace('/locked');
+      });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(wait);
+    };
+  }, [query, only]);
 
   const q = query.trim().toLowerCase();
   const chats = useMemo(

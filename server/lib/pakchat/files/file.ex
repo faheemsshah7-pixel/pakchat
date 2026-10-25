@@ -8,7 +8,8 @@ defmodule Pakchat.Files.File do
   schema "files" do
     field :owner_id, :binary_id
     field :chat_id, :binary_id
-    # "attachment" or "backup".
+
+    # "attachment", "backup", or "photo" (a person's, group's or community's picture, kept until it's replaced).
     field :kind, :string, default: "attachment"
     field :size, :integer
     field :uploaded, :boolean, default: false

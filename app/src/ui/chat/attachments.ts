@@ -3,6 +3,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 
 import { kindOf, type Picked } from '../../core/files';
+import { outsideFor } from '../../core/lock';
 
 function fromPicker(a: ImagePicker.ImagePickerAsset): Picked {
   const video = a.type === 'video';
@@ -21,7 +22,7 @@ function fromPicker(a: ImagePicker.ImagePickerAsset): Picked {
 
 /** Photos and videos from the gallery (up to 10 at once, or just one). Empty if you closed it. */
 export async function fromGallery(many = true): Promise<Picked[]> {
-  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: many, selectionLimit: many ? 10 : 1, quality: 1 });
+  const r = await outsideFor(() => ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: many, selectionLimit: many ? 10 : 1, quality: 1 }));
   return r.canceled ? [] : r.assets.map(fromPicker);
 }
 
@@ -29,13 +30,13 @@ export async function fromGallery(many = true): Promise<Picked[]> {
 export async function fromCamera(): Promise<Picked | null> {
   const { granted } = await ImagePicker.requestCameraPermissionsAsync();
   if (!granted) return null;
-  const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.9 });
+  const r = await outsideFor(() => ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.9 }));
   return r.canceled ? null : fromPicker(r.assets[0]);
 }
 
 /** Any file. Null if you closed the picker. */
 export async function fromFiles(): Promise<Picked | null> {
-  const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+  const r = await outsideFor(() => DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false }));
   if (r.canceled || !r.assets[0]) return null;
   const a = r.assets[0];
   const mime = a.mimeType ?? 'application/octet-stream';
@@ -46,6 +47,14 @@ export async function fromFiles(): Promise<Picked | null> {
 
 /** One photo, cropped square in the picker (for making a sticker). Null if you closed it. */
 export async function squarePhoto(): Promise<Picked | null> {
-  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 });
+  const r = await outsideFor(() => ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 }));
   return r.canceled || !r.assets[0] ? null : fromPicker(r.assets[0]);
+}
+
+/** A song or other sound file, from the phone's files (sent as audio, with a player). Null if you closed the picker. */
+export async function fromAudio(): Promise<Picked | null> {
+  const r = await outsideFor(() => DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true, multiple: false }));
+  if (r.canceled || !r.assets[0]) return null;
+  const a = r.assets[0];
+  return { uri: a.uri, mime: a.mimeType ?? 'audio/mpeg', kind: 'audio', name: a.name, size: a.size };
 }

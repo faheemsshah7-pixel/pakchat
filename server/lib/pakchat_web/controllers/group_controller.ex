@@ -9,7 +9,14 @@ defmodule PakchatWeb.GroupController do
 
   action_fallback PakchatWeb.FallbackController
 
-  @fields ["title", "description", "photo", "only_admins_send"]
+  @fields [
+    "title",
+    "description",
+    "photo",
+    "only_admins_send",
+    "groups_by_members",
+    "join_approval"
+  ]
 
   @doc "`POST /api/groups` with `{title, member_ids, description?}`."
   def create(conn, params) do
@@ -57,12 +64,42 @@ defmodule PakchatWeb.GroupController do
     end
   end
 
-  @doc "`POST /api/groups/:id/invite`: a new link (the old one stops working)."
-  def reset_invite(conn, %{"id" => id}) do
-    with {:ok, code} <- Chats.reset_invite(conn.assigns.user, id), do: json(conn, %{code: code})
+  @doc """
+  `POST /api/groups/:id/invite`, with `{expires_in?, max_uses?}`: a new link (the
+  old one stops working). It can stop after a time (seconds), or once that many
+  people have joined. Works for communities too.
+  """
+  def reset_invite(conn, %{"id" => id} = params) do
+    with {:ok, invite} <-
+           Chats.reset_invite(conn.assigns.user, id, Map.take(params, ["expires_in", "max_uses"])),
+         do: json(conn, invite)
   end
 
   def remove_invite(conn, %{"id" => id}) do
     with :ok <- Chats.remove_invite(conn.assigns.user, id), do: send_resp(conn, 204, "")
+  end
+
+  @doc "`GET /api/groups/:id/requests`: who is asking to join. Admins only."
+  def requests(conn, %{"id" => id}) do
+    with {:ok, list} <- Chats.join_requests(conn.assigns.user, id),
+         do: json(conn, %{requests: list})
+  end
+
+  @doc "`POST /api/groups/:id/requests/:user_id`: lets them in. Admins only."
+  def approve_request(conn, %{"id" => id, "user_id" => user_id}) do
+    with :ok <- Chats.answer_join_request(conn.assigns.user, id, user_id, true),
+         do: send_resp(conn, 204, "")
+  end
+
+  @doc "`DELETE /api/groups/:id/requests/:user_id`: says no (admins), or, with my own id, takes my request back."
+  def drop_request(conn, %{"id" => id, "user_id" => user_id}) do
+    me = conn.assigns.user
+
+    result =
+      if user_id == me.id,
+        do: Chats.cancel_join_request(me, id),
+        else: Chats.answer_join_request(me, id, user_id, false)
+
+    with :ok <- result, do: send_resp(conn, 204, "")
   end
 end

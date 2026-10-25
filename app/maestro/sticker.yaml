@@ -2,7 +2,7 @@
 appId: com.pakchat.app
 ---
 - tapOn:
-    id: emoji
+    id: stickers
 - tapOn:
     id: panel-sticker
 - tapOn:

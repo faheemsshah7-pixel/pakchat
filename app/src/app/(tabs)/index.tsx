@@ -4,19 +4,24 @@
 // shows instantly, even with no internet. Hold a chat to pick several; swipe
 // one to pin or archive it.
 import KV from 'expo-sqlite/kv-store';
-import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BackHandler, ScrollView, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, FlatList, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { findBackup } from '../../core/backup';
+import { handOffMedia, type Picked } from '../../core/files';
+import { chatOpen, FOLDER, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
-import { useAllPresence, useAllTyping, useAuth, useChatList, useConnected, useLists, warmChats, type ChatRow as Row } from '../../core/hooks';
+import { useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useConnected, useCore, useLists, useSettings, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
 import { ChatRow } from '../../ui/ChatRow';
+import { fromGallery } from '../../ui/chat/attachments';
+import { MuteSheet } from '../../ui/MuteSheet';
+import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { listLayout, rise, thud, tick } from '../../ui/motion';
@@ -24,6 +29,12 @@ import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 
 // The chips above the chats. `list:<id>` is one of your own lists.
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
+
+/** A chat in the list, or the name of a community over its groups. */
+type Item = { kind: 'row'; row: Row } | { kind: 'community'; id: string; title: string };
+
+/** The "Locked chats" row's height: the list starts scrolled down this much, hiding it. */
+const LOCKED_ROW = 52;
 
 export default function Chats() {
   const t = useT();
@@ -38,11 +49,55 @@ export default function Chats() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState(false);
   const [pickMenu, setPickMenu] = useState(false);
+  const [muting, setMuting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // The list whose chip you held down (for Edit / Delete), and the one being deleted.
   const [heldList, setHeldList] = useState<string | null>(null);
   const [deletingList, setDeletingList] = useState<string | null>(null);
   const selecting = picked.size > 0;
+  // The 📷 at the top: take a photo or video, then choose the chat (send-to.tsx).
+  const [camera, setCamera] = useState(false);
+  const sendTaken = (list: Picked[]) => {
+    // Nothing picked in the gallery: back to the camera.
+    if (!list.length) return;
+    setCamera(false);
+    handOffMedia(list);
+    router.push('/send-to');
+  };
+  const settings = useSettings();
+  const prefsAll = useCore(['prefs'], () => core.prefs);
+  const lockedCount = Object.values(prefsAll).filter((p) => p.lock === 'folder').length;
+  // "Locked chats" sits just above the first chat, scrolled out of sight, like
+  // WhatsApp: pulling the list down slides it into view. The list is always at
+  // least a row taller than the screen, so there's room to hide it.
+  const lockedRow = lockedCount > 0 && !settings.lockedHidden && filter === 'all' && !selecting;
+  const list = useRef<FlatList<Row>>(null);
+  const [listHeight, setListHeight] = useState(0);
+  const scrolled = useRef(0);
+  // Only near the top: coming back to a list scrolled further down leaves it where it was.
+  /**
+   * A locked chat (or the Locked chats folder): the fingerprint is asked here,
+   * on the list, and then it slides in like any chat.
+   */
+  async function openLocked(key: string, path?: '/locked') {
+    if (!chatOpen(key)) {
+      const r = await unlockChat(key, t.unlockChat, t.cancel);
+      if (r === 'failed') toast(t.notRecognised);
+      else if (r === 'wait') toast(t.waitABit);
+      else if (r === 'unavailable') toast(t.biometricsGone);
+      if (r !== 'ok') return;
+    }
+    if (path) router.push(path);
+    else router.push({ pathname: '/chat/[id]', params: { id: key } });
+  }
+
+  const hideLocked = useCallback(() => {
+    if (lockedRow && scrolled.current < LOCKED_ROW) requestAnimationFrame(() => list.current?.scrollToOffset({ offset: LOCKED_ROW, animated: false }));
+  }, [lockedRow]);
+  useFocusEffect(hideLocked);
+  useEffect(() => {
+    if (listHeight) hideLocked();
+  }, [listHeight, hideLocked]);
 
   // The first time on this phone, a quick "what should people call you?".
   // On a phone just signed in to, an offer to restore the chats from a backup comes first (on top).
@@ -89,7 +144,32 @@ export default function Chats() {
     return live;
   }, [rows, filter, lists]);
 
+  // A community's groups sit together, under its name, where the newest of them
+  // would be (like WhatsApp). A pinned group stays pinned on its own.
+  const communities = useCommunities();
+  const items = useMemo<Item[]>(() => {
+    const names = new Map((communities ?? []).map((c) => [c.community.id, core.chatTitle(c.community)]));
+    if ((filter !== 'all' && filter !== 'groups') || !names.size) return visible.map((row) => ({ kind: 'row', row }));
+    const inOne = (r: Row) => !!r.chat.communityId && names.has(r.chat.communityId) && !r.prefs.pinnedAt;
+    const out: Item[] = [];
+    const done = new Set<string>();
+    for (const r of visible) {
+      if (!inOne(r)) {
+        out.push({ kind: 'row', row: r });
+        continue;
+      }
+      const id = r.chat.communityId!;
+      if (done.has(id)) continue;
+      done.add(id);
+      out.push({ kind: 'community', id, title: names.get(id)! });
+      for (const g of visible) if (inOne(g) && g.chat.communityId === id) out.push({ kind: 'row', row: g });
+    }
+    return out;
+  }, [visible, communities, filter]);
+
   const archivedCount = (rows ?? []).filter((r) => r.prefs.archived).length;
+  // Like WhatsApp: how many archived chats have something unread.
+  const archivedUnread = (rows ?? []).filter((r) => r.prefs.archived && (r.chat.unread > 0 || r.prefs.markedUnread)).length;
   const unreadCount = (rows ?? []).filter((r) => !r.prefs.archived && (r.chat.unread > 0 || r.prefs.markedUnread)).length;
 
   // Online dots for the people in the first chats on screen.
@@ -145,8 +225,8 @@ export default function Chats() {
           </Txt>
         </View>
         <IconButton icon="pin" label={allPinned ? t.unpinChat : t.pinChat} look="onAccent" onPress={() => forPicked((r) => pinAll(r, !allPinned))} />
-        <IconButton icon="muted" label={allMuted ? t.unmute : t.mute} look="onAccent" onPress={() => forPicked((r) => core.setPrefs(r.chat.id, { muted: !allMuted }))} />
-        <IconButton icon="archive" label={t.archive} look="onAccent" onPress={() => forPicked((r) => core.setPrefs(r.chat.id, { archived: true, pinnedAt: undefined }))} testID="archive-picked" />
+        <IconButton icon="muted" label={allMuted ? t.unmute : t.mute} look="onAccent" onPress={() => (allMuted ? forPicked((r) => core.unmute(r.chat.id)) : setMuting(true))} />
+        <IconButton icon="archive" label={t.archive} look="onAccent" onPress={() => (archive(pickedRows, t), setPicked(new Set()))} testID="archive-picked" />
         <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setConfirmDelete(true)} />
         <IconButton icon="more" label={t.moreOptions} look="onAccent" onPress={() => setPickMenu(true)} />
       </LinearGradient>
@@ -158,7 +238,7 @@ export default function Chats() {
           {t.appName}
         </Txt>
       </View>
-      <IconButton icon="camera" label={t.camera} look="glass" onPress={() => toast(t.comingSoon)} />
+      <IconButton icon="camera" label={t.camera} look="glass" onPress={() => setCamera(true)} testID="list-camera" />
       <IconButton icon="more" label={t.moreOptions} look="glass" onPress={() => setMenu(true)} testID="chats-menu" />
     </Animated.View>
   );
@@ -217,13 +297,36 @@ export default function Chats() {
       {/* The chats run edge to edge, like WhatsApp, so they line up with the tab bar below. */}
       <View style={{ flex: 1, paddingHorizontal: 4 }}>
         <Animated.FlatList
-          data={visible}
+          data={items}
           extraData={[picked, typing, presence]}
-          keyExtractor={(r) => r.chat.id}
+          keyExtractor={(it) => (it.kind === 'row' ? it.row.chat.id : `community-${it.id}`)}
           itemLayoutAnimation={listLayout}
-          contentContainerStyle={{ paddingBottom: 96 }}
+          ref={list}
+          onLayout={(e) => setListHeight(Math.round(e.nativeEvent.layout.height))}
+          onScroll={(e) => {
+            scrolled.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={64}
+          contentContainerStyle={{ paddingBottom: 96, minHeight: lockedRow && listHeight ? listHeight + LOCKED_ROW : undefined }}
           ListHeaderComponent={
             <>
+              {lockedRow && (
+                <View>
+                  <Pressy onPress={() => void openLocked(FOLDER, '/locked')} label={t.lockedChats} scale={0.98} testID="open-locked">
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, height: LOCKED_ROW }}>
+                      <View style={{ width: 50, alignItems: 'center' }}>
+                        <Icon name="lock" size={22} color={theme.accInk} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Txt size={15.5} weight="600">
+                          {t.lockedChats}
+                        </Txt>
+                      </View>
+                      <Icon name="chevron" size={18} color={theme.faint} />
+                    </View>
+                  </Pressy>
+                </View>
+              )}
               {/* Realme, Xiaomi and the like: turn on Autostart, or alerts don't come. */}
               {filter === 'all' && !selecting && <AlertsCard />}
               {archivedCount > 0 && filter === 'all' ? (
@@ -237,9 +340,11 @@ export default function Chats() {
                         {t.archived}
                       </Txt>
                     </View>
-                    <Txt size={13} weight="600" color={theme.accInk}>
-                      {archivedCount}
-                    </Txt>
+                    {archivedUnread > 0 && (
+                      <Txt size={13} weight="700" color={theme.acc} testID="archived-unread">
+                        {archivedUnread}
+                      </Txt>
+                    )}
                   </View>
                 </Pressy>
               ) : null}
@@ -259,24 +364,36 @@ export default function Chats() {
               </Animated.View>
             ) : undefined
           }
-          renderItem={({ item, index }) => (
-            <Animated.View entering={rows && index < 12 ? rise(index * 28) : undefined} exiting={FadeOut.duration(160)}>
-              <ChatRow
-                row={item}
-                typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== myId)}
-                online={!!(item.other && presence[item.other]?.online)}
-                selecting={selecting}
-                selected={picked.has(item.chat.id)}
-                onPress={() => (selecting ? togglePick(item.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: item.chat.id } }))}
-                onLongPress={() => {
-                  thud();
-                  togglePick(item.chat.id);
-                }}
-                onPin={() => pin(item)}
-                onArchive={() => archive(item, t)}
-              />
-            </Animated.View>
-          )}
+          renderItem={({ item: it, index }) =>
+            it.kind === 'community' ? (
+              <Pressy onPress={() => router.push({ pathname: '/community/[id]', params: { id: it.id } })} label={it.title} scale={0.98} testID={`list-community-${it.title}`}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 2 }}>
+                  <Icon name="community" size={16} color={theme.accInk} />
+                  <Txt size={13} weight="700" color={theme.sectionText} lines={1} style={{ flexShrink: 1 }}>
+                    {it.title}
+                  </Txt>
+                  <Icon name="chevron" size={14} color={theme.faint} flip />
+                </View>
+              </Pressy>
+            ) : (
+              <Animated.View entering={rows && index < 12 ? rise(index * 28) : undefined} exiting={FadeOut.duration(160)}>
+                <ChatRow
+                  row={it.row}
+                  typing={Object.keys(typing[it.row.chat.id] ?? {}).filter((id) => id !== myId)}
+                  online={!!(it.row.other && presence[it.row.other]?.online)}
+                  selecting={selecting}
+                  selected={picked.has(it.row.chat.id)}
+                  onPress={() => (selecting ? togglePick(it.row.chat.id) : it.row.prefs.lock ? void openLocked(it.row.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: it.row.chat.id } }))}
+                  onLongPress={() => {
+                    thud();
+                    togglePick(it.row.chat.id);
+                  }}
+                  onPin={() => pin(it.row)}
+                  onArchive={() => archive(it.row, t)}
+                />
+              </Animated.View>
+            )
+          }
         />
       </View>
 
@@ -284,11 +401,13 @@ export default function Chats() {
 
       <Popup visible={menu} onClose={() => setMenu(false)}>
         <MenuItem icon="group" label={t.newGroup} onPress={() => (setMenu(false), router.push('/new-group'))} testID="menu-new-group" />
+        <MenuItem icon="community" label={t.newCommunity} onPress={() => (setMenu(false), router.push('/new-community'))} testID="menu-new-community" />
+        <MenuItem icon="broadcast" label={t.broadcastLists} onPress={() => (setMenu(false), router.push('/broadcasts'))} testID="menu-broadcasts" />
         <MenuItem icon="archive" label={t.archived} onPress={() => (setMenu(false), router.push('/archived'))} />
         <MenuItem icon="star" label={t.starred} onPress={() => (setMenu(false), router.push('/starred'))} />
         <MenuItem icon="select" label={t.selectChats} onPress={() => (setMenu(false), visible[0] && togglePick(visible[0].chat.id))} />
         <MenuItem icon="unread" label={t.markAllRead} onPress={() => (setMenu(false), (rows ?? []).forEach((r) => markRead(r)))} />
-        <MenuItem icon="palette" label={t.settings} onPress={() => (setMenu(false), router.navigate('/you'))} />
+        <MenuItem icon="settings" label={t.settings} onPress={() => (setMenu(false), router.push('/settings'))} testID="menu-settings" />
       </Popup>
 
       <Popup visible={pickMenu} onClose={() => setPickMenu(false)} top={70}>
@@ -369,6 +488,8 @@ export default function Chats() {
           { label: t.cancel, onPress: () => setConfirmDelete(false) },
         ]}
       />
+      <CameraSheet visible={camera} onClose={() => setCamera(false)} onTaken={sendTaken} onGallery={() => void fromGallery().then(sendTaken).catch(() => setCamera(false))} />
+      <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => forPicked((r) => core.mute(r.chat.id, ms))} />
     </Screen>
   );
 }
@@ -381,9 +502,18 @@ function pinAll(r: Row, on: boolean) {
   core.setPrefs(r.chat.id, { pinnedAt: on ? (r.prefs.pinnedAt ?? Date.now()) : undefined });
 }
 
-function archive(r: Row, t: Strings) {
-  core.setPrefs(r.chat.id, { archived: !r.prefs.archived, pinnedAt: undefined });
-  toast(r.prefs.archived ? t.unarchived : t.archivedNote);
+/** Archives (or brings back) chats, with Undo on the note, like WhatsApp. */
+function archive(r: Row | Row[], t: Strings) {
+  const list = Array.isArray(r) ? r : [r];
+  if (!list.length) return;
+  const back = !!list[0].prefs.archived;
+  const was = list.map((x) => ({ id: x.chat.id, archived: x.prefs.archived, pinnedAt: x.prefs.pinnedAt }));
+  list.forEach((x) => core.setPrefs(x.chat.id, { archived: !back, pinnedAt: undefined }));
+  toast(back ? t.unarchived : list.length > 1 ? fill(t.chatsArchived, { n: list.length }) : t.archivedNote, {
+    label: t.undoWord,
+    onPress: () => was.forEach(({ id, ...prefs }) => core.setPrefs(id, prefs)),
+    testID: 'undo-archive',
+  });
 }
 
 function markRead(r: Row) {

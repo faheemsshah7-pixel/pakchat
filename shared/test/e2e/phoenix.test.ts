@@ -15,16 +15,22 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { PakChat, type FileUploader } from '../../src/client';
 import { phoenixConnection } from '../../src/connection';
-import { HttpServer, ServerError, type SignedIn } from '../../src/server';
+import { HttpServer, REQUESTED, ServerError, type ServerChat, type SignedIn } from '../../src/server';
 import type { SignalApi } from '../../src/signal';
 import { MemoryStorage, type Message } from '../../src/storage';
 import { type Kind, make } from '../signals';
+
+/** A join that went straight in (not a request to its admins). */
+function inside(chat: ServerChat | typeof REQUESTED): ServerChat {
+  if (chat === REQUESTED) throw new Error('Asked to join instead of joining');
+  return chat;
+}
 
 const HTTP = process.env.PAKCHAT_SERVER ?? 'http://localhost:4002';
 const SOCKET = HTTP.replace(/^http/, 'ws') + '/socket';
 const HELPER = process.env.PAKCHAT_HELPER ?? 'http://localhost:4003';
 
-type Person = { name: string; client: PakChat; signal: SignalApi; storage: MemoryStorage; id: string };
+type Person = { name: string; client: PakChat; signal: SignalApi; storage: MemoryStorage; server: HttpServer; id: string };
 const people: Person[] = [];
 
 async function helper<T>(path: string, body: object): Promise<T> {
@@ -62,10 +68,10 @@ const sha256 = (text: string) => createHash('sha256').update(text).digest('base6
 
 /** Signs someone in with a pretend Google account. The same `key` is the same account. */
 async function person(name: string, kind: Kind, key = `${name}-${Date.now()}-${Math.random()}`): Promise<Person> {
-  const { client, signal, storage } = newClient(kind);
+  const { client, signal, storage, server } = newClient(kind);
   const { id_token } = await helper<{ id_token: string }>('/google_token', { name, key });
   const s = await client.signIn(id_token);
-  const p = { name, client, signal, storage, id: s.userId, key };
+  const p = { name, client, signal, storage, server, id: s.userId, key };
   people.push(p);
   await connected(client);
   return p;
@@ -73,7 +79,7 @@ async function person(name: string, kind: Kind, key = `${name}-${Date.now()}-${M
 
 /** Links a website to someone's phone, through the test helper (the QR code comes in phase 8). */
 async function website(phone: Person, kind: Kind): Promise<Person> {
-  const { client, signal, storage } = newClient(kind);
+  const { client, signal, storage, server } = newClient(kind);
   const s = await client.signInWith(async (device, keys) => {
     const r = await helper<{ token: string; device_id: number; device_uuid: string }>('/link', {
       token: phone.client.me!.token,
@@ -89,7 +95,7 @@ async function website(phone: Person, kind: Kind): Promise<Person> {
     });
     return { token: r.token, deviceId: r.device_id, deviceUuid: r.device_uuid, user: phone.client.me!.me } satisfies SignedIn;
   });
-  const p = { name: `${phone.name} (web)`, client, signal, storage, id: s.userId };
+  const p = { name: `${phone.name} (web)`, client, signal, storage, server, id: s.userId };
   people.push(p);
   await connected(client);
   return p;
@@ -200,6 +206,67 @@ describe('against the real server', () => {
     await eventually(async () => expect((await texts(ali, g.id)).at(-1)).toBe('Sara: Welcome Zara, bye Bilal'));
     await new Promise((r) => setTimeout(r, 300));
     expect(await texts(bilal, g.id)).toEqual(['Ali: Exam on Monday (edited)']);
+  });
+
+  test('phase 7: an invite link that stops after 2 joins, and a message from someone who joined with it', async () => {
+    const ali = await person('Ali', 'node');
+    const g = await ali.client.createGroup('Cricket', []);
+    const link = await ali.server.resetInvite(g.id, { maxUses: 2, expiresIn: 3_600 });
+    expect(link.maxUses).toBe(2);
+    expect(link.expiresAt).toBeGreaterThan(Date.now());
+    const [sara, bilal, zara] = [await person('Sara', 'wasm'), await person('Bilal', 'node'), await person('Zara', 'wasm')];
+    const info = await sara.server.inviteInfo(link.code);
+    expect(info).toMatchObject({ chatId: g.id, title: 'Cricket', kind: 'group', callLink: false });
+    await sara.client.adopt(inside(await sara.server.joinInvite(link.code)));
+    await bilal.client.adopt(inside(await bilal.server.joinInvite(link.code)));
+    // The third join: the link has stopped.
+    await expect(zara.server.joinInvite(link.code)).rejects.toBeInstanceOf(ServerError);
+    await sara.client.sendText(g.id, 'Salam all');
+    for (const p of [ali, bilal]) await eventually(async () => expect(await texts(p, g.id)).toContain('Sara: Salam all'));
+    // A new link: the old one stops.
+    const fresh = await ali.server.resetInvite(g.id);
+    expect(fresh.code).not.toBe(link.code);
+    await expect(zara.server.inviteInfo(link.code)).rejects.toBeInstanceOf(ServerError);
+  });
+
+  test('phase 7: a community with announcements, a linked group, and a group joined from its list', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'wasm');
+    const g = await ali.client.createGroup('Juniors', [sara.id]);
+    const community = await ali.client.adopt(await ali.server.createCommunity('Model Town', 'Our street', [g.id]));
+    expect(community.kind).toBe('community');
+    const { groups } = await ali.server.communityGroups(community.id);
+    const ann = groups.find((x) => x.announcements)!;
+    expect(ann).toBeTruthy();
+    expect(groups.some((x) => x.id === g.id)).toBe(true);
+    // Sara joins the community; a new group in it is hers to join from its list.
+    await ali.client.addMembers(community.id, [sara.id]);
+    const seniors = await ali.server.addCommunityGroups(community.id, [], { title: 'Seniors' });
+    expect(seniors).toBeTruthy();
+    const list = await sara.server.communityGroups(community.id);
+    expect(list.groups.find((x) => x.id === seniors)?.joined).toBe(false);
+    expect(list.groups.find((x) => x.announcements)?.joined).toBe(true);
+    const joined = await sara.client.adopt(inside(await sara.server.joinCommunityGroup(community.id, seniors!)));
+    expect(joined.communityId).toBe(community.id);
+    // Only admins post in announcements.
+    await ali.client.syncChats();
+    await ali.client.sendText(ann.id, 'Meeting on Friday');
+    await sara.client.syncChats();
+    await eventually(async () => expect(await texts(sara, ann.id)).toContain('Ali: Meeting on Friday'));
+  });
+
+  test('phase 7: a call link anyone can join, and a report', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'wasm');
+    const call = await ali.client.adopt(await ali.server.createCallLink('Family call'));
+    expect(call.callLink).toBe(true);
+    expect(call.inviteCode).toBeTruthy();
+    const info = await sara.server.inviteInfo(call.inviteCode!);
+    expect(info.callLink).toBe(true);
+    const joined = await sara.client.adopt(inside(await sara.server.joinInvite(call.inviteCode!)));
+    expect(joined.members.map((m) => m.userId).sort()).toEqual([ali.id, sara.id].sort());
+    const dm = await sara.client.openDirect(ali.id);
+    await sara.server.report(dm.id, 'spam', ali.id, [{ author: ali.id, text: 'buy now', at: Date.now() }]);
   });
 
   test('a reinstalled phone keeps chatting, after asking for what it missed', async () => {

@@ -228,21 +228,29 @@ export function Dialog({ visible, onClose, title, text, buttons }: { visible: bo
 
 // ---- Toasts ----
 
-let current: { id: number; text: string } | null = null;
+export type ToastAction = { label: string; onPress: () => void; testID?: string };
+
+let current: { id: number; text: string; action?: ToastAction } | null = null;
 const toastListeners = new Set<() => void>();
 let nextId = 1;
 
-/** Shows a short note at the bottom for a moment. */
-export function toast(text: string) {
+/**
+ * Shows a short note at the bottom for a moment. With an action (Undo), it has a
+ * button and stays for `ms` (the time there is to press it).
+ */
+export function toast(text: string, action?: ToastAction, ms = action ? 5000 : 2000) {
   const id = nextId++;
-  current = { id, text };
+  current = { id, text, action };
   toastListeners.forEach((fn) => fn());
-  setTimeout(() => {
-    if (current?.id === id) {
-      current = null;
-      toastListeners.forEach((fn) => fn());
-    }
-  }, 2000);
+  setTimeout(() => hideToast(id), ms);
+  return id;
+}
+
+/** Takes a toast away early (its action was pressed, or it no longer applies). */
+export function hideToast(id?: number) {
+  if (!current || (id !== undefined && current.id !== id)) return;
+  current = null;
+  toastListeners.forEach((fn) => fn());
 }
 
 /** Put once near the top of the app; shows the toasts. */
@@ -257,17 +265,35 @@ export function ToastHost() {
     () => current,
   );
   return (
-    <View pointerEvents="none" style={{ position: 'absolute', start: 0, end: 0, bottom: insets.bottom + 90, alignItems: 'center' }}>
+    <View pointerEvents="box-none" style={{ position: 'absolute', start: 0, end: 0, bottom: insets.bottom + 90, alignItems: 'center' }}>
       {now && (
         <Animated.View
           key={now.id}
           entering={rise()}
           exiting={FadeOutDown.duration(160)}
-          style={{ paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16, backgroundColor: t.dark ? '#ECEEF2' : '#0B1B36' }}
+          pointerEvents={now.action ? 'auto' : 'none'}
+          style={{ paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16, backgroundColor: t.dark ? '#ECEEF2' : '#0B1B36', flexDirection: 'row', alignItems: 'center', gap: 16 }}
         >
           <Txt size={14} weight="600" color={t.dark ? '#111214' : '#FFFFFF'} align="center">
             {now.text}
           </Txt>
+          {now.action && (
+            <Pressable
+              onPress={() => {
+                const a = now.action!;
+                hideToast(now.id);
+                a.onPress();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={now.action.label}
+              hitSlop={12}
+              testID={now.action.testID}
+            >
+              <Txt size={14} weight="800" color={t.dark ? t.accInk : '#9CC2FF'}>
+                {now.action.label}
+              </Txt>
+            </Pressable>
+          )}
         </Animated.View>
       )}
     </View>

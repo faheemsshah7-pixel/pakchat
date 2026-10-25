@@ -33,6 +33,10 @@ export type Attachment = {
   waveform?: string;
   /** A GIF: a short silent video that plays on a loop. */
   gif?: true;
+  /** View once: a photo, video or voice note that can be opened one time, then it's gone. */
+  once?: true;
+  /** A round video message (recorded in the chat, shown in a circle). */
+  round?: true;
 };
 
 /** `sticker`: a picture with a see-through background, shown big and without a bubble. */
@@ -44,6 +48,24 @@ export const FILE_KINDS: readonly FileKind[] = ['image', 'video', 'audio', 'voic
  * is gone after a day, and the chat isn't the status's).
  */
 export type StatusQuote = { author: string; id: string; kind: 'text' | 'image' | 'video'; text?: string; thumb?: string };
+
+/**
+ * "Reply privately" to a group message: a little copy of it goes with the
+ * reply in the one-to-one chat (the other person may not have the group open).
+ */
+export type ChatQuote = { chat: string; author: string; id: string; kind: 'text' | 'image' | 'video' | 'voice' | 'file' | 'poll' | 'other'; text?: string; thumb?: string };
+
+/** A web page named in a message, made into a card on the sender's phone (so the receiver's phone never visits it). */
+export type LinkPreview = { url: string; title?: string; description?: string; site?: string; thumb?: string };
+
+/** Someone's details, as a contact card. `user`: their PakChat id, if they're on PakChat. */
+export type SharedContact = { name: string; phones: string[]; emails?: string[]; user?: string };
+
+/** A place. `live`: sharing where I am until this time (ms); the moves come as `live` changes. */
+export type Place = { lat: number; lng: number; name?: string; address?: string; live?: number };
+
+/** A call planned for later, with an optional call link. */
+export type CallPlan = { title: string; at: number; video: boolean; link?: string; about?: string };
 
 /**
  * A call message: never shown as a bubble, never saved. One call (`call`, its
@@ -71,18 +93,30 @@ export type CallSignal = {
   video?: boolean;
   /** media: my microphone is on. */
   audio?: boolean;
+  /** media: what I send is my screen (shown whole, not cropped), not my camera. */
+  screen?: boolean;
   /** ring: a group call. */
   group?: boolean;
+  /**
+   * ring, when someone is added to a call that isn't a group chat's: who else
+   * is in it (user ids), so the new person's phone can connect to them too.
+   */
+  people?: string[];
   sdp?: string;
   cand?: IceCandidate;
 };
+/** A call has room for this many people (each phone sends to every other). */
+export const MAX_CALL_PEOPLE = 8;
 
 /** Things that show up as a message bubble. */
 export type Body =
   /** `bg`: a status in words, on one of the app's colours. `status`: a reply to someone's status. */
-  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; bg?: number; status?: StatusQuote }
+  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; bg?: number; status?: StatusQuote; quote?: ChatQuote; link?: LinkPreview }
   | { t: 'poll'; question: string; options: string[]; multi: boolean }
-  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; status?: StatusQuote };
+  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; status?: StatusQuote; quote?: ChatQuote }
+  | ({ t: 'location'; replyTo?: Ref; forwarded?: boolean } & Place)
+  | { t: 'contact'; cards: SharedContact[]; replyTo?: Ref; forwarded?: boolean }
+  | ({ t: 'event' } & CallPlan);
 
 /** Changes to messages that are already there. */
 export type Change =
@@ -97,7 +131,11 @@ export type Change =
   /** Pin a message until a time (ms), or null to unpin. */
   | { t: 'pin'; target: Ref; until: number | null }
   /** Disappearing messages: how long messages last, in seconds. 0 turns it off. */
-  | { t: 'timer'; seconds: number };
+  | { t: 'timer'; seconds: number }
+  /** I opened a view once message (so it's gone on my other devices, and the sender sees "Opened"). */
+  | { t: 'opened'; target: Ref }
+  /** My live location moved, or (`stop`) I stopped sharing it. */
+  | { t: 'live'; target: Ref; lat: number; lng: number; stop?: true };
 
 /** The app's own housekeeping, never shown. */
 export type Control =
@@ -118,8 +156,10 @@ export type Payload = Body | Change | Control;
  */
 export type Content = Payload & { v: 1; id: string; chat: string; at: number };
 
-export const BODY_TYPES = ['text', 'poll', 'file'] as const;
-export const CHANGE_TYPES = ['edit', 'delete', 'react', 'vote', 'pin', 'timer'] as const;
+export const BODY_TYPES = ['text', 'poll', 'file', 'location', 'contact', 'event'] as const;
+export const CHANGE_TYPES = ['edit', 'delete', 'react', 'vote', 'pin', 'timer', 'opened', 'live'] as const;
+/** Live location: for 15 minutes, 1 hour or 8 hours, as on WhatsApp. */
+export const LIVE_MAX_MS = 8 * 3600_000;
 
 // Limits, so nobody can send something huge or odd.
 const MAX_TEXT = 20_000;
@@ -169,6 +209,58 @@ function checkAttachment(x: unknown): Attachment | null {
     out.waveform = x.waveform;
   }
   if (x.gif === true) out.gif = true;
+  // View once only for photos, videos and voice notes.
+  if (x.once === true && (out.kind === 'image' || out.kind === 'video' || out.kind === 'voice')) out.once = true;
+  if (x.round === true && out.kind === 'video') out.round = true;
+  return out;
+}
+
+const QUOTE_KINDS = ['text', 'image', 'video', 'voice', 'file', 'poll', 'other'];
+
+function checkChatQuote(x: unknown): ChatQuote | null {
+  if (!isObject(x) || !isId(x.chat) || !isId(x.author) || !isId(x.id) || !QUOTE_KINDS.includes(x.kind as string)) return null;
+  const out: ChatQuote = { chat: x.chat, author: x.author, id: x.id, kind: x.kind as ChatQuote['kind'] };
+  if (x.text !== undefined) {
+    if (!isText(x.text, 700)) return null;
+    out.text = x.text;
+  }
+  if (x.thumb !== undefined) {
+    if (!isText(x.thumb, MAX_THUMB)) return null;
+    out.thumb = x.thumb;
+  }
+  return out;
+}
+
+function checkLink(x: unknown): LinkPreview | null {
+  if (!isObject(x) || !isText(x.url, 2000) || !/^https?:\/\//i.test(x.url)) return null;
+  const out: LinkPreview = { url: x.url };
+  for (const [k, max] of [['title', 300], ['description', 500], ['site', 100]] as const) {
+    if (x[k] === undefined) continue;
+    if (!isText(x[k], max)) return null;
+    out[k] = x[k];
+  }
+  if (x.thumb !== undefined) {
+    if (!isText(x.thumb, MAX_THUMB)) return null;
+    out.thumb = x.thumb;
+  }
+  return out;
+}
+
+const isLat = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= -90 && x <= 90;
+const isLng = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= -180 && x <= 180;
+
+function checkCard(x: unknown): SharedContact | null {
+  if (!isObject(x) || !isText(x.name, 200) || x.name.trim() === '') return null;
+  if (!Array.isArray(x.phones) || x.phones.length > 10 || !x.phones.every((p) => isText(p, 40) && p.trim() !== '')) return null;
+  const out: SharedContact = { name: x.name, phones: x.phones as string[] };
+  if (x.emails !== undefined) {
+    if (!Array.isArray(x.emails) || x.emails.length > 10 || !x.emails.every((e) => isText(e, 200) && e.trim() !== '')) return null;
+    out.emails = x.emails as string[];
+  }
+  if (x.user !== undefined) {
+    if (!isId(x.user)) return null;
+    out.user = x.user;
+  }
   return out;
 }
 
@@ -189,7 +281,11 @@ function checkQuote(x: unknown): StatusQuote | null {
 function checkCall(x: Record<string, unknown>): CallSignal | null {
   if (!isId(x.call) || !CALL_OPS.includes(x.op as CallOp)) return null;
   const out: CallSignal = { t: 'call', call: x.call, op: x.op as CallOp };
-  for (const k of ['video', 'audio', 'group'] as const) if (typeof x[k] === 'boolean') out[k] = x[k];
+  for (const k of ['video', 'audio', 'group', 'screen'] as const) if (typeof x[k] === 'boolean') out[k] = x[k];
+  if (x.people !== undefined) {
+    if (!isIdList(x.people, MAX_CALL_PEOPLE)) return null;
+    out.people = [...new Set(x.people)];
+  }
   if (x.sdp !== undefined) {
     if (!isText(x.sdp, MAX_SDP)) return null;
     out.sdp = x.sdp;
@@ -224,6 +320,16 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
         if (!quote) return null;
         out.status = quote;
       }
+      if (x.quote !== undefined) {
+        const quote = checkChatQuote(x.quote);
+        if (!quote) return null;
+        out.quote = quote;
+      }
+      if (x.link !== undefined) {
+        // A broken card isn't worth losing the words for.
+        const link = checkLink(x.link);
+        if (link) out.link = link;
+      }
       return out;
     }
     case 'poll': {
@@ -249,6 +355,54 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
         if (!quote) return null;
         out.status = quote;
       }
+      if (x.quote !== undefined) {
+        const quote = checkChatQuote(x.quote);
+        if (!quote) return null;
+        out.quote = quote;
+      }
+      return out;
+    }
+    case 'location': {
+      if (!isLat(x.lat) || !isLng(x.lng)) return null;
+      if (x.replyTo !== undefined && !isRef(x.replyTo)) return null;
+      const out: Body = { t: 'location', lat: x.lat, lng: x.lng };
+      if (x.name !== undefined) {
+        if (!isText(x.name, 200)) return null;
+        out.name = x.name;
+      }
+      if (x.address !== undefined) {
+        if (!isText(x.address, 400)) return null;
+        out.address = x.address;
+      }
+      if (x.live !== undefined) {
+        if (!isCount(x.live)) return null;
+        out.live = x.live;
+      }
+      if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
+      if (x.forwarded === true) out.forwarded = true;
+      return out;
+    }
+    case 'contact': {
+      if (!Array.isArray(x.cards) || x.cards.length < 1 || x.cards.length > 20) return null;
+      const cards = x.cards.map(checkCard);
+      if (cards.some((c) => !c)) return null;
+      if (x.replyTo !== undefined && !isRef(x.replyTo)) return null;
+      const out: Body = { t: 'contact', cards: cards as SharedContact[] };
+      if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
+      if (x.forwarded === true) out.forwarded = true;
+      return out;
+    }
+    case 'event': {
+      if (!isText(x.title, 200) || x.title.trim() === '' || !isCount(x.at)) return null;
+      const out: Body = { t: 'event', title: x.title, at: x.at, video: x.video === true };
+      if (x.link !== undefined) {
+        if (!isText(x.link, 64) || !/^[A-Za-z0-9_-]+$/.test(x.link)) return null;
+        out.link = x.link;
+      }
+      if (x.about !== undefined) {
+        if (!isText(x.about, 1000)) return null;
+        out.about = x.about;
+      }
       return out;
     }
     case 'edit':
@@ -270,6 +424,14 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       return { t: 'pin', target: { author: x.target.author, id: x.target.id }, until: x.until as number | null };
     case 'timer':
       return isCount(x.seconds) && x.seconds <= 366 * 24 * 3600 ? { t: 'timer', seconds: x.seconds } : null;
+    case 'opened':
+      return isRef(x.target) ? { t: 'opened', target: { author: x.target.author, id: x.target.id } } : null;
+    case 'live': {
+      if (!isRef(x.target) || !isLat(x.lat) || !isLng(x.lng)) return null;
+      const out: Change = { t: 'live', target: { author: x.target.author, id: x.target.id }, lat: x.lat, lng: x.lng };
+      if (x.stop === true) out.stop = true;
+      return out;
+    }
     case 'key':
       return isId(x.distributionId) && isText(x.key, 4096) ? { t: 'key', distributionId: x.distributionId, key: x.key } : null;
     case 'retry':

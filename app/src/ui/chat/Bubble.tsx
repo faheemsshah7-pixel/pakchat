@@ -15,12 +15,14 @@ import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, wi
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
+import { slowPhone } from '../../core/phone';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Ticks } from '../ChatRow';
 import { FileBody } from './FileBody';
+import { ChatQuoteView, ContactBody, EventBody, LinkBody, LocationBody, OnceBody, RoundBody } from './MoreBodies';
 import { VoiceBody } from './VoiceBody';
-import { clock, fileLine, systemText } from '../format';
+import { bodyLine, clock, systemText } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
 import { fade, pop, smooth, snappy, tick } from '../motion';
@@ -125,8 +127,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
     borderBottomEndRadius: mine ? (first ? corner : 18) : 18,
   };
   const reactions = Object.entries(m.reactions ?? {});
-  // A sticker has no bubble: just the picture, with the time on a little pill under it.
-  const bare = !m.deleted && m.kind === 'file' && m.file?.kind === 'sticker';
+  // A sticker (and a round video) has no bubble: just the picture, with the time on a little pill under it.
+  const bare = !m.deleted && m.kind === 'file' && (m.file?.kind === 'sticker' || (!!m.file?.round && !m.file.once));
 
   const body = (
     <View style={{ paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
@@ -146,6 +148,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
       {/* While picking messages, a tap anywhere on the bubble picks it (no jumping, voting or retrying). */}
       {quoted && !m.deleted && <Quote m={quoted} mine={mine} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />}
       {m.statusReply && !m.deleted && <StatusQuoteView q={m.statusReply} mine={mine} />}
+      {m.quote && !m.deleted && <ChatQuoteView q={m.quote} mine={mine} />}
       {m.deleted ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="close" size={14} color={meta} />
@@ -160,9 +163,17 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           onVote={(i) => (selecting ? onPress(m) : onVote(m, i))}
           onView={() => (selecting ? onPress(m) : router.push({ pathname: '/poll-votes', params: { chat: m.chatId, author: m.author, id: m.id } }))}
         />
+      ) : m.kind === 'location' && m.location ? (
+        <LocationBody m={m} mine={mine} />
+      ) : m.kind === 'contact' && m.contacts ? (
+        <ContactBody m={m} mine={mine} />
+      ) : m.kind === 'event' && m.plan ? (
+        <EventBody m={m} mine={mine} />
       ) : m.kind === 'file' && m.file ? (
         <>
-          {m.file.kind === 'voice' || m.file.kind === 'audio' ? (
+          {m.file.once ? (
+            <OnceBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+          ) : m.file.kind === 'voice' || m.file.kind === 'audio' ? (
             <VoiceBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
           ) : (
             <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
@@ -179,14 +190,17 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           )}
         </>
       ) : (
-        <Text
-          style={[
-            fontStyle(m.text ?? '', lang, 15.5, '400'),
-            { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left' },
-          ]}
-        >
-          <Words text={m.text ?? ''} mentions={m.mentions} />
-        </Text>
+        <>
+          {m.link && <LinkBody link={m.link} mine={mine} />}
+          <Text
+            style={[
+              fontStyle(m.text ?? '', lang, 15.5, '400'),
+              { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left' },
+            ]}
+          >
+            <Words text={m.text ?? ''} mentions={m.mentions} />
+          </Text>
+        </>
       )}
       <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 2 }}>
         {starred && <Icon name="starFilled" size={11} color={meta} />}
@@ -207,7 +221,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
 
   return (
     <View style={{ marginTop: first ? 6 : 2 }}>
-      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }, highlight]} />
+      {/* The picked-message tint, only while picking (one less layer per bubble while scrolling). */}
+      {(selecting || selected) && <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }, highlight]} />}
       {above}
       <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
         {/* The reply arrow, waiting behind the bubble. */}
@@ -239,7 +254,11 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                       <Quote m={quoted} mine={false} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
                     </View>
                   )}
-                  <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+                  {m.file?.round ? (
+                    <RoundBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+                  ) : (
+                    <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+                  )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: theme.glass }}>
                     {starred && <Icon name="starFilled" size={11} color={theme.muted} />}
                     {!!m.expiresAt && <Icon name="timer" size={11} color={theme.muted} />}
@@ -249,6 +268,10 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                     {mine && <Ticks status={m.status} size={15} color={theme.muted} />}
                   </View>
                 </View>
+              ) : mine && (slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]) ? (
+                // One plain colour: on a slower phone (the colour fade and its clipping cost a lot
+                // there), and in the dark look, whose "fade" is one colour anyway.
+                <View style={[radius, { backgroundColor: middle(theme.bubbleMine), borderWidth: selected ? 2 : 0, borderColor: theme.acc }]}>{body}</View>
               ) : mine ? (
                 // The gradient can't round its own corners one by one on Android (it came
                 // out square), so a plain View with the corners clips it instead.
@@ -313,7 +336,7 @@ function Quote({ m, mine, onPress }: { m: Message; mine: boolean; onPress: () =>
   const t = useT();
   const { theme } = useLook();
   const who = m.author === core.myId ? t.youWord : core.name(m.author) || '…';
-  const text = m.deleted ? t.deleted : m.kind === 'poll' ? `${t.poll} ${m.poll?.question ?? ''}` : m.kind === 'file' && m.file ? fileLine(m, t) : (m.text ?? '');
+  const text = m.deleted ? t.deleted : bodyLine(m, t);
   return (
     <Pressy onPress={onPress} scale={0.98} label={text}>
       <View
@@ -564,4 +587,18 @@ function Dot({ delay }: { delay: number }) {
   }, [delay, reduceMotion, y]);
   const style = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }], opacity: interpolate(y.value, [-4, 0], [1, 0.45]) }));
   return <Animated.View style={[{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.acc }, style]} />;
+}
+
+/** The colour halfway along a two-colour fade ("#RRGGBB" each), for the plain bubble. */
+const middles = new Map<string, string>();
+function middle([a, b]: [string, string]) {
+  const key = a + b;
+  let out = middles.get(key);
+  if (!out) {
+    const ch = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+    const ok = /^#[0-9a-f]{6}$/i.test(a) && /^#[0-9a-f]{6}$/i.test(b);
+    out = ok ? `#${[0, 1, 2].map((i) => Math.round((ch(a, i) + ch(b, i)) / 2).toString(16).padStart(2, '0')).join('')}` : a;
+    middles.set(key, out);
+  }
+  return out;
 }

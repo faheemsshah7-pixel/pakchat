@@ -6,7 +6,7 @@
 // Saving: like WhatsApp's "Save to", a new contact can also go into the phone's
 // address book: a Google account (Google syncs it to your Gmail contacts), the
 // phone itself, or the SIM card.
-import type { ContactCard } from '@pakchat/shared';
+import type { ContactCard, SharedContact } from '@pakchat/shared';
 import { Contact, ContactField, getPermissionsAsync, requestPermissionsAsync } from 'expo-contacts';
 import KV from 'expo-sqlite/kv-store';
 
@@ -52,3 +52,23 @@ export function rememberSaveTo(key: string) {
 }
 
 export const accountKey = (a: PhoneBookAccount) => `${a.type ?? ''}|${a.name ?? ''}`;
+
+/**
+ * Everyone in the phone's address book, by name, to share as a contact card in a
+ * chat. Null when PakChat may not see contacts.
+ */
+export async function phoneBookCards(): Promise<SharedContact[] | null> {
+  const { granted } = await requestPermissionsAsync();
+  if (!granted) return null;
+  const all = await Contact.getAllDetails([ContactField.FULL_NAME, ContactField.PHONES, ContactField.EMAILS] as const);
+  return all
+    .map((c) => ({
+      name: (c.fullName ?? '').trim(),
+      phones: [...new Set((c.phones ?? []).map((p) => (p.number ?? '').trim()).filter(Boolean))].slice(0, 5),
+      emails: [...new Set((c.emails ?? []).map((e) => (e.address ?? '').trim()).filter(Boolean))].slice(0, 3),
+    }))
+    .filter((c) => c.name && (c.phones.length || c.emails.length))
+    .map((c) => (c.emails.length ? c : { name: c.name, phones: c.phones }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+

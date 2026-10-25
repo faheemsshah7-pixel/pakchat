@@ -21,16 +21,21 @@ defmodule PakchatWeb.Wire do
       privacy: %{
         last_seen: u.last_seen_visibility,
         online: u.online_visibility,
+        photo: u.photo_visibility,
         read_receipts: u.read_receipts
       }
     }
   end
 
-  @doc "Someone else: only what anyone may see."
-  def person(%User{} = u), do: %{id: u.id, name: u.name, about: u.about, photo: u.photo}
+  @doc "Someone else: only what anyone may see (their photo only if `viewer` may see it)."
+  def person(%User{} = u, viewer \\ nil) do
+    photo = if Pakchat.Privacy.can_see_photo?(viewer, u), do: u.photo
+    %{id: u.id, name: u.name, about: u.about, photo: photo}
+  end
 
   @doc "Someone who messaged me first: also how to reach them (see `Chats.reached_out?/2`)."
-  def person_with_ways(%User{} = u), do: Map.merge(person(u), %{phone: u.phone, email: u.email})
+  def person_with_ways(%User{} = u, viewer \\ nil),
+    do: Map.merge(person(u, viewer), %{phone: u.phone, email: u.email})
 
   def chat(%Chat{} = c, viewer_id) do
     # Someone's status: only its owner sees who else can see it.
@@ -49,19 +54,47 @@ defmodule PakchatWeb.Wire do
       members: members
     }
     |> Map.merge(
-      if c.kind == "group" do
+      if c.kind in ["group", "community"] do
+        # Only admins see the invite code, as in today's app. Anyone in a call
+        # link's group may share its link.
+        sees_invite? = admin? or c.call_link
+
         %{
           title: c.title,
           description: c.description,
           photo: c.photo,
           only_admins_send: c.only_admins_send,
-          # Only admins see the invite code, as in today's app.
-          invite_code: if(admin?, do: c.invite_code)
+          invite_code: if(sees_invite?, do: c.invite_code),
+          invite_expires_at: if(sees_invite? and c.invite_code, do: c.invite_expires_at),
+          invite_max_uses: if(sees_invite? and c.invite_code, do: c.invite_max_uses),
+          invite_uses: if(sees_invite? and c.invite_code, do: c.invite_uses),
+          community_id: c.community_id,
+          announcements: c.announcements,
+          call_link: c.call_link,
+          groups_by_members: c.groups_by_members,
+          join_approval: c.join_approval,
+          # Whoever made it: a community's owner, the only one who can deactivate it.
+          created_by: c.created_by
         }
       else
         %{}
       end
     )
+  end
+
+  @doc "A group in a community, as its members see it in the community's list."
+  def community_group(%Chat{} = c, viewer_id, requested \\ []) do
+    %{
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      photo: c.photo,
+      announcements: c.announcements,
+      members: length(c.members),
+      joined: Enum.any?(c.members, &(&1.user_id == viewer_id)),
+      approval: c.join_approval,
+      requested: c.id in requested
+    }
   end
 
   @doc """

@@ -82,8 +82,20 @@ defmodule Pakchat.Relay do
           {seq, insert(rows)}
         end)
 
-      # A status never wakes anyone: it waits until they open PakChat.
-      if chat.kind == "status", do: deliver(stored, wake: false), else: deliver(stored)
+      # A status never wakes anyone: it waits until they open PakChat. But a
+      # like on one wakes its owner's phone, so it can say "Sara liked your
+      # status" (the app checks what's inside; taking a like back says nothing).
+      cond do
+        chat.kind == "status" and kind == "reaction" and sender.user_id != chat.created_by ->
+          deliver(stored, wake_kind: "reaction")
+
+        chat.kind == "status" ->
+          deliver(stored, wake: false)
+
+        true ->
+          deliver(stored)
+      end
+
       {:ok, %{seq: seq, sent_at: now}}
     end
   end
@@ -152,6 +164,9 @@ defmodule Pakchat.Relay do
 
   # Only its owner posts to a status. Viewers can like it ("reaction") or ask
   # for a resend ("control"), to the owner only (see `status_viewer/5`).
+  # A community only holds its members: its messages go in its groups.
+  defp may_send(%Chat{kind: "community"}, _user_id, _kind), do: {:error, :forbidden}
+
   defp may_send(%Chat{kind: "status", created_by: owner}, user_id, kind) do
     if user_id == owner or kind in ["reaction", "control"], do: :ok, else: {:error, :forbidden}
   end
@@ -392,9 +407,11 @@ defmodule Pakchat.Relay do
   still waiting for this device (it hasn't collected it).
   """
   def waiting?(device_id, %DateTime{} = since, kind \\ "message") do
+    kinds = List.wrap(kind)
+
     Repo.exists?(
       from e in Envelope,
-        where: e.device_id == ^device_id and e.kind == ^kind and e.sent_at >= ^since
+        where: e.device_id == ^device_id and e.kind in ^kinds and e.sent_at >= ^since
     )
   end
 
@@ -471,10 +488,13 @@ defmodule Pakchat.Relay do
       Phoenix.PubSub.broadcast(Pakchat.PubSub, "relay:" <> device_id, {:envelopes, list})
     end
 
-    # Only messages wake a closed app: not ticks, reactions or group notes.
-    # A call that starts ringing wakes it too, with a call push.
+    # Only messages wake a closed app: not ticks, reactions or group notes
+    # (except a like on a status, `wake_kind: "reaction"`). A call that
+    # starts ringing wakes it too, with a call push.
     {kind, wake?} =
-      if opts[:call], do: {"call", opts[:wake] == true}, else: {"message", opts[:wake] != false}
+      if opts[:call],
+        do: {"call", opts[:wake] == true},
+        else: {opts[:wake_kind] || "message", opts[:wake] != false}
 
     if wake? do
       by_device

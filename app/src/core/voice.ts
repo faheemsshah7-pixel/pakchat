@@ -84,7 +84,7 @@ const remove = (uri: string | null | undefined) => {
   }
 };
 
-export type Recorded = { uri: string; duration: number; waveform?: string };
+export type Recorded = { uri: string; duration: number; waveform?: string; /** View once. */ once?: boolean };
 
 /**
  * One voice note being made. `rec` is the screen's recorder (useAudioRecorder);
@@ -220,13 +220,13 @@ export class VoiceSession {
 }
 
 /** Sends a finished voice note: it moves into PakChat's own folder first, like any file. */
-export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref) {
+export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref, hold?: number) {
   const files = new Directory(Paths.document, 'files');
   if (!files.exists) files.create({ intermediates: true, idempotent: true });
   const copy = new File(files, `${core.newId()}.m4a`);
   // Wait for the move to finish before reading its size or sending it.
   await new File(v.uri).move(copy);
-  await core.client.sendFile(
+  return core.client.sendFile(
     chatId,
     {
       local: copy.uri,
@@ -235,7 +235,8 @@ export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref) {
       kind: 'voice',
       duration: Math.round(v.duration),
       ...(v.waveform ? { waveform: v.waveform } : {}),
+      ...(v.once ? { once: true as const } : {}),
     },
-    { replyTo },
+    { replyTo, hold },
   );
 }

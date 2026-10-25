@@ -219,7 +219,8 @@ export class SqliteStorage implements Storage {
    */
   async shared(chatId: string, which: 'media' | 'docs' | 'links', limit = 500): Promise<Message[]> {
     const where = {
-      media: "json_extract(json, '$.file.kind') IN ('image', 'video') AND json_extract(json, '$.file.gif') IS NULL",
+      // View once photos and videos are never in Media (nor round videos, like WhatsApp's).
+      media: "json_extract(json, '$.file.kind') IN ('image', 'video') AND json_extract(json, '$.file.gif') IS NULL AND json_extract(json, '$.file.once') IS NULL AND json_extract(json, '$.file.round') IS NULL",
       docs: "json_extract(json, '$.file.kind') IN ('doc', 'audio')",
       links: "(json_extract(json, '$.text') LIKE '%http%' OR json_extract(json, '$.text') LIKE '%www.%')",
     }[which];

@@ -26,13 +26,19 @@ import { fileModule } from '../../modules/pakchat-signal';
 import { en, ur, type Strings } from '../i18n/strings';
 import { preview } from '../ui/format';
 import { avatarTint, initials } from '../ui/kit';
-import { core } from './core';
+import { core, isMuted } from './core';
+import { toneName } from '../ui/TonePicker';
 
 /** The background task the wake-ups run (defined in background.ts). */
 export const WAKE_TASK = 'pakchat-wake';
 const CHANNEL = 'messages';
 /** The plain "New message" alert, for when a wake-up couldn't reach the server. */
 const PLAIN = 'pakchat:new';
+/** "Sara liked your status" alerts start with this (one for each person and status). */
+export const LIKE_ALERT = 'pakchat:like:';
+/** A scheduled call's reminder, as it starts (plans.ts). */
+export const PLAN_ALERT = 'pakchat:plan:';
+export const alertChannel = 'messages';
 
 let started = false;
 
@@ -45,7 +51,7 @@ export const pushState = () => state;
 // have nothing to show. (Chat alerts are drawn by the phone itself: ChatAlerts.kt.)
 Notifications.setNotificationHandler({
   handleNotification: async (n) => {
-    const ours = n.request.identifier === PLAIN;
+    const ours = n.request.identifier === PLAIN || n.request.identifier.startsWith(LIKE_ALERT) || n.request.identifier.startsWith(PLAN_ALERT);
     return { shouldShowBanner: ours, shouldShowList: ours, shouldPlaySound: ours, shouldSetBadge: false };
   },
 });
@@ -88,7 +94,7 @@ export async function startPush() {
 }
 
 /** The words in the language you chose (read straight from the saved look, so it works in the background). */
-function words(): Strings {
+export function words(): Strings {
   try {
     const saved = KV.getItemSync('prefs.look');
     return saved && (JSON.parse(saved) as { lang?: string }).lang === 'ur' ? ur : en;
@@ -111,40 +117,71 @@ const SHOWN = 'app:alertLines';
 const KEEP = 7;
 
 /**
- * A message from someone else just arrived: alert, unless the chat is muted,
- * you're looking at it, or it's an old one caught up while PakChat is open
+ * A message from someone else just arrived: alert, unless the chat is muted
+ * (or archived and kept archived), you're looking at it, or it's an old one caught up while PakChat is open
  * (those just show in the chat list).
  */
 export function alertFor(m: Message) {
   if (m.kind === 'system' || m.deleted || m.author === core.myId) return;
-  if (core.prefs[m.chatId]?.muted) return;
+  // A muted chat, or an archived one that stays archived, is quiet; but in a group, not one for me:
+  // an @mention, or a reply to me (like WhatsApp's). (One-to-one chats: quiet, as most messages there answer me.)
+  const forMe = !!m.mentions?.includes(core.myId) || m.replyTo?.author === core.myId;
+  const quiet = isMuted(core.prefs[m.chatId]) || (!!core.prefs[m.chatId]?.archived && core.settings.keepArchived);
+  if (quiet && !forMe) return;
   const open = AppState.currentState === 'active';
   if (open && (core.viewing === m.chatId || Date.now() - m.sentAt > 120_000)) return;
   void inLine(async () => {
     const chat = await core.storage.getChat(m.chatId);
     // Statuses never alert (a like or a reply to one comes as a normal message).
     if (!chat || chat.kind === 'status') return;
+    if (quiet && chat.kind !== 'group') return;
     const t = words();
     const fm = fileModule();
     const shown = (await core.storage.getValue<Shown>(SHOWN)) ?? {};
     // Still showing? Then this message adds to it. Swiped away? Start again.
     const was = fm.chatAlertShowing(m.chatId) ? shown[m.chatId] : undefined;
-    const line: Line = { name: core.name(m.author) || '…', text: preview(m, t, false) || t.newMessage, at: m.sentAt };
+    const prefs = core.prefs[m.chatId] ?? {};
+    // A locked chat's alert says only "New message": not who, nor what.
+    const locked = !!prefs.lock;
+    const line: Line = locked ? { name: 'PakChat', text: t.newMessage, at: m.sentAt } : { name: core.name(m.author) || '…', text: preview(m, t, false) || t.newMessage, at: m.sentAt };
     const next = { count: (was?.count ?? 0) + 1, lines: [...(was?.lines ?? []), line].slice(-KEEP) };
     await core.storage.setValue(SHOWN, { ...shown, [m.chatId]: next });
-    const title = core.chatTitle(chat) || t.newMessage;
+    const title = locked ? 'PakChat' : core.chatTitle(chat) || t.newMessage;
+    // The chat's own tone, else the one for groups or for messages (Settings › Notifications), like WhatsApp.
+    const tone = prefs.tone ?? (chat.kind === 'group' ? (core.settings.groupTone ?? core.settings.defaultTone) : core.settings.defaultTone);
     fm.showChatAlert(
       JSON.stringify({
         chatId: m.chatId,
         title,
-        group: chat.kind === 'group',
+        group: !locked && chat.kind === 'group',
         me: t.you,
         count: next.count,
         lines: next.lines,
-        avatar: { ...avatarTint(core.otherPerson(chat) ?? chat.id), letters: initials(title) },
-        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats },
+        locked,
+        tone,
+        avatar: locked ? { ...avatarTint('pakchat'), letters: 'P' } : { ...avatarTint(core.otherPerson(chat) ?? chat.id), letters: initials(title) },
+        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats, toneChannel: t.toneChannel, toneName: toneName(tone, t) },
       }),
     );
+  });
+}
+
+/**
+ * Someone reacted to my message. A like on my status gets its own alert, like
+ * WhatsApp's "Sara liked your status" (tap it for the Status tab). Not for one
+ * taken back, nor an old one caught up later.
+ */
+export function alertReaction(e: { message: Message; from: string; emoji: string; at: number }) {
+  if (Date.now() - e.at > 10 * 60_000) return;
+  void inLine(async () => {
+    const chat = await core.storage.getChat(e.message.chatId);
+    if (chat?.kind !== 'status') return;
+    const t = words();
+    await Notifications.scheduleNotificationAsync({
+      identifier: `${LIKE_ALERT}${e.message.id}:${e.from}`,
+      content: { title: core.name(e.from) || t.newMessage, body: t.likedYourStatus, priority: Notifications.AndroidNotificationPriority.HIGH },
+      trigger: { channelId: CHANNEL },
+    }).catch(() => {});
   });
 }
 

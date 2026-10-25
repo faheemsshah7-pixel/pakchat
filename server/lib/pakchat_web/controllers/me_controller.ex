@@ -1,7 +1,7 @@
 defmodule PakchatWeb.MeController do
   @moduledoc "My own profile and privacy settings, and my push token."
   use PakchatWeb, :controller
-  alias Pakchat.{Accounts, RateLimit}
+  alias Pakchat.{Accounts, Files, RateLimit}
   alias PakchatWeb.Wire
 
   action_fallback PakchatWeb.FallbackController
@@ -11,7 +11,8 @@ defmodule PakchatWeb.MeController do
   @doc """
   `PATCH /api/me` with any of: name, about, photo, and
   `privacy: {last_seen: "everyone" | "contacts" | "nobody",
-  online: "everyone" | "same", read_receipts: true | false}`.
+  online: "everyone" | "same", photo: "everyone" | "contacts" | "nobody",
+  read_receipts: true | false}`. A new photo deletes the old one's file.
   """
   def update(conn, params) do
     privacy = if is_map(params["privacy"]), do: params["privacy"], else: %{}
@@ -21,9 +22,13 @@ defmodule PakchatWeb.MeController do
       |> Map.take(["name", "about", "photo"])
       |> put_if(privacy, "last_seen", "last_seen_visibility")
       |> put_if(privacy, "online", "online_visibility")
+      |> put_if(privacy, "photo", "photo_visibility")
       |> put_if(privacy, "read_receipts", "read_receipts")
 
+    was = conn.assigns.user.photo
+
     with {:ok, user} <- Accounts.update_profile(conn.assigns.user, attrs) do
+      if user.photo != was, do: Files.forget_photo(was)
       json(conn, Wire.me(user))
     end
   end

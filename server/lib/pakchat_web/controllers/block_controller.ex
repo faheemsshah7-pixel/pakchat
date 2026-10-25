@@ -7,7 +7,10 @@ defmodule PakchatWeb.BlockController do
   action_fallback PakchatWeb.FallbackController
 
   def index(conn, _params) do
-    json(conn, %{blocked: Enum.map(Accounts.list_blocked(conn.assigns.user), &Wire.person/1)})
+    json(conn, %{
+      blocked:
+        Enum.map(Accounts.list_blocked(conn.assigns.user), &Wire.person(&1, conn.assigns.user))
+    })
   end
 
   def create(conn, %{"user_id" => id}) do

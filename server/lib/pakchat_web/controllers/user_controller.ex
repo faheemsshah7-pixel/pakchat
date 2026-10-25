@@ -13,7 +13,7 @@ defmodule PakchatWeb.UserController do
   def lookup(conn, params) do
     with :ok <- RateLimit.hit(:lookup, conn.assigns.user.id),
          %{} = user <- find(params) do
-      json(conn, Wire.person(user))
+      json(conn, Wire.person(user, conn.assigns.user))
     end
   end
 
@@ -35,7 +35,7 @@ defmodule PakchatWeb.UserController do
       found =
         for {hash, user} <- Accounts.match_hashes(phones, emails),
             user.id != conn.assigns.user.id,
-            do: %{hash: Base.encode64(hash), user: Wire.person(user)}
+            do: %{hash: Base.encode64(hash), user: Wire.person(user, conn.assigns.user)}
 
       json(conn, found)
     end
@@ -58,8 +58,8 @@ defmodule PakchatWeb.UserController do
   def show(conn, %{"id" => id}) do
     with %{} = user <- Accounts.get_user(id) do
       if Chats.reached_out?(user.id, conn.assigns.user.id),
-        do: json(conn, Wire.person_with_ways(user)),
-        else: json(conn, Wire.person(user))
+        do: json(conn, Wire.person_with_ways(user, conn.assigns.user)),
+        else: json(conn, Wire.person(user, conn.assigns.user))
     end
   end
 

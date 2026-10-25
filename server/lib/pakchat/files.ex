@@ -14,6 +14,11 @@ defmodule Pakchat.Files do
 
   Attachments are kept 30 days, like messages waiting to be collected.
   Each person keeps one backup, replaced by the next.
+
+  Photos (a person's, a group's or a community's) are kept until replaced.
+  Like WhatsApp's, they aren't end-to-end locked: the key travels in the
+  `photo` field (`pk1:<id>:<key>:<digest>`), which the server only shows to
+  people allowed to see it (see `Pakchat.Privacy`).
   """
   import Ecto.Query
   alias Pakchat.Accounts.User
@@ -54,6 +59,38 @@ defmodule Pakchat.Files do
   end
 
   def start_attachment(_, _, _), do: {:error, :bad_request}
+
+  # A photo is small: the phone makes it 640 pixels across first.
+  @photo_max 5 * 1024 * 1024
+
+  @doc "Makes room for my new profile photo, or (`chat_id`) a group's or community's I'm an admin of."
+  def start_photo(%User{} = me, chat_id, size) when is_integer(size) and size > 0 do
+    cond do
+      size > @photo_max ->
+        {:error, :too_big}
+
+      chat_id != nil and
+          (Ecto.UUID.cast(chat_id) == :error or Chats.role(chat_id, me.id) != "admin") ->
+        {:error, :not_found}
+
+      true ->
+        Repo.insert(%Stored{owner_id: me.id, chat_id: chat_id, kind: "photo", size: size})
+    end
+  end
+
+  def start_photo(_, _, _), do: {:error, :bad_request}
+
+  @doc "Deletes the file behind a `photo` value that's no longer used (nothing for any other value)."
+  def forget_photo("pk1:" <> rest) do
+    with [id | _] <- String.split(rest, ":"),
+         %Stored{kind: "photo"} <- get(id) do
+      from(f in Stored, where: f.id == ^id) |> delete_all()
+    end
+
+    :ok
+  end
+
+  def forget_photo(_), do: :ok
 
   @doc "Makes room for my next backup."
   def start_backup(%User{} = me, size) when is_integer(size) and size > 0 do
@@ -120,6 +157,8 @@ defmodule Pakchat.Files do
 
   @doc "May I download this? Members of the file's chat may; a backup only its owner."
   def can_read?(%Stored{kind: "backup", owner_id: owner}, %User{id: me}), do: owner == me
+  # Whoever was shown its `photo` value (which names it) may fetch it, as on WhatsApp.
+  def can_read?(%Stored{kind: "photo"}, %User{}), do: true
   def can_read?(%Stored{chat_id: chat_id}, %User{id: me}), do: Chats.role(chat_id, me) != nil
 
   @doc "My latest backup, if I have one."

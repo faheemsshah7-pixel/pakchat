@@ -1,9 +1,10 @@
-// ExtrasPanel.tsx: the panel the smiley button opens, with three tabs, like WhatsApp:
+// ExtrasPanel.tsx: the panel the sticker button in the message bar opens, with three
+// tabs, like WhatsApp. It opens on Stickers.
 //
-//   Emoji      tap one to add it to your message
-//   GIF        popular ones, or search; tap one to send it (hidden when the server has no GIFs)
 //   Stickers   the ones I sent lately, then my saved ones (+ makes one from a photo, hold one
 //              to remove it), then PakChat's pack, like WhatsApp's Recent and Favourites
+//   GIF        popular ones, or search; tap one to send it (hidden when the server has no GIFs)
+//   Emoji      tap one to add it to your message
 import type { Gif } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
@@ -21,7 +22,7 @@ import { rise, tick } from '../motion';
 import { toast } from '../overlays';
 import { squarePhoto } from './attachments';
 
-const EMOJI = [
+export const EMOJI = [
   '😂', '❤️', '👍', '🙏', '😍', '😭', '🔥', '😊', '🤲', '💯', '😅', '🥰', '👌', '😢', '🎉', '🤣',
   '✨', '🌙', '😘', '😁', '🙂', '😉', '😎', '🤔', '🙄', '😴', '😡', '🥺', '😱', '🤗', '🤝', '👏',
   '💪', '🙌', '✌️', '👋', '💐', '🌹', '🌸', '☀️', '⭐', '💚', '💙', '💔', '🕌', '📿', '☕', '🍵',
@@ -35,14 +36,14 @@ const HEIGHT = 300;
 export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string) => void; onGif: (g: Gif) => void; onSticker: (from: string | number) => void }) {
   const t = useT();
   const { theme } = useLook();
-  const [tab, setTab] = useState<Tab>('emoji');
+  const [tab, setTab] = useState<Tab>('sticker');
   // The GIF tab shows unless the server said it has no GIFs.
   const [gifsOn, setGifsOn] = useState(gifsAvailable() !== false);
 
   const tabs: { key: Tab; icon: IconName; label: string }[] = [
-    { key: 'emoji', icon: 'emoji', label: t.emoji },
-    ...(gifsOn ? [{ key: 'gif' as const, icon: 'gif' as const, label: t.gifWord }] : []),
     { key: 'sticker', icon: 'sticker', label: t.stickers },
+    ...(gifsOn ? [{ key: 'gif' as const, icon: 'gif' as const, label: t.gifWord }] : []),
+    { key: 'emoji', icon: 'emoji', label: t.emoji },
   ];
 
   return (
@@ -55,7 +56,7 @@ export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string
               onGif={onGif}
               onNone={() => {
                 setGifsOn(false);
-                setTab('emoji');
+                setTab('sticker');
               }}
             />
           )}

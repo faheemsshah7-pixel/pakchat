@@ -23,6 +23,9 @@ defmodule PakchatWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    # Invite and call links shared outside PakChat open a page that opens the app.
+    get "/join/:code", PageController, :join
+    get "/calllink/:code", PageController, :call_link
   end
 
   # Everything the app and the website talk to lives under /api.
@@ -59,6 +62,7 @@ defmodule PakchatWeb.Router do
 
     get "/files/limits", FileController, :limits
     post "/files", FileController, :create
+    post "/photos", FileController, :create_photo
     get "/files/:id/link", FileController, :link
 
     get "/backup", BackupController, :show
@@ -86,11 +90,28 @@ defmodule PakchatWeb.Router do
     delete "/groups/:id/admins/:user_id", GroupController, :remove_admin
     post "/groups/:id/invite", GroupController, :reset_invite
     delete "/groups/:id/invite", GroupController, :remove_invite
+    get "/groups/:id/requests", GroupController, :requests
+    post "/groups/:id/requests/:user_id", GroupController, :approve_request
+    delete "/groups/:id/requests/:user_id", GroupController, :drop_request
 
     get "/invites/:code", InviteController, :show
     post "/invites/:code/join", InviteController, :join
 
+    post "/communities", CommunityController, :create
+    get "/communities/:id/groups", CommunityController, :groups
+    post "/communities/:id/groups", CommunityController, :add_groups
+    delete "/communities/:id/groups/:group_id", CommunityController, :remove_group
+    post "/communities/:id/groups/:group_id/join", CommunityController, :join_group
+    delete "/communities/:id", CommunityController, :deactivate
+    post "/communities/:id/suggestions", CommunityController, :suggest
+    get "/communities/:id/suggestions", CommunityController, :suggestions
+    post "/communities/:id/suggestions/:suggestion_id", CommunityController, :approve_suggestion
+    delete "/communities/:id/suggestions/:suggestion_id", CommunityController, :drop_suggestion
+
+    post "/reports", ReportController, :create
+
     get "/calls/ice", CallController, :ice
+    post "/calls/links", CallController, :create_link
     put "/status/audience", StatusController, :audience
     get "/gifs", GifController, :index
 

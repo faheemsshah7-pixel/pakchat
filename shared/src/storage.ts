@@ -4,21 +4,40 @@
 //
 // Signal's keys are NOT kept here: they stay inside the Signal module.
 
-import type { Attachment, Ref, StatusQuote } from './content';
+import type { Attachment, CallPlan, ChatQuote, SharedContact, LinkPreview, Place, Ref, StatusQuote } from './content';
 
 export type Role = 'admin' | 'member';
 
 export type Chat = {
   id: string;
-  /** `status`: someone's status (their photos, videos and words for a day). Its only admin is its owner. */
-  kind: 'direct' | 'group' | 'status';
+  /**
+   * `status`: someone's status (their photos, videos and words for a day). Its only admin is its owner.
+   * `community`: groups under one name. It holds only its members; its groups point to it with `communityId`.
+   */
+  kind: 'direct' | 'group' | 'status' | 'community';
   members: { userId: string; role: Role }[];
   title?: string;
   description?: string;
   photo?: string;
   onlyAdminsSend?: boolean;
-  /** Only admins see it. */
+  /** Only admins see it (anyone in a call link's group). */
   inviteCode?: string | null;
+  /** The invite link stops at this time (ms), or after this many people join with it. */
+  inviteExpiresAt?: number | null;
+  inviteMaxUses?: number | null;
+  inviteUses?: number;
+  /** A group in a community. */
+  communityId?: string | null;
+  /** The community's announcements group (only admins post). */
+  announcements?: boolean;
+  /** A call link's own group (never in the chat list: the Calls tab shows it). */
+  callLink?: boolean;
+  /** A community: anyone in it may suggest groups (its admins approve them). */
+  groupsByMembers?: boolean;
+  /** A group: its admins approve who joins. */
+  joinApproval?: boolean;
+  /** Who made it (a community's owner, the only one who can deactivate it). */
+  createdBy?: string;
   /** Disappearing messages, in seconds. 0 or missing: off. */
   timer?: number;
   /** I left, or was removed. The chat stays, but I can't send. */
@@ -48,7 +67,7 @@ export type Message = {
   order: number;
   /** The server's time (ms), or this phone's time while it waits. */
   sentAt: number;
-  kind: 'text' | 'poll' | 'file' | 'system';
+  kind: 'text' | 'poll' | 'file' | 'location' | 'contact' | 'event' | 'system';
   /** The words, or a file's caption. */
   text?: string;
   /** A photo, video, voice note or document, and where it is on this device. */
@@ -70,6 +89,19 @@ export type Message = {
   bg?: number;
   /** A reply to someone's status: a little copy of it. */
   statusReply?: StatusQuote;
+  /** "Reply privately": the group message it answers. */
+  quote?: ChatQuote;
+  /** The card for a web address in the words. */
+  link?: LinkPreview;
+  /** A place, or a live location (`updatedAt`: when it last moved, server time). */
+  location?: Place & { updatedAt?: number };
+  contacts?: SharedContact[];
+  /** A planned call. */
+  plan?: CallPlan;
+  /** View once, received: I opened it (the file is gone from this phone). */
+  opened?: boolean;
+  /** View once, mine: who has opened it. */
+  openedBy?: string[];
   event?: SystemEvent;
   /** My own messages: how far they got. */
   status?: MessageStatus;
@@ -82,6 +114,10 @@ export type Message = {
 export type LocalAttachment = Attachment & {
   /** Where the file is on this device, once it's here (sent from here, or downloaded). */
   local?: string;
+  /** A video sent from here: a sharp first frame to show while it sends. */
+  poster?: string;
+  /** A voice note's words, made on this phone (Transcribe). */
+  transcript?: string;
 };
 
 /** One thing waiting to go to the server, oldest first. */
@@ -99,9 +135,32 @@ export type OutboxItem = {
   tries: number;
   /** Don't try again before this time (ms). */
   notBefore: number;
+  /** "Undo": it waits until `notBefore` before going, and only messages after it in the same chat wait too. */
+  held?: true;
   /** Its place in the queue. */
   added: number;
 };
+
+/** What a chat's server copy says, which wins over an older copy here. */
+export const CHAT_SERVER_FIELDS = [
+  'kind',
+  'members',
+  'title',
+  'description',
+  'photo',
+  'onlyAdminsSend',
+  'inviteCode',
+  'inviteExpiresAt',
+  'inviteMaxUses',
+  'inviteUses',
+  'communityId',
+  'announcements',
+  'callLink',
+  'groupsByMembers',
+  'joinApproval',
+  'createdBy',
+  'left',
+] as const;
 
 /**
  * A chat from a backup, put back on a new phone. The backup's copy wins (its
@@ -113,7 +172,7 @@ export function restoredChat(backup: Chat, here: Chat | null, newest: number | n
   const chat: Chat = { ...backup };
   if (here) {
     // Who's in it and its name come from the server, which this phone asked more recently.
-    for (const k of ['kind', 'members', 'title', 'description', 'photo', 'onlyAdminsSend', 'inviteCode', 'left'] as const) {
+    for (const k of CHAT_SERVER_FIELDS) {
       if (here[k] !== undefined) (chat as Record<string, unknown>)[k] = here[k];
     }
     chat.readUpTo = Math.max(backup.readUpTo, here.readUpTo);

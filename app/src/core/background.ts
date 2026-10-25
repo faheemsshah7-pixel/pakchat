@@ -13,6 +13,7 @@ import { AppRegistry } from 'react-native';
 import { calls } from './calls';
 import { core } from './core';
 import { alertPlain, dismissChatAlert, WAKE_TASK } from './push';
+import { onAlarm } from './scheduled';
 
 TaskManager.defineTask(WAKE_TASK, async () => {
   try {
@@ -43,5 +44,14 @@ AppRegistry.registerHeadlessTask('PakchatCallAction', () => async ({ action, cal
     await calls.onAction(action, callId);
   } catch (err) {
     console.log(`[pakchat] call action: ${String(err)}`);
+  }
+});
+
+// A scheduled message's time came (Scheduled.kt): send what's due.
+AppRegistry.registerHeadlessTask('PakchatScheduled', () => async () => {
+  try {
+    await onAlarm();
+  } catch (err) {
+    console.log(`[pakchat] scheduled: ${String(err)}`);
   }
 });

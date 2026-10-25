@@ -24,7 +24,9 @@ export function CallBar() {
   const chat = useChat(call?.chatId ?? '');
   const now = useNow(1000);
   if (!call || call.state === 'ended' || calls.screenOpen) return null;
-  const title = chat ? core.chatTitle(chat) : '';
+  // Someone was added to a one-to-one call: everyone's names.
+  const others = chat ? chat.members.map((m) => m.userId).filter((u) => u !== core.myId) : [];
+  const title = call.extra.length ? [...new Set([...others, ...call.extra])].map((u) => core.name(u) || '…').join(', ') : chat ? core.chatTitle(chat) : '';
   const line = call.state === 'active' && call.startedAt ? duration(now - call.startedAt) : call.state === 'incoming' ? t.answer : call.state === 'connecting' ? t.connectingWord : call.ringing ? t.ringingWord : t.callingWord;
   return (
     <Animated.View entering={FadeInUp} exiting={FadeOutUp} style={{ position: 'absolute', top: insets.top + 6, start: 0, end: 0, alignItems: 'center' }} pointerEvents="box-none">
@@ -53,7 +55,10 @@ export async function startCall(chatId: string, video: boolean, t: Strings) {
   }
   if (!core.connected) return toast(t.offline);
   // The screen opens straight away, showing "Calling…" (then "Ringing…" once their phone rings).
-  const r = await calls.start(chatId, video, (id) => router.push({ pathname: '/call', params: { id } }));
+  // A call link joins the call going on there (or starts one, which rings nobody).
+  const open = (id: string) => router.push({ pathname: '/call', params: { id } });
+  const link = (await core.storage.getChat(chatId))?.callLink;
+  const r = link ? await calls.joinLink(chatId, video, open) : await calls.start(chatId, video, open);
   if (r === 'permission') toast(t.callNeedsMic);
   else if (r === 'offline') toast(t.offline);
   else if (r === 'busy') toast(t.alreadyInCall);

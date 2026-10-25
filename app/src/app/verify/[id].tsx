@@ -9,6 +9,7 @@ import Animated from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { usePerson } from '../../core/hooks';
+import { outsideFor } from '../../core/lock';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
@@ -67,7 +68,7 @@ export default function Verify() {
             <ActivityIndicator color={theme.acc} />
           )}
         </Glass>
-        {code && <Button title={t.share} look="soft" icon="forward" onPress={() => void Share.share({ message: groups.join(' ') })} style={{ alignSelf: 'stretch' }} />}
+        {code && <Button title={t.share} look="soft" icon="forward" onPress={() => void outsideFor(() => Share.share({ message: groups.join(' ') }))} style={{ alignSelf: 'stretch' }} />}
       </View>
     </Screen>
   );

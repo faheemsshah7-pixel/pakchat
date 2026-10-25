@@ -89,13 +89,16 @@ export function ChatRow({
         weight: '600' as const,
       };
     }
-    if (prefs.draft) return { text: `${t.draft} ${prefs.draft}`, color: theme.danger, weight: '400' as const };
     const unread = chat.unread > 0;
+    // A chat locked in the list never shows its words: only whether something new came.
+    // (Inside the unlocked Locked chats folder they show, like WhatsApp.)
+    if (prefs.lock === 'list') return { text: unread ? t.newMessage : t.lockedChat, color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
+    if (prefs.draft) return { text: `${t.draft} ${prefs.draft}`, color: theme.danger, weight: '400' as const };
     return { text: preview(last, t, chat.kind === 'group'), color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
-  }, [typing, prefs.draft, last, chat, t, theme]);
+  }, [typing, prefs.draft, prefs.lock, last, chat, t, theme]);
 
   const unread = chat.unread || (prefs.markedUnread ? 1 : 0);
-  const mine = last && last.kind !== 'system' && !last.deleted && last.author === core.myId && !typing.length && !prefs.draft;
+  const mine = last && last.kind !== 'system' && !last.deleted && last.author === core.myId && !typing.length && !prefs.draft && prefs.lock !== 'list';
   const when = Math.max(chat.lastActivity, last?.sentAt ?? 0);
 
   return (
@@ -172,8 +175,16 @@ export function ChatRow({
                       {line.text}
                     </Txt>
                   </View>
+                  {prefs.lock === 'list' && <Icon name="lock" size={15} color={theme.muted} />}
                   {prefs.muted && <Icon name="muted" size={15} color={theme.muted} />}
                   {!!prefs.pinnedAt && <Icon name="pin" size={15} color={theme.muted} />}
+                  {row.mentioned && unread > 0 && prefs.lock !== 'list' && (
+                    <View style={{ width: 21, height: 21, borderRadius: 11, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }} testID="row-mention">
+                      <Txt size={12} weight="800" color="#FFFFFF" align="center">
+                        @
+                      </Txt>
+                    </View>
+                  )}
                   {unread > 0 && (
                     <View
                       style={{

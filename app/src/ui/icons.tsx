@@ -19,6 +19,7 @@ const ICONS = {
   calls: { d: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z'] },
   you: { d: ['M4 20c0-4 4-6 8-6s8 2 8 6'], circles: [[12, 8, 4]] },
   back: { d: ['M15 5l-7 7 7 7'] },
+  settings: { d: ['M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1'], circles: [[15, 7, 2], [9, 12, 2], [17, 17, 2]] },
   forwardArrow: { d: ['M9 5l7 7-7 7'] },
   video: { d: ['M16 10l5-3v10l-5-3'], rects: [[3, 6, 13, 12, 3]] },
   plus: { d: ['M12 5v14M5 12h14'] },
@@ -80,6 +81,7 @@ const ICONS = {
   micOff: { d: ['M5 11a7 7 0 0 0 11.5 5.4M19 11a7 7 0 0 1-.6 2.8M12 18v3M15 9.5V6a3 3 0 0 0-6 0M9 9v2a3 3 0 0 0 4.9 2.3M3 3l18 18'] },
   videoOff: { d: ['M16 10l5-3v10l-5-3M3 3l18 18M16 16v1a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1M10 6h5a1 1 0 0 1 1 1v4'] },
   speaker: { d: ['M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12'] },
+  speakerOff: { d: ['M4 9h4l5-4v14l-5-4H4zM16 9.5l5 5M21 9.5l-5 5'] },
   headset: { d: ['M4 15v-3a8 8 0 0 1 16 0v3'], rects: [[3, 14, 4, 6, 1.5], [17, 14, 4, 6, 1.5]] },
   bluetooth: { d: ['M7 7l10 10-5 4V3l5 4L7 17'] },
   endCall: { d: ['M3 14.5c5-5 13-5 18 0l-2.5 2.5-3.5-1.5v-2.5c-2-.7-4-.7-6 0v2.5L5.5 17z'] },
@@ -93,6 +95,34 @@ const ICONS = {
   gif: { d: ['M10 9.5H8a1.5 1.5 0 0 0-1.5 1.5v2A1.5 1.5 0 0 0 8 14.5h2V12H9M13 9.5v5M16 14.5v-5h2.5M16 12h2'], rects: [[2.5, 5, 19, 14, 3]] },
   text: { d: ['M5 6V4h14v2M12 4v16M9 20h6'] },
   eye: { d: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z'], circles: [[12, 12, 3]] },
+  // Phase 7
+  attach: { d: ['M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8'] },
+  place: { d: ['M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z'], circles: [[12, 9.5, 2.6]] },
+  live: { d: ['M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z', 'M8.8 7.2a4.5 4.5 0 0 0 0 4.6M15.2 7.2a4.5 4.5 0 0 1 0 4.6'], dots: [[12, 9.5, 1.5]] },
+  card: { d: ['M14 10h4M14 14h3M6 16c.4-1.5 1.6-2.3 3-2.3s2.6.8 3 2.3'], rects: [[3, 5, 18, 14, 3]], circles: [[9, 10, 2]] },
+  crop: { d: ['M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14'] },
+  rotate: { d: ['M4 4v5h5', 'M4.5 9A8 8 0 1 1 6 16.5'] },
+  draw: { d: ['M3 21c2-1 3-3 5-3s2 2 4 2 3-2 5-2M14.5 4.5l5 5L11 18H6v-5z'] },
+  once: { d: ['M10.5 9l2-1.5V16'], circles: [[12, 12, 9]] },
+  community: { d: ['M2 19c0-2.5 2-4 4.5-4M22 19c0-2.5-2-4-4.5-4M7 19c0-3 2.2-5 5-5s5 2 5 5'], circles: [[12, 8, 3], [5.5, 10, 2.2], [18.5, 10, 2.2]] },
+  broadcast: { d: ['M4 10v4h3l7 4V6L7 10zM17.5 9a4 4 0 0 1 0 6M20 6.5a7.5 7.5 0 0 1 0 11'] },
+  wallpaper: { d: ['M3 16l4-4 3 3 5-5 6 6'], rects: [[3, 3, 18, 18, 3]], circles: [[8, 8, 1.6]] },
+  export: { d: ['M12 15V3M7.5 7.5L12 3l4.5 4.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7'] },
+  tone: { d: ['M9 17V5l11-2v12'], circles: [[6, 17, 3], [17, 15, 3]] },
+  flash: { d: ['M13 2L4 14h7l-1 8 9-12h-7z'] },
+  flashOff: { d: ['M13 2L9.5 6.7M7.5 9.3L4 14h7l-1 8 4.3-5.7M15.6 12H19l-2 2.7M3 3l18 18'] },
+  undo: { d: ['M9 14L4 9l5-5', 'M4 9h10a6 6 0 0 1 0 12h-3'] },
+  schedule: { d: ['M12 9v4l2.5 1.5', 'M4 20l2-2M20 20l-2-2'], circles: [[12, 12.5, 7]] },
+  hd: { d: ['M7 9v6M7 12h3.5M10.5 9v6M14 9v6h1.5a3 3 0 0 0 0-6z'], rects: [[2.5, 5, 19, 14, 3]] },
+  privateBadge: { d: ['M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', 'M12 8.5v4M12 15.5h.01'] },
+  smile: { d: ['M8 14s1.5 2 4 2 4-2 4-2M9 9.5h.01M15 9.5h.01'], circles: [[12, 12, 9]] },
+  fingerprint: { d: ['M12 11c0 3-.5 6-2 8.5M8.5 9.5A3.5 3.5 0 0 1 15.5 11c0 2-.3 4-1 6M5.5 8a7.5 7.5 0 0 1 13.4 2.5c.2 2.2 0 4.5-.6 6.5M5 12.5c0 1.8-.3 3.3-1 4.5M17.5 20c.3-.7.5-1.4.7-2.2'] },
+  calendar: { d: ['M3 9h18M8 3v4M16 3v4'], rects: [[3, 5, 18, 16, 3]] },
+  map: { d: ['M9 4L3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14'] },
+  keyboard: { d: ['M7 10h.01M11 10h.01M15 10h.01M7 14h10'], rects: [[3, 6, 18, 12, 3]] },
+  target: { d: ['M12 2v3M12 19v3M2 12h3M19 12h3'], circles: [[12, 12, 7], [12, 12, 2.5]] },
+  screenShare: { d: ['M8 21h8M12 17v4M12 13.5V7.5M9.2 10.2L12 7.4l2.8 2.8'], rects: [[2.5, 3.5, 19, 13.5, 2.5]] },
+  dialpad: { dots: [[6, 4, 1.6], [12, 4, 1.6], [18, 4, 1.6], [6, 10, 1.6], [12, 10, 1.6], [18, 10, 1.6], [6, 16, 1.6], [12, 16, 1.6], [18, 16, 1.6], [12, 21.5, 1.6]] },
 } satisfies Record<string, Shape>;
 
 export type IconName = keyof typeof ICONS;
@@ -112,9 +142,18 @@ export function Icon({
   flip?: boolean;
 }) {
   const { rtl } = useLook();
-  const s: Shape = ICONS[name];
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" style={flip && rtl ? { transform: [{ scaleX: -1 }] } : undefined}>
+      <IconPaths name={name} color={color} stroke={stroke} />
+    </Svg>
+  );
+}
+
+/** An icon's lines alone, to draw inside another picture (the wallpaper's doodles). */
+export function IconPaths({ name, color, stroke = 1.9 }: { name: IconName; color: string; stroke?: number }) {
+  const s: Shape = ICONS[name];
+  return (
+    <>
       {name === 'status' && <Circle cx={12} cy={12} r={8.5} stroke={color} strokeWidth={stroke} strokeDasharray="4 3" fill="none" />}
       {s.d?.map((d) => (
         <Path key={d} d={d} stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -127,6 +166,6 @@ export function Icon({
       {s.rects?.map(([x, y, w, h, rx]) => (
         <Rect key={`${x}-${y}`} x={x} y={y} width={w} height={h} rx={rx} stroke={color} strokeWidth={stroke} fill="none" />
       ))}
-    </Svg>
+    </>
   );
 }

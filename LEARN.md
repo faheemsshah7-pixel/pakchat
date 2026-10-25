@@ -1504,3 +1504,225 @@ Tap a photo for the viewer: swipe, or use the arrows, and the strip at the botto
 - Send the same photo twice, once with HD on. Compare their sizes in Info, Media, links and docs.
 - Set Settings, Privacy, Default message timer to 24 hours, then start a new chat: it starts with
   disappearing messages on.
+
+## Step 29: Phase 7, the WhatsApp extras, Communities and the locks
+
+### First: what "React" and "native compile" mean
+PakChat on the phone is made of two kinds of code.
+
+- **The React part** (`app/src`, files ending in `.ts` and `.tsx`). This is every screen, button and
+  list, and the "brain" (`core/`) that locks messages and talks to the server. It's written in
+  TypeScript and drawn by React Native. We can check it on the build computer without a phone: the
+  type checker (`tsc`) finds mistakes like a wrong name, the linter (`eslint`) finds risky code, and
+  the tests (`vitest`) run the real code. That's why the React part was "already tested".
+- **The native part** (`app/modules/pakchat-signal/android`, files ending in `.kt`, plus C++ inside
+  some libraries). This is code in Android's own language, Kotlin, for things JavaScript can't do by
+  itself: the alarm clock for scheduled messages, blocking screenshots, the live location alert,
+  speech-to-text, making a .zip. It only gets **compiled** (turned into machine code the phone runs)
+  when the APK is built.
+
+**Building the APK** (`./gradlew assembleRelease` in `app/android`) does both at once: Gradle
+downloads the Android libraries, compiles the Kotlin and C++, packs the React part into one
+JavaScript file, and zips it all into `app-release.apk`. It takes 20 to 40 minutes the first time
+because it compiles a lot of code. If a Kotlin file has a mistake, this is the step that finds it.
+
+### The Communities tab (Settings moved to the ⋮ menu)
+The fourth tab is now **Communities**, like WhatsApp. A community is a group of groups: one
+**Announcements** group where only admins write (it has a 📢), and the other groups under it. The
+community page shows the groups you're in and the ones you can join with one tap. Admins can add
+groups they run, make a new one, or hold a group to take it out.
+
+On the server, a community is just a chat with `kind: community`, and each group points to it
+(`community_id`). The server knows which groups belong together, but still can't read any of them.
+Settings and your profile are now in the chat list's ⋮ menu, Settings.
+
+### Invite links (with limits)
+Group info, Invite via link makes a link like `…/join/AbC123`. Anyone with it sees the group's name
+and picture and can join. You can make it stop **after a time** (an hour, a day, 7 or 30 days) or **after a
+number of people** join, and reset it to make the old link stop working (that's also where the limits are set). The server keeps the code,
+the end time and the count (`invite_expires_at`, `invite_max_uses`), and turns people away when it's
+used up.
+
+### Broadcast lists
+A broadcast list sends one message to many people at once, but each person gets it in their normal
+chat with you, as if you'd sent it only to them. They can't see each other. The list itself lives
+only on your phone (`core/broadcasts.ts`). The server just sees ordinary messages. Each sent message
+shows **"12 of 20 read"**: your phone adds up the ticks from each person's chat. Tap it to see who.
+A photo is uploaded once and then reused for everyone, so it doesn't upload 20 times.
+
+### View once
+A view once photo, video or voice note opens one time. While it's open, screenshots and screen
+recording are blocked (Android's `FLAG_SECURE`, in `Privacy.kt`). When you leave, the file is
+deleted from the phone, so it can't be opened again, saved or forwarded. The sender sees "Opened".
+
+### Round video messages
+Hold the 📷 in the message bar to record a round video with the front camera, up to a minute. Let go
+to send it, or slide left to cancel. Tap the 📷 instead for the normal camera.
+
+### Location and live location
+Send where you are, or drag the map to pick a place. The map is made of OpenStreetMap's free little
+square pictures (`MapTiles.tsx`), so there's no Google Maps key and nothing to pay.
+**Live location** shares where you are for 15 minutes, an hour or 8 hours. Each move (at most every 30
+seconds or 25 metres) goes as a small locked message. Android only lets an app follow you in the
+background while it shows an alert, so you'll see "Sharing live location" with a Stop button
+(`LiveLocation.kt`).
+
+### Contact cards, starred messages, export chat
+- **Contacts:** pick someone from your phone's contacts and send their name and number as a card. If
+  they're on PakChat, the card has Message.
+- **Starred:** the starred list got tidier (it's the same feature as before).
+- **Export chat** (chat menu): makes a `.txt` file like WhatsApp's (`25/10/2026, 14:05 - Ali: hi`),
+  or a `.zip` with the photos and files too (at most 100 files or 200 MB), and opens the share sheet.
+  It's made on your phone, so the server never sees it.
+
+### The new message bar, attach menu and editor
+The message bar now looks like WhatsApp's: 😊 on the left, the box, 📎 and 📷, then the mic or send.
+The 📎 opens our own menu (Gallery, Camera, Document, Audio, Location, Contact, Poll). Picking photos
+opens a full-screen editor: crop and turn, draw, add words and stickers, trim a video, add a caption, or make it view once.
+
+**Private badge:** before sending, every photo is redrawn as a fresh copy. The hidden details a camera
+puts inside photos (EXIF: where it was taken, the phone model, the time) aren't copied, so they never
+leave your phone. The editor shows "Private" to say so.
+
+### Scheduled messages and Undo send
+- **Scheduled:** hold send, pick a time. The message waits on your phone, and Android's alarm clock
+  (`Scheduled.kt`) wakes PakChat at that time, even if it's closed or the phone restarted, and sends
+  it. The chat shows "1 scheduled message" with edit, send now and delete. Works in every chat.
+- **Undo send:** after you send, there's an Undo for 5 seconds. The message really waits those 5
+  seconds on your phone before it goes, so Undo means nobody ever got it. (Settings, Chats can turn
+  this off.)
+
+### Link previews, reply privately, report, voice transcripts
+- **Link previews:** when you write a web address, *your* phone reads the page and makes a little
+  card (title, words, picture) that goes inside the locked message. The other person's phone never
+  visits the page, and our server never sees the address. Settings, Chats can turn it off.
+- **Reply privately:** hold a message in a group, Reply privately, and it opens your one-to-one chat
+  with that person, quoting it.
+- **Report:** the server can't read messages, so a report carries only the last few messages (at most
+  5) that *your* phone chose to send with it, like WhatsApp. They're saved in the server's `reports`
+  table for whoever runs PakChat.
+- **Voice transcripts:** tap "Show words" under a voice note. Android's own speech recognition does it
+  on the phone (`Transcribe.kt`), so the voice never leaves it. It needs Android 13 or newer with
+  on-device recognition; otherwise the button doesn't show.
+
+### Wallpapers and tones
+- **Wallpaper:** Settings, Chats, Wallpaper for every chat, or a chat's Info for just that chat:
+  doodles, none, 8 colours, 6 gradients or your own photo (copied into PakChat, so it stays if you
+  delete it from the gallery). In dark mode a photo can be dimmed with a slider.
+- **Notification tone:** 6 PakChat tones, for all chats or one chat. Android lets each alert
+  "channel" have only one sound, so each tone gets a channel of its own.
+- **Conversation tones:** the little sounds while you're in a chat (a "pop" when yours goes, a soft
+  one when theirs arrives), with a loudness slider in Settings, Notifications.
+
+### Call links and scheduled calls
+- **Call link** (Calls tab, the link button): a link anyone can use to join a call. It never rings
+  anyone: people join when they want, and the page shows who's in it now. Behind the scenes it's a
+  special group chat whose calls don't ring. If two people start at the same moment, the phones
+  agree (the smaller id wins) so everyone ends up in one call, not two.
+- **Scheduled call** (Calls tab, or the chat menu): pick a chat, a time, voice or video. Everyone gets
+  an event message, and each phone sets its own reminder for that time. It shows under "Upcoming".
+
+### App lock and chat lock
+**App lock** (Settings, App lock): PakChat opens only with your fingerprint or face. There's
+no PIN on purpose, because anyone who knows your phone's PIN could get in. A wrong try waits 30
+seconds. It locks again when you leave: at once, after 30 seconds, after a minute, or when the phone's
+screen goes off. Going to our own gallery, camera or share sheet doesn't count, so it doesn't lock
+while you're picking a photo. It only turns on if the phone has a fingerprint or face set up, and it
+warns you first: **if the fingerprint stops working, the only way back is to reinstall PakChat and
+restore your backup.**
+
+**Chat lock** (a chat's Info, Chat lock), two ways:
+- **Locked chats folder** (WhatsApp's way): the chat leaves the list and goes into "Locked chats",
+  which appears when you pull the chat list down. Add a **secret code** to hide the folder too; then
+  it only opens by typing the code in search. "Clear locked chats" deletes them if you forget the code.
+- **In the list** (our way): the chat stays where it is with a 🔒, showing only "Locked chat" or "New
+  message", and opens with your fingerprint.
+
+Either way its alerts just say "New message", its words don't show in search, and it locks again when
+you leave it (at once, or after 30 seconds or a minute). The secret code is never saved, only its
+fingerprint (a SHA-256 hash), so even someone reading the phone's storage can't find it. Locked chats'
+photos never go to the phone's gallery: PakChat keeps all its files to itself.
+
+### Try this
+- Make an invite link that stops after 1 person. Join from the second emulator, then try a third
+  account: the link says it's used up.
+- Make a broadcast list with both emulators' accounts, send a message, open it on one: "1 of 2 read".
+- Schedule a message 2 minutes ahead, close PakChat completely, and wait: it still goes.
+- Lock a chat "in the list", send it a message from the other phone, and look at the alert: it says
+  only "New message".
+- Turn on App lock with "at once", go home and come back: it asks for your fingerprint. Now attach a
+  photo and come back from the gallery: it doesn't ask.
+
+## Step 30: Build 2, closer to WhatsApp
+
+Build 2 fixes what testing found and copies more of WhatsApp's behaviour, screen by screen. Two
+things need the server updated first: **`mix ecto.migrate`** (community join requests and
+suggestions, and who may see your profile photo), and the APK is built after **`expo prebuild`**,
+because two new Android settings came with it (the camera's recent photos, and screen sharing).
+
+### Fixes from testing
+- The camera shows your newest photos and videos in a row; tap to send one, hold to pick several.
+  The chat list has its own camera button too: take or pick, choose the chat, edit and send.
+- Hold send to schedule a message for any minute (Undo send is gone: messages go at once).
+- The locked chats row slides in when you pull the list down, the app lock asks only once, and a
+  locked chat opens straight from the list.
+- The video viewer is clean like WhatsApp's, the video editor's trim strip is under the video, and
+  the sticker crop button says "Done".
+
+### Looks
+- **Chat header:** a flat bar, no rounded card, like WhatsApp.
+- **Wallpaper:** fills the whole chat, behind the header and the message box. The picker is
+  WhatsApp's: a small phone preview, then My photos, Doodles, None, Colours and Gradients, each opening
+  full screen to swipe through. From a chat it asks "For this chat" or "For all chats".
+
+### Photos (people, groups and communities)
+Tap your photo in Settings, or a group's or community's photo in its Info if you're an admin: Choose
+from gallery, or Remove photo. The photo is cropped square, made 640×640 and uploaded. Like
+WhatsApp's, photos are **not** end-to-end locked: the server only gives your photo to people allowed
+to see it (Settings, Privacy, Profile photo: Everyone, My contacts or Nobody). Each phone keeps a copy
+in its cache (`core/photos.ts`), so a photo is fetched once.
+
+### Communities and Archive
+- **Communities** work like WhatsApp's: exiting a community leaves all its groups; members can
+  suggest groups and admins approve them; a group can ask admins to approve new members ("Request
+  to join"); only the owner can deactivate a community. In Chats, a community's groups sit together
+  under its name.
+- **Archive:** "Keep chats archived" (on by default) keeps archived chats there when someone writes,
+  and quiet, except a group message that @mentions you or replies to you. Hold chats in Archived to
+  pick several, then Unarchive (with Undo), Mute or Delete.
+
+### Chats
+- **Message yourself:** the first row in New chat. It's called "Your name (You)": notes, links and
+  files to keep, on all your devices. No calls or blocking there.
+- **Mute** for 8 hours, 1 week or Always. When the time is up the chat unmutes by itself (a timer,
+  and a check each time PakChat opens; alerts check the time too, so a late timer never matters).
+- **Muted groups** still alert you for an @mention or a reply to you, and show an **@** on the row,
+  like WhatsApp. One-to-one chats stay quiet when muted.
+- **Broadcast lists:** hold a message you sent for Info, Copy, Edit (words, for 15 minutes) and
+  Delete. "Delete for everyone" takes back every copy in every chat.
+
+### Calls
+- **New call** (the button at the bottom of Calls): search your contacts and call one, or "Call a
+  number" that's on PakChat.
+- **Favourites** at the top of Calls, with "Add favourite": call them in one tap.
+- Calls one after another with the same person, the same way, on the same day are one row ("Ali
+  (3)"). Tap a row for **Call info**: each call, in or out, voice or video, the time and how long.
+- The Calls tab shows how many **missed calls** you haven't looked at yet.
+- **Share screen** in a video call. Android asks first ("Start recording or casting?") and shows its
+  own alert while you share; everyone sees your screen whole, instead of your camera. Behind the
+  scenes the camera's picture is swapped for the screen's, so nothing has to reconnect.
+- **Use less data for calls** (Settings, Storage and data): thinner sound and a smaller, slower
+  picture, for little mobile data.
+
+### Settings
+- **Search** (the 🔍 at the top): type "tone", "last seen" or "backup" and every matching setting
+  shows with its page.
+- **Groups' tone** (Settings, Notifications): a separate tone for group messages.
+
+### Try this
+- Mute a group for 8 hours, then from the other phone @mention this one in it: you still get the
+  alert, and the row shows @.
+- Start a video call, tap Share screen, and open your gallery: the other phone sees it. Tap "Stop
+  sharing": your camera comes back.
+- Call the other phone twice and miss a call: Calls shows "(2)" and a 1 on the tab until you open it.
+- In Settings, search "less": "Use less data for calls" comes up.

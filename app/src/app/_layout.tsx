@@ -15,9 +15,10 @@ import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
-import { useAuth } from '../core/hooks';
+import { useAppLocked, useAuth, useCall } from '../core/hooks';
+import { LockScreen } from '../ui/LockScreen';
 import { calls, takeTappedCall, watchCallTaps } from '../core/calls';
-import { LIKE_ALERT, takeTapped, watchTaps } from '../core/push';
+import { LIKE_ALERT, PLAN_ALERT, takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { CallBar } from '../ui/CallBar';
 import { ToastHost } from '../ui/overlays';
@@ -43,6 +44,8 @@ export default function Root() {
 function App() {
   const { theme, rtl } = useLook();
   const { state } = useAuth();
+  const appLocked = useAppLocked();
+  const call = useCall();
 
   // If starting up fails, or takes far too long, say so on screen instead of staying blank.
   const [problem, setProblem] = useState<string | null>(null);
@@ -77,6 +80,12 @@ function App() {
       Notifications.clearLastNotificationResponse();
       if (tappedPlain.notification.request.identifier.startsWith(LIKE_ALERT)) {
         router.navigate('/(tabs)/status');
+        return;
+      }
+      // A scheduled call starting: its chat (Join is on its message there).
+      const planned = tappedPlain.notification.request.identifier.startsWith(PLAN_ALERT) ? (tappedPlain.notification.request.content.data as { chatId?: string } | null)?.chatId : undefined;
+      if (planned && planned !== core.viewing) {
+        router.push({ pathname: '/chat/[id]', params: { id: planned } });
         return;
       }
     }
@@ -133,6 +142,8 @@ function App() {
           <Stack.Screen name="info/[id]" />
           <Stack.Screen name="verify/[id]" />
           <Stack.Screen name="new-chat" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="new-call" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="call-info" />
           <Stack.Screen name="new-group" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="list" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="search" options={{ animation: 'fade' }} />
@@ -158,12 +169,28 @@ function App() {
           <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="settings/status-privacy" />
+          <Stack.Screen name="once" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="invite/[id]" />
+          <Stack.Screen name="join/[code]" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="settings/index" />
+          <Stack.Screen name="community/[id]" />
+          <Stack.Screen name="new-community" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="broadcasts" />
+          <Stack.Screen name="broadcast/[id]" />
+          <Stack.Screen name="broadcast-edit" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="wallpaper" />
+          <Stack.Screen name="locked" />
+          <Stack.Screen name="settings/lock" />
+          <Stack.Screen name="calllink/[code]" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="send-to" options={{ animation: 'fade_from_bottom' }} />
         </Stack.Protected>
         <Stack.Protected guard={state === 'signedOut'}>
           <Stack.Screen name="sign-in" options={{ animation: 'fade' }} />
         </Stack.Protected>
       </Stack>
       {state === 'signedIn' && <CallBar />}
+      {/* App lock covers everything, except a call (you can answer, as on WhatsApp). */}
+      {state === 'signedIn' && appLocked && !(call && call.state !== 'ended') && <LockScreen />}
       <ToastHost />
     </View>
   );

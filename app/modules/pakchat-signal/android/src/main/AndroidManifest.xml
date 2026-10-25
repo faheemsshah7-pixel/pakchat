@@ -9,6 +9,13 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+  <!-- Phase 7: scheduled messages wake PakChat at their time, also after a restart (Scheduled.kt). -->
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <!-- Live location keeps going after you leave PakChat, with its alert showing (LiveLocation.kt). -->
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
   <!-- The phone makers' "Autostart" settings pages, so PakChat may open them (see Autostart.kt). -->
   <queries>
     <package android:name="com.miui.securitycenter" />
@@ -38,5 +45,18 @@
         android:screenOrientation="portrait"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
     <service android:name="expo.modules.pakchatsignal.CallService" android:exported="false" android:foregroundServiceType="microphone|camera" />
+    <!-- Scheduled messages (Scheduled.kt). -->
+    <receiver android:name="expo.modules.pakchatsignal.ScheduledReceiver" android:exported="false" />
+    <service android:name="expo.modules.pakchatsignal.ScheduledService" android:exported="false" />
+    <receiver android:name="expo.modules.pakchatsignal.ScheduledBootReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+      </intent-filter>
+    </receiver>
+    <!-- Live location (LiveLocation.kt). -->
+    <service android:name="expo.modules.pakchatsignal.LiveLocationService" android:exported="false" android:foregroundServiceType="location" />
+    <receiver android:name="expo.modules.pakchatsignal.LiveStopReceiver" android:exported="false" />
   </application>
 </manifest>

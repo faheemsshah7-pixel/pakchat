@@ -1,17 +1,21 @@
 // info/[id].tsx: Contact info (one-to-one) or Group info.
 //
 // The big picture shrinks away as you scroll, and the name slides into the bar
-// at the top. Admins can rename the group, add and remove people, and choose
-// who may send.
+// at the top. Admins can rename the group, add and remove people, choose
+// who may send, and approve who joins (and let in those waiting). A
+// community's announcements group has "Exit community" instead of leaving.
 import { formatPhone, roleOf } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import Animated, { interpolate, LinearTransition, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { defaultTimer } from '../../core/timer';
-import { useBlocked, useChat, useChatPrefs, usePeople, usePerson, usePresence } from '../../core/hooks';
+import { useBlocked, useChat, useChatList, useChatPrefs, usePeople, usePerson, usePresence } from '../../core/hooks';
+import { ChatLockSheet } from '../../ui/ChatLockSheet';
+import { ExportSheet } from '../../ui/ExportSheet';
+import { TonePicker, toneName } from '../../ui/TonePicker';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { lastSeen, TIMERS, timerLabel } from '../../ui/format';
@@ -19,6 +23,10 @@ import { Icon, type IconName } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, Toggle, Txt } from '../../ui/kit';
 import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
 import { rise } from '../../ui/motion';
+import { startCall } from '../../ui/CallBar';
+import { ReportSheet } from '../../ui/ReportSheet';
+import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
+import { MuteSheet, mutedLine } from '../../ui/MuteSheet';
 
 export default function Info() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -31,12 +39,37 @@ export default function Info() {
   const presence = usePresence(other);
   const blocked = useBlocked();
   const prefs = useChatPrefs(id);
+  const [toneOpen, setToneOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
   const [member, setMember] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
   const [leaving, setLeaving] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [muting, setMuting] = useState(false);
+  const [requests, setRequests] = useState<{ userId: string; at: number }[]>([]);
+  const community = useChat(chat?.communityId ?? '');
+  const rows = useChatList();
   const y = useSharedValue(0);
+
+  // Who is waiting to join, for its admins (and again whenever someone asks).
+  const seesRequests = chat?.kind === 'group' && !chat.announcements && !chat.left && roleOf(chat, core.myId) === 'admin';
+  useEffect(() => {
+    if (!seesRequests) return;
+    const load = () =>
+      core.server
+        .joinRequests(id)
+        .then((list) => {
+          setRequests(list);
+          list.forEach((r) => void core.person(r.userId).catch(() => {}));
+        })
+        .catch(() => {});
+    void load();
+    return core.on(`notice:${id}`, () => void load());
+  }, [id, seesRequests]);
 
   const onScroll = useAnimatedScrollHandler((e) => {
     y.value = e.contentOffset.y;
@@ -53,10 +86,14 @@ export default function Info() {
   if (!chat) return <Screen>{null}</Screen>;
 
   const group = chat.kind === 'group';
+  // A community's announcements: its people come and go with the community.
+  const ann = group && !!chat.announcements;
   const title = core.chatTitle(chat);
   const amAdmin = group && roleOf(chat, core.myId) === 'admin';
   const isBlocked = !!other && !!blocked?.some((p) => p.id === other);
-  const sub = group ? fill(t.members, { n: chat.members.length }) : lastSeen(presence, t);
+  // Messaging myself: no calls, blocking or reporting, like WhatsApp.
+  const self = core.isSelfChat(chat);
+  const sub = group ? fill(t.members, { n: chat.members.length }) : self ? t.messageYourself : lastSeen(presence, t);
 
   async function act(work: () => Promise<unknown>, done?: string) {
     try {
@@ -69,8 +106,12 @@ export default function Info() {
 
   const actions: { icon: IconName; label: string; on: () => void }[] = [
     { icon: 'chat', label: t.message, on: () => router.back() },
-    { icon: 'calls', label: t.voiceCall, on: () => toast(t.callsSoon) },
-    { icon: 'video', label: t.videoCall, on: () => toast(t.callsSoon) },
+    ...(self
+      ? []
+      : [
+          { icon: 'calls' as const, label: t.voiceCall, on: () => void startCall(id, false, t) },
+          { icon: 'video' as const, label: t.videoCall, on: () => void startCall(id, true, t) },
+        ]),
     { icon: 'search', label: t.search, on: () => router.push({ pathname: '/search', params: { chat: id } }) },
   ];
 
@@ -93,7 +134,15 @@ export default function Info() {
 
       <Animated.ScrollView onScroll={onScroll} scrollEventThrottle={16} contentContainerStyle={{ paddingBottom: 40 }}>
         <Animated.View style={[{ alignItems: 'center', paddingTop: 18, gap: 6 }, big]}>
-          <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+          {/* Admins change the group's photo (Announcements has its community's: change it there). */}
+          {amAdmin && !ann && !chat.left ? (
+            <Pressy onPress={() => setPhotoOpen(true)} label={t.profilePhoto} scale={0.95} testID="group-photo">
+              <Avatar id={id} name={title} size={104} group />
+              <CameraBadge size={32} />
+            </Pressy>
+          ) : (
+            <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+          )}
           <Txt size={24} weight="800" align="center" style={{ marginTop: 10 }} testID="info-title">
             {title}
           </Txt>
@@ -145,19 +194,39 @@ export default function Info() {
           <SettingRow icon="photo" title={t.media} onPress={() => router.push({ pathname: '/media/[id]', params: { id } })} testID="info-media" />
           <Divider />
           <SettingRow icon="star" title={t.starred} onPress={() => router.push({ pathname: '/starred', params: { chat: id } })} />
+          <Divider />
+          <SettingRow icon="export" title={t.exportChat} onPress={() => setExportOpen(true)} testID="info-export" />
         </Glass>
 
         <Glass style={{ marginHorizontal: 12, marginTop: 12 }}>
-          <SettingRow icon="muted" title={t.mute} right={<Toggle on={!!prefs.muted} onChange={(on) => core.setPrefs(id, { muted: on })} label={t.mute} testID="mute-toggle" />} />
+          <SettingRow
+            icon="muted"
+            title={t.muteNotifications}
+            sub={mutedLine(prefs, t) || undefined}
+            chevron={false}
+            right={<Toggle on={!!prefs.muted} onChange={(on) => (on ? setMuting(true) : core.unmute(id))} label={t.mute} testID="mute-toggle" />}
+          />
+          <Divider />
+          <SettingRow icon="tone" title={t.notificationTone} sub={toneName(prefs.tone, t)} onPress={() => setToneOpen(true)} testID="info-tone" />
+          <Divider />
+          <SettingRow icon="wallpaper" title={t.wallpaper} onPress={() => router.push({ pathname: '/wallpaper', params: { chat: id } })} testID="info-wallpaper" />
+          <Divider />
+          <SettingRow
+            icon="lock"
+            title={t.chatLock}
+            sub={prefs.lock === 'folder' ? t.chatLockFolder : prefs.lock === 'list' ? t.chatLockList : t.chatLockOff}
+            onPress={() => setLockOpen(true)}
+            testID="info-lock"
+          />
           <Divider />
           <SettingRow icon="timer" title={t.disappearing} sub={timerLabel(chat.timer ?? 0, t)} onPress={() => setTimerOpen(true)} testID="info-timer" />
-          {!group && other && (
+          {!group && other && !self && (
             <>
               <Divider />
               <SettingRow icon="shield" title={t.encryption} sub={t.encryptionNote} onPress={() => router.push({ pathname: '/verify/[id]', params: { id: other } })} testID="verify" />
             </>
           )}
-          {group && amAdmin && (
+          {group && amAdmin && !ann && (
             <>
               <Divider />
               <SettingRow
@@ -165,17 +234,74 @@ export default function Info() {
                 title={t.onlyAdminsSend}
                 right={<Toggle on={!!chat.onlyAdminsSend} onChange={(on) => void act(() => core.client.updateGroup(id, { onlyAdminsSend: on }))} label={t.onlyAdminsSend} />}
               />
+              <Divider />
+              <SettingRow
+                icon="userPlus"
+                title={t.approveMembers}
+                sub={t.approveMembersSub}
+                right={
+                  <Toggle on={!!chat.joinApproval} onChange={(on) => void act(() => core.client.updateGroup(id, { joinApproval: on }))} label={t.approveMembers} testID="approve-toggle" />
+                }
+              />
             </>
           )}
         </Glass>
+
+        {seesRequests && (chat.joinApproval || requests.length > 0) && (
+          <>
+            <Section title={`${t.pendingRequests} · ${requests.length}`} />
+            <Glass style={{ marginHorizontal: 12 }}>
+              {requests.map((r, i) => (
+                <View key={r.userId}>
+                  {i > 0 && <Divider />}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
+                    <Avatar id={r.userId} name={core.name(r.userId)} size={42} />
+                    <Txt size={15.5} weight="600" lines={1} style={{ flex: 1 }}>
+                      {core.name(r.userId) || '…'}
+                    </Txt>
+                    <IconButton
+                      icon="close"
+                      label={t.rejectWord}
+                      look="glass"
+                      size={38}
+                      onPress={() => void act(async () => (await core.server.answerJoinRequest(id, r.userId, false), setRequests((old) => old.filter((o) => o.userId !== r.userId))))}
+                      testID={`request-no-${i}`}
+                    />
+                    <IconButton
+                      icon="tick"
+                      label={t.approveWord}
+                      look="soft"
+                      size={38}
+                      onPress={() => void act(async () => (await core.server.answerJoinRequest(id, r.userId, true), setRequests((old) => old.filter((o) => o.userId !== r.userId))))}
+                      testID={`request-yes-${i}`}
+                    />
+                  </View>
+                </View>
+              ))}
+              {!requests.length && (
+                <Txt size={13.5} color={theme.muted} style={{ padding: 14 }}>
+                  {t.noPending}
+                </Txt>
+              )}
+            </Glass>
+          </>
+        )}
+
+        {group && !!chat.communityId && (
+          <Glass style={{ marginHorizontal: 12, marginTop: 12 }}>
+            <SettingRow icon="community" title={community?.title ?? t.community} sub={ann ? t.announcementsExitNote : t.partOfCommunity} onPress={() => router.push({ pathname: '/community/[id]', params: { id: chat.communityId! } })} testID="info-community" />
+          </Glass>
+        )}
 
         {group && (
           <>
             <Section title={fill(t.members, { n: chat.members.length })} />
             <Glass style={{ marginHorizontal: 12 }}>
-              {amAdmin && !chat.left && (
+              {amAdmin && !chat.left && !ann && (
                 <>
                   <SettingRow icon="userPlus" title={t.addMembers} onPress={() => router.push({ pathname: '/new-group', params: { add: id } })} testID="add-members" />
+                  <Divider />
+                  <SettingRow icon="link" title={t.inviteLink} sub={t.inviteViaLink} onPress={() => router.push({ pathname: '/invite/[id]', params: { id } })} testID="invite-link" />
                   <Divider />
                 </>
               )}
@@ -206,10 +332,19 @@ export default function Info() {
         )}
 
         <Glass style={{ marginHorizontal: 12, marginTop: 16 }}>
+          {(group || (other && other !== core.myId)) && (
+            <>
+              <SettingRow icon="warning" title={group ? t.reportGroup : fill(t.reportName, { name: title })} danger chevron={false} onPress={() => setReporting(true)} testID="report" />
+              <Divider />
+            </>
+          )}
           {group ? (
-            !chat.left && <SettingRow icon="leave" title={t.leaveGroup} danger chevron={false} onPress={() => setLeaving(true)} testID="leave-group" />
+            !chat.left && (
+              <SettingRow icon="leave" title={ann ? t.leaveCommunity : t.leaveGroup} danger chevron={false} onPress={() => setLeaving(true)} testID={ann ? 'exit-community' : 'leave-group'} />
+            )
           ) : (
-            other && (
+            other &&
+            !self && (
               <SettingRow
                 icon="flag"
                 title={isBlocked ? t.unblock : fill(t.blockName, { name: title })}
@@ -296,8 +431,41 @@ export default function Info() {
         </View>
       </Sheet>
 
+      <TonePicker visible={toneOpen} value={prefs.tone} forChat onPick={(tone) => core.setPrefs(id, { tone })} onClose={() => setToneOpen(false)} />
+      <ExportSheet visible={exportOpen} chatId={id} onClose={() => setExportOpen(false)} />
+      <ChatLockSheet visible={lockOpen} chatId={id} onClose={() => setLockOpen(false)} />
+      <ReportSheet visible={reporting} chatId={id} group={group} userId={group ? null : other} onClose={() => setReporting(false)} />
+      <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => core.mute(id, ms)} />
+      <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!chat.photo} chatId={id} />
+
+      {/* Announcements: nobody leaves them alone, they exit the community (and its groups), as on WhatsApp. */}
       <Dialog
-        visible={leaving}
+        visible={leaving && ann}
+        onClose={() => setLeaving(false)}
+        title={t.leaveCommunity}
+        text={fill(t.leaveCommunityNote, {
+          name: community?.title ?? '',
+          n: (rows ?? []).filter((r) => r.chat.communityId === chat.communityId && !r.chat.announcements && !r.chat.left).length,
+        })}
+        buttons={[
+          {
+            label: t.leaveCommunity,
+            danger: true,
+            testID: 'confirm-exit-community',
+            onPress: () => {
+              setLeaving(false);
+              void act(async () => {
+                await core.client.removeMember(chat.communityId!, core.myId);
+                await core.client.syncChats().catch(() => {});
+                router.back();
+              });
+            },
+          },
+          { label: t.cancel, onPress: () => setLeaving(false) },
+        ]}
+      />
+      <Dialog
+        visible={leaving && !ann}
         onClose={() => setLeaving(false)}
         title={fill(t.leaveSure, { name: title })}
         buttons={[

@@ -325,7 +325,8 @@ function Picture({ call, small }: { call: CallView; small?: boolean }) {
   const other = call.peers.find((p) => p.stream && p.video);
   return (
     <>
-      {!waiting && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit="cover" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={0} />}
+      {/* A shared screen shows whole; a face fills the screen. */}
+      {!waiting && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={0} />}
       {call.local && !waiting && !small && (
         <Animated.View entering={FadeIn} style={{ position: 'absolute', top: insets.top + 110, end: 14, width: 110, height: 160, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }}>
           <RTCView streamURL={call.local} objectFit="cover" mirror={call.front} style={{ flex: 1 }} zOrder={1} />
@@ -371,7 +372,13 @@ function Tile({ call, peer, w, h }: { call: CallView; peer: PeerView | 'me'; w: 
   const muted = me ? call.muted : !peer.audio;
   return (
     <View style={{ width: w, height: h, borderRadius: 18, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }} testID="call-tile">
-      {stream ? <RTCView key={me ? 'me' : `${peer.key}:${peer.rev}`} streamURL={stream} objectFit="cover" mirror={me && call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={me ? 1 : 0} /> : <Avatar id={userId} name={name.replace(/^~ /, '')} size={Math.min(72, h * 0.45)} />}
+      {me && call.sharing ? (
+        <Icon name="screenShare" size={Math.min(40, h * 0.3)} color={INK} />
+      ) : stream ? (
+        <RTCView key={me ? 'me' : `${peer.key}:${peer.rev}`} streamURL={stream} objectFit={!me && peer.screen ? 'contain' : 'cover'} mirror={me && call.front} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} zOrder={me ? 1 : 0} />
+      ) : (
+        <Avatar id={userId} name={name.replace(/^~ /, '')} size={Math.min(72, h * 0.45)} />
+      )}
       {/* The name stays inside the tile, however long. */}
       <View style={{ position: 'absolute', start: 8, bottom: 8, maxWidth: w - 16, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
         {muted && <Icon name="micOff" size={13} color={INK} />}
@@ -412,9 +419,28 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
     return have[(have.indexOf(call.route) + 1) % have.length];
   };
   const speakerOn = call.route !== 'earpiece';
+  // Share screen, like WhatsApp: in a video call once it's on.
+  const canShare = call.video && call.state === 'active';
   return (
     <View style={{ gap: 22, opacity: over ? 0.5 : 1 }} pointerEvents={over ? 'none' : 'auto'}>
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
+      {call.sharing && (
+        <Animated.View entering={FadeIn} style={{ alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 14, paddingEnd: 6, paddingVertical: 6, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.45)' }} testID="call-sharing">
+            <Icon name="screenShare" size={18} color={INK} />
+            <Txt size={13.5} weight="600" color={INK}>
+              {t.sharingScreen}
+            </Txt>
+            <Pressy onPress={() => calls.stopSharing()} label={t.stopSharing} scale={0.94} testID="call-stop-sharing">
+              <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: RED }}>
+                <Txt size={13} weight="700" color={INK}>
+                  {t.stopSharing}
+                </Txt>
+              </View>
+            </Pressy>
+          </View>
+        </Animated.View>
+      )}
+      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: canShare ? 12 : 18 }}>
         <Round icon={ROUTE_ICON[call.route]} on={speakerOn} label={`${t.speaker}: ${routeName(call.route, t)}`} onPress={() => calls.setRoute(nextRoute())} testID="call-speaker" />
         {/* In a voice call it shows once the call is on, and turns it into a video call. */}
         {(call.video || call.state === 'active') && (
@@ -426,7 +452,8 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
             testID="call-camera"
           />
         )}
-        {call.video && call.camera && <Round icon="flipCamera" label={t.flipCamera} onPress={() => calls.flipCamera()} testID="call-flip" />}
+        {call.video && call.camera && !call.sharing && <Round icon="flipCamera" label={t.flipCamera} onPress={() => calls.flipCamera()} testID="call-flip" />}
+        {canShare && <Round icon="screenShare" on={call.sharing} label={call.sharing ? t.stopSharing : t.shareScreen} onPress={() => (call.sharing ? calls.stopSharing() : void calls.shareScreen())} testID="call-share-screen" />}
         <Round icon={call.muted ? 'micOff' : 'mic'} on={call.muted} label={call.muted ? t.unmute : t.muteMic} onPress={() => (tick(), calls.setMuted(!call.muted))} testID="call-mute" />
       </View>
       <View style={{ alignItems: 'center' }}>

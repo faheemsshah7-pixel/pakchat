@@ -16,7 +16,7 @@ export type Me = {
   name: string;
   about?: string | null;
   photo?: string | null;
-  privacy: { lastSeen: string; online: string; readReceipts: boolean };
+  privacy: { lastSeen: string; online: string; readReceipts: boolean; photo: string };
 };
 
 export type SignedIn = {
@@ -34,7 +34,10 @@ export type SignedIn = {
 export type Match = { hash: string; user: { id: string; name: string; about?: string | null; photo?: string | null } };
 
 /** A chat as the server sends it: who's in it, and its counter. */
-export type ServerChat = Pick<Chat, 'id' | 'kind' | 'members' | 'title' | 'description' | 'photo' | 'onlyAdminsSend' | 'inviteCode'> & {
+export type ServerChat = Pick<
+  Chat,
+  'id' | 'kind' | 'members' | 'title' | 'description' | 'photo' | 'onlyAdminsSend' | 'inviteCode' | 'inviteExpiresAt' | 'inviteMaxUses' | 'inviteUses' | 'communityId' | 'announcements' | 'callLink' | 'groupsByMembers' | 'joinApproval' | 'createdBy'
+> & {
   seq: number;
 };
 
@@ -58,7 +61,7 @@ export interface ServerApi {
   /** Your own id means: leave. */
   removeMember(chatId: string, userId: string): Promise<void>;
   setAdmin(chatId: string, userId: string, admin: boolean): Promise<ServerChat>;
-  updateGroup(chatId: string, changes: { title?: string; description?: string; onlyAdminsSend?: boolean }): Promise<ServerChat>;
+  updateGroup(chatId: string, changes: GroupChanges): Promise<ServerChat>;
   lookup(email: string): Promise<{ id: string; name: string } | null>;
   /** Sets who sees my status; answers my status chat. */
   statusAudience(userIds: string[]): Promise<ServerChat>;
@@ -84,7 +87,7 @@ export type Gif = { id: string; mp4: string; preview: string; width: number; hei
 // The server's shapes, as they come over the wire.
 type WireChat = {
   id: string;
-  kind: 'direct' | 'group' | 'status';
+  kind: 'direct' | 'group' | 'status' | 'community';
   seq: number;
   members: { user_id: string; role: Role }[];
   title?: string;
@@ -92,9 +95,56 @@ type WireChat = {
   photo?: string | null;
   only_admins_send?: boolean;
   invite_code?: string | null;
+  invite_expires_at?: string | null;
+  invite_max_uses?: number | null;
+  invite_uses?: number | null;
+  community_id?: string | null;
+  announcements?: boolean;
+  call_link?: boolean;
+  groups_by_members?: boolean;
+  join_approval?: boolean;
+  created_by?: string | null;
 };
 
-type WireMe = { id: string; email: string | null; phone?: string | null; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean } };
+/** What a group's (or a community's) admins can change. */
+export type GroupChanges = { title?: string; description?: string; photo?: string; onlyAdminsSend?: boolean; groupsByMembers?: boolean; joinApproval?: boolean };
+
+/** An invite link, as the "Join group?" screen shows it. */
+export type InviteInfo = {
+  chatId: string;
+  title: string;
+  photo?: string | null;
+  description?: string | null;
+  members: number;
+  kind: 'group' | 'community';
+  callLink: boolean;
+  /** Its admins approve who joins: joining sends them a request. */
+  approval: boolean;
+};
+
+/** A group in a community's list. */
+export type CommunityGroup = {
+  id: string;
+  title: string;
+  description?: string | null;
+  photo?: string | null;
+  announcements: boolean;
+  members: number;
+  joined: boolean;
+  /** Its admins approve who joins, and whether I've asked. */
+  approval?: boolean;
+  requested?: boolean;
+};
+
+/** A group someone suggested for a community, waiting for its admins: one of theirs, or a new one (`isNew`). */
+export type GroupSuggestion = { id: string; title: string; photo?: string | null; members: number; isNew: boolean; suggestedBy: string; at: number };
+
+/** Joining a group whose admins approve who joins: they've been asked. */
+export const REQUESTED = 'requested' as const;
+
+export type ReportReason = 'spam' | 'abuse' | 'scam' | 'other';
+
+type WireMe = { id: string; email: string | null; phone?: string | null; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean; photo?: string } };
 
 type WireBundle = {
   device_id: number;
@@ -120,14 +170,28 @@ function signedIn(r: WireSignedIn): SignedIn {
 
 export function chatFromWire(c: WireChat): ServerChat {
   const chat: ServerChat = { id: c.id, kind: c.kind, seq: c.seq, members: c.members.map((m) => ({ userId: m.user_id, role: m.role })) };
-  if (c.kind === 'group') {
+  if (c.kind === 'group' || c.kind === 'community') {
     chat.title = c.title ?? '';
     if (c.description) chat.description = c.description;
-    if (c.photo) chat.photo = c.photo;
+    // '' when it has none, so a removed photo goes on the phone too.
+    chat.photo = c.photo ?? '';
     chat.onlyAdminsSend = c.only_admins_send === true;
     chat.inviteCode = c.invite_code ?? null;
+    chat.inviteExpiresAt = c.invite_expires_at ? Date.parse(c.invite_expires_at) : null;
+    chat.inviteMaxUses = c.invite_max_uses ?? null;
+    chat.inviteUses = c.invite_uses ?? 0;
+    chat.communityId = c.community_id ?? null;
+    chat.announcements = c.announcements === true;
+    chat.callLink = c.call_link === true;
+    chat.groupsByMembers = c.groups_by_members === true;
+    chat.joinApproval = c.join_approval === true;
+    if (c.created_by) chat.createdBy = c.created_by;
   }
   return chat;
+}
+
+function joined(r: WireChat | { requested: true }): ServerChat | typeof REQUESTED {
+  return 'requested' in r ? REQUESTED : chatFromWire(r);
 }
 
 export function meFromWire(u: WireMe): Me {
@@ -138,7 +202,7 @@ export function meFromWire(u: WireMe): Me {
     name: u.name,
     about: u.about,
     photo: u.photo,
-    privacy: { lastSeen: u.privacy.last_seen, online: u.privacy.online, readReceipts: u.privacy.read_receipts },
+    privacy: { lastSeen: u.privacy.last_seen, online: u.privacy.online, readReceipts: u.privacy.read_receipts, photo: u.privacy.photo ?? 'everyone' },
   };
 }
 
@@ -279,6 +343,12 @@ export class HttpServer implements ServerApi {
     return { id: r.id, uploadUrl: this.url(r.upload_url) };
   }
 
+  /** Makes room for my profile photo, or (`chatId`) a group's or community's. The upload link starts with /api. */
+  async startPhoto(size: number, chatId?: string) {
+    const r = await this.call<{ id: string; upload_url: string }>('POST', '/photos', chatId ? { size, chat_id: chatId } : { size });
+    return { id: r.id, uploadUrl: this.url(r.upload_url) };
+  }
+
   /** A download link for a file, good for a few hours. */
   async fileLink(id: string) {
     return this.url((await this.call<{ url: string }>('GET', `/files/${encodeURIComponent(id)}/link`)).url);
@@ -408,12 +478,127 @@ export class HttpServer implements ServerApi {
     return chatFromWire(await this.call<WireChat>(admin ? 'PUT' : 'DELETE', `/groups/${encodeURIComponent(chatId)}/admins/${encodeURIComponent(userId)}`));
   }
 
-  async updateGroup(chatId: string, changes: { title?: string; description?: string; onlyAdminsSend?: boolean }) {
+  async updateGroup(chatId: string, changes: GroupChanges) {
     const body: Record<string, unknown> = {};
     if (changes.title !== undefined) body.title = changes.title;
     if (changes.description !== undefined) body.description = changes.description;
+    if (changes.photo !== undefined) body.photo = changes.photo;
     if (changes.onlyAdminsSend !== undefined) body.only_admins_send = changes.onlyAdminsSend;
+    if (changes.groupsByMembers !== undefined) body.groups_by_members = changes.groupsByMembers;
+    if (changes.joinApproval !== undefined) body.join_approval = changes.joinApproval;
     return chatFromWire(await this.call<WireChat>('PATCH', `/groups/${encodeURIComponent(chatId)}`, body));
+  }
+
+  // ---- Invite links, communities, call links and reports (phase 7) ----
+
+  /** A new invite link (the old one stops). It can stop after `expiresIn` seconds, or once `maxUses` people join. */
+  async resetInvite(chatId: string, limits: { expiresIn?: number; maxUses?: number } = {}) {
+    const body: Record<string, unknown> = {};
+    if (limits.expiresIn) body.expires_in = limits.expiresIn;
+    if (limits.maxUses) body.max_uses = limits.maxUses;
+    const r = await this.call<{ code: string; expires_at: string | null; max_uses: number | null }>('POST', `/groups/${encodeURIComponent(chatId)}/invite`, body);
+    return { code: r.code, expiresAt: r.expires_at ? Date.parse(r.expires_at) : null, maxUses: r.max_uses ?? null };
+  }
+
+  async removeInvite(chatId: string) {
+    await this.call('DELETE', `/groups/${encodeURIComponent(chatId)}/invite`);
+  }
+
+  async inviteInfo(code: string): Promise<InviteInfo> {
+    const r = await this.call<{ chat_id: string; title: string; photo?: string | null; description?: string | null; members: number; kind?: string; call_link?: boolean; approval?: boolean }>(
+      'GET',
+      `/invites/${encodeURIComponent(code)}`,
+    );
+    return {
+      chatId: r.chat_id,
+      title: r.title,
+      photo: r.photo,
+      description: r.description,
+      members: r.members,
+      kind: r.kind === 'community' ? 'community' : 'group',
+      callLink: r.call_link === true,
+      approval: r.approval === true,
+    };
+  }
+
+  /** The group, or REQUESTED when its admins approve who joins. */
+  async joinInvite(code: string) {
+    return joined(await this.call<WireChat | { requested: true }>('POST', `/invites/${encodeURIComponent(code)}/join`));
+  }
+
+  async createCommunity(title: string, description: string, groupIds: string[]) {
+    const body: Record<string, unknown> = { title, group_ids: groupIds };
+    if (description.trim()) body.description = description;
+    return chatFromWire(await this.call<WireChat>('POST', '/communities', body));
+  }
+
+  async communityGroups(id: string): Promise<{ community: ServerChat; groups: CommunityGroup[] }> {
+    const r = await this.call<{ community: WireChat; groups: CommunityGroup[] }>('GET', `/communities/${encodeURIComponent(id)}/groups`);
+    return { community: chatFromWire(r.community), groups: r.groups };
+  }
+
+  /** Links my groups into a community, or makes a new group in it (`newGroup`). Answers the new group's id. */
+  async addCommunityGroups(id: string, groupIds: string[], newGroup?: { title: string; description?: string }) {
+    const body: Record<string, unknown> = { group_ids: groupIds };
+    if (newGroup) Object.assign(body, newGroup);
+    return (await this.call<{ group_id: string | null }>('POST', `/communities/${encodeURIComponent(id)}/groups`, body)).group_id;
+  }
+
+  async removeCommunityGroup(id: string, groupId: string) {
+    await this.call('DELETE', `/communities/${encodeURIComponent(id)}/groups/${encodeURIComponent(groupId)}`);
+  }
+
+  /** The group, or REQUESTED when its admins approve who joins. */
+  async joinCommunityGroup(id: string, groupId: string) {
+    return joined(await this.call<WireChat | { requested: true }>('POST', `/communities/${encodeURIComponent(id)}/groups/${encodeURIComponent(groupId)}/join`));
+  }
+
+  /** Deactivates a community (its owner only): its groups go on, on their own. */
+  async deactivateCommunity(id: string) {
+    await this.call('DELETE', `/communities/${encodeURIComponent(id)}`);
+  }
+
+  /** Suggests groups of mine for a community, and/or a new group by a name. */
+  async suggestGroups(id: string, groupIds: string[], title?: string) {
+    const body: Record<string, unknown> = { group_ids: groupIds };
+    if (title?.trim()) body.title = title.trim();
+    await this.call('POST', `/communities/${encodeURIComponent(id)}/suggestions`, body);
+  }
+
+  /** Groups waiting for a community's admins (all of them for its admins, my own for anyone else). */
+  async groupSuggestions(id: string): Promise<GroupSuggestion[]> {
+    const r = await this.call<{ suggestions: { id: string; title: string; photo?: string | null; members: number; new: boolean; suggested_by: string; at: string }[] }>(
+      'GET',
+      `/communities/${encodeURIComponent(id)}/suggestions`,
+    );
+    return r.suggestions.map((s) => ({ id: s.id, title: s.title, photo: s.photo, members: s.members, isNew: s.new, suggestedBy: s.suggested_by, at: Date.parse(s.at) }));
+  }
+
+  /** Approves a suggested group (`yes`), or says no to it (or takes mine back). */
+  async answerSuggestion(id: string, suggestionId: string, yes: boolean) {
+    await this.call(yes ? 'POST' : 'DELETE', `/communities/${encodeURIComponent(id)}/suggestions/${encodeURIComponent(suggestionId)}`);
+  }
+
+  /** Who is asking to join a group (its admins only), oldest first. */
+  async joinRequests(groupId: string): Promise<{ userId: string; at: number }[]> {
+    const r = await this.call<{ requests: { user_id: string; at: string }[] }>('GET', `/groups/${encodeURIComponent(groupId)}/requests`);
+    return r.requests.map((q) => ({ userId: q.user_id, at: Date.parse(q.at) }));
+  }
+
+  /** Lets someone in (`yes`) or says no; with my own id and no, takes my request back. */
+  async answerJoinRequest(groupId: string, userId: string, yes: boolean) {
+    await this.call(yes ? 'POST' : 'DELETE', `/groups/${encodeURIComponent(groupId)}/requests/${encodeURIComponent(userId)}`);
+  }
+
+  async createCallLink(title: string) {
+    return chatFromWire(await this.call<WireChat>('POST', '/calls/links', { title }));
+  }
+
+  /** Reports a chat (and someone in it), with up to 5 recent messages from this phone. */
+  async report(chatId: string, reason: ReportReason, userId: string | null, messages: { author: string; text: string; at: number }[]) {
+    const body: Record<string, unknown> = { chat_id: chatId, reason, messages: messages.slice(-5) };
+    if (userId) body.user_id = userId;
+    await this.call('POST', '/reports', body);
   }
 
   /** Finds someone by Gmail, or by phone number with `{ phone }`. */

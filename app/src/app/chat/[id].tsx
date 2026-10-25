@@ -3,35 +3,52 @@
 // The messages come from the phone's database (useMessages) and new ones slide
 // up from the bottom as they arrive. Hold a message to pick it (then reply,
 // react, star, copy, edit, pin, forward or delete); swipe one to reply.
-import type { Message, Ref } from '@pakchat/shared';
+import type { ChatQuote, LinkPreview, Message, Place, Ref, SharedContact } from '@pakchat/shared';
 import { EDIT_MINUTES, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, BackHandler, FlatList, ScrollView, View, type ListViewToken } from 'react-native';
+import { AppState, BackHandler, FlatList, StyleSheet, View, type ListViewToken } from 'react-native';
 import Animated, { FadeIn, FadeOut, useAnimatedKeyboard, useAnimatedStyle, ZoomOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../../core/core';
-import { haveFile, loadLimits, sendPicked, TooBig, type Picked } from '../../core/files';
+import { haveFile, loadLimits, sendPicked, takeHandOff, TooBig, type Picked } from '../../core/files';
+import { startLive } from '../../core/live';
+import { allowExactAlarms, exactAlarms, plan, SOONEST_MS } from '../../core/scheduled';
 import { saveSticker, sendGif, sendSticker, unsaveSticker } from '../../core/stickers';
 import { sendVoice, type Recorded } from '../../core/voice';
 import { calls } from '../../core/calls';
 import { slowPhone } from '../../core/phone';
 import { dismissChatAlert } from '../../core/push';
-import { useChat, useChatPrefs, useMessages, useNow, usePeople, usePerson, usePresence, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
+import { defaultTimer } from '../../core/timer';
+import { useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePerson, usePresence, useSettings, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
+import { Backdrop } from '../../ui/chat/Backdrop';
+import { chatOpen, leftChat } from '../../core/lock';
+import { LockedGate } from '../../ui/LockedGate';
+import { ExportSheet } from '../../ui/ExportSheet';
+import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
 import { startCall } from '../../ui/CallBar';
+import { AttachMenu, type AttachKind } from '../../ui/chat/AttachMenu';
+import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { Composer } from '../../ui/chat/Composer';
-import { fromCamera, fromFiles, fromGallery } from '../../ui/chat/attachments';
+import { ContactShare } from '../../ui/chat/ContactShare';
+import { fromAudio, fromFiles, fromGallery } from '../../ui/chat/attachments';
+import { LocationSheet } from '../../ui/chat/LocationSheet';
+import { MediaComposer, type Ready } from '../../ui/chat/MediaComposer';
 import { PollSheet } from '../../ui/chat/PollSheet';
-import { dayLabel, fileSize, lastSeen, sameDay, TIMERS, timerLabel } from '../../ui/format';
+import type { RoundVideo } from '../../ui/chat/RoundRecorder';
+import { ScheduledBar } from '../../ui/chat/ScheduledBar';
+import { ReportSheet } from '../../ui/ReportSheet';
+import { MuteSheet } from '../../ui/MuteSheet';
+import { SchedulePicker } from '../../ui/SchedulePicker';
+import { dayLabel, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
-import { Avatar, Button, Field, Glass, IconButton, Pressy, Screen, Toggle, Txt } from '../../ui/kit';
+import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
 import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
@@ -39,10 +56,31 @@ import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 type Item = { key: string; kind: 'msg'; m: Message; first: boolean } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'typing' };
 
 const keyOf = (m: Pick<Message, 'author' | 'id'>) => `${m.author}/${m.id}`;
+const quoteKind = (m: Message): ChatQuote['kind'] =>
+  m.kind === 'text' ? 'text' : m.kind === 'poll' ? 'poll' : m.kind !== 'file' || !m.file ? 'other' : m.file.kind === 'image' ? 'image' : m.file.kind === 'video' ? 'video' : m.file.kind === 'voice' ? 'voice' : 'file';
+/** The height of the bar across the top. */
+const BAR = 60;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-export default function ChatScreen() {
+/**
+ * A locked chat (Chat lock) asks for your fingerprint or face first, and locks
+ * again once you leave it (core/lock.ts). Until then nothing of it is read.
+ */
+/** Asked once per run of PakChat to allow exact alarms (scheduled messages on time). */
+let askedExact = false;
+
+export default function ChatRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const prefs = useChatPrefs(id);
+  const lock = !!prefs.lock;
+  const open = useCore(['lock', 'prefs'], () => !lock || chatOpen(id));
+  useEffect(() => (lock ? () => leftChat(id) : undefined), [id, lock]);
+  if (!open) return <LockedGate chatId={id} />;
+  return <ChatScreen />;
+}
+
+function ChatScreen() {
+  const { id, quote: quoteParam, media } = useLocalSearchParams<{ id: string; quote?: string; media?: string }>();
   const t = useT();
   const { theme } = useLook();
   const insets = useSafeAreaInsets();
@@ -51,6 +89,7 @@ export default function ChatScreen() {
   const typing = useTyping(id);
   const starred = useStarred();
   const prefs = useChatPrefs(id);
+  const settings = useSettings();
   usePeople();
   const other = chat ? core.otherPerson(chat) : null;
   const presence = usePresence(other);
@@ -61,14 +100,32 @@ export default function ChatScreen() {
   const [picked, setPicked] = useState<Map<string, Message>>(new Map());
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
+  // "Reply privately" from a group: the group message this answers.
+  const [quote, setQuote] = useState<ChatQuote | null>(() => {
+    try {
+      return quoteParam ? (JSON.parse(quoteParam) as ChatQuote) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [reportOf, setReportOf] = useState<Message | null | undefined>(undefined);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [muting, setMuting] = useState(false);
   const [pickMenu, setPickMenu] = useState(false);
   const [attach, setAttach] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
-  const [outgoing, setOutgoing] = useState<Picked[] | null>(null);
-  const [caption, setCaption] = useState('');
-  // Photos go smaller unless this is on (files.ts, smaller).
-  const [hd, setHd] = useState(false);
+  // Picked photos, videos and files, in the editor before they go (MediaComposer.tsx).
+  // Opened from the chat list's 📷 (send-to.tsx): the editor starts with what was taken.
+  const [outgoing, setOutgoing] = useState<Picked[] | null>(() => (media ? takeHandOff() : null));
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  // Hold "send" › Schedule message: the words wait here while you pick a time.
+  const [asking, setAsking] = useState<{ text: string; mentions: string[]; link?: LinkPreview } | null>(null);
+  const [askExact, setAskExact] = useState(false);
+  const askDone = useRef<((ok: boolean) => void) | null>(null);
   const [pollKey, setPollKey] = useState(0);
   const [timerOpen, setTimerOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -248,25 +305,108 @@ export default function ChatScreen() {
     }
   }
 
-  function send(text: string, mentions: string[]) {
+  /** Takes the reply (if any) for what's about to be sent, and scrolls down to it. */
+  function replyFor() {
+    const reply = replyTo;
+    setReplyTo(null);
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    return reply ? ref(reply) : undefined;
+  }
+
+  /** The private reply's quote goes with the next message only. */
+  function quoteFor() {
+    const q = quote;
+    setQuote(null);
+    return q ?? undefined;
+  }
+
+  /** "Reply privately" to someone's group message: our own chat, with it quoted. */
+  function replyPrivately(m: Message) {
+    done();
+    const q: ChatQuote = { chat: id, author: m.author, id: m.id, kind: quoteKind(m) };
+    if (m.text) q.text = m.text.slice(0, 700);
+    if (m.file?.thumb && !m.file.once) q.thumb = m.file.thumb;
+    void act(async () => {
+      const c = await core.client.openDirect(m.author, defaultTimer());
+      router.push({ pathname: '/chat/[id]', params: { id: c.id, quote: JSON.stringify(q) } });
+    });
+  }
+
+  function send(text: string, mentions: string[], link?: LinkPreview) {
     if (editing) {
       const m = editing;
       setEditing(null);
       void act(() => core.client.edit(id, m.id, text, mentions.length ? mentions : undefined));
       return;
     }
+    const reply = replyFor();
+    const q = quoteFor();
+    void act(() => core.client.sendText(id, text, { replyTo: reply, mentions, link, quote: q }));
+  }
+
+  /** Hold "send", Schedule message: asks when, then it waits on this phone (scheduled.ts). */
+  function askSchedule(text: string, mentions: string[], link?: LinkPreview) {
+    return new Promise<boolean>((done) => {
+      askDone.current = done;
+      setAsking({ text, mentions, link });
+    });
+  }
+
+  function scheduleAt(at: number) {
+    const a = asking;
+    const done = askDone.current;
+    askDone.current = null;
+    setAsking(null);
+    if (!a) return;
     const reply = replyTo;
     setReplyTo(null);
-    void act(() => core.client.sendText(id, text, { replyTo: reply ? ref(reply) : undefined, mentions }));
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    void plan(id, at, a.text, { mentions: a.mentions, link: a.link, replyTo: reply ? ref(reply) : undefined })
+      .then(() => {
+        done?.(true);
+        toast(fill(t.scheduledFor, { when: whenLabel(at, t) }));
+        // Android 12+: without "Alarms & reminders" it may go a few minutes late while PakChat is closed.
+        if (!askedExact && !exactAlarms()) {
+          askedExact = true;
+          setAskExact(true);
+        }
+      })
+      .catch(() => {
+        done?.(false);
+        toast(t.couldNot);
+      });
   }
 
   /** A voice note from the mic (it answers whatever you were replying to). */
   function sendVoiceNote(v: Recorded) {
-    const reply = replyTo;
-    setReplyTo(null);
-    void act(() => sendVoice(id, v, reply ? ref(reply) : undefined));
+    const reply = replyFor();
+    void act(() => sendVoice(id, v, reply));
+  }
+
+  /** A round video, from holding the 📷. */
+  function sendRound(v: RoundVideo) {
+    const reply = replyFor();
+    toast(t.videoGettingReady);
+    void act(() => sendPicked(id, { uri: v.uri, mime: 'video/mp4', kind: 'video', duration: v.duration, round: true }, undefined, { replyTo: reply }));
+  }
+
+  function sendPlace(place: Place) {
+    setLocationOpen(false);
+    const reply = replyFor();
+    void act(() => core.client.sendLocation(id, place, { replyTo: reply }));
+  }
+
+  function shareLive(ms: number) {
+    setLocationOpen(false);
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    void startLive(id, ms, { title: t.liveSharingTitle, text: fill(t.liveSharingText, { name: core.chatTitle(chat!) }), stop: t.stopWord })
+      .then((ok) => !ok && toast(t.locationNeeded))
+      .catch(() => toast(t.couldNot));
+  }
+
+  function sendCards(cards: SharedContact[]) {
+    setContactOpen(false);
+    const reply = replyFor();
+    void act(() => core.client.sendContacts(id, cards, { replyTo: reply }));
   }
 
   /** A GIF or sticker from the smiley panel (it answers whatever you were replying to too). */
@@ -277,43 +417,62 @@ export default function ChatScreen() {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }
 
-  /** Opens a picker, then shows what was picked with a caption box. */
-  async function pick(from: () => Promise<(Picked | null)[]>) {
-    setAttach(false);
+  /** Opens a picker; what's picked (and not too big) comes back. */
+  async function choose(from: () => Promise<(Picked | null)[]>) {
     try {
       const picked = (await from()).filter((p): p is Picked => !!p);
-      if (!picked.length) return;
+      if (!picked.length) return [];
       const limit = await loadLimits();
       // A video over the limit can still go once it's made smaller (HD off); with HD on, sending says it's too big.
       const ok = picked.filter((p) => !p.size || p.size <= limit || (p.kind === 'video' && !p.gif));
       if (ok.length < picked.length) toast(fill(t.fileTooBig, { mb: Math.floor(limit / 1024 / 1024) }));
-      if (!ok.length) return;
-      setCaption('');
-      setHd(false);
-      setOutgoing(ok);
+      return ok;
     } catch {
       toast(t.couldNot);
+      return [];
     }
   }
 
-  function sendOutgoing() {
-    const list = outgoing ?? [];
-    const words = caption.trim();
+  /** Opens a picker, then the editor with what was picked. */
+  async function pick(from: () => Promise<(Picked | null)[]>) {
+    const ok = await choose(from);
+    if (ok.length) setOutgoing(ok);
+  }
+
+  function attachPicked(k: AttachKind) {
+    setAttach(false);
+    // The menu closes first, then the next thing opens.
+    const next = (fn: () => void) => setTimeout(fn, 160);
+    if (k === 'gallery') void pick(fromGallery);
+    else if (k === 'camera') next(() => setCameraOpen(true));
+    else if (k === 'document') void pick(async () => [await fromFiles()]);
+    else if (k === 'audio') void pick(async () => [await fromAudio()]);
+    else if (k === 'location') next(() => setLocationOpen(true));
+    else if (k === 'contact') next(() => setContactOpen(true));
+    else {
+      setPollKey((n) => n + 1);
+      next(() => setPollOpen(true));
+    }
+  }
+
+  /** Send in the editor: each with its own caption, as on WhatsApp. */
+  function sendOutgoing(list: Ready[]) {
     setOutgoing(null);
+    const reply = replyFor();
+    const q = quoteFor();
     // Making a video smaller takes a few seconds (longer for a long one).
-    if (!hd && list.some((p) => p.kind === 'video' && !p.gif)) toast(t.videoGettingReady);
+    if (list.some((p) => p.kind === 'video' && !p.gif && !p.hd)) toast(t.videoGettingReady);
     void act(async () => {
       for (const [i, p] of list.entries()) {
         try {
-          // The caption goes with the first one, as on WhatsApp.
-          await sendPicked(id, { ...p, hd }, i === 0 && words ? words : undefined);
+          const { caption, ...picked } = p;
+          await sendPicked(id, picked, caption, { replyTo: i === 0 ? reply : undefined, quote: i === 0 ? q : undefined });
         } catch (err) {
           if (err instanceof TooBig) toast(fill(t.fileTooBig, { mb: Math.floor(Number(err.message) / 1024 / 1024) }));
           else throw err;
         }
       }
     });
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }
 
   const react = useCallback(
@@ -368,7 +527,9 @@ export default function ChatScreen() {
           .map((mb) => (mb.userId === core.myId ? t.youWord : core.name(mb.userId)))
           .filter(Boolean)
           .join(', ')
-      : lastSeen(presence, t) || t.tapForInfo;
+      : chat && core.isSelfChat(chat)
+        ? t.messageYourself
+        : lastSeen(presence, t) || t.tapForInfo;
 
   const pinned = useMemo(() => [...(list ?? [])].reverse().find((m) => m.pinnedUntil && m.pinnedUntil > now && !m.deleted), [list, now]);
   const mayWrite = chat && !chat.left && !(group && chat.onlyAdminsSend && !amAdmin);
@@ -382,24 +543,18 @@ export default function ChatScreen() {
   // The picked bar gets one more button for a sticker, so they're a little smaller then.
   const bs = pickedSticker ? 38 : 42;
   const header = selecting ? (
-    <Animated.View key="pick" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ marginHorizontal: 10, marginTop: 10 }}>
-      <LinearGradient
-        colors={theme.grad}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{ flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 22, boxShadow: `0 14px 30px -14px ${theme.acc}` }}
-      >
-        <IconButton icon="close" label={t.cancelSelection} look="onAccent" onPress={done} size={bs} testID="cancel-pick" />
+    <Animated.View key="pick" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
+        <IconButton icon="close" label={t.cancelSelection} onPress={done} size={bs} testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
-          <Txt size={18} weight="700" color="#FFFFFF">
+          <Txt size={18} weight="700">
             {fill(t.selected, { n: picked.size })}
           </Txt>
         </View>
-        {one && !one.deleted && mayWrite && <IconButton icon="reply" label={t.reply} look="onAccent" flip size={bs} onPress={() => (reply(one), done())} testID="pick-reply" />}
+        {one && !one.deleted && mayWrite && <IconButton icon="reply" label={t.reply} flip size={bs} onPress={() => (reply(one), done())} testID="pick-reply" />}
         <IconButton
           icon={allStarred ? 'starFilled' : 'star'}
           label={allStarred ? t.unstar : t.star}
-          look="onAccent"
+         
           size={bs}
           onPress={() => {
             core.setStarred(pickedList, !allStarred);
@@ -408,17 +563,18 @@ export default function ChatScreen() {
           }}
           testID="pick-star"
         />
-        <IconButton icon="trash" label={t.delete} look="onAccent" size={bs} onPress={() => setDeleting(true)} testID="pick-delete" />
+        <IconButton icon="trash" label={t.delete} size={bs} onPress={() => setDeleting(true)} testID="pick-delete" />
         <IconButton
           icon="forward"
           label={t.forward}
-          look="onAccent"
+         
           size={bs}
           flip
           onPress={() => {
             const texts = pickedList.filter((m) => m.kind === 'text' && !m.deleted && m.text).map((m) => m.text!);
             // Files go on only once they're on this phone (downloaded).
-            const files = pickedList.filter((m) => m.kind === 'file' && !m.deleted && haveFile(m)).map((m) => [m.chatId, m.author, m.id]);
+            // View once can't be forwarded.
+            const files = pickedList.filter((m) => m.kind === 'file' && !m.deleted && !m.file?.once && haveFile(m)).map((m) => [m.chatId, m.author, m.id]);
             done();
             if (texts.length || files.length) router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), files: JSON.stringify(files) } });
           }}
@@ -428,7 +584,7 @@ export default function ChatScreen() {
           <IconButton
             icon={stickerSaved ? 'stickerSaved' : 'stickerAdd'}
             label={stickerSaved ? t.unsaveSticker : t.saveSticker}
-            look="onAccent"
+           
             size={bs}
             onPress={() => {
               done();
@@ -437,16 +593,14 @@ export default function ChatScreen() {
             testID="pick-save-sticker"
           />
         )}
-        <IconButton icon="more" label={t.moreOptions} look="onAccent" size={bs} onPress={() => setPickMenu(true)} testID="pick-more" />
-      </LinearGradient>
+        <IconButton icon="more" label={t.moreOptions} size={bs} onPress={() => setPickMenu(true)} testID="pick-more" />
     </Animated.View>
   ) : (
-    <Animated.View key="title" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)}>
-      <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginHorizontal: 10, marginTop: 10, padding: 6 }}>
+    <Animated.View key="title" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="back" label={t.back} onPress={() => router.back()} flip size={42} iconSize={23} testID="back" />
         <Pressy onPress={() => router.push({ pathname: '/info/[id]', params: { id } })} label={title} scale={0.98} style={{ flex: 1 }} testID="chat-header">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Avatar id={id} name={title} size={40} online={!!presence?.online} group={group} />
+            <Avatar id={id} name={title} size={38} online={!!presence?.online} group={group} />
             <View style={{ flex: 1 }}>
               <Txt size={16} weight="700" lines={1}>
                 {title}
@@ -462,13 +616,11 @@ export default function ChatScreen() {
         </Pressy>
         {mayCall && (
           <>
-            <IconButton icon="video" label={t.videoCall} look="soft" size={42} onPress={() => void startCall(id, true, t)} testID="video-call" />
-            <View style={{ width: 6 }} />
-            <IconButton icon="calls" label={t.voiceCall} look="soft" size={42} iconSize={20} onPress={() => void startCall(id, false, t)} testID="voice-call" />
+            <IconButton icon="video" label={t.videoCall} size={42} iconSize={23} onPress={() => void startCall(id, true, t)} testID="video-call" />
+            <IconButton icon="calls" label={t.voiceCall} size={42} iconSize={20} onPress={() => void startCall(id, false, t)} testID="voice-call" />
           </>
         )}
         <IconButton icon="more" label={t.moreOptions} size={42} onPress={() => setMenu(true)} testID="chat-menu" />
-      </Glass>
     </Animated.View>
   );
 
@@ -486,9 +638,10 @@ export default function ChatScreen() {
   }
 
   return (
-    <Screen bottom={false}>
+    <Screen bottom={false} style={{ paddingTop: 0 }} backdrop={<Backdrop wp={prefs.wallpaper ?? settings.wallpaper} />}>
       <Animated.View style={[{ flex: 1 }, lift]}>
-        <View style={{ minHeight: 62, zIndex: 2 }}>{header}</View>
+        {/* A flat bar across the top, under the phone's status bar too, like WhatsApp's. */}
+        <View style={{ zIndex: 2, paddingTop: insets.top, backgroundColor: theme.dark ? '#17181C' : '#FFFFFF', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(11,27,54,0.08)' }}>{header}</View>
 
         {pinned && !selecting && (
           <Animated.View entering={rise()} exiting={FadeOut}>
@@ -509,7 +662,6 @@ export default function ChatScreen() {
         )}
 
         <View style={{ flex: 1 }}>
-          <Doodles />
           <FlatList
             ref={listRef}
             inverted
@@ -603,18 +755,25 @@ export default function ChatScreen() {
 
         {chat &&
           (mayWrite ? (
-            <Composer
-              key={editing ? `edit-${editing.id}` : chat.id}
-              chat={chat}
-              replyTo={replyTo}
-              editing={editing}
-              onCancel={() => (setReplyTo(null), setEditing(null))}
-              onSend={send}
-              onAttach={() => setAttach(true)}
-              onVoice={sendVoiceNote}
-              onGif={(g) => sendExtra((r) => sendGif(id, g, r))}
-              onSticker={(from) => sendExtra((r) => sendSticker(id, from, r))}
-            />
+            <>
+              <ScheduledBar chatId={id} />
+              <Composer
+                key={editing ? `edit-${editing.id}` : chat.id}
+                chat={chat}
+                replyTo={replyTo}
+                editing={editing}
+                quote={quote}
+                onCancel={() => (setReplyTo(null), setEditing(null), setQuote(null))}
+                onSend={send}
+                onSchedule={askSchedule}
+                onAttach={() => setAttach(true)}
+                onCamera={() => setCameraOpen(true)}
+                onRound={sendRound}
+                onVoice={sendVoiceNote}
+                onGif={(g) => sendExtra((r) => sendGif(id, g, r))}
+                onSticker={(from) => sendExtra((r) => sendSticker(id, from, r))}
+              />
+            </>
           ) : (
             <Glass style={{ margin: 10, padding: 14, borderRadius: 18 }}>
               <Txt size={14} color={theme.muted} align="center">
@@ -633,10 +792,15 @@ export default function ChatScreen() {
           label={prefs.muted ? t.unmute : t.mute}
           onPress={() => {
             setMenu(false);
-            core.setPrefs(id, { muted: !prefs.muted });
+            if (prefs.muted) core.unmute(id);
+            else setMuting(true);
           }}
         />
         <MenuItem icon="timer" label={t.disappearing} onPress={() => (setMenu(false), setTimerOpen(true))} testID="menu-timer" />
+        <MenuItem icon="wallpaper" label={t.wallpaper} onPress={() => (setMenu(false), router.push({ pathname: '/wallpaper', params: { chat: id } }))} testID="menu-wallpaper" />
+        {!chat?.onlyAdminsSend && <MenuItem icon="calendar" label={t.scheduleCall} onPress={() => (setMenu(false), setPlanOpen(true))} testID="menu-schedule-call" />}
+        <MenuItem icon="export" label={t.exportChat} onPress={() => (setMenu(false), setExportOpen(true))} testID="menu-export" />
+        {(group || (other && other !== core.myId)) && <MenuItem icon="warning" label={t.report} onPress={() => (setMenu(false), setReportOf(null))} testID="menu-report" />}
         <MenuItem icon="trash" label={t.clearChat} danger onPress={() => (setMenu(false), setClearing(true))} />
       </Popup>
 
@@ -682,6 +846,8 @@ export default function ChatScreen() {
             testID="pick-pin"
           />
         )}
+        {one && group && one.author !== core.myId && !one.deleted && one.kind !== 'system' && <MenuItem icon="reply" label={t.replyPrivately} onPress={() => replyPrivately(one)} testID="pick-reply-private" />}
+        {one && one.author !== core.myId && !one.deleted && one.kind !== 'system' && <MenuItem icon="warning" label={t.report} onPress={() => (setReportOf(one), done())} testID="pick-report" />}
         <MenuItem icon="select" label={t.selectAll} onPress={() => (setPicked(new Map((list ?? []).filter((m) => m.kind !== 'system').map((m) => [keyOf(m), m]))), setPickMenu(false))} />
       </Popup>
 
@@ -712,7 +878,7 @@ export default function ChatScreen() {
       <Dialog
         visible={deleting}
         onClose={() => setDeleting(false)}
-        title={fill(t.deleteMessages, { n: picked.size })}
+        title={picked.size === 1 ? t.deleteOneMessage : fill(t.deleteMessages, { n: picked.size })}
         buttons={[
           ...(canUnsend
             ? [
@@ -745,6 +911,11 @@ export default function ChatScreen() {
           { label: t.cancel, onPress: () => setDeleting(false) },
         ]}
       />
+
+      <ExportSheet visible={exportOpen} chatId={id} onClose={() => setExportOpen(false)} />
+      <ScheduleCallSheet visible={planOpen} chatId={id} onClose={() => setPlanOpen(false)} />
+      <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => core.mute(id, ms)} />
+      <ReportSheet visible={reportOf !== undefined} chatId={id} group={!!group} userId={reportOf ? reportOf.author : group ? null : other} message={reportOf} onClose={() => setReportOf(undefined)} />
 
       <Dialog
         visible={blocking}
@@ -782,72 +953,58 @@ export default function ChatScreen() {
         ]}
       />
 
-      {/* "+": things to send. */}
-      <Sheet visible={attach} onClose={() => setAttach(false)} title={t.attach}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingTop: 8, gap: 6 }}>
-          {[
-            { icon: 'photo' as const, label: t.gallery, on: () => pick(fromGallery), testID: 'attach-photo' },
-            { icon: 'camera' as const, label: t.camera, on: () => pick(async () => [await fromCamera()]), testID: 'attach-camera' },
-            { icon: 'doc' as const, label: t.document, on: () => pick(async () => [await fromFiles()]), testID: 'attach-doc' },
-            { icon: 'poll' as const, label: t.pollWord, on: () => (setAttach(false), setPollKey((k) => k + 1), setTimeout(() => setPollOpen(true), 200)), testID: 'attach-poll' },
-          ].map((a, i) => (
-            <Animated.View key={a.icon} entering={pop(60 + i * 40)} style={{ width: '23%', alignItems: 'center' }}>
-              <Pressy onPress={a.on} label={a.label} testID={a.testID} scale={0.9}>
-                <View style={{ alignItems: 'center', gap: 6, paddingVertical: 8 }}>
-                  <View style={{ width: 56, height: 56, borderRadius: 19, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name={a.icon} size={24} color={theme.accInk} />
-                  </View>
-                  <Txt size={12.5} weight="600" align="center">
-                    {a.label}
-                  </Txt>
-                </View>
-              </Pressy>
-            </Animated.View>
-          ))}
-        </View>
-      </Sheet>
+      <Dialog
+        visible={askExact}
+        onClose={() => setAskExact(false)}
+        title={t.exactAlarmsTitle}
+        text={t.exactAlarmsText}
+        buttons={[
+          {
+            label: t.allowWord,
+            onPress: () => {
+              setAskExact(false);
+              allowExactAlarms();
+            },
+            testID: 'allow-exact',
+          },
+          { label: t.notNow, onPress: () => setAskExact(false) },
+        ]}
+      />
 
-      {/* What you picked, with a caption, before it goes. */}
-      <Sheet visible={!!outgoing?.length} onClose={() => setOutgoing(null)} title={outgoing && outgoing.length > 1 ? fill(t.selected, { n: outgoing.length }) : t.send}>
-        <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 12 }}>
-          <ScrollView horizontal contentContainerStyle={{ gap: 8 }} showsHorizontalScrollIndicator={false}>
-            {(outgoing ?? []).map((p) =>
-              p.kind === 'image' ? (
-                <Image key={p.uri} source={{ uri: p.uri }} style={{ width: outgoing!.length > 1 ? 96 : 220, height: outgoing!.length > 1 ? 96 : 220, borderRadius: 14 }} contentFit="cover" />
-              ) : (
-                <View key={p.uri} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: theme.glass, maxWidth: 260 }}>
-                  <Icon name={p.kind === 'video' ? 'video' : p.kind === 'audio' ? 'music' : 'doc'} size={24} color={theme.accInk} />
-                  <View style={{ flexShrink: 1 }}>
-                    <Txt size={14.5} weight="600" lines={2}>
-                      {p.name ?? (p.kind === 'video' ? t.videoLabel : t.document)}
-                    </Txt>
-                    {!!p.size && (
-                      <Txt size={12.5} color={theme.muted}>
-                        {fileSize(p.size)}
-                      </Txt>
-                    )}
-                  </View>
-                </View>
-              ),
-            )}
-          </ScrollView>
-          {outgoing?.some((p) => (p.kind === 'image' && p.mime !== 'image/gif') || (p.kind === 'video' && !p.gif)) && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4 }}>
-              <View style={{ flex: 1 }}>
-                <Txt size={15} weight="600">
-                  {t.hdQuality}
-                </Txt>
-                <Txt size={12.5} color={theme.muted}>
-                  {hd ? t.hdOnNote : t.hdOffNote}
-                </Txt>
-              </View>
-              <Toggle on={hd} onChange={setHd} label={t.hdQuality} testID="send-hd" />
-            </View>
-          )}
-          <Field value={caption} onChangeText={setCaption} placeholder={t.addCaption} maxLength={1000} testID="caption" />
-          <Button title={t.send} icon="send" onPress={sendOutgoing} testID="send-file" />
-        </View>
-      </Sheet>
+      {/* 📎: things to send. */}
+      <AttachMenu visible={attach} onClose={() => setAttach(false)} onPick={attachPicked} />
+
+      <CameraSheet
+        visible={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onTaken={(list) => {
+          setCameraOpen(false);
+          setOutgoing((old) => [...(old ?? []), ...list]);
+        }}
+        onGallery={() => {
+          setCameraOpen(false);
+          void pick(fromGallery);
+        }}
+      />
+
+      {/* What you picked, in the editor, before it goes. */}
+      {outgoing && <MediaComposer items={outgoing} to={title} onClose={() => setOutgoing(null)} onMore={() => choose(fromGallery)} onSend={sendOutgoing} />}
+
+      <LocationSheet visible={locationOpen} onClose={() => setLocationOpen(false)} onSend={sendPlace} onLive={shareLive} />
+      <ContactShare visible={contactOpen} onClose={() => setContactOpen(false)} onSend={sendCards} />
+
+      <SchedulePicker
+        visible={!!asking}
+        title={t.scheduleMessage}
+        button={t.scheduleWord}
+        soonest={SOONEST_MS}
+        onClose={() => {
+          askDone.current?.(false);
+          askDone.current = null;
+          setAsking(null);
+        }}
+        onPick={scheduleAt}
+      />
 
       <PollSheet
         key={pollKey}
@@ -855,6 +1012,7 @@ export default function ChatScreen() {
         onClose={() => setPollOpen(false)}
         onSend={(q, options, multi) => {
           setPollOpen(false);
+          listRef.current?.scrollToOffset({ offset: 0, animated: true });
           void act(() => core.client.sendPoll(id, q, options, multi));
         }}
       />
@@ -941,27 +1099,5 @@ function ReactionBar({ mine, current, onPick }: { mine: boolean; current?: strin
         ))}
       </Glass>
     </Animated.View>
-  );
-}
-
-/** Faint drawings behind the messages: a moon, a kite, a cup of chai, a star. */
-function Doodles() {
-  const { theme } = useLook();
-  const color = theme.dark ? 'rgba(255,255,255,0.04)' : 'rgba(37,99,235,0.08)';
-  return (
-    <View pointerEvents="none" style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, direction: 'ltr' }}>
-      <View style={{ position: 'absolute', left: 24, top: 40 }}>
-        <Icon name="moon" size={42} color={color} stroke={1.3} />
-      </View>
-      <View style={{ position: 'absolute', right: 30, top: 130 }}>
-        <Icon name="star" size={40} color={color} stroke={1.3} />
-      </View>
-      <View style={{ position: 'absolute', left: 34, top: 310 }}>
-        <Icon name="heart" size={40} color={color} stroke={1.3} />
-      </View>
-      <View style={{ position: 'absolute', right: 44, top: 440 }}>
-        <Icon name="sun" size={38} color={color} stroke={1.3} />
-      </View>
-    </View>
   );
 }

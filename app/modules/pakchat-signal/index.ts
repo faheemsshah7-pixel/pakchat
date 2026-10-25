@@ -52,8 +52,11 @@ export type FileModule = {
   autostartBrand(): string | null;
   /** Opens the maker's Autostart page, or PakChat's app settings. False if neither opened. */
   openAutostart(): boolean;
-  /** A smaller copy of a video (720 px on its short side), written to `output`. */
-  shrinkVideo(input: string, output: string): Promise<{ uri: string; size: number; width: number; height: number }>;
+  /**
+   * A copy of a video for sending, written to `output`: smaller (720 px on its short side) unless `hd`,
+   * cut to `startMs`..`endMs` (0 and 0: all of it), and without where it was filmed.
+   */
+  shrinkVideo(input: string, output: string, startMs: number, endMs: number, hd: boolean): Promise<{ uri: string; size: number; width: number; height: number }>;
   /** Picture-in-picture is wanted now: leaving PakChat shrinks it to a small window (Android 8+). */
   callPip(on: boolean): void;
   callAudioState(): CallAudioState;
@@ -63,6 +66,24 @@ export type FileModule = {
   callFullScreenAllowed(): boolean;
   callOpenFullScreenSettings(): void;
   addListener(event: 'callAudio', fn: (e: CallAudioState) => void): EventSubscription;
+
+  // ---- Phase 7 (Privacy.kt, Scheduled.kt, LiveLocation.kt, Transcribe.kt) ----
+  /** No screenshots or screen recording (a view once photo or video is open). */
+  setSecure(on: boolean): void;
+  /** When the screen last went off (ms), or 0. */
+  screenOffAt(): number;
+  /** An exported chat as one zip: `text` as `textName`, then each file (paths[i] as names[i]). Answers its size. */
+  zipChat(out: string, textName: string, text: string, paths: string[], names: string[]): Promise<number>;
+  scheduleAlarm(id: string, at: number): void;
+  cancelAlarm(id: string): void;
+  /** Android 12+: exact alarms allowed ("Alarms & reminders"). True before Android 12. */
+  canExactAlarms(): boolean;
+  openExactAlarmSettings(): void;
+  liveLocationStart(title: string, text: string, stop: string): void;
+  liveLocationStop(): void;
+  transcriptsAvailable(): boolean;
+  transcribe(uri: string, language: string): Promise<string>;
+  addListener(event: 'liveStop', fn: () => void): EventSubscription;
   addListener(event: 'pip', fn: (e: { on: boolean }) => void): EventSubscription;
 };
 

@@ -102,6 +102,12 @@ export function systemText(m: Message, t: Strings) {
       return fill(t.sysAdmin, { users });
     case 'not_admin':
       return fill(t.sysNotAdmin, { users });
+    case 'community':
+      return fill(t.sysCommunity, { name: by, title: String(e.title ?? '') });
+    case 'community_left':
+      return fill(t.sysCommunityLeft, { title: String(e.title ?? '') });
+    case 'deactivated':
+      return fill(t.sysDeactivated, { title: String(e.title ?? '') });
     case 'timer': {
       const s = Number(e.seconds ?? 0);
       return s ? fill(t.sysTimerOn, { name: by, time: timerLabel(s, t) }) : fill(t.sysTimerOff, { name: by });
@@ -133,8 +139,11 @@ export function timerLabel(seconds: number, t: Strings) {
 /** "📷 Photo", "🎥 Video: caption", "📄 notes.pdf", "GIF", "Sticker" */
 export function fileLine(m: Message, t: Strings) {
   const f = m.file!;
-  const what =
-    f.kind === 'sticker'
+  // A view once caption is part of what's hidden.
+  if (f.once) return `① ${f.kind === 'image' ? t.photoLabel : f.kind === 'video' ? t.videoLabel : t.voiceNote}`;
+  const what = f.round
+    ? `⭕ ${t.roundVideo}`
+    : f.kind === 'sticker'
       ? t.stickerMsg
       : f.gif
         ? t.gifMsg
@@ -150,12 +159,22 @@ export function fileLine(m: Message, t: Strings) {
   return m.text ? `${what}: ${m.text}` : what;
 }
 
+/** What a message is, in one line: its words, or "📍 Location", "👤 Ali", "📅 Call: Team"… */
+export function bodyLine(m: Message, t: Strings) {
+  if (m.kind === 'poll') return `${t.poll} ${m.poll?.question ?? ''}`;
+  if (m.kind === 'file' && m.file) return fileLine(m, t);
+  if (m.kind === 'location') return `📍 ${m.location?.live ? t.liveLocation : (m.location?.name ?? t.location)}`;
+  if (m.kind === 'contact') return `👤 ${m.contacts?.map((c) => c.name).join(', ') ?? t.contactWord}`;
+  if (m.kind === 'event') return `📅 ${t.eventWord}: ${m.plan?.title ?? ''}`;
+  return m.text ?? '';
+}
+
 /** The one line under a chat's name in the list. */
 export function preview(m: Message | null, t: Strings, group: boolean) {
   if (!m) return '';
   if (m.kind === 'system') return systemText(m, t);
   if (m.deleted) return m.author === core.myId ? t.youDeleted : t.deleted;
-  const body = m.kind === 'poll' ? `${t.poll} ${m.poll?.question ?? ''}` : m.kind === 'file' && m.file ? fileLine(m, t) : (m.text ?? '');
+  const body = bodyLine(m, t);
   if (group && m.author !== core.myId) return `${core.name(m.author) || '…'}: ${body}`;
   return body;
 }
@@ -188,4 +207,22 @@ export function fileSize(bytes: number) {
 export function duration(ms: number) {
   const s = Math.round(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** A time ahead: "today at 9:00 pm", "tomorrow at 9:00 am", "Monday at 2:30 pm", "3 Nov at 8:00 am". */
+export function whenLabel(ms: number, t: Strings) {
+  const ur = t.today !== 'Today';
+  const days = Math.round((startOfDay(ms) - startOfDay(Date.now())) / DAY);
+  const day = days <= 0 ? t.today : days === 1 ? t.tomorrow : days < 7 ? (ur ? DAYS_UR : DAYS_EN)[new Date(ms).getDay()] : date(ms, ur);
+  return fill(t.dayAtTime, { day, time: clock(ms) });
+}
+
+/** A day chip in the time picker: "Today", "Tomorrow", "Mon 3". */
+export function dayChip(ms: number, t: Strings) {
+  const ur = t.today !== 'Today';
+  const days = Math.round((startOfDay(ms) - startOfDay(Date.now())) / DAY);
+  if (days <= 0) return t.today;
+  if (days === 1) return t.tomorrow;
+  const d = new Date(ms);
+  return `${(ur ? DAYS_UR : DAYS_EN)[d.getDay()].slice(0, ur ? undefined : 3)} ${d.getDate()}`;
 }

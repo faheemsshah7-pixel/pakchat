@@ -130,7 +130,46 @@ class PakchatSignalModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PakchatSignal")
 
-    Events("progress", "callAudio", "pip")
+    Events("progress", "callAudio", "pip", "liveStop")
+
+    OnCreate {
+      appContext.reactContext?.let { ScreenWatch.start(it) }
+      LiveLocationService.onStop = { sendEvent("liveStop", mapOf<String, Any>()) }
+    }
+
+    // ---- Phase 7 (see Privacy, Scheduled, LiveLocation, Transcribe) ----
+
+    /** No screenshots or screen recording while a view once photo or video is open. */
+    Function("setSecure") { on: Boolean -> Secure.set(appContext.currentActivity, on) }
+
+    /** When the screen last went off (ms), for "App lock: when the phone locks". */
+    Function("screenOffAt") { ScreenWatch.offAt.toDouble() }
+
+    /** Writes an exported chat (its words, then its files) as one zip. Answers its size. */
+    AsyncFunction("zipChat") { out: String, textName: String, text: String, paths: List<String>, names: List<String>, promise: Promise ->
+      slowly(promise) { Zipper.zip(path(out), textName, text, paths.map { path(it) }.zip(names)).toDouble() }
+    }
+
+    /** A scheduled message's time on the phone's alarm clock (it wakes PakChat to send it). */
+    Function("scheduleAlarm") { id: String, at: Double -> Scheduled.set(context(), id, at.toLong()) }
+
+    Function("cancelAlarm") { id: String -> Scheduled.cancel(context(), id) }
+
+    Function("canExactAlarms") { Scheduled.canExact(context()) }
+
+    Function("openExactAlarmSettings") { Scheduled.openExactSettings(context()) }
+
+    /** The "Sharing live location" alert, which lets PakChat follow the phone's location in the background. */
+    Function("liveLocationStart") { title: String, text: String, stop: String -> LiveLocationService.start(context(), title, text, stop) }
+
+    Function("liveLocationStop") { LiveLocationService.stop(context()) }
+
+    Function("transcriptsAvailable") { Transcribe.available(context()) }
+
+    /** A voice note's words, made on the phone. `language` like "en-US" or "ur-PK". */
+    AsyncFunction("transcribe") { uri: String, language: String, promise: Promise ->
+      Transcribe.run(context(), uri, language, promise)
+    }
 
     // ---- Files (see FileLock and FileTransfer) ----
 
@@ -227,8 +266,8 @@ class PakchatSignalModule : Module() {
     Function("openAutostart") { Autostart.open(context()) }
 
     /** A smaller copy of a video, for sending (VideoShrink.kt). */
-    AsyncFunction("shrinkVideo") { input: String, output: String, promise: Promise ->
-      VideoShrink.shrink(context(), input, output, promise)
+    AsyncFunction("shrinkVideo") { input: String, output: String, startMs: Double, endMs: Double, hd: Boolean, promise: Promise ->
+      VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, promise)
     }
 
     /** Picture-in-picture is wanted (the call screen, in a video call); "pip" says when the small window opens or closes. */

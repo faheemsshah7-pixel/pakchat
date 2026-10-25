@@ -21,6 +21,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useFileProgress } from '../../core/hooks';
 import { Cancelled, cancelDownload, download, FileBroken, FileGone, haveFile, pauseSend, resumeSend, tagOf } from '../../core/files';
 import { isOffline } from '../../core/core';
+import { outsideFor } from '../../core/lock';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { duration, fileSize } from '../format';
@@ -97,7 +98,9 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
   if (f.kind === 'image' || f.kind === 'video') {
     const ratio = f.width && f.height ? f.height / f.width : 0.75;
     const height = Math.round(Math.min(320, Math.max(130, WIDE * ratio)));
-    const source = here && f.kind === 'image' ? { uri: f.local } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
+    // A video I'm sending shows its sharp first frame (kept on this phone) instead of the blurry preview.
+    const sharp = f.kind === 'video' && !!f.poster;
+    const source = here && f.kind === 'image' ? { uri: f.local } : sharp ? { uri: f.poster } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
     return (
       <Pressy onPress={tap} onLongPress={onPick} label={f.kind === 'image' ? t.photoLabel : t.videoLabel} scale={0.98} testID={`file-${f.kind}`}>
         <View
@@ -113,7 +116,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
           {f.gif && here ? (
             <GifView uri={f.local!} />
           ) : (
-            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={here && f.kind === 'image' ? 0 : 6} transition={150} />
+            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} transition={150} />
           )}
           {badge && (
             <View
@@ -286,12 +289,12 @@ export async function open(m: Message) {
     return;
   }
   try {
-    await new File(f.local).preview({ mimeType: f.mime });
+    await outsideFor(() => new File(f.local!).preview({ mimeType: f.mime }));
   } catch {
     // No app opens this kind of file: offer to send it somewhere instead.
-    await Sharing.shareAsync(f.local, {
+    await outsideFor(() => Sharing.shareAsync(f.local!, {
       mimeType: f.mime,
       dialogTitle: f.name,
-    }).catch(() => {});
+    })).catch(() => {});
   }
 }

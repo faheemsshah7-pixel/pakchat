@@ -8,6 +8,7 @@ defmodule Pakchat.Privacy do
   * Fair's fair, as in WhatsApp: if you hide your last seen from everyone,
     you can't see other people's either.
   * Someone who blocked you, or whom you blocked, sees neither.
+  * Profile photo: everyone, my contacts, or nobody (and not across a block).
   """
   alias Pakchat.{Accounts, Chats, Presence}
   alias Pakchat.Accounts.User
@@ -37,6 +38,15 @@ defmodule Pakchat.Privacy do
       owner.online_visibility == "everyone" -> true
       true -> can_see_last_seen?(viewer, owner)
     end
+  end
+
+  @doc "May `viewer` see `owner`'s profile photo?"
+  def can_see_photo?(nil, _owner), do: true
+  def can_see_photo?(%User{id: id}, %User{id: id}), do: true
+
+  def can_see_photo?(%User{} = viewer, %User{} = owner) do
+    not Accounts.blocked_between?(viewer.id, owner.id) and
+      allowed?(owner.photo_visibility, viewer, owner)
   end
 
   defp hides_online?(user),

@@ -28,6 +28,15 @@ defmodule PakchatWeb.FileController do
 
   def create(_conn, _params), do: {:error, :bad_request}
 
+  @doc "`POST /api/photos` with `{size, chat_id?}`: room for my profile photo, or a group's or community's."
+  def create_photo(conn, %{"size" => size} = params) do
+    with {:ok, file} <- Files.start_photo(conn.assigns.user, params["chat_id"], size) do
+      json(conn, %{id: file.id, upload_url: Files.link(file, "put").url})
+    end
+  end
+
+  def create_photo(_conn, _params), do: {:error, :bad_request}
+
   def link(conn, %{"id" => id}) do
     with %{} = file <- uploaded(Files.get(id)),
          true <- Files.can_read?(file, conn.assigns.user) || {:error, :not_found} do

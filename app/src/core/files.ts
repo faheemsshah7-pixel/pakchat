@@ -9,7 +9,7 @@
 // the server for a download link, fetches the locked bytes, checks the
 // fingerprint, and unlocks them into PakChat's folder. Photos (and whatever you
 // switched on in Settings › Storage) download by themselves.
-import { OfflineError, type FileKind, type FileUploader, type Message, type Ref } from '@pakchat/shared';
+import { OfflineError, type ChatQuote, type FileKind, type FileUploader, type Message, type Ref } from '@pakchat/shared';
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as Network from 'expo-network';
@@ -110,7 +110,30 @@ export type Picked = {
   gif?: true;
   /** Send a photo or video as it is, without making it smaller (the "HD" switch). */
   hd?: boolean;
+  /** A video cut in the editor: from and to (ms). */
+  trim?: { start: number; end: number };
+  /** View once. */
+  once?: true;
+  /** A round video message. */
+  round?: true;
+  /** The photo was drawn on, cropped or turned in the editor (already a fresh copy without its camera details). */
+  edited?: true;
 };
+
+/** Photos and videos from the chat list's 📷, waiting while you choose a chat (send-to.tsx). */
+let handOff: Picked[] | null = null;
+export function handOffMedia(list: Picked[]) {
+  handOff = list;
+}
+/** The chat that was chosen takes them (once). */
+export function takeHandOff() {
+  const list = handOff;
+  handOff = null;
+  return list;
+}
+export function dropHandOff() {
+  handOff = null;
+}
 
 /** What kind of file a type is. */
 export function kindOf(mime: string): FileKind {
@@ -139,24 +162,30 @@ async function thumbOf(p: Picked): Promise<string | undefined> {
 /** Photos are made this wide (or tall) at most, unless sent in HD, like WhatsApp. */
 const PHOTO_MAX = 1600;
 
+/** HD photos: as big as they came, up to this (a 50 MP photo is far more than any screen). */
+const PHOTO_HD_MAX = 4096;
+
 /**
  * A photo, smaller: at most 1600 px on its long side, as a JPEG at 75%. A
  * phone photo of 4 MB usually becomes about 300 KB and looks the same on a
- * phone. A moving .gif stays as it is, and so does a photo that would not get
- * smaller.
+ * phone. With HD it keeps its size (as a JPEG at 92%).
+ *
+ * Either way it's a fresh copy, so where it was taken and the camera's
+ * details (EXIF: GPS, phone model, time) never go with it: the "Private"
+ * badge in the editor. A moving .gif stays as it is.
  */
 async function smaller(p: Picked): Promise<Picked> {
   if (p.kind === 'video') return smallerVideo(p);
-  if (p.kind !== 'image' || p.hd || p.mime === 'image/gif') return p;
+  if (p.kind !== 'image' || p.mime === 'image/gif') return p;
   try {
     const ctx = ImageManipulator.manipulate(p.uri);
     const w = p.width ?? 0;
     const h = p.height ?? 0;
-    if (Math.max(w, h) > PHOTO_MAX) ctx.resize(w >= h ? { width: PHOTO_MAX } : { height: PHOTO_MAX });
+    const max = p.hd ? PHOTO_HD_MAX : PHOTO_MAX;
+    if (Math.max(w, h) > max) ctx.resize(w >= h ? { width: max } : { height: max });
     const img = await ctx.renderAsync();
-    const saved = await img.saveAsync({ compress: 0.75, format: SaveFormat.JPEG });
+    const saved = await img.saveAsync({ compress: p.hd ? 0.92 : 0.75, format: SaveFormat.JPEG });
     const size = new File(saved.uri).size;
-    if (p.size && size >= p.size) return p;
     const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.jpg` : undefined;
     return { ...p, uri: saved.uri, mime: 'image/jpeg', name, size, width: saved.width, height: saved.height };
   } catch {
@@ -164,34 +193,57 @@ async function smaller(p: Picked): Promise<Picked> {
   }
 }
 
+/** Roughly how big a video will be once sent (for the trim strip: "about 4 MB"). */
+export function videoSizeGuess(p: Picked, lengthMs: number) {
+  if (p.hd && p.size && p.duration) return Math.round((p.size * lengthMs) / p.duration);
+  // About 2 megabits a second for the picture, and a little for the sound.
+  return Math.round(((2_000_000 + 128_000) / 8) * (lengthMs / 1000));
+}
+
 /**
  * A video, smaller (VideoShrink.kt): 720 px on its short side, about 2
  * megabits a second, so a minute is about 15 MB, like WhatsApp. With HD on it
- * goes as it is (up to the server's 100 MB). A GIF is already small. If it
- * can't be made smaller, or wouldn't get smaller, it goes as it is.
+ * keeps its size and quality (up to the server's 100 MB). Cut to the trim
+ * strip's part, and always without where it was filmed. A GIF is already
+ * small. If it can't be done, it goes as it is (a cut one is tried again
+ * without HD first).
  */
 async function smallerVideo(p: Picked): Promise<Picked> {
-  if (p.hd || p.gif) return p;
-  const out = new File(Paths.cache, `small-${core.newId()}.mp4`);
-  try {
-    const r = await fileModule().shrinkVideo(p.uri, out.uri);
-    if (p.size && r.size >= p.size) {
-      out.delete();
-      return p;
+  if (p.gif) return p;
+  const trimmed = !!p.trim && (p.trim.start > 0 || (!!p.duration && p.trim.end < p.duration));
+  const attempt = async (hd: boolean) => {
+    const out = new File(Paths.cache, `small-${core.newId()}.mp4`);
+    try {
+      return await fileModule().shrinkVideo(p.uri, out.uri, trimmed ? p.trim!.start : 0, trimmed ? p.trim!.end : 0, hd);
+    } catch (err) {
+      console.log(`[pakchat] video shrink: ${String(err)}`);
+      if (out.exists) out.delete();
+      return null;
     }
-    const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.mp4` : undefined;
-    return { ...p, uri: r.uri, mime: 'video/mp4', name, size: r.size, ...(r.width && r.height ? { width: r.width, height: r.height } : {}) };
-  } catch (err) {
-    console.log(`[pakchat] video shrink: ${String(err)}`);
-    if (out.exists) out.delete();
-    return p;
+  };
+  const r = (await attempt(!!p.hd)) ?? (p.hd ? await attempt(false) : null);
+  if (!r) return p;
+  const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.mp4` : undefined;
+  const duration = trimmed ? p.trim!.end - p.trim!.start : p.duration;
+  return { ...p, uri: r.uri, mime: 'video/mp4', name, size: r.size, duration, ...(r.width && r.height ? { width: r.width, height: r.height } : {}) };
+}
+
+/** A sharp first frame of a video, kept on this phone, for its bubble while it sends. */
+async function posterOf(uri: string): Promise<string | undefined> {
+  try {
+    const shot = await VideoThumbnails.getThumbnailAsync(uri, { time: 0, quality: 0.8 });
+    const copy = new File(folder(), `${core.newId()}-poster.jpg`);
+    await new File(shot.uri).move(copy);
+    return copy.uri;
+  } catch {
+    return undefined;
   }
 }
 
 export class TooBig extends Error {}
 
 /** Sends a picked file to a chat (photos and videos made smaller first, unless HD). Throws TooBig over the server's limit. */
-export async function sendPicked(chatId: string, picked: Picked, caption?: string, extra: { replyTo?: Ref } = {}) {
+export async function sendPicked(chatId: string, picked: Picked, caption?: string, extra: { replyTo?: Ref; quote?: ChatQuote; hold?: number } = {}) {
   const p = await smaller(picked);
   const source = new File(p.uri);
   const size = p.size ?? source.size;
@@ -200,6 +252,8 @@ export async function sendPicked(chatId: string, picked: Picked, caption?: strin
   const copy = new File(folder(), `${core.newId()}.${extOf(p.name, p.mime)}`);
   await source.copy(copy);
   const thumb = await thumbOf({ ...p, uri: copy.uri });
+  // View once: no little preview travels with it, so nothing shows before it's opened.
+  const poster = p.kind === 'video' && !p.once ? await posterOf(copy.uri) : undefined;
   const file = {
     local: copy.uri,
     size,
@@ -209,11 +263,14 @@ export async function sendPicked(chatId: string, picked: Picked, caption?: strin
     ...(p.width ? { width: Math.round(p.width) } : {}),
     ...(p.height ? { height: Math.round(p.height) } : {}),
     ...(p.duration ? { duration: Math.round(p.duration) } : {}),
-    ...(thumb ? { thumb } : {}),
+    ...(thumb && !p.once ? { thumb } : {}),
     ...(p.gif ? { gif: true as const } : {}),
+    ...(p.once && (p.kind === 'image' || p.kind === 'video') ? { once: true as const } : {}),
+    ...(p.round && p.kind === 'video' ? { round: true as const } : {}),
+    ...(poster ? { poster } : {}),
   };
   try {
-    return await core.client.sendFile(chatId, file, { caption, replyTo: extra.replyTo });
+    return await core.client.sendFile(chatId, file, { caption, replyTo: extra.replyTo, quote: extra.quote, hold: extra.hold });
   } finally {
     // The smaller photo or video was only needed for the copy above.
     if (p.uri !== picked.uri) {
@@ -228,11 +285,18 @@ export async function sendPicked(chatId: string, picked: Picked, caption?: strin
 
 /** Sends a file I already have to another chat (forwarding). It's locked again with a new key. */
 export async function forwardFile(chatId: string, m: Message) {
-  if (!m.file?.local) return;
-  const { local, id: _id, key: _key, digest: _digest, ...meta } = m.file;
+  await copyFileTo(chatId, m, { caption: m.text || undefined, forwarded: true });
+}
+
+/** A copy of a file I have, sent to another chat (forwarding, and broadcast lists). */
+export async function copyFileTo(chatId: string, m: Message, extra: { caption?: string; forwarded?: boolean } = {}) {
+  if (!m.file?.local) return null;
+  const { local, id: _id, key: _key, digest: _digest, poster, transcript: _words, once: _once, ...meta } = m.file;
   const copy = new File(folder(), `${core.newId()}.${extOf(meta.name, meta.mime)}`);
   await new File(local).copy(copy);
-  await core.client.sendFile(chatId, { ...meta, local: copy.uri }, { caption: m.text || undefined, forwarded: true });
+  // Forwarding: the first frame is made again only for a broadcast (a forward shows the blurred one).
+  const keep = !extra.forwarded && poster ? { poster } : {};
+  return core.client.sendFile(chatId, { ...meta, ...keep, local: copy.uri }, { caption: extra.caption, forwarded: extra.forwarded });
 }
 
 /**
@@ -275,7 +339,8 @@ const fetching = new Set<string>();
 /** Downloads a message's file, checks it, and keeps it. */
 export async function download(m: Message) {
   const f = m.file;
-  if (!f || f.local || !f.key || !f.digest) return;
+  // An opened view once message is gone for good.
+  if (!f || f.local || !f.key || !f.digest || m.opened) return;
   const tag = tagOf(m.chatId, m);
   if (fetching.has(tag)) return;
   fetching.add(tag);
@@ -308,12 +373,14 @@ export async function download(m: Message) {
 
 /** Deletes a message's file from the phone (deleting the message here). */
 export async function forgetFile(m: Message | null) {
-  if (!m?.file?.local) return;
-  try {
-    const f = new File(m.file.local);
-    if (f.exists) f.delete();
-  } catch {
-    // Already gone.
+  for (const uri of [m?.file?.local, m?.file?.poster]) {
+    if (!uri) continue;
+    try {
+      const f = new File(uri);
+      if (f.exists) f.delete();
+    } catch {
+      // Already gone.
+    }
   }
 }
 
@@ -341,7 +408,8 @@ export function setAutoDownload(a: AutoDownload) {
 
 /** A new message came: download its file if Settings say so for this network. */
 export async function maybeDownload(m: Message) {
-  if (!m.file || m.file.local || m.deleted) return;
+  // View once comes only when it's opened (once.tsx), so it's never kept unopened.
+  if (!m.file || m.file.local || m.deleted || m.file.once) return;
   const net = await Network.getNetworkStateAsync().catch(() => null);
   if (!net?.isConnected) return;
   const a = autoDownload();

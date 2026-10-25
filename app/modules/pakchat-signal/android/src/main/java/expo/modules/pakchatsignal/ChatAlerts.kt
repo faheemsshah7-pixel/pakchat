@@ -65,7 +65,8 @@ object ChatAlerts {
     }
     val count = o.optInt("count", lines.length())
 
-    val builder = base(context)
+    val locked = o.optBoolean("locked")
+    val builder = base(context, channelFor(context, o.optString("tone", ""), words))
       .setStyle(style)
       .setContentTitle(title)
       .setContentText(lines.getJSONObject(lines.length() - 1).getString("text"))
@@ -74,9 +75,12 @@ object ChatAlerts {
       .setNumber(count)
       .setContentIntent(open(context, chatId))
       .addPerson(them)
-      .addAction(replyAction(context, chatId, words))
+    // A locked chat's alert only says "New message": no reply box under it.
+    if (!locked) builder.addAction(replyAction(context, chatId, words))
+    builder
       .addAction(action(context, chatId, "read", words.optString("markRead", "Mark as read"), NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ))
       .addAction(action(context, chatId, "mute", words.optString("mute", "Mute"), NotificationCompat.Action.SEMANTIC_ACTION_MUTE))
+    if (locked) builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
     if (o.optBoolean("quiet")) builder.setSilent(true)
     builder.extras.putInt(COUNT, count)
     builder.extras.putString("pakchat.summaryLine", "$title: ${lines.getJSONObject(lines.length() - 1).getString("text")}")
@@ -110,7 +114,38 @@ object ChatAlerts {
 
   private fun manager(context: Context) = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-  private fun base(context: Context) = NotificationCompat.Builder(context, CHANNEL)
+  /**
+   * Each chat can have its own tone (chat info › Notification tone). Android fixes
+   * a channel's sound once it's made, so each tone has its own channel:
+   * "messages" is the default, "messages-silent" has none, "messages-<tone>"
+   * plays res/raw/pakchat_tone_<tone>.
+   */
+  val TONES = listOf("chime", "bell", "pop", "drop", "harp", "soft")
+
+  private fun channelFor(context: Context, tone: String, words: JSONObject): String {
+    if (tone.isEmpty() || Build.VERSION.SDK_INT < 26 || (tone != "silent" && tone !in TONES)) return CHANNEL
+    val id = "messages-$tone"
+    val nm = manager(context)
+    if (nm.getNotificationChannel(id) != null) return id
+    val name = words.optString("toneChannel", "Messages ({tone})").replace("{tone}", words.optString("toneName", tone))
+    val channel = android.app.NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH)
+    if (tone == "silent") {
+      channel.setSound(null, null)
+      channel.enableVibration(false)
+    } else {
+      val sound = Uri.parse("android.resource://${context.packageName}/raw/pakchat_tone_$tone")
+      val attrs = android.media.AudioAttributes.Builder()
+        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+      channel.setSound(sound, attrs)
+      channel.enableVibration(true)
+    }
+    nm.createNotificationChannel(channel)
+    return id
+  }
+
+  private fun base(context: Context, channel: String = CHANNEL) = NotificationCompat.Builder(context, channel)
     .setSmallIcon(R.drawable.pakchat_alert)
     .setColor(Color.parseColor("#2F6BF0"))
     .setCategory(NotificationCompat.CATEGORY_MESSAGE)

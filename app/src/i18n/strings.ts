@@ -1,6 +1,8 @@
 // strings.ts: every word the phone app shows, in English and Urdu.
 // To change a word, change it here. Most of the Urdu comes from the website (web/src/strings.ts),
 // so both apps say the same thing. {name}-style bits get filled in by fill() below.
+// Phase 7's words are in phase7.ts.
+import { en7, ur7 } from './phase7';
 
 export const en = {
   // Sign in
@@ -173,7 +175,7 @@ export const en = {
   english: 'English',
   urdu: 'اردو',
   appLock: 'App lock',
-  appLockSub: 'Fingerprint or PIN',
+  appLockSub: 'Fingerprint or face',
   storage: 'Storage and data',
   storageSub: 'Auto-download, Save data',
   backup: 'Chat backup',
@@ -508,6 +510,7 @@ export const en = {
   alertsCardDone: "I've done it",
   fullScreenCardTitle: 'Show calls on the lock screen',
   fullScreenCardText: 'Allow PakChat to use full screen, so a call opens its answer screen on a locked phone, like WhatsApp.',
+  ...en7,
 };
 
 export type Strings = typeof en;
@@ -669,7 +672,7 @@ export const ur: Strings = {
   english: 'English',
   urdu: 'اردو',
   appLock: 'ایپ لاک',
-  appLockSub: 'فنگر پرنٹ یا پِن',
+  appLockSub: 'فنگر پرنٹ یا چہرہ',
   storage: 'اسٹوریج اور ڈیٹا',
   storageSub: 'خودکار ڈاؤن لوڈ، ڈیٹا بچائیں',
   backup: 'چیٹ بیک اپ',
@@ -994,6 +997,7 @@ export const ur: Strings = {
   alertsCardDone: 'ہو گیا',
   fullScreenCardTitle: 'لاک اسکرین پر کالز دکھائیں',
   fullScreenCardText: 'PakChat کو فل اسکرین کی اجازت دیں، تاکہ لاک فون پر کال آئے تو اٹھانے والی اسکرین کھلے، جیسے WhatsApp میں۔',
+  ...ur7,
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

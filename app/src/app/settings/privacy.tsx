@@ -22,9 +22,9 @@ export default function Privacy() {
   const { theme } = useLook();
   const { me } = useAuth();
   const blocked = useBlocked();
-  const [open, setOpen] = useState<'last_seen' | 'online' | 'timer' | null>(null);
+  const [open, setOpen] = useState<'last_seen' | 'online' | 'photo' | 'timer' | null>(null);
   const [timer, setTimer] = useState(defaultTimer);
-  const p = me?.privacy ?? { lastSeen: 'everyone', online: 'everyone', readReceipts: true };
+  const p = me?.privacy ?? { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone' };
 
   const lastSeenChoices: Choice[] = [
     { value: 'everyone', label: t.everyone },
@@ -37,7 +37,7 @@ export default function Privacy() {
   ];
   const labelOf = (list: Choice[], v: string) => list.find((c) => c.value === v)?.label ?? v;
 
-  async function change(privacy: { last_seen?: string; online?: string; read_receipts?: boolean }) {
+  async function change(privacy: { last_seen?: string; online?: string; photo?: string; read_receipts?: boolean }) {
     try {
       await core.updateMe({ privacy });
     } catch {
@@ -47,7 +47,7 @@ export default function Privacy() {
 
   const timerChoices: Choice[] = TIMERS.map((s) => ({ value: String(s), label: timerLabel(s, t) }));
   const choices = open === 'online' ? onlineChoices : open === 'timer' ? timerChoices : lastSeenChoices;
-  const current = open === 'online' ? p.online : open === 'timer' ? String(timer) : p.lastSeen;
+  const current = open === 'online' ? p.online : open === 'timer' ? String(timer) : open === 'photo' ? p.photo : p.lastSeen;
 
   return (
     <Screen>
@@ -66,6 +66,8 @@ export default function Privacy() {
           <SettingRow icon="clock" title={t.lastSeenOnline} sub={labelOf(lastSeenChoices, p.lastSeen)} onPress={() => setOpen('last_seen')} testID="privacy-last-seen" />
           <Divider />
           <SettingRow icon="you" title={t.online2} sub={labelOf(onlineChoices, p.online)} onPress={() => setOpen('online')} testID="privacy-online" />
+          <Divider />
+          <SettingRow icon="photo" title={t.profilePhoto} sub={labelOf(lastSeenChoices, p.photo)} onPress={() => setOpen('photo')} testID="privacy-photo" />
           <Divider />
           <SettingRow
             icon="ticks"
@@ -87,7 +89,7 @@ export default function Privacy() {
         </Glass>
       </ScrollView>
 
-      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open === 'online' ? t.online2 : open === 'timer' ? t.defaultTimer : t.lastSeenOnline}>
+      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open === 'online' ? t.online2 : open === 'timer' ? t.defaultTimer : open === 'photo' ? t.profilePhoto : t.lastSeenOnline}>
         <View style={{ paddingHorizontal: 16, gap: 4 }}>
           {choices.map((c) => {
             const on = current === c.value;
@@ -104,7 +106,7 @@ export default function Privacy() {
                   if (which === 'timer') {
                     setDefaultTimer(Number(c.value));
                     setTimer(Number(c.value));
-                  } else if (!on) void change(which === 'online' ? { online: c.value } : { last_seen: c.value });
+                  } else if (!on) void change(which === 'online' ? { online: c.value } : which === 'photo' ? { photo: c.value } : { last_seen: c.value });
                 }}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: on ? theme.accSoft : 'transparent' }}>

@@ -53,6 +53,11 @@ const IN_CALL_OPS: readonly CallSignal['op'][] = ['join', 'here', 'offer', 'answ
 /** How long a dropped connection may try to come back. */
 const RECONNECT_MS = 15_000;
 
+/** A call going on in a call link's chat, as this phone has heard of it. */
+type LinkCall = { id: string; from: string; fromDevice: number; video: boolean; at: number; people: Set<string> };
+/** A call link's call is taken to be over this long after it started, if nobody said they left. */
+const LINK_CALL_MS = 6 * 3_600_000;
+
 export type CallState = 'outgoing' | 'incoming' | 'connecting' | 'active' | 'ended';
 export type EndReason = 'hungUp' | 'theyHungUp' | 'declined' | 'busy' | 'noAnswer' | 'missed' | 'failed' | 'elsewhere' | 'offline' | 'full' | 'permission';
 
@@ -63,6 +68,8 @@ export type PeerView = {
   state: 'connecting' | 'connected' | 'reconnecting';
   audio: boolean;
   video: boolean;
+  /** Their picture is their screen (shown whole, not cropped). */
+  screen: boolean;
   stream: string | null;
   /** Goes up each time their sound or picture arrives anew, so the screen redraws it. */
   rev: number;
@@ -95,6 +102,8 @@ export type CallView = {
   extra: string[];
   /** People can be added (a call from a one-to-one chat, not a group chat's). */
   canAdd: boolean;
+  /** I'm sharing my screen: everyone sees it instead of my camera. */
+  sharing: boolean;
 };
 
 /** One call in the Calls tab. */
@@ -109,6 +118,7 @@ type Peer = {
   state: PeerView['state'];
   audio: boolean;
   video: boolean;
+  screen: boolean;
   /** ICE that came before the offer or answer it belongs to. */
   pending: RTCIceCandidate[];
   rev: number;
@@ -120,6 +130,8 @@ type Live = Omit<CallView, 'peers' | 'local'> & {
   fromDevice: number;
   peers: Map<string, Peer>;
   localStream: MediaStream | null;
+  /** My screen, while I share it (sent instead of my camera). */
+  screenStream: MediaStream | null;
   /** I'm in it (I started it, or answered). */
   joined: boolean;
   /** Ever connected to anyone. */
@@ -144,6 +156,13 @@ type PcEvents = {
   addEventListener(type: 'track', fn: (e: { streams: MediaStream[] }) => void): void;
   addEventListener(type: 'connectionstatechange', fn: () => void): void;
 };
+
+/** The camera's picture: smaller and slower with "Use less data for calls". */
+function cameraSize() {
+  return core.settings.lessDataCalls ? { width: 320, height: 240, frameRate: 15 } : { width: 640, height: 480, frameRate: 24 };
+}
+
+type TrackEvents = { addEventListener(type: 'ended', fn: () => void): void };
 
 const keyOf = (d: Device) => `${d.userId}:${d.deviceId}`;
 
@@ -190,6 +209,12 @@ class Calls {
   /** Calls that are over, so a late message about one is ignored. */
   private finished: string[] = [];
   private ice: { servers: { urls: string[]; username?: string; credential?: string }[]; at: number } | null = null;
+  /**
+   * Call links: a call in a call link's chat never rings anyone. Each phone
+   * just notes it here (who's in it), so opening the link joins it.
+   */
+  private linkCalls = new Map<string, LinkCall>();
+  private linkChats = new Map<string, boolean>();
   private audioWatch: { remove: () => void } | null = null;
 
   /** A call is going on (or ringing): the connection to the server stays open. */
@@ -214,12 +239,13 @@ class Calls {
   view(): CallView | null {
     const c = this.call;
     if (!c) return null;
-    const { fromDevice: _f, peers, localStream, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, ...rest } = c;
+    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, ...rest } = c;
     return {
       ...rest,
       extra: [...c.extra],
-      local: localStream && c.camera ? localStream.toURL() : null,
-      peers: [...peers.values()].map((p) => ({ key: p.key, userId: p.userId, state: p.state, audio: p.audio, video: p.video, stream: p.stream ? p.stream.toURL() : null, rev: p.rev })),
+      // While I share my screen, my own tile says so (like WhatsApp) instead of showing it back to me.
+      local: localStream && c.camera && !c.sharing ? localStream.toURL() : null,
+      peers: [...peers.values()].map((p) => ({ key: p.key, userId: p.userId, state: p.state, audio: p.audio, video: p.video, screen: p.screen, stream: p.stream ? p.stream.toURL() : null, rev: p.rev })),
     };
   }
 
@@ -262,8 +288,8 @@ class Calls {
     audio.callAudioStart(video);
     this.watchAudio(c);
     // No ringing sound yet: it starts when their phone says it's ringing (like WhatsApp's "Calling…" then "Ringing…").
-    // Everyone in the chat rings; closed phones are woken for it.
-    const rang = await this.send(c, { op: 'ring', video, group: c.group }, undefined, true);
+    // Everyone in the chat rings; closed phones are woken for it. A call link's call rings nobody: people join from the link.
+    const rang = await this.send(c, { op: 'ring', video, group: c.group }, undefined, !chat.callLink);
     // Hung up already (before the ring got out): it's over.
     if (c.done) return 'started';
     if (!rang) {
@@ -271,6 +297,10 @@ class Calls {
       return 'offline';
     }
     this.ongoing(c);
+    if (chat.callLink) {
+      this.linkCalls.set(chatId, { id: c.id, from: me.userId, fromDevice: me.deviceId, video, at: Date.now(), people: new Set([me.userId]) });
+      return 'started';
+    }
     c.cancel.push(
       later(RING_MS, () => {
         // Nobody answered: stop their ringing (waking them if need be).
@@ -290,6 +320,8 @@ class Calls {
       startedAt: null,
       peers: new Map(),
       localStream: null,
+      screenStream: null,
+      sharing: false,
       muted: false,
       camera: x.video,
       front: true,
@@ -313,7 +345,7 @@ class Calls {
     try {
       const stream = await mediaDevices.getUserMedia({
         audio: true,
-        video: c.video ? { facingMode: 'user', width: 640, height: 480, frameRate: 24 } : false,
+        video: c.video ? { facingMode: 'user', ...cameraSize() } : false,
       });
       if (c.done) {
         stream.getTracks().forEach((t) => t.stop());
@@ -402,6 +434,77 @@ class Calls {
         if (!c.done && !c.connectedOnce) this.end(c, 'failed');
       }),
     );
+  }
+
+  // ---- Call links ----
+
+  private async isLink(chatId: string) {
+    let on = this.linkChats.get(chatId);
+    if (on === undefined) {
+      on = !!(await core.storage.getChat(chatId))?.callLink;
+      this.linkChats.set(chatId, on);
+    }
+    return on;
+  }
+
+  /** Who's in a call link's call now (none: nobody's in it). */
+  linkCall(chatId: string): { id: string; people: string[]; video: boolean } | null {
+    const l = this.linkCalls.get(chatId);
+    if (!l || !l.people.size || Date.now() - l.at > LINK_CALL_MS || this.finished.includes(l.id)) return null;
+    return { id: l.id, people: [...l.people], video: l.video };
+  }
+
+  /**
+   * Notes a call message in a call link's chat. True: it's dealt with here (a
+   * "ring" never rings; it only says a call is going on there).
+   */
+  private linkSignal(e: CallEvent, from: Device) {
+    const s = e.signal;
+    const mine = e.from === core.myId;
+    const known = this.linkCalls.get(e.chatId);
+    if (s.op === 'ring') {
+      if (mine) return true;
+      const now = this.call && !this.call.done && this.call.chatId === e.chatId ? this.call : null;
+      if (now && now.id !== s.call) {
+        if (now.joined && (now.peers.size || now.connectedOnce)) {
+          // Someone started a second call here: tell them about ours, so they come to it.
+          void this.sendTo(e.chatId, now.id, { op: 'ring', video: now.video, group: true }, [from]);
+          return true;
+        }
+        // I'm alone in mine, and theirs has someone: mine goes, and I join theirs (the smaller id wins a tie).
+        if (now.direction === 'out' && !now.peers.size && (!known || known.id !== now.id || s.call < now.id)) {
+          this.end(now, 'hungUp', true);
+          void this.send(now, { op: 'leave' });
+          this.linkCalls.set(e.chatId, { id: s.call, from: e.from, fromDevice: e.fromDevice, video: !!s.video, at: e.at, people: new Set([e.from]) });
+          void this.joinLink(e.chatId, now.video, (id) => this.screenOpen && router.setParams({ id }));
+          return true;
+        }
+        return true;
+      }
+      if (!known || known.id !== s.call) this.linkCalls.set(e.chatId, { id: s.call, from: e.from, fromDevice: e.fromDevice, video: !!s.video, at: e.at, people: new Set([e.from]) });
+      core.emit('calls');
+      return true;
+    }
+    if (known && known.id === s.call) {
+      if (s.op === 'join' || s.op === 'here') known.people.add(e.from);
+      if (s.op === 'leave') known.people.delete(e.from);
+      core.emit('calls');
+    }
+    return false;
+  }
+
+  /** Opens a call link's call: joins the one going on there, or starts one (which rings nobody). */
+  async joinLink(chatId: string, video: boolean, ready?: (callId: string) => void): Promise<'started' | 'busy' | 'offline' | 'permission'> {
+    if (this.call && !this.call.done) return this.call.chatId === chatId ? 'started' : 'busy';
+    const l = this.linkCall(chatId);
+    if (!l) return this.start(chatId, video, ready);
+    const k = this.linkCalls.get(chatId)!;
+    const extra = l.people.filter((u) => u !== core.myId);
+    knowNames(extra);
+    this.ring({ id: k.id, chatId, from: k.from, fromDevice: k.fromDevice, video, group: true, extra: [], canAdd: false, until: Date.now() + RING_MS }, RING_MS, false);
+    ready?.(k.id);
+    await this.answer();
+    return 'started';
   }
 
   /** Says no to the ringing call. */
@@ -515,6 +618,10 @@ class Calls {
       }
     }
 
+    if (await this.isLink(e.chatId)) {
+      if (this.linkSignal(e, from)) return;
+    }
+
     switch (s.op) {
       case 'ring':
         if (mine || this.finished.includes(s.call) || c) return;
@@ -548,7 +655,10 @@ class Calls {
         const p = c?.peers.get(keyOf(from));
         if (!p) return;
         if (s.audio !== undefined) p.audio = s.audio;
-        if (s.video !== undefined) p.video = s.video;
+        if (s.video !== undefined) {
+          p.video = s.video;
+          p.screen = !!s.screen;
+        }
         if (c && s.video && !c.video) {
           // They turned their camera on in a voice call: show them, on the loudspeaker, like WhatsApp.
           c.video = true;
@@ -654,7 +764,7 @@ class Calls {
     const key = keyOf(from);
     let p = c.peers.get(key);
     if (!p) {
-      p = { key, userId: from.userId, deviceId: from.deviceId, pc: null, stream: null, state: 'connecting', audio: true, video: c.video, pending: [], giveUp: null, rev: 0 };
+      p = { key, userId: from.userId, deviceId: from.deviceId, pc: null, stream: null, state: 'connecting', audio: true, video: c.video, screen: false, pending: [], giveUp: null, rev: 0 };
       c.peers.set(key, p);
     }
     return p;
@@ -698,6 +808,13 @@ class Calls {
     p.pc = pc;
     const local = c.localStream;
     if (local) for (const track of local.getTracks()) pc.addTrack(track, local);
+    // Someone joining while I share my screen gets my screen, not my camera.
+    const screen = c.screenStream?.getVideoTracks()[0];
+    if (screen && local) {
+      const camera = pc.getSenders().find((x) => x.track?.kind === 'video');
+      if (camera) void camera.replaceTrack(screen).catch(() => {});
+      else pc.addTrack(screen, local);
+    }
     // (The library's own event types don't load, so these are spelled out.)
     const events = pc as unknown as PcEvents;
     events.addEventListener('icecandidate', (ev) => {
@@ -723,6 +840,7 @@ class Calls {
       if (c.done) return;
       const offer = (await pc.createOffer(restart ? { iceRestart: true } : {})) as { sdp: string; type: 'offer' };
       await pc.setLocalDescription(offer);
+      void this.saveData(p);
       await this.send(c, { op: 'offer', sdp: offer.sdp }, [p]);
     } catch (err) {
       console.log(`[pakchat] call offer: ${String(err)}`);
@@ -747,6 +865,7 @@ class Calls {
     await this.flushIce(p);
     const answer = (await pc.createAnswer()) as { sdp: string; type: 'answer' };
     await pc.setLocalDescription(answer);
+    void this.saveData(p);
     if (c.state === 'outgoing') c.state = 'connecting';
     this.emit();
     await this.send(c, { op: 'answer', sdp: answer.sdp }, [p]);
@@ -830,6 +949,12 @@ class Calls {
   async setCamera(on: boolean) {
     const c = this.call;
     if (!c || c.done) return false;
+    // Sharing my screen: the camera waits (it comes back as I left it when sharing stops).
+    if (c.sharing) {
+      c.camera = on;
+      this.emit();
+      return true;
+    }
     if (on && !c.localStream?.getVideoTracks().length) return this.addCamera(c);
     c.camera = on;
     for (const t of c.localStream?.getVideoTracks() ?? []) t.enabled = on;
@@ -844,7 +969,7 @@ class Calls {
     if (c.state !== 'active') return false;
     let track;
     try {
-      const got = await mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480, frameRate: 24 } });
+      const got = await mediaDevices.getUserMedia({ video: { facingMode: 'user', ...cameraSize() } });
       track = got.getVideoTracks()[0];
     } catch {
       return false;
@@ -869,6 +994,104 @@ class Calls {
     }
     void this.send(c, { op: 'media', audio: !c.muted, video: true });
     return true;
+  }
+
+  /**
+   * Shares my screen instead of my camera, like WhatsApp: Android asks first
+   * ("Start recording or casting?"), then everyone in the call sees my screen
+   * until I stop (or stop it from Android's own alert). False if it couldn't, or I said no.
+   */
+  async shareScreen() {
+    const c = this.call;
+    if (!c || c.done || c.state !== 'active' || c.sharing || !c.localStream) return false;
+    let stream: MediaStream;
+    try {
+      stream = await mediaDevices.getDisplayMedia({});
+    } catch {
+      return false;
+    }
+    const screen = stream.getVideoTracks()[0];
+    const local = c.localStream;
+    if (!screen || c.done || this.call !== c || c.sharing || !local) {
+      stream.release();
+      return false;
+    }
+    c.screenStream = stream;
+    c.sharing = true;
+    const camera = local.getVideoTracks()[0];
+    for (const p of c.peers.values()) {
+      if (!p.pc) continue;
+      const sender = camera && p.pc.getSenders().find((x) => x.track?.id === camera.id);
+      if (sender) void sender.replaceTrack(screen).catch(() => {});
+      else {
+        // A voice call (or no camera): the screen is added, and each connection set up again with it.
+        p.pc.addTrack(screen, local);
+        void this.offer(c, p);
+      }
+    }
+    if (camera) camera.enabled = false;
+    // Stopped from Android's own "sharing" alert, or by Android.
+    (screen as unknown as TrackEvents).addEventListener('ended', () => this.stopSharing());
+    this.emit();
+    void this.send(c, { op: 'media', audio: !c.muted, video: true, screen: true });
+    return true;
+  }
+
+  stopSharing() {
+    const c = this.call;
+    const stream = c?.screenStream;
+    if (!c || !stream) return;
+    const screen = stream.getVideoTracks()[0];
+    const local = c.localStream;
+    const camera = local?.getVideoTracks()[0];
+    c.screenStream = null;
+    c.sharing = false;
+    const swaps: Promise<unknown>[] = [];
+    if (!c.done) {
+      for (const p of c.peers.values()) {
+        const sender = p.pc?.getSenders().find((x) => x.track?.id === screen?.id);
+        if (!p.pc || !sender) continue;
+        if (camera) swaps.push(sender.replaceTrack(camera).catch(() => {}));
+        else {
+          p.pc.removeTrack(sender);
+          void this.offer(c, p);
+        }
+      }
+      if (camera) camera.enabled = c.camera;
+      void this.send(c, { op: 'media', audio: !c.muted, video: !!camera && c.camera, screen: false });
+    }
+    this.emit();
+    // The screen stops (and Android's "sharing" alert goes) once nobody is sent it any more.
+    void Promise.all(swaps).then(() => stream.release());
+  }
+
+  /** "Use less data for calls" was switched: the call going on changes at once. */
+  dataSaverChanged() {
+    for (const p of this.call?.peers.values() ?? []) void this.saveData(p);
+  }
+
+  /**
+   * "Use less data for calls" (Settings › Storage and data), like WhatsApp's:
+   * thinner sound and a smaller, slower picture, for little mobile data. Off:
+   * the phones choose as usual.
+   */
+  private async saveData(p: Peer) {
+    const less = !!core.settings.lessDataCalls;
+    for (const sender of p.pc?.getSenders() ?? []) {
+      const kind = sender.track?.kind;
+      if (!kind) continue;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings.length) continue;
+        for (const e of params.encodings) {
+          e.maxBitrate = less ? (kind === 'audio' ? 20_000 : 180_000) : null;
+          if (kind === 'video') e.maxFramerate = less ? 15 : null;
+        }
+        await sender.setParameters(params);
+      } catch (err) {
+        console.log(`[pakchat] call data saver: ${String(err)}`);
+      }
+    }
   }
 
   flipCamera() {
@@ -917,6 +1140,11 @@ class Calls {
     for (const stop of c.cancel) stop();
     c.cancel = [];
     for (const p of c.peers.values()) this.closePeer(p);
+    if (c.screenStream) {
+      c.screenStream.release();
+      c.screenStream = null;
+      c.sharing = false;
+    }
     if (c.localStream) {
       for (const t of c.localStream.getTracks()) t.stop();
       c.localStream.release();

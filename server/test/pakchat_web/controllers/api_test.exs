@@ -26,6 +26,7 @@ defmodule PakchatWeb.ApiTest do
       assert body["privacy"] == %{
                "last_seen" => "contacts",
                "online" => "same",
+               "photo" => "everyone",
                "read_receipts" => false
              }
     end

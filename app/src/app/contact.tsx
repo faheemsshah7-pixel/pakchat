@@ -25,10 +25,11 @@ const PAKCHAT_ONLY = 'pakchat';
 export default function SaveContact() {
   const t = useT();
   const { theme } = useLook();
-  const { id, phone: givenPhone, email: givenEmail } = useLocalSearchParams<{ id?: string; phone?: string; email?: string }>();
+  const { id, phone: givenPhone, email: givenEmail, name: givenName } = useLocalSearchParams<{ id?: string; phone?: string; email?: string; name?: string }>();
   usePeople();
   const saved = id ? core.contacts[id] : undefined;
-  const startName = (saved?.name ?? (id ? core.plainName(id) : '')).trim();
+  // A contact card from a chat brings its name too.
+  const startName = (saved?.name ?? (id ? core.plainName(id) : (givenName ?? ''))).trim();
   const [first, setFirst] = useState(startName.split(/\s+/)[0] ?? '');
   const [last, setLast] = useState(startName.split(/\s+/).slice(1).join(' '));
   const [phone, setPhone] = useState(saved?.phone ? formatPhone(saved.phone) : (givenPhone ?? ''));

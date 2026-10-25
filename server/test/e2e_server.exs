@@ -77,15 +77,11 @@ Application.put_env(
   Keyword.merge(endpoint, server: true, http: [ip: {127, 0, 0, 1}, port: 4002])
 )
 
-Application.put_env(:pakchat, :rate_limits,
-  sign_in: {100_000, 60_000},
-  lookup: {100_000, 60_000},
-  keys: {100_000, 60_000},
-  send: {100_000, 10_000},
-  groups: {100_000, 60_000},
-  invites: {100_000, 60_000},
-  sms: {100_000, 60_000},
-  contacts: {100_000, 60_000}
+# Every limit very high, so the tests never hit one (each kind the server has).
+Application.put_env(
+  :pakchat,
+  :rate_limits,
+  for({name, {_, window}} <- Application.fetch_env!(:pakchat, :rate_limits), do: {name, {100_000, window}})
 )
 
 # Phone sign-in: codes are kept for GET /api/auth/test/code instead of being texted,

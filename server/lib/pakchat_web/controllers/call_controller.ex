@@ -16,12 +16,29 @@ defmodule PakchatWeb.CallController do
   never leaves the server.
   """
   use PakchatWeb, :controller
+  alias Pakchat.{Chats, RateLimit}
+  alias PakchatWeb.Wire
+
+  action_fallback PakchatWeb.FallbackController
 
   # A day: long enough for any call, short enough not to be worth stealing.
   @ttl 24 * 3600
 
   def ice(conn, _params) do
     json(conn, %{ice_servers: ice_servers(conn.assigns.user.id)})
+  end
+
+  @doc """
+  `POST /api/calls/links` with `{title}`: a call link. It's a small group of
+  its own; anyone who opens the link joins it (as an invite) and its call.
+  """
+  def create_link(conn, params) do
+    me = conn.assigns.user
+
+    with :ok <- RateLimit.hit(:groups, me.id),
+         {:ok, chat} <- Chats.create_call_link(me, %{"title" => params["title"] || "Call"}) do
+      conn |> put_status(201) |> json(Wire.chat(chat, me.id))
+    end
   end
 
   @doc false

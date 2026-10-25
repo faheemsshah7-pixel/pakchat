@@ -32,21 +32,93 @@ import { openStorage } from './db';
 import { backUpIfDue } from './backup';
 import { calls } from './calls';
 import { forgetFile, maybeDownload, uploader } from './files';
-import { alertFor, startPush } from './push';
+import { alertFor, alertReaction, startPush, words } from './push';
+import { startLock } from './lock';
+import { receivedTone, sentTone } from './tones';
 
 export type Person = { id: string; name: string; about?: string | null; photo?: string | null };
 
 /** How to reach someone: what I typed to find them, or what they showed me by messaging first. */
 export type Ways = { phone?: string; email?: string };
 
+/** Behind a chat's messages: PakChat's doodles (the default), nothing, a colour, a gradient or a photo. */
+export type Wallpaper = {
+  kind: 'doodles' | 'none' | 'colour' | 'gradient' | 'photo';
+  value?: number | string;
+  /** Darker in dark mode, 0 to 0.8. */
+  dim?: number;
+  /** A plain colour with PakChat's doodles over it. */
+  doodles?: boolean;
+};
+
+const HOUR = 3_600_000;
+
+/** Muted right now: Always, or its 8 hours or week isn't up yet (even before the timer unmutes it, say in the background). */
+export function isMuted(p?: ChatPrefs) {
+  return !!p?.muted && (!p.mutedUntil || p.mutedUntil > Date.now());
+}
+
 /** Things about a chat that only this phone knows. */
 export type ChatPrefs = {
   pinnedAt?: number;
   archived?: boolean;
   muted?: boolean;
+  /** Muted for 8 hours or a week (like WhatsApp): when it unmutes. Missing while muted: Always. */
+  mutedUntil?: number;
   favourite?: boolean;
   markedUnread?: boolean;
   draft?: string;
+  /** Its own alert tone (ChatAlerts.TONES), or "silent". Missing: the default. */
+  tone?: string;
+  wallpaper?: Wallpaper;
+  /**
+   * Chat lock. `folder`: WhatsApp's way, moved to the hidden Locked chats folder.
+   * `list`: ours, stays in the list with a lock, and never shows its words.
+   */
+  lock?: 'folder' | 'list';
+};
+
+/** Settings only this phone has (phase 7). */
+export type AppSettings = {
+  /** A few seconds to take back a message just sent. */
+  /** Little sounds as messages go and come while a chat is open, and how loud (0 to 1). */
+  conversationTones: boolean;
+  toneVolume: number;
+  /** The alert tone for chats without their own ('' is PakChat's own). */
+  defaultTone: string;
+  /** Groups' tone (Settings › Notifications › Groups), like WhatsApp. Missing: the same as messages. */
+  groupTone?: string;
+  /** Cards for web addresses in what I write. */
+  linkPreviews: boolean;
+  /** App lock (fingerprint or face only), and when: 0 at once, 30 or 60 seconds, -1 when the phone locks. */
+  appLock: boolean;
+  appLockAfter: 0 | 30 | 60 | -1;
+  /** A locked chat locks again this long after you leave it (seconds). */
+  chatRelock: 0 | 30 | 60;
+  /** The Locked chats folder only opens by typing the secret code in search (it's hidden from the list). */
+  lockedHidden: boolean;
+  /** The secret code's SHA-256 (never the code itself). */
+  secretCode?: string;
+  /** Behind chats without their own. */
+  wallpaper?: Wallpaper;
+  /** Archived chats stay archived when someone writes (and don't alert, unless I'm mentioned or replied to), like WhatsApp. */
+  keepArchived: boolean;
+  /** "Use less data for calls" (Settings › Storage and data), like WhatsApp. */
+  lessDataCalls?: boolean;
+  /** When I last looked at Calls: missed calls since then are the number on its tab. */
+  callsSeenAt?: number;
+};
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  conversationTones: true,
+  toneVolume: 0.5,
+  defaultTone: '',
+  linkPreviews: true,
+  appLock: false,
+  appLockAfter: 0,
+  chatRelock: 0,
+  lockedHidden: false,
+  keepArchived: true,
 };
 
 /** A list you made yourself (like "Family" or "Work"), shown as a chip above the chats. */
@@ -57,7 +129,27 @@ export type Presence = { online: boolean; lastSeen: string | null };
 /** Someone I saved under my own name, with the number or Gmail I know them by. Only on this phone. */
 export type Contact = { name: string; phone?: string; email?: string; fromPhoneBook?: boolean };
 
-type Topic = 'calls' | 'stickers' | 'auth' | 'chats' | 'people' | 'prefs' | 'connection' | 'typing' | 'presence' | 'blocked' | 'files' | 'backup' | `messages:${string}`;
+type Topic =
+  | 'calls'
+  | 'stickers'
+  | 'auth'
+  | 'chats'
+  | 'people'
+  | 'prefs'
+  | 'connection'
+  | 'typing'
+  | 'presence'
+  | 'blocked'
+  | 'files'
+  | 'backup'
+  | 'settings'
+  | 'scheduled'
+  | 'broadcasts'
+  | 'lock'
+  | 'photos'
+  | `messages:${string}`
+  // Someone asked to join a group, or suggested a group for a community (admins' lists).
+  | `notice:${string}`;
 
 // ---- Where the server is ----
 
@@ -105,9 +197,14 @@ class Core {
   state: 'loading' | 'signedOut' | 'signedIn' = 'loading';
   connected = false;
   people: Record<string, Person> = {};
+  /** Each group's and community's photo value, for Avatar (see photos.ts). */
+  chatPhotos: Record<string, string> = {};
+  /** A one-to-one chat → the other person (me, for messaging myself): its photo is theirs. */
+  directWith: Record<string, string> = {};
   /** userId → how I saved them. People not here show as "~ Name". */
   contacts: Record<string, Contact> = {};
   prefs: Record<string, ChatPrefs> = {};
+  settings: AppSettings = DEFAULT_SETTINGS;
   starred: Record<string, true> = {};
   lists: ChatList[] = [];
   /** chatId → userId → when they started typing. */
@@ -164,6 +261,9 @@ class Core {
     this.contacts = (await this.storage.getValue<Record<string, Contact>>('app:contacts')) ?? {};
     this.ways = (await this.storage.getValue<Record<string, Ways>>('app:ways')) ?? {};
     this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
+    this.unmuteDue();
+    this.settings = { ...DEFAULT_SETTINGS, ...((await this.storage.getValue<Partial<AppSettings>>('app:settings')) ?? {}) };
+    startLock();
     this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
     this.lists = (await this.storage.getValue<ChatList[]>('app:lists')) ?? [];
     this.at('loading the encryption');
@@ -195,9 +295,20 @@ class Core {
       this.emit(`messages:${m.chatId}`);
       this.emit('chats');
       if (m.file) void maybeDownload(m);
+      // My message just went, in the chat that's open: its little sound.
+      if (m.author === this.myId && m.status === 'sent' && m.chatId === this.viewing && Date.now() - m.sentAt < 30_000) sentTone(`${m.chatId}:${m.id}`);
+      if (m.kind === 'event' && m.plan) void import('./plans').then((p) => p.notePlan(m)).catch(() => {});
     });
-    this.client.on('arrived', (m) => alertFor(m));
-    this.client.on('chat', () => {
+    this.client.on('arrived', (m) => {
+      // "Keep chats archived" off: someone writing brings the chat back to the list.
+      if (this.prefs[m.chatId]?.archived && !this.settings.keepArchived && m.kind !== 'system' && m.author !== this.myId) this.setPrefs(m.chatId, { archived: false });
+      alertFor(m);
+      if (m.chatId === this.viewing && m.kind !== 'system' && !m.deleted) receivedTone(`${m.chatId}:${m.author}:${m.id}`);
+    });
+    this.client.on('reacted', (e) => alertReaction(e));
+    this.client.on('notice', ({ chatId }) => this.emit(`notice:${chatId}`));
+    this.client.on('chat', (c) => {
+      this.notePhoto(c);
       this.emit('chats');
       // Someone new may have started a chat with me, or joined a group: get their name.
       this.namesSoon();
@@ -221,6 +332,23 @@ class Core {
     this.client.on('call', (e) => calls.onSignal(e));
   }
 
+  /** Keeps a group's or community's photo value where Avatar finds it. */
+  private notePhoto(c: Chat) {
+    // A one-to-one chat shows the other person's photo (or mine, messaging myself).
+    if (c.kind === 'direct') {
+      // (Not before its people are known: no one else in it would look like messaging myself.)
+      const other = c.members.length ? this.otherPerson(c) : null;
+      if (other && this.directWith[c.id] !== other) {
+        this.directWith = { ...this.directWith, [c.id]: other };
+        this.emit('photos');
+      }
+      return;
+    }
+    if ((c.photo ?? '') === (this.chatPhotos[c.id] ?? '')) return;
+    this.chatPhotos = { ...this.chatPhotos, [c.id]: c.photo ?? '' };
+    this.emit('photos');
+  }
+
   private clearTyping(chatId: string, userId: string) {
     const at = this.typing[chatId]?.[userId];
     if (at && Date.now() - at >= 5_500) {
@@ -233,6 +361,10 @@ class Core {
 
   private afterSignIn() {
     this.client.start();
+    void this.client
+      .chats()
+      .then((all) => all.forEach((c) => this.notePhoto(c)))
+      .catch(() => {});
     void startPush();
     if (!this.watchingApp) {
       this.watchingApp = true;
@@ -246,6 +378,8 @@ class Core {
       .then(() => this.loadPeople())
       .catch(() => {});
     void this.loadPeople();
+    void import('./scheduled').then((m) => (void m.watchPlans(), m.sendDue())).catch(() => {});
+    void import('./live').then((m) => m.resumeLive()).catch(() => {});
   }
 
   private watchingApp = false;
@@ -267,6 +401,9 @@ class Core {
     if (this.state !== 'signedIn') return;
     if (s === 'active') {
       this.client.start();
+      // Anything scheduled that should have gone while PakChat was away.
+      void import('./scheduled').then((m) => m.sendDue()).catch(() => {});
+      this.unmuteDue();
       return;
     }
     if (s !== 'background') return;
@@ -301,7 +438,7 @@ class Core {
   async onAlert(action: 'reply' | 'read' | 'mute', chatId: string, text: string) {
     await this.init();
     if (this.state !== 'signedIn') return;
-    if (action === 'mute') return this.setPrefs(chatId, { muted: true });
+    if (action === 'mute') return this.mute(chatId, 8 * HOUR);
     // Replying reads the chat too, as in WhatsApp. If the server can't be reached
     // the reply waits in the outbox and goes next time.
     if (action === 'reply' && text) await this.client.sendText(chatId, text);
@@ -414,6 +551,9 @@ class Core {
       this.people = {};
       this.contacts = {};
       this.prefs = {};
+      this.chatPhotos = {};
+      this.directWith = {};
+      this.settings = DEFAULT_SETTINGS;
       this.starred = {};
       this.lists = [];
       this.ways = {};
@@ -442,6 +582,9 @@ class Core {
   }
 
   async signOut() {
+    await import('./scheduled').then((m) => m.forgetPlans()).catch(() => {});
+    await import('./broadcasts').then((m) => m.forgetBroadcasts()).catch(() => {});
+    await import('./plans').then((m) => m.forgetPlansOfCalls()).catch(() => {});
     await this.client.signOut();
     this.state = 'signedOut';
     this.connected = false;
@@ -471,7 +614,7 @@ class Core {
   }
 
   /** Changes my name, about, or privacy. The server answers with the new me. */
-  async updateMe(change: { name?: string; about?: string; privacy?: { last_seen?: string; online?: string; read_receipts?: boolean } }) {
+  async updateMe(change: { name?: string; about?: string; photo?: string; privacy?: { last_seen?: string; online?: string; photo?: string; read_receipts?: boolean } }) {
     await this.saveMe(meFromWire(await this.call<Parameters<typeof meFromWire>[0]>('PATCH', '/me', change)));
   }
 
@@ -725,6 +868,44 @@ class Core {
     this.prefs = { ...this.prefs, [chatId]: next };
     void this.storage.setValue('app:prefs', this.prefs);
     this.emit('prefs');
+    if (change.muted) this.unmuteDue();
+  }
+
+  /** Mutes a chat for `ms` (8 hours, a week), or Always (null), like WhatsApp. */
+  mute(chatId: string, ms: number | null) {
+    this.setPrefs(chatId, { muted: true, mutedUntil: ms === null ? undefined : Date.now() + ms });
+  }
+
+  unmute(chatId: string) {
+    this.setPrefs(chatId, { muted: false, mutedUntil: undefined });
+  }
+
+  private unmuteTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Chats whose 8 hours or week is up unmute; and a timer waits for the next one. */
+  private unmuteDue() {
+    if (this.unmuteTimer) clearTimeout(this.unmuteTimer);
+    this.unmuteTimer = null;
+    const now = Date.now();
+    let next = Infinity;
+    for (const [id, p] of Object.entries(this.prefs)) {
+      if (!p.mutedUntil) continue;
+      if (p.mutedUntil <= now) this.unmute(id);
+      else next = Math.min(next, p.mutedUntil);
+    }
+    // Timers can't wait more than about 24 days; a week is fine.
+    if (next !== Infinity) this.unmuteTimer = setTimeout(() => this.unmuteDue(), Math.min(next - now + 500, 2 ** 31 - 1));
+  }
+
+  setSettings(change: Partial<AppSettings>) {
+    this.settings = { ...this.settings, ...change };
+    void this.storage.setValue('app:settings', this.settings);
+    this.emit('settings');
+  }
+
+  /** Is this chat locked (either way)? */
+  isLocked(chatId: string) {
+    return !!this.prefs[chatId]?.lock;
   }
 
   /** Adds a new list, or changes one (same id). Lists are only on this phone. */
@@ -795,15 +976,29 @@ class Core {
 
   private forgetting = new Set<string>();
 
-  /** The chat's name: the group's title, or the other person's name. */
+  /** The chat's name: the group's title, or the other person's name ("Ali (You)" messaging myself, like WhatsApp). */
   chatTitle(chat: Chat): string {
-    if (chat.kind === 'group') return chat.title ?? '';
+    if (chat.kind === 'group' || chat.kind === 'community') return chat.title ?? '';
+    if (this.isSelfChat(chat)) return `${this.me?.name ?? ''} (${words().youWord})`;
     const other = chat.members.find((m) => m.userId !== this.myId)?.userId ?? this.myId;
     return this.name(other) || '…';
   }
 
+  /** The photo for an Avatar: a person's (mine too), a group's or community's, or for a one-to-one chat the other person's. */
+  photoOf(id: string): string | null | undefined {
+    if (id === this.myId) return this.me?.photo || this.people[id]?.photo;
+    const direct = this.directWith[id];
+    if (direct) return this.photoOf(direct);
+    return this.people[id]?.photo ?? this.chatPhotos[id];
+  }
+
+  /** Messaging myself: notes, links and files to keep, on all my devices. */
+  isSelfChat(chat: Chat) {
+    return chat.kind === 'direct' && chat.members.length > 0 && chat.members.every((m) => m.userId === this.myId);
+  }
+
   otherPerson(chat: Chat): string | null {
-    if (chat.kind === 'group') return null;
+    if (chat.kind === 'group' || chat.kind === 'community') return null;
     return chat.members.find((m) => m.userId !== this.myId)?.userId ?? this.myId;
   }
 }

@@ -6,11 +6,12 @@
 //                         🗑 deletes, ⏸ pauses (and you can listen back,
 //                         tap the bars to jump, 🎤 to record more), ➤ sends.
 //   Tap the mic once    the same locked recording, without holding.
+//   ①                   (locked or paused) view once: they can play it one time.
 //
 // The mic button itself stays in place the whole time (it holds your finger),
 // and becomes the send button once locked. The recording is in core/voice.ts.
 import { useAudioPlayer, useAudioPlayerStatus, useAudioRecorder } from 'expo-audio';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { usePanGesture } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
@@ -42,6 +43,8 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
   const [mode, setModeState] = useState<VoiceMode>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [preview, setPreview] = useState<Recorded | null>(null);
+  // View once, for a locked recording (a held one sends as you let go).
+  const [once, setOnce] = useState(false);
   const allowed = useRef(false);
   const busy = useRef(false);
 
@@ -110,6 +113,7 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
     session.current = s;
     setElapsed(0);
     setPreview(null);
+    setOnce(false);
     setMode('holding');
     try {
       await s.record();
@@ -191,7 +195,7 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
     setMode('idle');
     setPreview(null);
     const v = await s.finish(1).catch(() => null);
-    if (v) onSend(v);
+    if (v) onSend(once ? { ...v, once: true } : v);
   }
 
   const pan = usePanGesture({
@@ -267,9 +271,9 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
       mode === 'holding' ? (
         <HoldStrip elapsed={elapsed} slideStyle={slideStyle} label={t.slideToCancel} />
       ) : mode === 'locked' ? (
-        <LockedStrip elapsed={elapsed} levels={session.current?.levels ?? []} onDelete={cancel} onPause={pauseIt} />
+        <LockedStrip elapsed={elapsed} levels={session.current?.levels ?? []} onDelete={cancel} onPause={pauseIt} once={<OnceToggle on={once} onChange={setOnce} />} />
       ) : mode === 'paused' ? (
-        <PausedStrip preview={preview} elapsed={elapsed} onDelete={cancel} onResume={resume} />
+        <PausedStrip preview={preview} elapsed={elapsed} onDelete={cancel} onResume={resume} once={<OnceToggle on={once} onChange={setOnce} />} />
       ) : null,
   };
 }
@@ -326,7 +330,7 @@ function LiveBars({ levels }: { levels: number[] }) {
   const { theme } = useLook();
   const recent = levels.slice(-28);
   return (
-    <View style={{ flex: 1, height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 2, overflow: 'hidden' }}>
+    <View style={{ flex: 1, minWidth: 0, height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 2, overflow: 'hidden' }}>
       {recent.map((l, i) => (
         <View key={levels.length - recent.length + i} style={{ width: 3, height: Math.max(3, Math.round((l / 255) * 26)), borderRadius: 2, backgroundColor: theme.acc }} />
       ))}
@@ -334,7 +338,44 @@ function LiveBars({ levels }: { levels: number[] }) {
   );
 }
 
-function LockedStrip({ elapsed, levels, onDelete, onPause }: { elapsed: number; levels: number[]; onDelete: () => void; onPause: () => void }) {
+/** ① View once: the round "1" that's filled in when on. */
+export function OnceToggle({ on, onChange, light }: { on: boolean; onChange: (on: boolean) => void; light?: boolean }) {
+  const t = useT();
+  const { theme } = useLook();
+  const ink = light ? '#FFFFFF' : theme.muted;
+  return (
+    <Pressy
+      onPress={() => {
+        tick();
+        toast(on ? t.viewOnceOff : t.viewOnceOn);
+        onChange(!on);
+      }}
+      label={t.viewOnce}
+      scale={0.88}
+      testID="view-once"
+    >
+      <View
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 15,
+          borderWidth: 1.6,
+          borderColor: on ? theme.acc : ink,
+          backgroundColor: on ? theme.acc : 'transparent',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginHorizontal: 4,
+        }}
+      >
+        <Txt size={14} weight="800" color={on ? '#FFFFFF' : ink}>
+          1
+        </Txt>
+      </View>
+    </Pressy>
+  );
+}
+
+function LockedStrip({ elapsed, levels, onDelete, onPause, once }: { elapsed: number; levels: number[]; onDelete: () => void; onPause: () => void; once: ReactNode }) {
   const t = useT();
   const { theme } = useLook();
   return (
@@ -345,21 +386,23 @@ function LockedStrip({ elapsed, levels, onDelete, onPause }: { elapsed: number; 
         {duration(elapsed)}
       </Txt>
       <LiveBars levels={levels} />
+      {once}
       <IconButton icon="pause" label={t.pause} onPress={onPause} color="#E5484D" testID="voice-pause" />
     </Animated.View>
   );
 }
 
-function PausedStrip({ preview, elapsed, onDelete, onResume }: { preview: Recorded | null; elapsed: number; onDelete: () => void; onResume: () => void }) {
+function PausedStrip({ preview, elapsed, onDelete, onResume, once }: { preview: Recorded | null; elapsed: number; onDelete: () => void; onResume: () => void; once: ReactNode }) {
   const t = useT();
   const { theme } = useLook();
   const player = useAudioPlayer(preview ? { uri: preview.uri } : null, { updateInterval: 100 });
   const status = useAudioPlayerStatus(player);
-  const [bars] = useState(() => barsOf(preview?.waveform, 30));
+  // The wave fills whatever room is left (less once ① is there), 5 px a bar.
+  const [width, setWidth] = useState(0);
+  const bars = useMemo(() => (width ? barsOf(preview?.waveform, Math.max(8, Math.floor((width + 2) / 5))) : []), [preview?.waveform, width]);
   const length = preview?.duration ?? elapsed;
   const at = Math.round((status.currentTime ?? 0) * 1000);
   const done = length ? Math.min(1, at / length) : 0;
-  const width = 30 * 5;
 
   useEffect(() => {
     if (status.didJustFinish) {
@@ -385,11 +428,11 @@ function PausedStrip({ preview, elapsed, onDelete, onResume }: { preview: Record
           <Icon name={status.playing ? 'pause' : 'play'} size={16} color={theme.accInk} />
         </View>
       </Pressy>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, minWidth: 0, overflow: 'hidden' }} onLayout={(e) => setWidth(Math.floor(e.nativeEvent.layout.width))}>
         <Pressable
-          onPress={(e) => void player.seekTo((Math.min(1, Math.max(0, e.nativeEvent.locationX / width)) * length) / 1000)}
+          onPress={(e) => void player.seekTo((Math.min(1, Math.max(0, e.nativeEvent.locationX / Math.max(1, width))) * length) / 1000)}
           accessibilityLabel={t.voiceNote}
-          style={{ width, height: 26, flexDirection: 'row', alignItems: 'center', gap: 2 }}
+          style={{ height: 26, flexDirection: 'row', alignItems: 'center', gap: 2 }}
         >
           {bars.map((b, i) => (
             <View key={i} style={{ width: 3, height: Math.max(3, Math.round(b * 24)), borderRadius: 2, backgroundColor: (i + 0.5) / bars.length <= done ? theme.acc : theme.muted, opacity: (i + 0.5) / bars.length <= done ? 1 : 0.55 }} />
@@ -399,6 +442,7 @@ function PausedStrip({ preview, elapsed, onDelete, onResume }: { preview: Record
           {duration(status.playing || at > 0 ? at : length)}
         </Txt>
       </View>
+      {once}
       <IconButton
         icon="mic"
         label={t.recordMore}

@@ -48,7 +48,9 @@ config :pakchat, :rate_limits,
   # Changing who sees my status, per person.
   status: {30, 60_000},
   # GIF searches, per person.
-  gifs: {60, 60_000}
+  gifs: {60, 60_000},
+  # Reporting a chat or someone, per person.
+  reports: {10, 3_600_000}
 
 # Websites allowed to talk to the server (the phone app doesn't need this).
 config :pakchat, :allowed_origins, [

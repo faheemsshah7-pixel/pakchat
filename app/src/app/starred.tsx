@@ -28,6 +28,8 @@ export default function Starred() {
       for (const key of Object.keys(starred)) {
         const [chatId, author, ...rest] = key.split('/');
         if (only && chatId !== only) continue;
+        // A locked chat's starred messages show only inside it.
+        if (!only && core.prefs[chatId]?.lock) continue;
         const m = await core.storage.getMessage(chatId, author, rest.join('/'));
         if (m && !m.deleted) out.push(m);
       }

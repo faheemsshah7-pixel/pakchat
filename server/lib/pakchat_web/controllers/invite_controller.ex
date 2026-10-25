@@ -15,7 +15,10 @@ defmodule PakchatWeb.InviteController do
         title: chat.title,
         photo: chat.photo,
         description: chat.description,
-        members: length(chat.members)
+        members: length(chat.members),
+        kind: chat.kind,
+        call_link: chat.call_link,
+        approval: chat.join_approval
       })
     end
   end
@@ -23,9 +26,13 @@ defmodule PakchatWeb.InviteController do
   def join(conn, %{"code" => code}) do
     me = conn.assigns.user
 
-    with :ok <- RateLimit.hit(:invites, me.id),
-         {:ok, chat} <- Chats.join_by_invite(me, code) do
-      json(conn, Wire.chat(chat, me.id))
+    with :ok <- RateLimit.hit(:invites, me.id) do
+      case Chats.join_by_invite(me, code) do
+        # Its admins approve who joins: they've been asked.
+        {:ok, :requested} -> conn |> put_status(202) |> json(%{requested: true})
+        {:ok, chat} -> json(conn, Wire.chat(chat, me.id))
+        error -> error
+      end
     end
   end
 end

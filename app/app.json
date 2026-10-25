@@ -22,7 +22,6 @@
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "softwareKeyboardLayoutMode": "resize"
@@ -34,6 +33,8 @@
       "./plugins/withSignal",
       "./plugins/withScreenSlide",
       "./plugins/withCallPip",
+      "./plugins/withCropDone",
+      "./plugins/withScreenShare",
       "expo-router",
       [
         "expo-splash-screen",
@@ -142,7 +143,33 @@
           "defaultChannel": "messages"
         }
       ],
-      "expo-document-picker"
+      "expo-document-picker",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "PakChat lets you take photos, videos and round videos to send.",
+          "microphonePermission": "PakChat records sound with your videos and round videos.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "PakChat sends your location only when you choose to share it.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "granularPermissions": [
+            "photo",
+            "video"
+          ],
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
     ],
     "extra": {
       "googleWebClientId": "459861530466-6clhf90r8bfd2urbikjsqicvkcndbel9.apps.googleusercontent.com",

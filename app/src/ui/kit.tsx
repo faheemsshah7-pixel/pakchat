@@ -11,6 +11,7 @@
 //   Toggle       an on/off switch
 //   TopBar       the glass bar at the top of a screen
 //   SettingRow   one row in Settings
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, type ReactNode } from 'react';
 import {
@@ -29,6 +30,9 @@ import Animated, { interpolate, interpolateColor, useAnimatedKeyboard, useAnimat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
+import { core } from '../core/core';
+import { useCore } from '../core/hooks';
+import { photoUri } from '../core/photos';
 import { useT } from '../i18n';
 import { useLook, useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
@@ -137,12 +141,14 @@ export function useKeyboardLift(base = 24) {
 }
 
 /** Every screen sits in one of these. */
-export function Screen({ children, style, bottom = true }: { children: ReactNode; style?: StyleProp<ViewStyle>; bottom?: boolean }) {
+export function Screen({ children, style, bottom = true, backdrop }: { children: ReactNode; style?: StyleProp<ViewStyle>; bottom?: boolean; backdrop?: ReactNode }) {
   const insets = useSafeAreaInsets();
   const { rtl } = useLook();
   return (
     <View style={[{ flex: 1, direction: rtl ? 'rtl' : 'ltr' }]}>
       <SkyBackground />
+      {/* A chat's wallpaper fills the whole screen, behind its header and the typing bar too. */}
+      {backdrop}
       <View style={[{ flex: 1, paddingTop: insets.top, paddingBottom: bottom ? insets.bottom : 0 }, style]}>{children}</View>
     </View>
   );
@@ -233,6 +239,7 @@ export function Pressy({
 export function IconButton({
   icon,
   onPress,
+  onLongPress,
   label,
   look = 'plain',
   size = 44,
@@ -244,6 +251,7 @@ export function IconButton({
 }: {
   icon: IconName;
   onPress?: () => void;
+  onLongPress?: () => void;
   label: string;
   /** glass: frosted. soft: tinted with the accent. plain: just the icon. onAccent: on a coloured bar. */
   look?: 'glass' | 'soft' | 'plain' | 'onAccent';
@@ -260,6 +268,7 @@ export function IconButton({
   return (
     <Pressy
       onPress={onPress}
+      onLongPress={onLongPress}
       label={label}
       testID={testID}
       disabled={disabled}
@@ -372,27 +381,36 @@ export function initials(name: string) {
   return two ? ([...words[0]][0] + [...words[1]][0]).toUpperCase() : [...words[0]][0].toUpperCase();
 }
 
-export function Avatar({ id, name, size = 50, online, group }: { id: string; name: string; size?: number; online?: boolean; group?: boolean }) {
+/**
+ * Someone's (or a group's) picture: their photo once it's on the phone, else
+ * their letters on a colour. `photo`: a value to show instead of theirs.
+ */
+export function Avatar({ id, name, size = 50, online, group, photo }: { id: string; name: string; size?: number; online?: boolean; group?: boolean; photo?: string | null }) {
   const theme = useTheme();
+  const uri = useCore(['photos', 'people', 'auth'], () => photoUri(photo !== undefined ? photo : core.photoOf(id)));
   const tints = theme.dark ? TINTS_DARK : TINTS_SKY;
   const [a, b, ink] = tints[hash(id) % tints.length];
   const dot = Math.round(size * 0.3);
   return (
     <View style={{ width: size, height: size }}>
-      <LinearGradient
-        colors={[a, b]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{ width: size, height: size, borderRadius: size * 0.34, alignItems: 'center', justifyContent: 'center' }}
-      >
-        {group && !name ? (
-          <Icon name="group" size={size * 0.5} color={ink} />
-        ) : (
-          <Txt size={Math.round(size * 0.34)} weight="700" color={ink} align="center" style={hasUrdu(name) ? { lineHeight: size } : undefined}>
-            {initials(name || '?')}
-          </Txt>
-        )}
-      </LinearGradient>
+      {uri ? (
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size * 0.34, backgroundColor: a }} contentFit="cover" transition={150} />
+      ) : (
+        <LinearGradient
+          colors={[a, b]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{ width: size, height: size, borderRadius: size * 0.34, alignItems: 'center', justifyContent: 'center' }}
+        >
+          {group && !name ? (
+            <Icon name="group" size={size * 0.5} color={ink} />
+          ) : (
+            <Txt size={Math.round(size * 0.34)} weight="700" color={ink} align="center" style={hasUrdu(name) ? { lineHeight: size } : undefined}>
+              {initials(name || '?')}
+            </Txt>
+          )}
+        </LinearGradient>
+      )}
       {online && (
         <Animated.View
           entering={pop()}

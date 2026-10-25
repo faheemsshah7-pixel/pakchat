@@ -1,11 +1,15 @@
 // settings/storage.tsx: which files download by themselves, on mobile data and on
-// Wi-Fi (like WhatsApp's "Media auto-download"). Others wait for a tap.
+// Wi-Fi (like WhatsApp's "Media auto-download"). Others wait for a tap. And
+// "Use less data for calls", as in WhatsApp's Storage and data.
 import type { FileKind } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
+import { calls } from '../../core/calls';
+import { core } from '../../core/core';
 import { autoDownload, loadLimits, setAutoDownload, type AutoDownload } from '../../core/files';
+import { useSettings } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
@@ -16,6 +20,7 @@ export default function Storage() {
   const { theme } = useLook();
   const [auto, setAuto] = useState<AutoDownload>(autoDownload);
   const [limit, setLimit] = useState<number | null>(null);
+  const settings = useSettings();
 
   useEffect(() => {
     void loadLimits().then(setLimit);
@@ -72,6 +77,26 @@ export default function Storage() {
             </Glass>
           </View>
         ))}
+        <Section title={t.calls} />
+        <Glass>
+          <SettingRow
+            icon="calls"
+            title={t.lessDataCalls}
+            sub={t.lessDataCallsSub}
+            chevron={false}
+            right={
+              <Toggle
+                on={!!settings.lessDataCalls}
+                onChange={(on) => {
+                  core.setSettings({ lessDataCalls: on });
+                  calls.dataSaverChanged();
+                }}
+                label={t.lessDataCalls}
+                testID="less-data-calls"
+              />
+            }
+          />
+        </Glass>
       </ScrollView>
     </Screen>
   );

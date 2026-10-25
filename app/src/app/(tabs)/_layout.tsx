@@ -1,4 +1,5 @@
-// (tabs)/_layout.tsx: the four tabs along the bottom (Chats, Status, Calls, You).
+// (tabs)/_layout.tsx: the four tabs along the bottom (Chats, Status, Calls,
+// Communities). Settings and you are in the chat list's ⋮ menu, as on WhatsApp.
 //
 // The bar is our own: a soft pill sits behind the open tab and springs across
 // when you pick another one (the other way in Urdu).
@@ -8,18 +9,18 @@ import { StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChatList } from '../../core/hooks';
+import { useChatList, useMissedCalls } from '../../core/hooks';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon, type IconName } from '../../ui/icons';
 import { Pressy, Txt } from '../../ui/kit';
 import { smooth } from '../../ui/motion';
 
-const TABS: { name: string; icon: IconName; label: 'chats' | 'status' | 'calls' | 'you' }[] = [
+const TABS: { name: string; icon: IconName; label: 'chats' | 'status' | 'calls' | 'communities' }[] = [
   { name: 'index', icon: 'chat', label: 'chats' },
   { name: 'status', icon: 'status', label: 'status' },
   { name: 'calls', icon: 'calls', label: 'calls' },
-  { name: 'you', icon: 'you', label: 'you' },
+  { name: 'communities', icon: 'community', label: 'communities' },
 ];
 
 function TabBar({ state, navigateToTab }: BottomTabBarProps) {
@@ -31,6 +32,7 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
   const x = useSharedValue(0);
   const rows = useChatList();
   const unreadChats = (rows ?? []).filter((r) => (r.chat.unread > 0 || r.prefs.markedUnread) && !r.prefs.archived).length;
+  const missed = useMissedCalls();
 
   useEffect(() => {
     x.value = withSpring(state.index * tabW, smooth);
@@ -61,6 +63,7 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
       {TABS.map((tab, i) => {
         const on = state.index === i;
         const color = on ? theme.accInk : theme.muted;
+        const badge = tab.name === 'index' ? unreadChats : tab.name === 'calls' ? missed : 0;
         return (
           <View key={tab.name} style={{ flex: 1 }}>
             <Pressy
@@ -76,7 +79,7 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
               <View style={{ alignItems: 'center', gap: 3 }}>
                 <View style={{ width: 58, height: 32, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name={tab.icon} size={22} color={color} stroke={on ? 2 : 1.8} />
-                  {tab.name === 'index' && unreadChats > 0 && (
+                  {badge > 0 && (
                     <View
                       style={{
                         position: 'absolute',
@@ -91,8 +94,8 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
                         justifyContent: 'center',
                       }}
                     >
-                      <Txt size={10} weight="700" color="#FFFFFF" align="center">
-                        {unreadChats}
+                      <Txt size={10} weight="700" color="#FFFFFF" align="center" testID={`tab-badge-${tab.name}`}>
+                        {badge}
                       </Txt>
                     </View>
                   )}

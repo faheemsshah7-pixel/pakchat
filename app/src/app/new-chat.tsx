@@ -9,7 +9,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { core, isOffline } from '../core/core';
 import { defaultTimer } from '../core/timer';
 import { findFromPhoneBook } from '../core/phoneBook';
-import { usePeople } from '../core/hooks';
+import { usePeople, usePerson } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
@@ -26,6 +26,8 @@ export default function NewChat() {
   const [found, setFound] = useState<{ id: string; name: string } | null>(null);
 
   const [syncing, setSyncing] = useState(false);
+  const myName = usePerson(core.myId)?.name ?? '';
+  const showMe = !query.trim() || myName.toLowerCase().includes(query.trim().toLowerCase());
 
   // My contacts first (by the names I gave them), then others I chat with ("~ Name").
   const known = useMemo(() => {
@@ -57,7 +59,6 @@ export default function NewChat() {
     try {
       const p = await core.lookup(query);
       if (!p) setNote(t.notOnPakChat);
-      else if (p.id === core.myId) setNote(t.ownAccount);
       else setFound(p);
     } catch (err) {
       setNote(isOffline(err) ? t.offline : t.couldNot);
@@ -133,13 +134,34 @@ export default function NewChat() {
         <SettingRow icon="contacts" title={syncing ? t.connecting : t.findContacts} sub={t.findContactsNote} onPress={syncing ? undefined : phoneBook} testID="find-contacts" />
       </Glass>
 
-      {known.length > 0 && <Section title={t.contacts} />}
+      {(known.length > 0 || showMe) && <Section title={t.contacts} />}
       <FlatList
         data={known}
         keyExtractor={(p) => p.id}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ marginHorizontal: 12, paddingBottom: 30 }}
         ItemSeparatorComponent={Divider}
+        ListHeaderComponent={
+          showMe ? (
+            // Messaging myself first, like WhatsApp: notes, links and files to keep.
+            <>
+              <Pressy onPress={() => open(core.myId)} label={t.messageYourself} scale={0.98} testID="message-yourself">
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
+                  <Avatar id={core.myId} name={myName} size={44} />
+                  <View style={{ flex: 1 }}>
+                    <Txt size={15.5} weight="600">
+                      {`${myName} (${t.youWord})`}
+                    </Txt>
+                    <Txt size={13} color={theme.muted} lines={1}>
+                      {t.messageYourself}
+                    </Txt>
+                  </View>
+                </View>
+              </Pressy>
+              {known.length > 0 && <Divider />}
+            </>
+          ) : undefined
+        }
         renderItem={({ item, index }) => (
           <Animated.View entering={rise(Math.min(index, 10) * 25)}>
             <Pressy onPress={() => open(item.id)} label={item.name} scale={0.98} testID={`person-${item.name}`}>

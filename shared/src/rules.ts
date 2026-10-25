@@ -23,7 +23,7 @@ export function maySend(chat: Chat, userId: string, t: string) {
   // A status: only its owner posts; the people watching can like it.
   if (chat.kind === 'status') return userId === statusOwner(chat) || t === 'react';
   if (chat.kind !== 'group' || !chat.onlyAdminsSend) return true;
-  return roleOf(chat, userId) === 'admin' || t === 'react' || t === 'vote' || t === 'call';
+  return roleOf(chat, userId) === 'admin' || t === 'react' || t === 'vote' || t === 'call' || t === 'opened';
 }
 
 /** Whose status this is (the status chat's only admin), or null for other chats. */
@@ -48,6 +48,11 @@ export function changeAllowed(chat: Chat, m: Message, change: Change, from: stri
       return m.kind === 'poll' && !m.deleted && !!m.poll && change.options.every((o) => o < m.poll!.options.length) && (m.poll.multi || change.options.length <= 1);
     case 'pin':
       return !m.deleted;
+    case 'opened':
+      // Only a view once message, and only by someone who got it (or my own other device).
+      return !m.deleted && !!m.file?.once && m.author !== from;
+    case 'live':
+      return !m.deleted && m.kind === 'location' && m.author === from && !!m.location?.live;
     default:
       return false;
   }
