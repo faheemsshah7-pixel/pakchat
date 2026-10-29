@@ -21,7 +21,7 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Linking, Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
-import Animated from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -35,10 +35,10 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon, type IconName } from '../icons';
 import { Pressy, Txt } from '../kit';
-import { thud, tick } from '../motion';
+import { fadeIn, fadeOut, quick, thud, tick } from '../motion';
 import { pickedOf } from './Gallery';
 import type { RoundVideo } from './RoundRecorder';
-import { toast } from '../overlays';
+import { toast, whenOpened } from '../overlays';
 
 const MAX_VIDEO_S = 120;
 const MAX_NOTE_S = 60;
@@ -48,7 +48,7 @@ const RED = '#E5484D';
 
 type Kind = 'video' | 'photo' | 'note';
 
-export function CameraSheet({
+export const CameraSheet = whenOpened(function CameraSheet({
   visible,
   onClose,
   onTaken,
@@ -82,14 +82,15 @@ export function CameraSheet({
   }, [visible]);
 
   return (
-    <Modal visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
+    // It fades in over the chat, like WhatsApp's camera.
+    <Modal visible={visible} animationType="fade" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       {/* Swipes inside a Modal need their own gesture root on Android. */}
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
         {visible && ok && <Camera onClose={onClose} onTaken={onTaken} onGallery={onGallery} onRound={onRound} />}
       </GestureHandlerRootView>
     </Modal>
   );
-}
+});
 
 function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void; onTaken: (p: Picked[]) => void; onGallery: () => void; onRound?: (v: RoundVideo) => void }) {
   const t = useT();
@@ -243,8 +244,9 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
     void stopFilm();
   }
 
-  // White for a photo; red for video; a small red rounded square while filming.
+  // White for a photo; red for video; while filming it shrinks quickly to a small red rounded square, like WhatsApp's.
   const dotColor = kind === 'photo' && !filming ? '#FFFFFF' : RED;
+  const dot = useAnimatedStyle(() => ({ transform: [{ scale: withTiming(filming ? 0.5 : 1, quick) }], borderRadius: withTiming(filming ? 8 : 29, quick) }), [filming]);
 
   const circle = Math.min(width - 56, 300);
   const camera = (
@@ -286,6 +288,8 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
           <Round icon="close" size={42} label={t.close} onPress={onClose} testID="camera-close" />
           {filming && (
             <Animated.View
+              entering={fadeIn}
+              exiting={fadeOut}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.45)' }}
             >
               <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: RED }} />
@@ -318,7 +322,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
               testID="shutter"
             >
               <View style={{ width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: filming ? 29 : 58, height: filming ? 29 : 58, borderRadius: filming ? 8 : 29, backgroundColor: dotColor }} />
+                <Animated.View style={[{ width: 58, height: 58, backgroundColor: dotColor }, dot]} />
               </View>
             </Pressable>
             <View style={{ opacity: filming ? 0 : 1 }} pointerEvents={filming ? 'none' : 'auto'}>
@@ -349,7 +353,7 @@ function Round({ icon, size, label, onPress, testID }: { icon: IconName; size: n
 
 const MODE_W = 116;
 
-/** The modes in a row, the chosen one in the middle in a soft pill (it moves there at once). */
+/** The modes in a row, the chosen one in the middle in a soft pill; it slides there quickly, like WhatsApp's. */
 function Modes({ kinds, kind, onPick }: { kinds: Kind[]; kind: Kind; onPick: (k: Kind) => void }) {
   const t = useT();
   const { rtl } = useLook();
@@ -357,9 +361,10 @@ function Modes({ kinds, kind, onPick }: { kinds: Kind[]; kind: Kind; onPick: (k:
   // The row is centred; this moves it so the chosen one sits in the middle.
   const middle = (kinds.length - 1) / 2;
   const shift = (middle - kinds.indexOf(kind)) * MODE_W * (rtl ? -1 : 1);
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: withTiming(shift, { duration: 200, easing: quick.easing }) }] }), [shift]);
   return (
     <View style={{ alignItems: 'center' }}>
-      <View style={{ flexDirection: 'row', transform: [{ translateX: shift }] }}>
+      <Animated.View style={[{ flexDirection: 'row' }, slide]}>
         {kinds.map((k) => (
           <Pressable key={k} onPress={() => onPick(k)} accessibilityRole="button" accessibilityLabel={label[k]} accessibilityState={{ selected: k === kind }} testID={`camera-mode-${k}`}>
             <View style={{ width: MODE_W, alignItems: 'center' }}>
@@ -371,7 +376,7 @@ function Modes({ kinds, kind, onPick }: { kinds: Kind[]; kind: Kind; onPick: (k:
             </View>
           </Pressable>
         ))}
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -454,7 +459,7 @@ function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGaller
   return (
     <View>
       {picked.length > 0 && (
-        <Animated.View style={{ alignSelf: 'flex-end', marginEnd: 14, marginBottom: 10 }}>
+        <Animated.View entering={fadeIn} exiting={fadeOut} style={{ alignSelf: 'flex-end', marginEnd: 14, marginBottom: 10 }}>
           <Pressy onPress={send} label={t.send} scale={0.92} testID="camera-recent-send">
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, height: 48, borderRadius: 24, backgroundColor: theme.acc }}>
               <Icon name="send" size={19} color="#FFFFFF" flip />

@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { BackHandler, FlatList, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useAllTyping, useChatList, useSettings, useStable, type ChatRow as Row } from '../core/hooks';
@@ -18,7 +19,7 @@ import { PhotoPeek } from '../ui/PhotoPeek';
 import { ChatRow } from '../ui/ChatRow';
 import { Empty, IconButton, Pressy, Screen, SettingRow, Toggle, TopBar, Txt } from '../ui/kit';
 import { MenuItem, Popup, Sheet, toast } from '../ui/overlays';
-import { tick } from '../ui/motion';
+import { fadeIn, fadeOut, tick } from '../ui/motion';
 
 export default function Archived() {
   const t = useT();
@@ -70,7 +71,7 @@ export default function Archived() {
   }
 
   const header = selecting ? (
-    <View key="picking" style={{ marginHorizontal: 10, marginTop: 10 }}>
+    <Animated.View key="picking" entering={fadeIn} exiting={fadeOut} style={{ marginHorizontal: 10, marginTop: 10 }}>
       <LinearGradient
         colors={theme.grad}
         start={{ x: 0, y: 0 }}
@@ -88,7 +89,7 @@ export default function Archived() {
         <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setChatAction('delete')} />
         <IconButton icon="more" label={t.moreOptions} look="onAccent" onPress={() => setPickMenu(true)} />
       </LinearGradient>
-    </View>
+    </Animated.View>
   ) : (
     <TopBar key="title" title={t.archived} onBack={() => router.back()} right={<IconButton icon="more" label={t.moreOptions} onPress={() => setMenu(true)} testID="archived-menu" />} />
   );

@@ -5,6 +5,7 @@
 // picked): a new message in one chat doesn't redraw every row in the list.
 import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { plainText } from '../core/richText';
@@ -14,6 +15,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { listTime, preview } from './format';
 import { Icon } from './icons';
 import { Avatar, Pressy, Txt } from './kit';
+import { fadeIn, fadeOut, popIn, popOut } from './motion';
 
 type Props = {
   row: Row;
@@ -91,13 +93,16 @@ function ChatRowView({
                 backgroundColor: theme.dark ? theme.bg : '#FFFFFF',
               }}
             >
-              {selected && <View style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }]} />}
+              {/* Picked: the row tints and a tick pops onto the photo, like WhatsApp's. */}
+              {selected && <Animated.View entering={fadeIn} exiting={fadeOut} style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }]} />}
               <View>
                 <Pressy onPress={onAvatar && (() => onAvatar(row))} disabled={!onAvatar || selecting} label={t.profilePhoto} scale={0.92} testID={`avatar-${title}`}>
                   <Avatar id={chat.id} name={title} size={50} online={online} group={chat.kind === 'group'} />
                 </Pressy>
                 {selected && (
-                  <View
+                  <Animated.View
+                    entering={popIn}
+                    exiting={popOut}
                     style={{
                       position: 'absolute',
                       end: -3,
@@ -113,7 +118,7 @@ function ChatRowView({
                     }}
                   >
                     <Icon name="check" size={13} color="#FFFFFF" stroke={3} />
-                  </View>
+                  </Animated.View>
                 )}
               </View>
               <View style={{ flex: 1, gap: 3 }}>

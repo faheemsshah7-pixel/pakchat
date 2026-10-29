@@ -6,7 +6,8 @@
 // emoji), the words, 📎 for the attach menu, and 📷 (tap: the camera; hold: a
 // round video). The 📷 hides while you type, as on WhatsApp. The round button
 // beside the box is a microphone while the box is empty and turns into "send"
-// (with a little spin) as soon as you type; hold "send" to schedule the message.
+// as soon as you type (the mic shrinks away as the arrow grows in, like
+// WhatsApp's); hold "send" to schedule the message.
 //
 // A web address in the words gets a preview card (links.ts), which goes with
 // the message unless you close it. Your words are kept as a draft if you leave,
@@ -17,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, useRef, useState } from 'react';
 import { Keyboard, TextInput, View, type TextInputInstance } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { firstUrl, previewOf } from '../../core/links';
@@ -27,7 +28,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { bodyLine } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
-import { thud } from '../motion';
+import { fadeIn, fadeOut, quick, riseIn, thud } from '../motion';
 import { ExtrasPanel } from './ExtrasPanel';
 import { useRoundRecorder, type RoundVideo } from './RoundRecorder';
 import { useVoiceRecorder } from './VoiceRecorder';
@@ -194,14 +195,21 @@ export const Composer = memo(function Composer({
     setMentions((old) => [...new Set([...old, p.id])]);
   }
 
-  // The mic turns into "send" at once when there's something to send (no animation).
+  // The mic turns into "send" when there's something to send: it shrinks away as the arrow grows in, like WhatsApp's.
   const hasText = text.trim().length > 0;
   const v = useSharedValue(hasText ? 1 : 0);
   useEffect(() => {
-    v.value = hasText ? 1 : 0;
+    v.set(withTiming(hasText ? 1 : 0, quick));
   }, [hasText, v]);
-  const micStyle = useAnimatedStyle(() => ({ opacity: 1 - v.value }));
-  const sendStyle = useAnimatedStyle(() => ({ opacity: v.value }));
+  // The 📷 slides out of the box as you type, and 📎 moves over into its place, like WhatsApp's.
+  const showCam = !hasText && !editing;
+  const cam = useSharedValue(showCam ? 1 : 0);
+  useEffect(() => {
+    cam.set(withTiming(showCam ? 1 : 0, quick));
+  }, [showCam, cam]);
+  const camStyle = useAnimatedStyle(() => ({ width: cam.value * 42, opacity: cam.value, overflow: 'hidden' }));
+  const micStyle = useAnimatedStyle(() => ({ opacity: 1 - v.value, transform: [{ scale: interpolate(v.value, [0, 1], [1, 0.5]) }] }));
+  const sendStyle = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ scale: interpolate(v.value, [0, 1], [0.5, 1]) }] }));
 
   // Voice notes: the mic button records (hold, slide, lock, or tap).
   const voice = useVoiceRecorder({ enabled: !hasText && !editing, onSend: onVoice });
@@ -215,124 +223,125 @@ export const Composer = memo(function Composer({
 
   return (
     // No layout animation on this outer view: it moves with the keyboard every frame,
-    // and an animation here lagged behind and bounced. The parts inside fade in on their own.
-    <View>
-      {round.overlay}
+    // and an animation here lagged behind and bounced. The parts inside fade in on their
+    // own, but only when they come later, not as the chat opens (skipEntering).
+    <LayoutAnimationConfig skipEntering>
+      <View>
+        {round.overlay}
 
-      {suggestions.length > 0 && (
-        <View>
-          <Glass strong style={{ marginHorizontal: 10, marginBottom: 6, paddingVertical: 4, borderRadius: 18 }}>
-            {suggestions.map((p) => (
-              <Pressy key={p.id} onPress={() => mention(p)} label={p.name} scale={0.98}>
-                <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-                  <Txt size={15} weight="600" color={theme.accInk}>
-                    @{p.name}
+        {suggestions.length > 0 && (
+          <Animated.View entering={fadeIn} exiting={fadeOut}>
+            <Glass strong style={{ marginHorizontal: 10, marginBottom: 6, paddingVertical: 4, borderRadius: 18 }}>
+              {suggestions.map((p) => (
+                <Pressy key={p.id} onPress={() => mention(p)} label={p.name} scale={0.98}>
+                  <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
+                    <Txt size={15} weight="600" color={theme.accInk}>
+                      @{p.name}
+                    </Txt>
+                  </View>
+                </Pressy>
+              ))}
+            </Glass>
+          </Animated.View>
+        )}
+
+        {voice.lockHint}
+
+        {panel && !recording && (
+          <ExtrasPanel
+            onEmoji={(e) => changed(text + e)}
+            onGif={(g) => {
+              setPanel(false);
+              onGif(g);
+            }}
+            onSticker={(from) => {
+              setPanel(false);
+              onSticker(from);
+            }}
+          />
+        )}
+
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginHorizontal: 10, marginTop: 10, marginBottom: 10 }}>
+          <Glass style={{ flex: 1, padding: 4, borderRadius: 24 }}>
+            {banner && !recording && (
+              <Animated.View entering={riseIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }}>
+                <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
+                  <Txt size={13} weight="700" color={theme.accInk}>
+                    {editing ? t.editing : fill(t.replyingTo, { name: banner.author === core.myId ? t.youWord : core.name(banner.author) || '…' })}
+                  </Txt>
+                  <Txt size={13} color={theme.muted} lines={1}>
+                    {bodyLine(banner, t)}
                   </Txt>
                 </View>
-              </Pressy>
-            ))}
-          </Glass>
-        </View>
-      )}
-
-      {voice.lockHint}
-
-      {panel && !recording && (
-        <ExtrasPanel
-          onEmoji={(e) => changed(text + e)}
-          onGif={(g) => {
-            setPanel(false);
-            onGif(g);
-          }}
-          onSticker={(from) => {
-            setPanel(false);
-            onSticker(from);
-          }}
-        />
-      )}
-
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginHorizontal: 10, marginTop: 10, marginBottom: 10 }}>
-        <Glass style={{ flex: 1, padding: 4, borderRadius: 24 }}>
-          {banner && !recording && (
-            <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }}>
-              <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
-                <Txt size={13} weight="700" color={theme.accInk}>
-                  {editing ? t.editing : fill(t.replyingTo, { name: banner.author === core.myId ? t.youWord : core.name(banner.author) || '…' })}
-                </Txt>
-                <Txt size={13} color={theme.muted} lines={1}>
-                  {bodyLine(banner, t)}
-                </Txt>
-              </View>
-              <IconButton
-                icon="close"
-                label={t.cancel}
-                size={36}
-                iconSize={18}
-                onPress={() => {
-                  if (editing) setText('');
-                  onCancel();
-                }}
-                testID="cancel-reply"
-              />
-            </Animated.View>
-          )}
-          {privately && !recording && (
-            <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }} testID="private-reply">
-              <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
-                <Txt size={13} weight="700" color={theme.accInk}>
-                  {fill(t.replyingPrivately, { name: core.name(privately.author) || '…' })}
-                </Txt>
-                <Txt size={13} color={theme.muted} lines={1}>
-                  {privately.text ?? t.photoLabel}
-                </Txt>
-              </View>
-              <IconButton icon="close" label={t.cancel} size={36} iconSize={18} onPress={onCancel} testID="cancel-private-reply" />
-            </Animated.View>
-          )}
-          {card && !recording && <LinkCard card={card} onClose={() => setClosed(card.url)} />}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-            {recording ? (
-              voice.strip
-            ) : (
-              <>
                 <IconButton
-                  icon={panel ? 'keyboard' : 'smile'}
-                  label={panel ? t.message : t.stickersEmoji}
-                  size={42}
-                  iconSize={22}
+                  icon="close"
+                  label={t.cancel}
+                  size={36}
+                  iconSize={18}
                   onPress={() => {
-                    if (panel) {
-                      setPanel(false);
-                      input.current?.focus();
-                    } else {
-                      Keyboard.dismiss();
-                      setPanel(true);
-                    }
+                    if (editing) setText('');
+                    onCancel();
                   }}
-                  color={panel ? theme.acc : theme.muted}
-                  testID="stickers"
+                  testID="cancel-reply"
                 />
-                <TextInput
-                  ref={input}
-                  testID="composer"
-                  value={text}
-                  onChangeText={changed}
-                  // The keyboard and the sticker panel take turns, as on WhatsApp.
-                  onFocus={() => setPanel(false)}
-                  placeholder={t.message}
-                  placeholderTextColor={theme.muted}
-                  selectionColor={theme.acc}
-                  cursorColor={theme.acc}
-                  multiline
-                  maxLength={4000}
-                  style={[
-                    fontStyle(text || null, lang, 16, '400'),
-                    { flex: 1, color: theme.text, maxHeight: 132, minHeight: 42, paddingVertical: 9, paddingHorizontal: 2, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center' },
-                  ]}
-                />
-                <IconButton icon="attach" label={t.attachFile} size={42} iconSize={21} color={theme.muted} onPress={() => (Keyboard.dismiss(), setPanel(false), onAttach())} testID="attach" />
-                {!hasText && !editing && (
-                  <View>
+              </Animated.View>
+            )}
+            {privately && !recording && (
+              <Animated.View entering={riseIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }} testID="private-reply">
+                <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
+                  <Txt size={13} weight="700" color={theme.accInk}>
+                    {fill(t.replyingPrivately, { name: core.name(privately.author) || '…' })}
+                  </Txt>
+                  <Txt size={13} color={theme.muted} lines={1}>
+                    {privately.text ?? t.photoLabel}
+                  </Txt>
+                </View>
+                <IconButton icon="close" label={t.cancel} size={36} iconSize={18} onPress={onCancel} testID="cancel-private-reply" />
+              </Animated.View>
+            )}
+            {card && !recording && <LinkCard card={card} onClose={() => setClosed(card.url)} />}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+              {recording ? (
+                voice.strip
+              ) : (
+                <>
+                  <IconButton
+                    icon={panel ? 'keyboard' : 'smile'}
+                    label={panel ? t.message : t.stickersEmoji}
+                    size={42}
+                    iconSize={22}
+                    onPress={() => {
+                      if (panel) {
+                        setPanel(false);
+                        input.current?.focus();
+                      } else {
+                        Keyboard.dismiss();
+                        setPanel(true);
+                      }
+                    }}
+                    color={panel ? theme.acc : theme.muted}
+                    testID="stickers"
+                  />
+                  <TextInput
+                    ref={input}
+                    testID="composer"
+                    value={text}
+                    onChangeText={changed}
+                    // The keyboard and the sticker panel take turns, as on WhatsApp.
+                    onFocus={() => setPanel(false)}
+                    placeholder={t.message}
+                    placeholderTextColor={theme.muted}
+                    selectionColor={theme.acc}
+                    cursorColor={theme.acc}
+                    multiline
+                    maxLength={4000}
+                    style={[
+                      fontStyle(text || null, lang, 16, '400'),
+                      { flex: 1, color: theme.text, maxHeight: 132, minHeight: 42, paddingVertical: 9, paddingHorizontal: 2, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center' },
+                    ]}
+                  />
+                  <IconButton icon="attach" label={t.attachFile} size={42} iconSize={21} color={theme.muted} onPress={() => (Keyboard.dismiss(), setPanel(false), onAttach())} testID="attach" />
+                  <Animated.View style={camStyle} pointerEvents={showCam ? 'auto' : 'none'} importantForAccessibility={showCam ? 'auto' : 'no-hide-descendants'}>
                     <GestureDetector gesture={round.gesture}>
                       <View
                         accessible
@@ -346,43 +355,43 @@ export const Composer = memo(function Composer({
                         <Icon name="camera" size={22} color={round.recording ? theme.acc : theme.muted} />
                       </View>
                     </GestureDetector>
-                  </View>
-                )}
-              </>
-            )}
-          </View>
-        </Glass>
+                  </Animated.View>
+                </>
+              )}
+            </View>
+          </Glass>
 
-        {/* The mic records voice notes; it holds your finger, so it stays put while recording. */}
-        <View>
-          <GestureDetector gesture={voice.gesture}>
-            <Animated.View style={voice.micStyle}>
-              <Pressy
-                onPress={() => (hasText ? send() : undefined)}
-                onLongPress={hasText && !editing ? () => (thud(), void schedule()) : undefined}
-                label={hasText ? t.send : locked ? t.sendVoice : t.voiceNote}
-                testID="send"
-                scale={0.88}
-              >
-                <LinearGradient
-                  colors={theme.grad}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={{ width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 20px -8px ${theme.acc}` }}
+          {/* The mic records voice notes; it holds your finger, so it stays put while recording. */}
+          <View>
+            <GestureDetector gesture={voice.gesture}>
+              <Animated.View style={voice.micStyle}>
+                <Pressy
+                  onPress={() => (hasText ? send() : undefined)}
+                  onLongPress={hasText && !editing ? () => (thud(), void schedule()) : undefined}
+                  label={hasText ? t.send : locked ? t.sendVoice : t.voiceNote}
+                  testID="send"
+                  scale={0.88}
                 >
-                  <Animated.View style={[{ position: 'absolute' }, micStyle]}>
-                    <Icon name={locked ? 'send' : 'mic'} size={21} color="#FFFFFF" stroke={2} flip={locked} />
-                  </Animated.View>
-                  <Animated.View style={[{ position: 'absolute' }, sendStyle]}>
-                    <Icon name={editing ? 'check' : 'send'} size={21} color="#FFFFFF" stroke={2} flip />
-                  </Animated.View>
-                </LinearGradient>
-              </Pressy>
-            </Animated.View>
-          </GestureDetector>
+                  <LinearGradient
+                    colors={theme.grad}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{ width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 20px -8px ${theme.acc}` }}
+                  >
+                    <Animated.View style={[{ position: 'absolute' }, micStyle]}>
+                      <Icon name={locked ? 'send' : 'mic'} size={21} color="#FFFFFF" stroke={2} flip={locked} />
+                    </Animated.View>
+                    <Animated.View style={[{ position: 'absolute' }, sendStyle]}>
+                      <Icon name={editing ? 'check' : 'send'} size={21} color="#FFFFFF" stroke={2} flip />
+                    </Animated.View>
+                  </LinearGradient>
+                </Pressy>
+              </Animated.View>
+            </GestureDetector>
+          </View>
         </View>
       </View>
-    </View>
+    </LayoutAnimationConfig>
   );
 });
 
@@ -391,7 +400,12 @@ function LinkCard({ card, onClose }: { card: LinkPreview; onClose: () => void })
   const t = useT();
   const { theme } = useLook();
   return (
-    <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, margin: 2, marginBottom: 4, padding: 6, borderRadius: 16, backgroundColor: theme.accSoft }} testID="link-card">
+    <Animated.View
+      entering={riseIn}
+      exiting={fadeOut}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, margin: 2, marginBottom: 4, padding: 6, borderRadius: 16, backgroundColor: theme.accSoft }}
+      testID="link-card"
+    >
       {card.thumb ? (
         <Image source={{ uri: `data:image/jpeg;base64,${card.thumb}` }} style={{ width: 52, height: 52, borderRadius: 11 }} contentFit="cover" />
       ) : (

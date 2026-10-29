@@ -12,11 +12,11 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { bodyLine } from './format';
 import { Button, Pressy, Toggle, Txt } from './kit';
-import { Sheet, toast } from './overlays';
+import { Sheet, toast, whenOpened } from './overlays';
 
 const REASONS: ReportReason[] = ['spam', 'scam', 'abuse', 'other'];
 
-export function ReportSheet({
+export const ReportSheet = whenOpened(function ReportSheet({
   visible,
   chatId,
   group,
@@ -96,4 +96,4 @@ export function ReportSheet({
       </View>
     </Sheet>
   );
-}
+});

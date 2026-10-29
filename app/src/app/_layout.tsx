@@ -31,8 +31,9 @@ export default function Root() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       {/* When the phone's "Remove animations" is on, Reanimated jumps every animation to its
-          end. The few left (a status's progress bar, things springing back after a drag) need
-          to play, or a status would skip straight to the next one, so they always run. */}
+          end. The few left (a status's progress bar, things springing back after a drag, pop-ups
+          coming and going) need to play, or a status would skip straight to the next one, so
+          they always run. */}
       <ReducedMotionConfig mode={ReduceMotion.Never} />
       <SafeAreaProvider>
         <ThemeProvider>
@@ -153,7 +154,8 @@ function App() {
           <Stack.Screen name="call-info" />
           <Stack.Screen name="new-group" />
           <Stack.Screen name="list" />
-          <Stack.Screen name="search" options={{ animation: 'none' }} />
+          {/* Search fades in over the chat list, like WhatsApp's, rather than sliding. */}
+          <Stack.Screen name="search" options={{ animation: 'fade' }} />
           <Stack.Screen name="archived" />
           <Stack.Screen name="starred" />
           <Stack.Screen name="forward" />
@@ -182,10 +184,11 @@ function App() {
           <Stack.Screen name="viewer" options={{ animation: 'none', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="photo" options={{ animation: 'none', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: '#0B1424' } }} />
-          <Stack.Screen name="status/[id]" options={{ animation: 'none', contentStyle: { backgroundColor: '#000000' } }} />
+          {/* A status and a view once photo fade in (and out), like WhatsApp's, instead of appearing at once. */}
+          <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" />
           <Stack.Screen name="settings/status-privacy" />
-          <Stack.Screen name="once" options={{ animation: 'none', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="once" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="invite/[id]" />
           <Stack.Screen name="join/[code]" />
           <Stack.Screen name="settings/index" />

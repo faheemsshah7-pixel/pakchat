@@ -9,7 +9,7 @@ import { router } from 'expo-router';
 import { core, isOffline } from '../core/core';
 import type { ChatRow } from '../core/hooks';
 import { fill, useT } from '../i18n';
-import { Dialog, toast } from './overlays';
+import { Dialog, toast, whenOpened } from './overlays';
 
 export function DeleteChats({ rows, mode, onClose }: { rows: ChatRow[]; mode: 'delete' | 'clear' | null; onClose: (done: boolean) => void }) {
   const t = useT();
@@ -71,7 +71,7 @@ export function DeleteChats({ rows, mode, onClose }: { rows: ChatRow[]; mode: 'd
 }
 
 /** After leaving a group (or from its bar once left): delete it from the list, clear it, or keep it. */
-export function LeftGroupChoices({ chatId, name, visible, justLeft, onClose }: { chatId: string; name: string; visible: boolean; justLeft?: boolean; onClose: () => void }) {
+export const LeftGroupChoices = whenOpened(function LeftGroupChoices({ chatId, name, visible, justLeft, onClose }: { chatId: string; name: string; visible: boolean; justLeft?: boolean; onClose: () => void }) {
   const t = useT();
   return (
     <Dialog
@@ -107,4 +107,4 @@ export function LeftGroupChoices({ chatId, name, visible, justLeft, onClose }: {
       ]}
     />
   );
-}
+});

@@ -7,12 +7,12 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from './icons';
 import { Divider, Pressy, Txt } from './kit';
-import { Sheet } from './overlays';
+import { Sheet, whenOpened } from './overlays';
 
 export { toneName } from '../core/tones';
 
 /** A tone's name ('' is the phone's own sound; undefined, for a chat, follows the default). */
-export function TonePicker({
+export const TonePicker = whenOpened(function TonePicker({
   visible,
   value,
   forChat,
@@ -62,4 +62,4 @@ export function TonePicker({
       </View>
     </Sheet>
   );
-}
+});

@@ -8,11 +8,11 @@ import { fill, useT, type Strings } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { whenLabel } from './format';
 import { Txt } from './kit';
-import { MenuItem, Sheet } from './overlays';
+import { MenuItem, Sheet, whenOpened } from './overlays';
 
 const HOUR = 3_600_000;
 
-export function MuteSheet({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (ms: number | null) => void }) {
+export const MuteSheet = whenOpened(function MuteSheet({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (ms: number | null) => void }) {
   const t = useT();
   const { theme } = useLook();
   const pick = (ms: number | null) => (onClose(), onPick(ms));
@@ -28,7 +28,7 @@ export function MuteSheet({ visible, onClose, onPick }: { visible: boolean; onCl
       <MenuItem icon="muted" label={t.muteAlways} onPress={() => pick(null)} testID="mute-always" />
     </Sheet>
   );
-}
+});
 
 /** "Muted until tomorrow at 9:00 am", or "Muted always" (empty when it isn't muted). */
 export function mutedLine(p: ChatPrefs, t: Strings) {

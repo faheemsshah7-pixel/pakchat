@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
@@ -28,7 +28,7 @@ import { VoiceBody } from './VoiceBody';
 import { bodyLine, clock, systemText } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
-import { smooth, tick } from '../motion';
+import { fadeIn, fadeOut, popIn, popOut, smooth, tick } from '../motion';
 
 const PULL = 64;
 
@@ -227,93 +227,104 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   );
 
   return (
-    <View style={{ marginTop: first ? 6 : 2 }}>
-      {/* The picked-message tint; and the same, for a moment, on a message just jumped to (the chat turns `flash` off). */}
-      {(selected || flash) && <View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }]} />}
-      {above}
-      <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
-        {/* The reply arrow, waiting behind the bubble. */}
-        <Animated.View style={[{ position: 'absolute' }, mine ? { end: 4 } : { start: 4 }, arrow]}>
-          <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="reply" size={17} color={theme.accInk} flip />
-          </View>
-        </Animated.View>
-        <GestureDetector gesture={pan}>
-          <Animated.View style={[{ maxWidth: '80%' }, slide]}>
-            <Pressy
-              onPress={() => (m.status === 'failed' && !selecting ? onRetry(m) : onPress(m))}
-              onLongPress={() => onLongPress(m)}
-              scale={0.98}
-              label={m.text ?? ''}
-              testID={`msg-${m.text ?? m.id}`}
-            >
-              {bare ? (
-                <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18, borderWidth: selected ? 2 : 0, borderColor: theme.acc, padding: selected ? 4 : 0 }}>
-                  {!!name && (
-                    <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: theme.glass }}>
-                      <Txt size={12.5} weight="700" color={theme.accInk} lines={1}>
-                        {name}
-                      </Txt>
-                    </View>
-                  )}
-                  {quoted && (
-                    <View style={{ maxWidth: 236, padding: 4, borderRadius: 12, backgroundColor: theme.bubbleIn }}>
-                      <Quote m={quoted} mine={false} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
-                    </View>
-                  )}
-                  {big > 0 ? (
-                    <BigEmoji text={m.text ?? ''} count={big} />
-                  ) : m.file?.round ? (
-                    <RoundBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
-                  ) : (
-                    <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
-                  )}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: theme.glass }}>
-                    {starred && <Icon name="starFilled" size={11} color={theme.muted} />}
-                    {!!m.expiresAt && <Icon name="timer" size={11} color={theme.muted} />}
-                    <Txt size={11} color={theme.muted}>
-                      {clock(m.sentAt)}
-                    </Txt>
-                    {mine && <Ticks status={m.status} size={15} color={theme.muted} />}
-                  </View>
-                </View>
-              ) : mine && (slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]) ? (
-                // One plain colour: on a slower phone (the colour fade and its clipping cost a lot
-                // there), and in the dark look, whose "fade" is one colour anyway.
-                <View style={[radius, { backgroundColor: middle(theme.bubbleMine), borderWidth: selected ? 2 : 0, borderColor: theme.acc }]}>{body}</View>
-              ) : mine ? (
-                // The gradient can't round its own corners one by one on Android (it came
-                // out square), so a plain View with the corners clips it instead.
-                <View
-                  style={[
-                    radius,
-                    { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}`, borderWidth: selected ? 2 : 0, borderColor: theme.acc },
-                  ]}
-                >
-                  <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-                  {body}
-                </View>
-              ) : (
-                <View
-                  style={[
-                    radius,
-                    { backgroundColor: theme.bubbleIn, boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)', borderWidth: selected ? 2 : 0, borderColor: theme.acc },
-                  ]}
-                >
-                  {body}
-                </View>
-              )}
-            </Pressy>
-            {m.status === 'failed' && (
-              <Txt size={11.5} weight="600" color={theme.danger} align="end" style={{ marginTop: 3 }}>
-                {t.notSent}
-              </Txt>
-            )}
-            {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
+    // What comes later (the picked tint, a reaction) fades or pops in, like WhatsApp's; not when the bubble first shows.
+    <LayoutAnimationConfig skipEntering>
+      <View style={{ marginTop: first ? 6 : 2 }}>
+        {/* The picked-message tint; and the same, for a moment, on a message just jumped to (the chat
+            turns `flash` off, and it fades slowly away, like WhatsApp's). */}
+        {(selected || flash) && (
+          <Animated.View
+            entering={fadeIn}
+            exiting={flash ? FadeOut.duration(600) : fadeOut}
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }]}
+          />
+        )}
+        {above}
+        <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
+          {/* The reply arrow, waiting behind the bubble. */}
+          <Animated.View style={[{ position: 'absolute' }, mine ? { end: 4 } : { start: 4 }, arrow]}>
+            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="reply" size={17} color={theme.accInk} flip />
+            </View>
           </Animated.View>
-        </GestureDetector>
+          <GestureDetector gesture={pan}>
+            <Animated.View style={[{ maxWidth: '80%' }, slide]}>
+              <Pressy
+                onPress={() => (m.status === 'failed' && !selecting ? onRetry(m) : onPress(m))}
+                onLongPress={() => onLongPress(m)}
+                scale={0.98}
+                label={m.text ?? ''}
+                testID={`msg-${m.text ?? m.id}`}
+              >
+                {bare ? (
+                  <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18, borderWidth: selected ? 2 : 0, borderColor: theme.acc, padding: selected ? 4 : 0 }}>
+                    {!!name && (
+                      <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: theme.glass }}>
+                        <Txt size={12.5} weight="700" color={theme.accInk} lines={1}>
+                          {name}
+                        </Txt>
+                      </View>
+                    )}
+                    {quoted && (
+                      <View style={{ maxWidth: 236, padding: 4, borderRadius: 12, backgroundColor: theme.bubbleIn }}>
+                        <Quote m={quoted} mine={false} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
+                      </View>
+                    )}
+                    {big > 0 ? (
+                      <BigEmoji text={m.text ?? ''} count={big} />
+                    ) : m.file?.round ? (
+                      <RoundBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+                    ) : (
+                      <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+                    )}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 9, backgroundColor: theme.glass }}>
+                      {starred && <Icon name="starFilled" size={11} color={theme.muted} />}
+                      {!!m.expiresAt && <Icon name="timer" size={11} color={theme.muted} />}
+                      <Txt size={11} color={theme.muted}>
+                        {clock(m.sentAt)}
+                      </Txt>
+                      {mine && <Ticks status={m.status} size={15} color={theme.muted} />}
+                    </View>
+                  </View>
+                ) : mine && (slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]) ? (
+                  // One plain colour: on a slower phone (the colour fade and its clipping cost a lot
+                  // there), and in the dark look, whose "fade" is one colour anyway.
+                  <View style={[radius, { backgroundColor: middle(theme.bubbleMine), borderWidth: selected ? 2 : 0, borderColor: theme.acc }]}>{body}</View>
+                ) : mine ? (
+                  // The gradient can't round its own corners one by one on Android (it came
+                  // out square), so a plain View with the corners clips it instead.
+                  <View
+                    style={[
+                      radius,
+                      { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}`, borderWidth: selected ? 2 : 0, borderColor: theme.acc },
+                    ]}
+                  >
+                    <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+                    {body}
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      radius,
+                      { backgroundColor: theme.bubbleIn, boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)', borderWidth: selected ? 2 : 0, borderColor: theme.acc },
+                    ]}
+                  >
+                    {body}
+                  </View>
+                )}
+              </Pressy>
+              {m.status === 'failed' && (
+                <Txt size={11.5} weight="600" color={theme.danger} align="end" style={{ marginTop: 3 }}>
+                  {t.notSent}
+                </Txt>
+              )}
+              {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
+            </Animated.View>
+          </GestureDetector>
+        </View>
       </View>
-    </View>
+    </LayoutAnimationConfig>
   );
 }
 
@@ -394,7 +405,7 @@ function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: bo
   return (
     <View style={{ flexDirection: 'row', gap: 4, marginTop: -6, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 10 }}>
       {[...counts].map(([emoji, c]) => (
-        <Animated.View key={emoji}>
+        <Animated.View key={emoji} entering={popIn} exiting={popOut}>
           <Pressy onPress={() => onPress(emoji)} scale={0.9} label={emoji}>
             <View
               style={{

@@ -9,7 +9,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { dayChip, whenLabel } from './format';
 import { Button, Chip, Txt } from './kit';
 import { tick } from './motion';
-import { Sheet, toast } from './overlays';
+import { Sheet, toast, whenOpened } from './overlays';
 
 const ROW = 44;
 const DAY = 86_400_000;
@@ -27,7 +27,7 @@ function rounded(now: number, ahead: number) {
   return Math.ceil((now + ahead) / 60_000) * 60_000;
 }
 
-export function SchedulePicker({
+export const SchedulePicker = whenOpened(function SchedulePicker({
   visible,
   title,
   initial,
@@ -50,7 +50,7 @@ export function SchedulePicker({
       {visible && <Picker initial={initial} button={button} soonest={soonest} onPick={onPick} />}
     </Sheet>
   );
-}
+});
 
 function Picker({ initial, button, soonest, onPick }: { initial?: number; button: string; soonest: number; onPick: (at: number) => void }) {
   const t = useT();

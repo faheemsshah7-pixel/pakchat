@@ -19,7 +19,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon } from '../icons';
 import { Chip, IconButton, Pressy, Txt } from '../kit';
-import { tick } from '../motion';
+import { popIn, popOut, tick } from '../motion';
 import { toast } from '../overlays';
 
 /** The most you can pick at once, as on WhatsApp. */
@@ -235,7 +235,7 @@ function GalleryScreen({ ask }: { ask: Ask }) {
         />
       )}
       {picked.length > 0 && (
-        <Animated.View style={{ position: 'absolute', end: 18, bottom: insets.bottom + 22 }}>
+        <Animated.View entering={popIn} exiting={popOut} style={{ position: 'absolute', end: 18, bottom: insets.bottom + 22 }}>
           <Pressy onPress={() => ask.done(picked.map(pickedOf))} label={t.send} scale={0.92} testID="gallery-done">
             <View
               style={{

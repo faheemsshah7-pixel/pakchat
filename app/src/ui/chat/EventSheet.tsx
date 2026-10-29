@@ -10,12 +10,12 @@ import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { whenLabel } from '../format';
 import { Button, Chip, Field, Glass, SettingRow, Txt } from '../kit';
-import { Sheet } from '../overlays';
+import { Sheet, whenOpened } from '../overlays';
 import { SchedulePicker } from '../SchedulePicker';
 
 export type NewEvent = { title: string; about?: string; at: number; end?: number; place?: string; call?: 'voice' | 'video' };
 
-export function EventSheet({ visible, onClose, onSend }: { visible: boolean; onClose: () => void; onSend: (e: NewEvent) => void }) {
+export const EventSheet = whenOpened(function EventSheet({ visible, onClose, onSend }: { visible: boolean; onClose: () => void; onSend: (e: NewEvent) => void }) {
   const t = useT();
   const { theme } = useLook();
   const [title, setTitle] = useState('');
@@ -80,4 +80,4 @@ export function EventSheet({ visible, onClose, onSend }: { visible: boolean; onC
       />
     </>
   );
-}
+});

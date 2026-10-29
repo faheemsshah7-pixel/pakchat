@@ -28,7 +28,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon, type IconName } from '../icons';
 import { fontStyle, Pressy, Txt } from '../kit';
-import { tick } from '../motion';
+import { fadeIn, fadeOut, tick } from '../motion';
 import { Sheet, toast } from '../overlays';
 import { Canvas, type CanvasRef, type Layer, type NewLayer, type Stroke, UNITS } from './editor/Canvas';
 import { CropTool, fit, type Rect } from './editor/CropTool';
@@ -287,7 +287,7 @@ export function MediaComposer({
 
           {/* Drawing: the colours down the side, and undo. */}
           {tool === 'draw' && (
-            <Animated.View style={{ position: 'absolute', end: 10, top: 10, gap: 8, alignItems: 'center' }}>
+            <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', end: 10, top: 10, gap: 8, alignItems: 'center' }}>
               <Round icon="undo" label={t.undoWord} onPress={() => change(d.key, { strokes: d.strokes.slice(0, -1) })} id="draw-undo" />
               <Colors color={color} onPick={setColor} vertical />
             </Animated.View>
@@ -370,7 +370,7 @@ export function MediaComposer({
 
         {/* Words: write them big, pick a colour, Done puts them on the photo. */}
         {tool === 'text' && writing && (
-          <Animated.View style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', paddingTop: insets.top + 10, zIndex: 5 }}>
+          <Animated.View entering={fadeIn} style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', paddingTop: insets.top + 10, zIndex: 5 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 }}>
               <Pressy
                 onPress={() => {
@@ -508,7 +508,7 @@ function VideoPart({ p, onTrim, onLength }: { p: Picked; onTrim: (trim: { start:
       <Pressable style={{ flex: 1 }} onPress={() => (playing ? player.pause() : player.play())} accessibilityLabel={playing ? t.pause : t.play}>
         <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} testID="editor-video" />
         {!playing && (
-          <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="play" size={28} color="#FFFFFF" />
             </View>

@@ -11,16 +11,16 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../icons';
 import { Avatar, Button, Field, Pressy, Txt } from '../kit';
-import { Sheet } from '../overlays';
+import { Sheet, whenOpened } from '../overlays';
 
-export function ContactShare({ visible, onClose, onSend }: { visible: boolean; onClose: () => void; onSend: (cards: SharedContact[]) => void }) {
+export const ContactShare = whenOpened(function ContactShare({ visible, onClose, onSend }: { visible: boolean; onClose: () => void; onSend: (cards: SharedContact[]) => void }) {
   const t = useT();
   return (
     <Sheet visible={visible} onClose={onClose} title={t.shareContact}>
       {visible && <Pick onSend={onSend} />}
     </Sheet>
   );
-}
+});
 
 function Pick({ onSend }: { onSend: (cards: SharedContact[]) => void }) {
   const t = useT();

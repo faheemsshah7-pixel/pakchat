@@ -7,7 +7,7 @@ import KV from 'expo-sqlite/kv-store';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, FlatList, ScrollView, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import Animated, { LayoutAnimationConfig } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { findBackup } from '../../core/backup';
@@ -26,7 +26,7 @@ import { PhotoPeek } from '../../ui/PhotoPeek';
 import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
-import { thud, tick } from '../../ui/motion';
+import { fadeIn, fadeOut, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 import { AddToListSheet } from '../../ui/AddToListSheet';
 import { ChatLockSheet } from '../../ui/ChatLockSheet';
@@ -249,7 +249,7 @@ export default function Chats() {
   }
 
   const header = selecting ? (
-    <Animated.View key="picking" style={{ marginHorizontal: 10, marginTop: 10 }}>
+    <Animated.View key="picking" entering={fadeIn} exiting={fadeOut} style={{ marginHorizontal: 10, marginTop: 10 }}>
       <LinearGradient
         colors={theme.grad}
         start={{ x: 0, y: 0 }}
@@ -270,7 +270,7 @@ export default function Chats() {
       </LinearGradient>
     </Animated.View>
   ) : (
-    <Animated.View key="title" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 18, paddingStart: 20, paddingEnd: 14 }}>
+    <Animated.View key="title" entering={fadeIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 18, paddingStart: 20, paddingEnd: 14 }}>
       <View style={{ flex: 1 }}>
         <Txt size={27} weight="800" style={{ letterSpacing: -0.9 }}>
           {t.appName}
@@ -283,7 +283,10 @@ export default function Chats() {
 
   return (
     <Screen bottom={false}>
-      <View style={{ minHeight: selecting ? 66 : 62 }}>{header}</View>
+      {/* Picking chats cross-fades the bar, like WhatsApp's; the title doesn't fade in as the app opens. */}
+      <View style={{ minHeight: selecting ? 66 : 62 }}>
+        <LayoutAnimationConfig skipEntering>{header}</LayoutAnimationConfig>
+      </View>
 
       <Pressy onPress={() => router.push('/search')} label={t.search} scale={0.98} testID="open-search">
         <Glass style={{ marginHorizontal: 14, marginTop: 16, height: 46, borderRadius: 15, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>

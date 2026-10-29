@@ -10,7 +10,7 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, BackHandler, FlatList, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
-import Animated, { KeyboardState, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, KeyboardState, LayoutAnimationConfig, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, MESSAGE_TEXT } from '../../core/core';
@@ -58,7 +58,7 @@ import { dayLabel, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../.
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
-import { arrive, thud, tick } from '../../ui/motion';
+import { arrive, fadeIn, fadeOut, popIn, popOut, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
 type Item = { key: string; kind: 'msg'; m: Message; first: boolean; album?: Message[] } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
@@ -735,7 +735,7 @@ function ChatScreen() {
   // The picked bar gets one more button for a sticker, so they're a little smaller then.
   const bs = pickedSticker ? 38 : 42;
   const header = searching && !selecting ? (
-    <Animated.View key="search" style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
+    <Animated.View key="search" entering={fadeIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
       <IconButton icon="back" label={t.back} onPress={stopSearch} flip size={42} iconSize={23} testID="search-close" />
       <TextInput
         value={searchText}
@@ -757,7 +757,7 @@ function ChatScreen() {
       <IconButton icon="down" label={t.newerMatch} size={40} onPress={() => stepHit(-1)} testID="search-down" />
     </Animated.View>
   ) : selecting ? (
-    <Animated.View key="pick" style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
+    <Animated.View key="pick" entering={fadeIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="close" label={t.cancelSelection} onPress={done} size={bs} testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
           <Txt size={18} weight="700">
@@ -810,7 +810,7 @@ function ChatScreen() {
         <IconButton icon="more" label={t.moreOptions} size={bs} onPress={() => setPickMenu(true)} testID="pick-more" />
     </Animated.View>
   ) : (
-    <Animated.View key="title" style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
+    <Animated.View key="title" entering={fadeIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="back" label={t.back} onPress={() => router.back()} flip size={42} iconSize={23} testID="back" />
         <Pressy onPress={() => router.push({ pathname: '/info/[id]', params: { id } })} label={title} scale={0.98} style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center' }} testID="chat-header">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -820,8 +820,8 @@ function ChatScreen() {
                 {title}
               </Txt>
               {!!subtitle && (
-                <Animated.View key={subtitle}>
-                  {/* "last seen today at 4:20 pm" slides along so the time shows, like WhatsApp. */}
+                <Animated.View key={subtitle} entering={fadeIn}>
+                  {/* "typing…" and "online" fade in for each other; "last seen today at 4:20 pm" slides along so the time shows, like WhatsApp. */}
                   <Marquee text={subtitle} size={12} weight="500" color={typing.length || presence?.online ? theme.acc : theme.muted} testID="chat-subtitle" />
                 </Animated.View>
               )}
@@ -856,8 +856,11 @@ function ChatScreen() {
   return (
     <Screen bottom={false} style={{ paddingTop: 0 }} backdrop={<Backdrop wp={wallpaper} />}>
       {/* A flat bar across the top, under the phone's status bar too, like WhatsApp's. It stays
-          put; what's under it rides up with the keyboard (and slides under it meanwhile). */}
-      <View style={{ zIndex: 2, paddingTop: insets.top, backgroundColor: theme.dark ? '#17181C' : '#FFFFFF', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(11,27,54,0.08)' }}>{header}</View>
+          put; what's under it rides up with the keyboard (and slides under it meanwhile). Picking
+          messages or searching cross-fades the bar quickly, as WhatsApp's does (not as the chat opens). */}
+      <View style={{ zIndex: 2, paddingTop: insets.top, backgroundColor: theme.dark ? '#17181C' : '#FFFFFF', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(11,27,54,0.08)' }}>
+        <LayoutAnimationConfig skipEntering>{header}</LayoutAnimationConfig>
+      </View>
       <Animated.View style={[{ flex: 1 }, lift]}>
 
         {pinned && !selecting && (
@@ -963,7 +966,7 @@ function ChatScreen() {
 
           {/* Back to the newest, when you've scrolled up. */}
           {!atBottom && (
-            <Animated.View style={{ position: 'absolute', end: 16, bottom: 12 }}>
+            <Animated.View entering={popIn} exiting={popOut} style={{ position: 'absolute', end: 16, bottom: 12 }}>
               <Pressy onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })} label={t.newest} scale={0.9} testID="to-bottom">
                 <Glass strong style={{ width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="down" size={22} color={theme.accInk} />
@@ -1344,12 +1347,12 @@ function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => voi
   );
 }
 
-/** The six quick reactions over a held message. They pop in one after another. */
+/** The six quick reactions over a held message. They pop in together, like WhatsApp's. */
 function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current?: string; onPick: (emoji: string) => void; onMore: () => void }) {
   const t = useT();
   const { theme } = useLook();
   return (
-    <Animated.View style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3 }}>
+    <Animated.View entering={popIn} exiting={popOut} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3, transformOrigin: mine ? 'right' : 'left' }}>
       <Glass strong style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 3, borderRadius: 26, boxShadow: `0 16px 34px -14px ${theme.shadow}` }}>
         {REACTIONS.map((e, i) => (
           <Animated.View key={e}>
@@ -1450,7 +1453,8 @@ function DatePill({ pill }: { pill: Pill }) {
   const text = useSyncExternalStore(pill.subscribe, pill.get);
   if (!text) return null;
   return (
-    <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 8, alignSelf: 'center' }}>
+    // It fades in as you scroll and out a moment after you stop, like WhatsApp's.
+    <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(250)} pointerEvents="none" style={{ position: 'absolute', top: 8, alignSelf: 'center' }}>
       <View style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, backgroundColor: theme.dark ? '#22252C' : '#FFFFFF', boxShadow: `0 2px 8px -3px ${theme.shadow}` }}>
         <Txt size={12.5} weight="600" color={theme.sectionText}>
           {text}

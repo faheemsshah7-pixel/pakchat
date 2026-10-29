@@ -7,9 +7,9 @@ import { exportChat } from '../core/exportChat';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Button, Txt } from './kit';
-import { Sheet, toast } from './overlays';
+import { Sheet, toast, whenOpened } from './overlays';
 
-export function ExportSheet({ visible, chatId, onClose }: { visible: boolean; chatId: string; onClose: () => void }) {
+export const ExportSheet = whenOpened(function ExportSheet({ visible, chatId, onClose }: { visible: boolean; chatId: string; onClose: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const [busy, setBusy] = useState<'with' | 'without' | null>(null);
@@ -37,4 +37,4 @@ export function ExportSheet({ visible, chatId, onClose }: { visible: boolean; ch
       </View>
     </Sheet>
   );
-}
+});

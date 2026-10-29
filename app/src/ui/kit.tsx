@@ -15,7 +15,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
-import Animated, { interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { Easing, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
@@ -423,9 +423,10 @@ export function Chip({
   testID?: string;
 }) {
   const { theme, lang } = useLook();
+  // The colour comes and goes quickly, like WhatsApp's filters.
   const v = useSharedValue(on ? 1 : 0);
   useEffect(() => {
-    v.value = on ? 1 : 0;
+    v.set(withTiming(on ? 1 : 0, { duration: 150, easing: Easing.out(Easing.cubic) }));
   }, [on, v]);
   const fill = useAnimatedStyle(() => ({ opacity: v.value }));
   const words = useAnimatedStyle(() => ({ color: interpolateColor(v.value, [0, 1], [theme.text, theme.onAcc]) }));
@@ -471,13 +472,13 @@ export function Chip({
   );
 }
 
-/** An on/off switch. The knob jumps across (no animation); in Urdu it sits the other way. */
+/** An on/off switch. The knob slides quickly across as its colour changes, like WhatsApp's; in Urdu it sits the other way. */
 export function Toggle({ on, onChange, label, testID }: { on: boolean; onChange: (on: boolean) => void; label: string; testID?: string }) {
   const theme = useTheme();
   const { rtl } = useLook();
   const v = useSharedValue(on ? 1 : 0);
   useEffect(() => {
-    v.value = on ? 1 : 0;
+    v.set(withTiming(on ? 1 : 0, { duration: 150, easing: Easing.out(Easing.cubic) }));
   }, [on, v]);
   const track = useAnimatedStyle(() => ({ backgroundColor: interpolateColor(v.value, [0, 1], [theme.faint, theme.acc]) }));
   const knob = useAnimatedStyle(() => ({ transform: [{ translateX: v.value * 20 * (rtl ? -1 : 1) }] }));

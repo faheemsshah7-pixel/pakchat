@@ -6,7 +6,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { BackHandler, FlatList, ScrollView, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 
 import { core, isOffline, type Person } from '../core/core';
 import { defaultTimer } from '../core/timer';
@@ -16,6 +16,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { TIMERS, timerLabel } from '../ui/format';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
+import { fadeIn, fadeOut, popIn, popOut } from '../ui/motion';
 import { MenuItem, Sheet, toast } from '../ui/overlays';
 
 export default function NewGroup() {
@@ -181,11 +182,13 @@ export default function NewGroup() {
     <Screen>
       <TopBar title={add ? t.addMembers : t.newGroup} subtitle={t.pickPeople} onBack={() => router.back()} />
 
+      {/* The people picked, in a row at the top: each pops in as you tick them and the rest close up
+          when one goes, like WhatsApp's. */}
       {picked.length > 0 && (
-        <View>
+        <Animated.View entering={fadeIn} exiting={fadeOut}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 16, paddingTop: 12 }}>
             {picked.map((p) => (
-              <Animated.View key={p.id}>
+              <Animated.View key={p.id} entering={popIn} exiting={popOut} layout={LinearTransition.duration(180)}>
                 <Pressy onPress={() => toggle(p)} label={p.name} scale={0.9}>
                   <View style={{ alignItems: 'center', width: 62, gap: 4 }}>
                     <View>
@@ -202,7 +205,7 @@ export default function NewGroup() {
               </Animated.View>
             ))}
           </ScrollView>
-        </View>
+        </Animated.View>
       )}
 
       <View style={{ padding: 14 }}>
@@ -255,9 +258,9 @@ export default function NewGroup() {
                     }}
                   >
                     {on && (
-                      <View>
+                      <Animated.View entering={popIn} exiting={popOut}>
                         <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
-                      </View>
+                      </Animated.View>
                     )}
                   </View>
                 </View>

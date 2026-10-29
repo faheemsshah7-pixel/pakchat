@@ -16,16 +16,16 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../icons';
 import { Button, Glass, IconButton, Pressy, Txt } from '../kit';
-import { toast } from '../overlays';
+import { toast, whenOpened } from '../overlays';
 import { MapTiles } from './MapTiles';
 
-export function LocationSheet({ visible, onClose, onSend, onLive }: { visible: boolean; onClose: () => void; onSend: (p: Place) => void; onLive: (ms: number) => void }) {
+export const LocationSheet = whenOpened(function LocationSheet({ visible, onClose, onSend, onLive }: { visible: boolean; onClose: () => void; onSend: (p: Place) => void; onLive: (ms: number) => void }) {
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       {visible && <Picker onClose={onClose} onSend={onSend} onLive={onLive} />}
     </Modal>
   );
-}
+});
 
 function Picker({ onClose, onSend, onLive }: { onClose: () => void; onSend: (p: Place) => void; onLive: (ms: number) => void }) {
   const t = useT();

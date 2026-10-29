@@ -11,9 +11,9 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from './icons';
 import { Divider, Pressy, Txt } from './kit';
 import { tick } from './motion';
-import { Sheet, toast } from './overlays';
+import { Sheet, toast, whenOpened } from './overlays';
 
-export function AddToListSheet({ visible, chatIds, onClose }: { visible: boolean; chatIds: string[]; onClose: () => void }) {
+export const AddToListSheet = whenOpened(function AddToListSheet({ visible, chatIds, onClose }: { visible: boolean; chatIds: string[]; onClose: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const lists = useLists();
@@ -81,4 +81,4 @@ export function AddToListSheet({ visible, chatIds, onClose }: { visible: boolean
       </View>
     </Sheet>
   );
-}
+});

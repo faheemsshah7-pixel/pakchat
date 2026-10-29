@@ -24,7 +24,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon } from '../icons';
 import { IconButton, Pressy, Txt } from '../kit';
-import { snappy, tick } from '../motion';
+import { fadeIn, fadeOut, quick, snappy, tick } from '../motion';
 import { toast } from '../overlays';
 
 /** How far to slide to cancel, and up to lock (in points). */
@@ -255,7 +255,7 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
     opacity: interpolate(-tx.value, [0, CANCEL_AT], [1, 0.2]),
   }));
   const micStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: tx.value * dir }, { translateY: ty.value * 0.6 }, { scale: phase.value === 1 ? 1.35 : 1 }],
+    transform: [{ translateX: tx.value * dir }, { translateY: ty.value * 0.6 }, { scale: withTiming(phase.value === 1 ? 1.35 : 1, quick) }],
   }));
   const lockStyle = useAnimatedStyle(() => ({
     opacity: phase.value === 1 ? 1 : 0,
@@ -291,7 +291,7 @@ function RecDot() {
 function HoldStrip({ elapsed, slideStyle, label }: { elapsed: number; slideStyle: object; label: string }) {
   const { theme } = useLook();
   return (
-    <Animated.View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 10 }} testID="voice-holding">
+    <Animated.View entering={fadeIn} exiting={fadeOut} style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 10 }} testID="voice-holding">
       <RecDot />
       <Txt size={15} weight="600" color={theme.text} style={{ minWidth: 44, fontVariant: ['tabular-nums'] }}>
         {duration(elapsed)}
@@ -313,6 +313,8 @@ function LockHint({ style }: { style: object }) {
   const { theme } = useLook();
   return (
     <Animated.View
+      entering={fadeIn}
+      exiting={fadeOut}
       pointerEvents="none"
       style={[{ position: 'absolute', end: 18, bottom: 74, width: 40, paddingVertical: 10, borderRadius: 20, backgroundColor: theme.glassStrong, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: theme.glassLine }, style]}
     >
@@ -371,7 +373,7 @@ function LockedStrip({ elapsed, levels, onDelete, onPause, once }: { elapsed: nu
   const t = useT();
   const { theme } = useLook();
   return (
-    <Animated.View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }} testID="voice-locked">
+    <Animated.View entering={fadeIn} style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }} testID="voice-locked">
       <IconButton icon="trash" label={t.deleteRecording} onPress={onDelete} color={theme.muted} testID="voice-delete" />
       <RecDot />
       <Txt size={15} weight="600" color={theme.text} style={{ minWidth: 44, fontVariant: ['tabular-nums'] }}>
@@ -404,7 +406,7 @@ function PausedStrip({ preview, elapsed, onDelete, onResume, once }: { preview: 
   }, [status.didJustFinish, player]);
 
   return (
-    <Animated.View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }} testID="voice-paused">
+    <Animated.View entering={fadeIn} style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }} testID="voice-paused">
       <IconButton
         icon="trash"
         label={t.deleteRecording}

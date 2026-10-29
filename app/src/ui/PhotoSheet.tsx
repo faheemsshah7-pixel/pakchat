@@ -10,7 +10,7 @@ import { pickPhoto, uploadPhoto } from '../core/photos';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from './icons';
-import { MenuItem, Sheet, toast } from './overlays';
+import { MenuItem, Sheet, toast, whenOpened } from './overlays';
 
 /** The little camera on a photo you can change (put it after the Avatar, inside its Pressy). */
 export function CameraBadge({ size = 26 }: { size?: number }) {
@@ -36,7 +36,7 @@ export function CameraBadge({ size = 26 }: { size?: number }) {
   );
 }
 
-export function PhotoSheet({ visible, onClose, has, chatId, title }: { visible: boolean; onClose: () => void; has: boolean; chatId?: string; title?: string }) {
+export const PhotoSheet = whenOpened(function PhotoSheet({ visible, onClose, has, chatId, title }: { visible: boolean; onClose: () => void; has: boolean; chatId?: string; title?: string }) {
   const t = useT();
 
   const save = async (photo: string) => {
@@ -81,4 +81,4 @@ export function PhotoSheet({ visible, onClose, has, chatId, title }: { visible: 
       {has && <MenuItem icon="trash" label={t.removePhoto} danger onPress={() => void remove()} testID="photo-remove" />}
     </Sheet>
   );
-}
+});

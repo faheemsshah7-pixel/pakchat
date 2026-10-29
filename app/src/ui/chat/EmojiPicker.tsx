@@ -10,12 +10,12 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../icons';
 import { Pressy, Txt } from '../kit';
 import { tick } from '../motion';
-import { Sheet } from '../overlays';
+import { Sheet, whenOpened } from '../overlays';
 import { EMOJI_GROUPS } from './emojiList';
 
 const ICONS = { smileys: '😀', people: '👋', nature: '🌸', food: '🍕', activity: '⚽', travel: '🚗', objects: '💡', symbols: '❤️' } as const;
 
-export function EmojiPicker({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (emoji: string) => void }) {
+export const EmojiPicker = whenOpened(function EmojiPicker({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (emoji: string) => void }) {
   const t = useT();
   const { theme } = useLook();
   const [group, setGroup] = useState(0);
@@ -67,4 +67,4 @@ export function EmojiPicker({ visible, onClose, onPick }: { visible: boolean; on
       </View>
     </Sheet>
   );
-}
+});

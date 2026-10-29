@@ -32,6 +32,7 @@ import { useT } from '../i18n';
 import { clock, dayLabel, duration, fileSize } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
+import { fadeIn, fadeOut } from '../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
 import { SwipeToClose, type Closer } from '../ui/SwipeToClose';
@@ -166,8 +167,9 @@ export default function Viewer() {
         />
       </SwipeToClose>
 
+      {/* A tap hides and shows the bars; they fade, like WhatsApp's. */}
       {bars && (
-        <Animated.View style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <IconButton icon="back" label={t.back} onPress={close} flip look="onAccent" size={42} testID="viewer-back" />
           <View style={{ flex: 1 }}>
             <Txt size={16} weight="700" color="#FFFFFF" lines={1}>
@@ -219,6 +221,8 @@ export default function Viewer() {
       {/* The caption (above a video's controls). */}
       {bars && !!m?.text && (
         <Animated.View
+          entering={fadeIn}
+          exiting={fadeOut}
           pointerEvents="none"
           style={{ position: 'absolute', start: 0, end: 0, bottom: insets.bottom + (f?.kind === 'video' && haveFile(m) ? VIDEO_BAR : 0), paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' }}
         >
@@ -320,7 +324,7 @@ function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: ()
         <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" surfaceType="textureView" testID="viewer-video" />
       </Pressable>
       {(chrome || !playing) && (
-        <Animated.View pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
           <Pressy onPress={toggle} label={playing ? t.pause : t.play} scale={0.9} testID="viewer-play">
             <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name={playing ? 'pause' : 'play'} size={30} color="#FFFFFF" />
@@ -330,6 +334,8 @@ function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: ()
       )}
       {chrome && (
         <Animated.View
+          entering={fadeIn}
+          exiting={fadeOut}
           style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: VIDEO_BAR + insets.bottom, paddingBottom: insets.bottom, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.45)' }}
         >
           <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>

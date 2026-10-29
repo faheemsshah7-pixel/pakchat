@@ -8,7 +8,7 @@ import { useT } from '../../i18n';
 import { useLook, type Lang } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Glass, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
-import { tick } from '../../ui/motion';
+import { popIn, tick } from '../../ui/motion';
 
 export default function Language() {
   const t = useT();
@@ -35,7 +35,7 @@ export default function Language() {
                   </Txt>
                 </View>
                 {on && (
-                  <Animated.View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
+                  <Animated.View entering={popIn} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name="check" size={16} color="#FFFFFF" stroke={3} />
                   </Animated.View>
                 )}

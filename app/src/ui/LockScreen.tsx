@@ -4,7 +4,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import { AppState, BackHandler, StyleSheet, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import Animated, { FadeOut } from 'react-native-reanimated';
 
 import { lockWaitUntil, unlockApp } from '../core/lock';
 import { useNow } from '../core/hooks';
@@ -53,7 +53,8 @@ export function LockScreen() {
   }, []);
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, { zIndex: 1000, elevation: 1000 }]} testID="app-lock">
+    // It covers the app at once (nothing shows through first), and fades away once unlocked, like WhatsApp's.
+    <Animated.View exiting={FadeOut.duration(180)} style={[StyleSheet.absoluteFill, { zIndex: 1000, elevation: 1000 }]} testID="app-lock">
       <LinearGradient colors={theme.dark ? ['#0B1424', '#141B2E'] : ['#EAF2FF', '#F7F9FF']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, gap: 14 }}>
         <View>
           <LinearGradient colors={theme.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 92, height: 92, borderRadius: 32, alignItems: 'center', justifyContent: 'center' }}>

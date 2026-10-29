@@ -15,6 +15,7 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt, useKeyboardLift } from '../ui/kit';
+import { popIn, popOut } from '../ui/motion';
 
 export default function ListScreen() {
   // chats: a new list's first chats (from "Add to list" › New list).
@@ -74,7 +75,7 @@ export default function ListScreen() {
                     </Txt>
                   </View>
                   {on && (
-                    <Animated.View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
+                    <Animated.View entering={popIn} exiting={popOut} style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
                     </Animated.View>
                   )}

@@ -8,11 +8,11 @@ import Animated from 'react-native-reanimated';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Button, Field, Toggle, Txt } from '../kit';
-import { Sheet } from '../overlays';
+import { Sheet, whenOpened } from '../overlays';
 
 const MAX = 12;
 
-export function PollSheet({ visible, onClose, onSend }: { visible: boolean; onClose: () => void; onSend: (question: string, options: string[], multi: boolean) => void }) {
+export const PollSheet = whenOpened(function PollSheet({ visible, onClose, onSend }: { visible: boolean; onClose: () => void; onSend: (question: string, options: string[], multi: boolean) => void }) {
   const t = useT();
   const { theme } = useLook();
   const [question, setQuestion] = useState('');
@@ -54,4 +54,4 @@ export function PollSheet({ visible, onClose, onSend }: { visible: boolean; onCl
       </ScrollView>
     </Sheet>
   );
-}
+});

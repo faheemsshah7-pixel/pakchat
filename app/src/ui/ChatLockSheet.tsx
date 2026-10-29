@@ -11,11 +11,11 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
 import { Divider, Pressy, Txt } from './kit';
-import { Sheet, toast } from './overlays';
+import { Sheet, toast, whenOpened } from './overlays';
 
 type Way = 'off' | 'folder' | 'list';
 
-export function ChatLockSheet({ visible, chatId, onClose }: { visible: boolean; chatId: string; onClose: () => void }) {
+export const ChatLockSheet = whenOpened(function ChatLockSheet({ visible, chatId, onClose }: { visible: boolean; chatId: string; onClose: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const prefs = useChatPrefs(chatId);
@@ -72,4 +72,4 @@ export function ChatLockSheet({ visible, chatId, onClose }: { visible: boolean; 
       </View>
     </Sheet>
   );
-}
+});

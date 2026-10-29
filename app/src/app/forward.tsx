@@ -6,6 +6,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { forwardFile } from '../core/files';
@@ -14,6 +15,7 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Pressy, Screen, Section, TopBar, Txt } from '../ui/kit';
+import { popIn, popOut } from '../ui/motion';
 import { toast } from '../ui/overlays';
 
 /** WhatsApp's limit: forwarding goes to at most this many chats at once. */
@@ -106,9 +108,9 @@ export default function Forward() {
                     </Txt>
                   </View>
                   {on && (
-                    <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
+                    <Animated.View entering={popIn} exiting={popOut} style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
-                    </View>
+                    </Animated.View>
                   )}
                 </View>
               </Pressy>

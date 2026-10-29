@@ -19,7 +19,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Pressable, TextInput, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -74,12 +74,12 @@ export default function StatusViewer() {
   const item: Message | null = items[at] ?? null;
 
   const [holding, setHolding] = useState(false);
-  // Held down (not just tapped): everything over the picture goes, as on WhatsApp (at once).
+  // Held down (not just tapped): everything over the picture fades away, as on WhatsApp, and back when let go.
   const ui = useSharedValue(1);
   const [hidden, setHidden] = useState(false);
   const hide = (on: boolean) => {
     setHidden(on);
-    ui.value = on ? 0 : 1;
+    ui.set(withTiming(on ? 0 : 1, { duration: 150 }));
   };
   const uiStyle = useAnimatedStyle(() => ({ opacity: ui.value }));
   const [typing, setTyping] = useState(false);
@@ -226,7 +226,11 @@ export default function StatusViewer() {
             <Shown key={key} m={item} playing={!paused} onReady={() => setReady(true)} />
           </Pressable>
           {/* Replying: the status dims behind the box (a tap on it puts the keyboard away). */}
-          {typing && <Pressable style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => Keyboard.dismiss()} accessible={false} />}
+          {typing && (
+            <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }}>
+              <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => Keyboard.dismiss()} accessible={false} />
+            </Animated.View>
+          )}
 
           {/* Bars, who, when. */}
           <Animated.View style={[{ position: 'absolute', top: insets.top + 8, start: 10, end: 10, gap: 10 }, uiStyle]} pointerEvents={hidden ? 'none' : 'box-none'}>
@@ -265,7 +269,7 @@ export default function StatusViewer() {
             ) : (
               <>
                 {typing && !reply && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingBottom: 18 }} testID="status-quick">
+                  <Animated.View entering={FadeInDown.duration(200)} exiting={FadeOut.duration(120)} style={{ flexDirection: 'row', flexWrap: 'wrap', paddingBottom: 18 }} testID="status-quick">
                     {QUICK.map((e) => (
                       <Pressy key={e} onPress={() => void sendReply(e)} label={fill(t.replyWithEmoji, { emoji: e })} style={{ width: '25%' }} testID={`status-quick-${e}`}>
                         <Txt size={36} align="center" style={{ paddingVertical: 10 }}>
@@ -273,7 +277,7 @@ export default function StatusViewer() {
                         </Txt>
                       </Pressy>
                     ))}
-                  </View>
+                  </Animated.View>
                 )}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
                   <TextInput

@@ -1,16 +1,21 @@
 // overlays.tsx: things that float over a screen.
 //
-//   Popup      the ⋮ menu, in the corner it was opened from
+//   Popup      the ⋮ menu: grows out of the corner it was opened from
 //   Sheet      slides up from the bottom; drag it down to close
-//   Dialog     a question in the middle ("Delete this message?")
-//   toast()    a short note at the bottom ("Copied") that goes away by itself
+//   Dialog     a question in the middle ("Delete this message?"): fades in, growing a little
+//   toast()    a short note at the bottom ("Copied") that fades in and goes away by itself
 //
-// They appear and go at once, with no animation (only screens slide, like WhatsApp).
-// A sheet still follows your finger when you drag it down.
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+// They come and go the way WhatsApp's do (Android's own pop-up motion): quickly,
+// slowing into place, with no bounce, and the screen behind dims as they come.
+// Each stays on screen until it has finished going. All of it runs on the UI
+// thread, so a busy app can't make it stutter.
+//
+// One that has never been opened costs nothing: none of its parts are made until
+// the first time it shows (whenOpened), so a screen with many of them opens fast.
+import { useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming, type WithTimingConfig } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -19,14 +24,61 @@ import { Icon, type IconName } from './icons';
 import { Pressy, Txt } from './kit';
 import { smooth } from './motion';
 
+/** Coming in: quick, slowing into place (Android's "decelerate"). Going: quicker, speeding away. */
+const OPEN: WithTimingConfig = { duration: 200, easing: Easing.out(Easing.cubic) };
+const CLOSE: WithTimingConfig = { duration: 150, easing: Easing.in(Easing.quad) };
+/** A sheet travels further, so it takes a little longer, like WhatsApp's. */
+const SHEET_OPEN: WithTimingConfig = { duration: 260, easing: Easing.out(Easing.cubic) };
+const SHEET_CLOSE: WithTimingConfig = { duration: 200, easing: Easing.in(Easing.quad) };
+
 /**
- * Whether it's shown, and `p` (always 1) for the styles below. Nothing animates in
- * or out any more (owner, 29 Oct: only screens slide), so menus, sheets, questions and
- * notes appear and go at once.
+ * Keeps something on screen while it animates out. `p` goes 0 → 1 as it opens and
+ * back to 0 as it closes; once it's back at 0 it goes away.
  */
-export function useOpenClose(visible: boolean) {
-  const p = useSharedValue(1);
-  return { mounted: visible, p };
+export function useOpenClose(visible: boolean, open: WithTimingConfig = OPEN, close: WithTimingConfig = CLOSE) {
+  const [mounted, setMounted] = useState(visible);
+  const p = useSharedValue(0);
+  // Opening: show it straight away (setting state while rendering is React's way to follow a prop).
+  if (visible && !mounted) setMounted(true);
+  useEffect(() => {
+    if (visible) p.set(withTiming(1, open));
+    else
+      p.set(
+        withTiming(0, close, (done) => {
+          'worklet';
+          if (done) scheduleOnRN(setMounted, false);
+        }),
+      );
+    // The timings are the same each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, p]);
+  return { mounted, p };
+}
+
+/**
+ * While it closes, a pop-up keeps showing what it showed while open: the screen
+ * behind has often cleared it already (the picked message, the sticker), and it
+ * would empty out as it went.
+ */
+function useKept<T>(value: T, visible: boolean): T {
+  const [kept, setKept] = useState(value);
+  if (visible && value !== kept) setKept(value);
+  return visible ? value : kept;
+}
+
+/**
+ * Only makes a pop-up the first time it opens (and keeps it after, so it can
+ * animate out and open again quickly). Until then it costs its screen nothing:
+ * no state, no animations, nothing read. `Body` must take `visible`.
+ */
+export function whenOpened<P extends { visible: boolean }>(Body: ComponentType<P>) {
+  function Lazy(props: P) {
+    const [ever, setEver] = useState(props.visible);
+    if (props.visible && !ever) setEver(true);
+    return ever ? <Body {...props} /> : null;
+  }
+  Lazy.displayName = `whenOpened(${Body.displayName ?? Body.name})`;
+  return Lazy;
 }
 
 export function Backdrop({ p, onClose, dim = 0.35 }: { p: { value: number }; onClose: () => void; dim?: number }) {
@@ -40,14 +92,16 @@ export function Backdrop({ p, onClose, dim = 0.35 }: { p: { value: number }; onC
 
 // ---- The ⋮ menu ----
 
-export function Popup({ visible, onClose, children, top = 64 }: { visible: boolean; onClose: () => void; children: ReactNode; top?: number }) {
+export const Popup = whenOpened(function Popup({ visible, onClose, children: now, top = 64 }: { visible: boolean; onClose: () => void; children: ReactNode; top?: number }) {
+  const children = useKept(now, visible);
   const t = useTheme();
   const { rtl } = useLook();
   const insets = useSafeAreaInsets();
   const { mounted, p } = useOpenClose(visible);
+  // Like WhatsApp's ⋮ menu: it grows out of its corner as it fades in, and fades as it goes.
   const style = useAnimatedStyle(() => ({
-    opacity: interpolate(p.value, [0, 0.6], [0, 1], 'clamp'),
-    transform: [{ scale: interpolate(p.value, [0, 1], [0.86, 1]) }],
+    opacity: interpolate(p.value, [0, 0.5], [0, 1], 'clamp'),
+    transform: [{ scale: interpolate(p.value, [0, 1], [0.8, 1]) }],
   }));
   if (!mounted) return null;
   return (
@@ -77,7 +131,7 @@ export function Popup({ visible, onClose, children, top = 64 }: { visible: boole
       </View>
     </Modal>
   );
-}
+});
 
 export function MenuItem({ icon, label, onPress, danger, testID }: { icon?: IconName; label: string; onPress: () => void; danger?: boolean; testID?: string }) {
   const t = useTheme();
@@ -97,7 +151,8 @@ export function MenuItem({ icon, label, onPress, danger, testID }: { icon?: Icon
 
 /** How tall the on-screen keyboard is right now (0 when it's closed). */
 function useKeyboardHeight() {
-  const [height, setHeight] = useState(0);
+  // Already open when the sheet first shows: start from its height (sheets are only made when first opened).
+  const [height, setHeight] = useState(() => (Keyboard.isVisible() ? (Keyboard.metrics()?.height ?? 0) : 0));
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', (e) => setHeight(e.endCoordinates.height));
     const hide = Keyboard.addListener('keyboardDidHide', () => setHeight(0));
@@ -109,13 +164,17 @@ function useKeyboardHeight() {
   return height;
 }
 
-export function Sheet({ visible, onClose, children, title }: { visible: boolean; onClose: () => void; children: ReactNode; title?: string }) {
+export const Sheet = whenOpened(function Sheet({ visible, onClose, children: now, title: nowTitle }: { visible: boolean; onClose: () => void; children: ReactNode; title?: string }) {
+  const children = useKept(now, visible);
+  const title = useKept(nowTitle, visible);
   const t = useTheme();
   const { rtl } = useLook();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { mounted, p } = useOpenClose(visible);
+  const { mounted, p } = useOpenClose(visible, SHEET_OPEN, SHEET_CLOSE);
   const drag = useSharedValue(0);
+  // Its own height (until measured, the screen's), so it slides up from just below the screen.
+  const tall = useSharedValue(height);
   const keyboardHeight = useKeyboardHeight();
   // Some phones shrink the pop-up's window when the keyboard opens and some don't. If it already
   // shrank, lifting by the keyboard's height again would push the boxes off the top. So measure how
@@ -137,7 +196,7 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
     },
   });
 
-  const style = useAnimatedStyle(() => ({ transform: [{ translateY: interpolate(p.value, [0, 1], [height * 0.6, 0]) + drag.value }] }));
+  const style = useAnimatedStyle(() => ({ transform: [{ translateY: (1 - p.value) * tall.value + drag.value }] }));
   if (!mounted) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
@@ -156,6 +215,7 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
             },
             style,
           ]}
+          onLayout={(e) => tall.set(e.nativeEvent.layout.height + 40)}
         >
           <GestureDetector gesture={pan}>
             <View style={{ alignItems: 'center', paddingTop: 10, paddingBottom: title ? 4 : 10 }}>
@@ -172,17 +232,23 @@ export function Sheet({ visible, onClose, children, title }: { visible: boolean;
       </View>
     </Modal>
   );
-}
+});
 
 // ---- A question in the middle ----
 
 export type DialogButton = { label: string; onPress: () => void; danger?: boolean; testID?: string };
 
-export function Dialog({ visible, onClose, title, text, buttons }: { visible: boolean; onClose: () => void; title?: string; text?: string; buttons: DialogButton[] }) {
+export const Dialog = whenOpened(function Dialog(props: { visible: boolean; onClose: () => void; title?: string; text?: string; buttons: DialogButton[] }) {
+  const { visible, onClose } = props;
+  // Each one kept on its own: the props object itself is new every time.
+  const title = useKept(props.title, visible);
+  const text = useKept(props.text, visible);
+  const buttons = useKept(props.buttons, visible);
   const t = useTheme();
   const { rtl } = useLook();
   const { mounted, p } = useOpenClose(visible);
-  const style = useAnimatedStyle(() => ({ opacity: interpolate(p.value, [0, 0.5], [0, 1], 'clamp'), transform: [{ scale: interpolate(p.value, [0, 1], [0.9, 1]) }] }));
+  // Like WhatsApp's: fades in while growing the last little bit, and fades away.
+  const style = useAnimatedStyle(() => ({ opacity: interpolate(p.value, [0, 0.6], [0, 1], 'clamp'), transform: [{ scale: interpolate(p.value, [0, 1], [0.92, 1]) }] }));
   if (!mounted) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
@@ -216,7 +282,7 @@ export function Dialog({ visible, onClose, title, text, buttons }: { visible: bo
       </View>
     </Modal>
   );
-}
+});
 
 // ---- Toasts ----
 
@@ -261,6 +327,8 @@ export function ToastHost() {
       {now && (
         <Animated.View
           key={now.id}
+          entering={FadeIn.duration(150)}
+          exiting={FadeOut.duration(150)}
           pointerEvents={now.action ? 'auto' : 'none'}
           style={{ paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16, backgroundColor: t.dark ? '#ECEEF2' : '#0B1B36', flexDirection: 'row', alignItems: 'center', gap: 16 }}
         >

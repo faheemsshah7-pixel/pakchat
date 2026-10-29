@@ -5,13 +5,11 @@
 // all chats (Settings › Chats). In Graphite any of them can be darkened.
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import type { ReactNode } from 'react';
-import { View } from 'react-native';
-import Svg, { Defs, G, Pattern, Rect } from 'react-native-svg';
+import { useState, type ReactNode } from 'react';
+import { Image as Picture, useWindowDimensions, View, type ImageSourcePropType } from 'react-native';
 
 import type { Wallpaper } from '../../core/core';
 import { useLook } from '../../theme/ThemeProvider';
-import { IconPaths, type IconName } from '../icons';
 
 /** The plain colours: [light, dark]. */
 export const WALL_COLOURS: [string, string][] = [
@@ -44,14 +42,14 @@ export function Backdrop({ wp }: { wp?: Wallpaper }) {
   let base: ReactNode;
   if (kind === 'colour') {
     const c = WALL_COLOURS[Number(wp?.value ?? 0)] ?? WALL_COLOURS[0];
-    base = <View style={[FILL, { backgroundColor: theme.dark ? c[1] : c[0] }]}>{wp?.doodles && <Doodles color={theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(11,27,54,0.07)'} />}</View>;
+    base = <View style={[FILL, { backgroundColor: theme.dark ? c[1] : c[0] }]}>{wp?.doodles && <Doodles tile={theme.dark ? TILES.colourDark : TILES.colourLight} />}</View>;
   } else if (kind === 'gradient') {
     const g = WALL_GRADIENTS[Number(wp?.value ?? 0)] ?? WALL_GRADIENTS[0];
     base = <LinearGradient colors={theme.dark ? [g[2], g[3]] : [g[0], g[1]]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={FILL} />;
   } else if (kind === 'photo' && typeof wp?.value === 'string') {
     base = <Image source={{ uri: wp.value }} style={FILL} contentFit="cover" />;
   } else {
-    base = <Doodles color={theme.dark ? 'rgba(255,255,255,0.045)' : 'rgba(37,99,235,0.08)'} />;
+    base = <Doodles tile={theme.dark ? TILES.dark : TILES.light} />;
   }
   return (
     <View pointerEvents="none" style={FILL}>
@@ -63,33 +61,44 @@ export function Backdrop({ wp }: { wp?: Wallpaper }) {
 
 const FILL = { position: 'absolute' as const, top: 0, start: 0, end: 0, bottom: 0 };
 
-/** One square of the doodles, repeated across the whole wallpaper: [icon, x, y, turn]. */
-const DOODLES: [IconName, number, number, number][] = [
-  ['moon', 10, 8, -14],
-  ['star', 70, 4, 12],
-  ['heart', 128, 26, -8],
-  ['music', 38, 58, 10],
-  ['sun', 100, 72, 0],
-  ['camera', 8, 112, -10],
-  ['emoji', 66, 124, 8],
-  ['chat', 134, 132, -12],
-];
+/**
+ * The doodles, one square of them in each tint (drawn by scripts/make-doodles.js): a
+ * moon, stars, hearts, music, a camera. Light and dark for PakChat's own wallpaper,
+ * and the two over a colour.
+ */
+const TILES: Record<'light' | 'dark' | 'colourLight' | 'colourDark', ImageSourcePropType> = {
+  light: require('../../../assets/wallpaper/doodles-light.png'),
+  dark: require('../../../assets/wallpaper/doodles-dark.png'),
+  colourLight: require('../../../assets/wallpaper/doodles-colour-light.png'),
+  colourDark: require('../../../assets/wallpaper/doodles-colour-dark.png'),
+};
+/** One square's size, in points. */
 const TILE = 176;
 
-/** Faint drawings behind the messages, like WhatsApp's: a moon, stars, hearts, music, a camera. */
-function Doodles({ color }: { color: string }) {
+/**
+ * Faint drawings behind the messages, like WhatsApp's: the same small square side by
+ * side. It used to be drawn afresh as one big picture each time a chat opened, which
+ * held up the chat sliding in on older phones; a small ready-made picture shows at once.
+ */
+function Doodles({ tile }: { tile: ImageSourcePropType }) {
+  const win = useWindowDimensions();
+  // As many squares as cover it: the screen's size at first, then its own once measured.
+  const [size, setSize] = useState({ width: win.width, height: win.height });
+  const across = Math.ceil(size.width / TILE);
+  const down = Math.ceil(size.height / TILE);
   return (
-    <Svg width="100%" height="100%" style={FILL}>
-      <Defs>
-        <Pattern id="pakchat-doodles" patternUnits="userSpaceOnUse" width={TILE} height={TILE}>
-          {DOODLES.map(([name, x, y, turn]) => (
-            <G key={name} transform={`translate(${x} ${y}) rotate(${turn} 12 12) scale(1.15)`}>
-              <IconPaths name={name} color={color} stroke={1.6} />
-            </G>
-          ))}
-        </Pattern>
-      </Defs>
-      <Rect width="100%" height="100%" fill="url(#pakchat-doodles)" />
-    </Svg>
+    <View
+      style={[FILL, { overflow: 'hidden' }]}
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        if (Math.ceil(width / TILE) !== across || Math.ceil(height / TILE) !== down) setSize({ width, height });
+      }}
+    >
+      <View style={{ width: across * TILE, flexDirection: 'row', flexWrap: 'wrap', direction: 'ltr' }}>
+        {Array.from({ length: across * down }, (_, i) => (
+          <Picture key={i} source={tile} style={{ width: TILE, height: TILE }} fadeDuration={0} />
+        ))}
+      </View>
+    </View>
   );
 }

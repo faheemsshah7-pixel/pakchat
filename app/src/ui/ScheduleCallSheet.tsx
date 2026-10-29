@@ -12,10 +12,10 @@ import { useLook } from '../theme/ThemeProvider';
 import { whenLabel } from './format';
 import { Icon } from './icons';
 import { Avatar, Button, Chip, Field, Glass, Pressy, SettingRow, Txt } from './kit';
-import { Sheet, toast } from './overlays';
+import { Sheet, toast, whenOpened } from './overlays';
 import { SchedulePicker } from './SchedulePicker';
 
-export function ScheduleCallSheet({ visible, chatId, onClose }: { visible: boolean; chatId?: string; onClose: () => void }) {
+export const ScheduleCallSheet = whenOpened(function ScheduleCallSheet({ visible, chatId, onClose }: { visible: boolean; chatId?: string; onClose: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left && (r.chat.kind === 'group' || r.chat.kind === 'direct') && !r.chat.announcements);
@@ -109,4 +109,4 @@ export function ScheduleCallSheet({ visible, chatId, onClose }: { visible: boole
       />
     </>
   );
-}
+});

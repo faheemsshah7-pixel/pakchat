@@ -1982,3 +1982,34 @@ your finger and settle back.
 - Forward a message: pick a sixth chat.
 - Make a group with 24 hours on, and members allowed to add people.
 - Add a chat to the home screen and open it from there.
+
+## Step 37: after build 8, pop-ups like WhatsApp's and a faster chat opening
+
+### Why
+On the Realme 7i, half a second passed between tapping a chat and it starting to slide, and
+menus and sheets just appeared with no motion.
+
+### Faster opening
+- A pop-up (sheet, menu, picker) is only built the first time it opens (`whenOpened` in
+  `ui/overlays.tsx`). The chat screen used to build 22 hidden ones every time it opened.
+- The wallpaper doodles are small ready-made tiles (`assets/wallpaper`, made by
+  `scripts/make-doodles.js`) instead of a full-screen drawing made on every open.
+- The slide starts fast and slows into place (`plugins/withScreenSlide.js`), like WhatsApp's;
+  Android's own started slowly, so for a moment nothing seemed to move.
+
+### Pop-ups and small changes
+- Shared in `ui/overlays.tsx` (`useOpenClose`): the ⋮ menu grows out of its corner, sheets
+  slide up over a dimmed screen, questions fade and grow a little, notes fade. Each goes away
+  smoothly too, keeping what it showed while it closes.
+- Quick fades in `ui/motion.ts` (`fadeIn`, `riseIn`, `popIn`, `quick`): selection bars and the
+  chat title cross-fade, "typing…" fades in, ticks pop onto picked chats and people, the mic
+  shrinks as the send arrow grows, the 📷 slides out of the box as you type, a reply preview
+  rises, new reactions pop, a jumped-to message fades back, the photo viewer's bars fade on tap.
+- `LayoutAnimationConfig skipEntering` keeps these still while a screen first draws, so
+  opening a chat doesn't fade everything in; only what comes later moves.
+- Status, a view once photo and search fade in rather than slide.
+
+### Try it
+- Settings › Help › Speed check on the Realme and the Pixel, after opening a few chats.
+- Open ⋮, a sheet (Mute), and a question (Delete): each should come and go smoothly.
+- Hold a chat, then a message: the bar and ticks fade; type a word: mic to send.
