@@ -3,13 +3,11 @@
 // editor, so you can crop, draw and add a caption before it's sent.
 import { router } from 'expo-router';
 import { FlatList, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { dropHandOff } from '../core/files';
 import { useChatList } from '../core/hooks';
 import { useT } from '../i18n';
 import { Avatar, Divider, Pressy, Screen, TopBar, Txt } from '../ui/kit';
-import { rise } from '../ui/motion';
 
 export default function SendTo() {
   const t = useT();
@@ -30,7 +28,7 @@ export default function SendTo() {
         contentContainerStyle={{ padding: 12, paddingBottom: 40 }}
         ItemSeparatorComponent={Divider}
         renderItem={({ item, index }) => (
-          <Animated.View entering={rise(Math.min(index, 10) * 25)}>
+          <View>
             <Pressy onPress={() => router.replace({ pathname: '/chat/[id]', params: { id: item.chat.id, media: '1' } })} label={item.title} scale={0.98} testID={`send-to-${item.title}`}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 16 }}>
                 <Avatar id={item.chat.id} name={item.title} size={44} group={item.chat.kind === 'group'} />
@@ -41,7 +39,7 @@ export default function SendTo() {
                 </View>
               </View>
             </Pressy>
-          </Animated.View>
+          </View>
         )}
       />
     </Screen>

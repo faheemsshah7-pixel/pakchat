@@ -3,7 +3,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { lockWaitUntil, unlockChat } from '../core/lock';
 import { useNow } from '../core/hooks';
@@ -11,7 +10,6 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from './icons';
 import { Button, Screen, TopBar, Txt } from './kit';
-import { pop } from './motion';
 
 export function LockedGate({ chatId }: { chatId: string }) {
   const t = useT();
@@ -38,11 +36,11 @@ export function LockedGate({ chatId }: { chatId: string }) {
     <Screen>
       <TopBar title={t.lockedChat} onBack={() => router.back()} />
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, gap: 12 }} testID="chat-locked">
-        <Animated.View entering={pop()}>
+        <View>
           <View style={{ width: 84, height: 84, borderRadius: 28, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="lock" size={38} color={theme.accInk} />
           </View>
-        </Animated.View>
+        </View>
         <Txt size={19} weight="800" align="center">
           {t.chatIsLocked}
         </Txt>

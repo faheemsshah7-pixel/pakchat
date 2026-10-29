@@ -14,7 +14,7 @@ import { useAudioPlayer, useAudioPlayerStatus, useAudioRecorder } from 'expo-aud
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { usePanGesture } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { stopAll } from '../../core/player';
@@ -255,7 +255,7 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
     opacity: interpolate(-tx.value, [0, CANCEL_AT], [1, 0.2]),
   }));
   const micStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: tx.value * dir }, { translateY: ty.value * 0.6 }, { scale: withSpring(phase.value === 1 ? 1.35 : 1, snappy) }],
+    transform: [{ translateX: tx.value * dir }, { translateY: ty.value * 0.6 }, { scale: phase.value === 1 ? 1.35 : 1 }],
   }));
   const lockStyle = useAnimatedStyle(() => ({
     opacity: phase.value === 1 ? 1 : 0,
@@ -291,7 +291,7 @@ function RecDot() {
 function HoldStrip({ elapsed, slideStyle, label }: { elapsed: number; slideStyle: object; label: string }) {
   const { theme } = useLook();
   return (
-    <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(100)} style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 10 }} testID="voice-holding">
+    <Animated.View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 10 }} testID="voice-holding">
       <RecDot />
       <Txt size={15} weight="600" color={theme.text} style={{ minWidth: 44, fontVariant: ['tabular-nums'] }}>
         {duration(elapsed)}
@@ -314,7 +314,6 @@ function LockHint({ style }: { style: object }) {
   return (
     <Animated.View
       pointerEvents="none"
-      entering={FadeIn.duration(150)}
       style={[{ position: 'absolute', end: 18, bottom: 74, width: 40, paddingVertical: 10, borderRadius: 20, backgroundColor: theme.glassStrong, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: theme.glassLine }, style]}
     >
       <Icon name="lock" size={18} color={theme.text} />
@@ -372,7 +371,7 @@ function LockedStrip({ elapsed, levels, onDelete, onPause, once }: { elapsed: nu
   const t = useT();
   const { theme } = useLook();
   return (
-    <Animated.View entering={FadeIn.duration(150)} style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }} testID="voice-locked">
+    <Animated.View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }} testID="voice-locked">
       <IconButton icon="trash" label={t.deleteRecording} onPress={onDelete} color={theme.muted} testID="voice-delete" />
       <RecDot />
       <Txt size={15} weight="600" color={theme.text} style={{ minWidth: 44, fontVariant: ['tabular-nums'] }}>
@@ -405,7 +404,7 @@ function PausedStrip({ preview, elapsed, onDelete, onResume, once }: { preview: 
   }, [status.didJustFinish, player]);
 
   return (
-    <Animated.View entering={FadeIn.duration(150)} style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }} testID="voice-paused">
+    <Animated.View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }} testID="voice-paused">
       <IconButton
         icon="trash"
         label={t.deleteRecording}

@@ -8,7 +8,7 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, SectionList, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useChatList, usePeople, useSearch } from '../core/hooks';
@@ -21,7 +21,6 @@ import { useLook } from '../theme/ThemeProvider';
 import { bodyLine, listTime } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { Avatar, Chip, Empty, Field, IconButton, Pressy, Screen, Txt, fontStyle } from '../ui/kit';
-import { rise } from '../ui/motion';
 
 type Row = { kind: 'chat'; id: string; title: string; group: boolean } | { kind: 'person'; id: string; name: string; about?: string } | { kind: 'msg'; f: Found & { thumb?: string } };
 
@@ -143,7 +142,7 @@ export default function Search() {
       </View>
 
       {secret && (
-        <Animated.View entering={FadeIn.duration(150)} style={{ paddingHorizontal: 12, paddingTop: 12 }}>
+        <Animated.View style={{ paddingHorizontal: 12, paddingTop: 12 }}>
           <Pressy
             onPress={() => {
               openFolderByCode();
@@ -168,9 +167,9 @@ export default function Search() {
         </Animated.View>
       )}
       {secret && sections.length === 0 ? null : !showing ? (
-        <Animated.View entering={FadeIn.delay(100)}>
+        <View>
           <Empty icon="lock" text={t.searchLocal} />
-        </Animated.View>
+        </View>
       ) : sections.length === 0 ? (
         <Empty icon="search" text={t.noResults} />
       ) : (
@@ -185,7 +184,7 @@ export default function Search() {
             </Txt>
           )}
           renderItem={({ item, index }) => (
-            <Animated.View entering={rise(Math.min(index, 8) * 20)}>
+            <View>
               {item.kind === 'chat' ? (
                 <Pressy onPress={() => openChat(item.id)} label={item.title} scale={0.98}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 }}>
@@ -237,7 +236,7 @@ export default function Search() {
                   </View>
                 </Pressy>
               )}
-            </Animated.View>
+            </View>
           )}
         />
       )}

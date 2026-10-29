@@ -1,24 +1,26 @@
 // (tabs)/_layout.tsx: the four tabs along the bottom (Chats, Status, Calls,
 // Communities). Settings and you are in the chat list's ⋮ menu, as on WhatsApp.
 //
-// The bar is our own: a soft pill sits behind the open tab and springs across
-// when you pick another one (the other way in Urdu).
+// The bar is our own: a soft pill sits behind the open tab (on the other side in
+// Urdu). It moves at once, with no animation.
 //
 // Like WhatsApp, swipe sideways anywhere on a tab to go to the next one: the
-// tabs sit side by side in a pager (react-native-tab-view) and slide with your
-// finger.
+// tabs sit side by side in a pager (react-native-tab-view) and move with your
+// finger. Tapping a tab switches at once (no sliding), and all four are made
+// ready just after the chat list first shows, so none has to load when you get
+// to it, and starting up draws the chat list first.
 import { TopTabs, type MaterialTopTabBarProps } from 'expo-router/js-top-tabs';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChatList, useMissedCalls } from '../../core/hooks';
+import { markListShown, useChatList, useMissedCalls } from '../../core/hooks';
+import { startTimer, stopTimer } from '../../core/speed';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon, type IconName } from '../../ui/icons';
 import { Pressy, Txt } from '../../ui/kit';
-import { smooth } from '../../ui/motion';
 
 const TABS: { name: string; icon: IconName; label: 'chats' | 'status' | 'calls' | 'communities' }[] = [
   { name: 'index', icon: 'chat', label: 'chats' },
@@ -39,8 +41,12 @@ function TabBar({ state, navigateToTab }: MaterialTopTabBarProps) {
   const missed = useMissedCalls();
 
   useEffect(() => {
-    x.value = withSpring(state.index * tabW, smooth);
+    x.value = state.index * tabW;
   }, [state.index, tabW, x]);
+  // A tap is timed until the tab is on screen (Settings › Help › Speed check).
+  useEffect(() => {
+    requestAnimationFrame(() => stopTimer('tab', 'tab'));
+  }, [state.index]);
 
   const pill = useAnimatedStyle(() => ({ transform: [{ translateX: rtl ? -x.value : x.value }] }));
 
@@ -77,6 +83,7 @@ function TabBar({ state, navigateToTab }: MaterialTopTabBarProps) {
               onPress={() => {
                 // No vibration here: like WhatsApp, switching tabs is silent.
                 if (on) return;
+                startTimer('tab');
                 navigateToTab(state.routes[i].key);
               }}
             >
@@ -118,11 +125,16 @@ function TabBar({ state, navigateToTab }: MaterialTopTabBarProps) {
 
 export default function TabsLayout() {
   const { theme } = useLook();
+  // The other tabs draw once the chat list has shown (useAfterStart); at the latest, after three seconds.
+  useEffect(() => {
+    const id = setTimeout(markListShown, 3_000);
+    return () => clearTimeout(id);
+  }, []);
   return (
     <TopTabs
       tabBarPosition="bottom"
       tabBar={(props) => <TabBar {...props} />}
-      screenOptions={{ swipeEnabled: true, animationEnabled: true, lazy: true, lazyPreloadDistance: 1, sceneStyle: { backgroundColor: theme.bg } }}
+      screenOptions={{ swipeEnabled: true, animationEnabled: false, lazy: true, lazyPreloadDistance: 3, sceneStyle: { backgroundColor: theme.bg } }}
     >
       {TABS.map((tab) => (
         <TopTabs.Screen key={tab.name} name={tab.name} />

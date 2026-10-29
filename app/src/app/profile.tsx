@@ -5,6 +5,7 @@ import KV from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
+import { View } from 'react-native';
 
 import { core } from '../core/core';
 import { useAuth } from '../core/hooks';
@@ -12,7 +13,6 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Avatar, Button, Field, Screen, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
-import { pop, rise } from '../ui/motion';
 
 export default function Profile() {
   const t = useT();
@@ -40,18 +40,18 @@ export default function Profile() {
     <Screen>
       {/* Lifted by the keyboard's height, so the name box and Continue stay above it. */}
       <Animated.View style={[{ flex: 1, padding: 24, gap: 16, justifyContent: 'center' }, lift]}>
-        <Animated.View entering={pop()} style={{ alignItems: 'center' }}>
+        <Animated.View style={{ alignItems: 'center' }}>
           <Avatar id={myId} name={name} size={110} />
         </Animated.View>
-        <Animated.View entering={rise(80)}>
+        <View>
           <Txt size={28} weight="800" align="center">
             {t.welcome}
           </Txt>
           <Txt size={15} color={theme.muted} align="center" style={{ marginTop: 6 }}>
             {t.nameLabel}
           </Txt>
-        </Animated.View>
-        <Animated.View entering={rise(140)} style={{ gap: 12 }}>
+        </View>
+        <Animated.View style={{ gap: 12 }}>
           <Field value={name} onChangeText={setName} placeholder={t.yourName} maxLength={25} autoCapitalize="words" testID="profile-name" />
           <Button title={t.continue} onPress={done} busy={busy} disabled={!name.trim()} testID="profile-continue" />
         </Animated.View>

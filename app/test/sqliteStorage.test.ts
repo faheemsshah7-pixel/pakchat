@@ -225,3 +225,42 @@ describe('media, links and docs', () => {
     expect(linksIn('nothing here')).toEqual([]);
   });
 });
+
+describe('the chat list', () => {
+  test('the newest message of each chat, in one read, is the one listMessages gives', async () => {
+    const s = await SqliteStorage.open(nodeDb());
+    const chat = (id: string) => ({ id, kind: 'direct' as const, members: [], readUpTo: 0, unread: 0, lastActivity: 1 });
+    const msg = (chatId: string, id: string, order: number, sentAt: number) => ({ chatId, id, author: 'u1', authorDevice: 1, seq: null, order, sentAt, kind: 'text' as const, text: id });
+    await s.putChat(chat('a'));
+    await s.putChat(chat('b'));
+    await s.putChat(chat('empty'));
+    await s.putMessage(msg('a', 'a1', 1, 10));
+    await s.putMessage(msg('a', 'a2', 2, 20));
+    // Same place in the order: the one sent later is newer.
+    await s.putMessage(msg('b', 'b1', 5, 30));
+    await s.putMessage(msg('b', 'b2', 5, 40));
+    await s.putMessage(msg('b', 'b0', 4, 99));
+    const newest = await s.newestOfEach();
+    expect([...newest.keys()].sort()).toEqual(['a', 'b']);
+    expect(newest.get('a')?.id).toBe('a2');
+    expect(newest.get('b')?.id).toBe('b2');
+    for (const id of ['a', 'b']) expect(newest.get(id)).toEqual((await s.listMessages(id, { limit: 1 }))[0]);
+  });
+});
+
+describe('forwarding', () => {
+  test('frequently contacted: the chats I wrote to most lately, most first', async () => {
+    const s = await SqliteStorage.open(nodeDb());
+    let n = 0;
+    const msg = (chatId: string, author: string, sentAt: number, kind = 'text') => ({ chatId, id: `m${++n}`, author, authorDevice: 1, seq: n, order: n, sentAt, kind: kind as 'text', text: 'hi' });
+    for (let i = 0; i < 3; i++) await s.putMessage(msg('ali', 'me', 1_000 + i));
+    for (let i = 0; i < 5; i++) await s.putMessage(msg('family', 'me', 1_000 + i));
+    await s.putMessage(msg('work', 'me', 1_100));
+    // Theirs, long ago, and notes don't count.
+    for (let i = 0; i < 9; i++) await s.putMessage(msg('noisy', 'them', 1_000 + i));
+    for (let i = 0; i < 9; i++) await s.putMessage(msg('old', 'me', 10 + i));
+    for (let i = 0; i < 9; i++) await s.putMessage(msg('notes', 'me', 1_000 + i, 'system'));
+    expect(await s.frequentChats('me', 500)).toEqual(['family', 'ali', 'work']);
+    expect(await s.frequentChats('me', 500, 2)).toEqual(['family', 'ali']);
+  });
+});

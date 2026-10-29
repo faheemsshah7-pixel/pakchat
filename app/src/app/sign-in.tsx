@@ -18,7 +18,7 @@
 // down, so the box you're typing in is never hidden.
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, ScrollView, View, type ScrollViewInstance } from 'react-native';
-import Animated, { FadeIn, useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
 import { formatPhone } from '@pakchat/shared';
@@ -30,7 +30,6 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
 import { phoneError } from '../ui/format';
-import { pop, rise } from '../ui/motion';
 
 /** Google's "G", in its four colours (Google asks for it on sign-in buttons). */
 function GoogleG() {
@@ -68,10 +67,10 @@ export default function SignIn() {
   // take a while to slide up (much longer on a busy phone), so this runs when Android says it's
   // fully up, not after a guessed wait. Tapping another box while it's already up scrolls too.
   function showBottom() {
-    setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 120);
+    setTimeout(() => scroller.current?.scrollToEnd({ animated: false }), 120);
   }
   useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 60));
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scroller.current?.scrollToEnd({ animated: false }), 60));
     return () => sub.remove();
   }, []);
 
@@ -189,7 +188,7 @@ export default function SignIn() {
         </View>
 
         <View style={{ alignItems: 'center', marginTop: 48, gap: 12 }}>
-          <Animated.View entering={pop()}>
+          <View>
             <View
               style={{
                 width: 96,
@@ -203,22 +202,22 @@ export default function SignIn() {
             >
               <Icon name="chat" size={46} color="#FFFFFF" stroke={2} />
             </View>
-          </Animated.View>
-          <Animated.View entering={rise(80)}>
+          </View>
+          <View>
             <Txt size={36} weight="800" align="center" style={{ marginTop: 10, letterSpacing: -1 }}>
               {t.appName}
             </Txt>
-          </Animated.View>
-          <Animated.View entering={rise(140)}>
+          </View>
+          <View>
             <Txt size={16} color={theme.muted} align="center">
               {t.tagline}
             </Txt>
-          </Animated.View>
+          </View>
         </View>
 
         <View style={{ gap: 10, marginTop: 36 }}>
           {features.map((f, i) => (
-            <Animated.View key={f.icon} entering={rise(200 + i * 70)}>
+            <Animated.View key={f.icon}>
               <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 18 }}>
                 <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name={f.icon} size={19} color={theme.accInk} />
@@ -236,16 +235,16 @@ export default function SignIn() {
         <View style={{ flex: 1, minHeight: 24 }} />
 
         {!!error && (
-          <Animated.View entering={FadeIn}>
+          <View>
             <View style={{ backgroundColor: theme.dangerSoft, borderRadius: 14, padding: 12, marginBottom: 12 }} testID="sign-in-error">
               <Txt size={14} weight="500" color={theme.danger} align="center">
                 {error}
               </Txt>
             </View>
-          </Animated.View>
+          </View>
         )}
 
-        <Animated.View entering={rise(380)} style={{ gap: 10 }}>
+        <Animated.View style={{ gap: 10 }}>
           {step === 'start' && (
             <>
               <Pressy onPress={google} disabled={busy} label={t.continueGoogle} testID="google-sign-in">
@@ -272,7 +271,7 @@ export default function SignIn() {
           )}
 
           {step === 'number' && (
-            <Animated.View entering={FadeIn} style={{ gap: 8 }}>
+            <Animated.View style={{ gap: 8 }}>
               <Txt size={13} color={theme.muted}>
                 {t.phoneHint}
               </Txt>
@@ -295,7 +294,7 @@ export default function SignIn() {
           )}
 
           {step === 'code' && (
-            <Animated.View entering={FadeIn} style={{ gap: 8 }}>
+            <Animated.View style={{ gap: 8 }}>
               <Txt size={14} color={theme.muted} align="center">
                 {fill(t.codeSentTo, { phone: formatPhone(sentTo) })}
               </Txt>
@@ -332,7 +331,7 @@ export default function SignIn() {
           )}
 
           {testOn && step === 'start' && (
-            <Animated.View entering={FadeIn} style={{ gap: 8, marginTop: 6 }}>
+            <Animated.View style={{ gap: 8, marginTop: 6 }}>
               <Txt size={13} weight="700" color={theme.sectionText}>
                 {t.testAccount}
               </Txt>
@@ -342,7 +341,7 @@ export default function SignIn() {
           )}
 
           {editing ? (
-            <Animated.View entering={FadeIn} style={{ gap: 8, marginTop: 6 }}>
+            <Animated.View style={{ gap: 8, marginTop: 6 }}>
               <Txt size={13} color={theme.muted}>
                 {t.serverAddressHint}
               </Txt>

@@ -77,8 +77,8 @@ function Picker({ initial, button, soonest, onPick }: { initial?: number; button
     const d = new Date(ms);
     setHour(d.getHours());
     setMinute(d.getMinutes());
-    hours.current?.scrollToOffset({ offset: d.getHours() * ROW, animated: true });
-    minutes.current?.scrollToOffset({ offset: d.getMinutes() * ROW, animated: true });
+    hours.current?.scrollToOffset({ offset: d.getHours() * ROW, animated: false });
+    minutes.current?.scrollToOffset({ offset: d.getMinutes() * ROW, animated: false });
   }
 
   const tonight = (() => {

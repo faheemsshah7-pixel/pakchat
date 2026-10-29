@@ -1,40 +1,32 @@
 // overlays.tsx: things that float over a screen.
 //
-//   Popup      the ⋮ menu: grows out of the corner it was opened from
+//   Popup      the ⋮ menu, in the corner it was opened from
 //   Sheet      slides up from the bottom; drag it down to close
 //   Dialog     a question in the middle ("Delete this message?")
 //   toast()    a short note at the bottom ("Copied") that goes away by itself
 //
-// Each one animates in AND out: it stays on screen until its closing
-// animation has finished, then goes away.
+// They appear and go at once, with no animation (only screens slide, like WhatsApp).
+// A sheet still follows your finger when you drag it down.
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { Easing, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { useLook, useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
 import { Pressy, Txt } from './kit';
-import { rise, smooth } from './motion';
+import { smooth } from './motion';
 
-/** Keeps something on screen while it animates out. `p` goes 0 → 1 when opening and back when closing. */
+/**
+ * Whether it's shown, and `p` (always 1) for the styles below. Nothing animates in
+ * or out any more (owner, 29 Oct: only screens slide), so menus, sheets, questions and
+ * notes appear and go at once.
+ */
 export function useOpenClose(visible: boolean) {
-  const [mounted, setMounted] = useState(visible);
-  const p = useSharedValue(0);
-  // Opening: show it straight away (setting state while rendering is React's way to follow a prop).
-  if (visible && !mounted) setMounted(true);
-  useEffect(() => {
-    if (visible) {
-      p.value = withSpring(1, smooth);
-    } else {
-      p.value = withTiming(0, { duration: 170, easing: Easing.in(Easing.quad) }, (done) => {
-        if (done) scheduleOnRN(setMounted, false);
-      });
-    }
-  }, [visible, p]);
-  return { mounted, p };
+  const p = useSharedValue(1);
+  return { mounted: visible, p };
 }
 
 export function Backdrop({ p, onClose, dim = 0.35 }: { p: { value: number }; onClose: () => void; dim?: number }) {
@@ -269,8 +261,6 @@ export function ToastHost() {
       {now && (
         <Animated.View
           key={now.id}
-          entering={rise()}
-          exiting={FadeOutDown.duration(160)}
           pointerEvents={now.action ? 'auto' : 'none'}
           style={{ paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16, backgroundColor: t.dark ? '#ECEEF2' : '#0B1B36', flexDirection: 'row', alignItems: 'center', gap: 16 }}
         >

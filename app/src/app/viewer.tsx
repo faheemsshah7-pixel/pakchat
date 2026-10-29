@@ -7,6 +7,8 @@
 // line to drag through it, its length and the sound. One that isn't
 // downloaded yet shows its blurred preview and a download button.
 // Share sends the file to another app. Drag it up or down to close it.
+// Like WhatsApp, it grows out of its spot in the chat when it opens, and
+// shrinks back into it when it closes (SwipeToClose.tsx, zoom.ts).
 // Along the top, like WhatsApp: Star, Forward, and ⋮ with Reply, Show in chat,
 // All media, Share and Delete.
 import type { Message } from '@pakchat/shared';
@@ -17,9 +19,9 @@ import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, BackHandler, FlatList, Pressable, useWindowDimensions, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, isOffline } from '../core/core';
@@ -32,16 +34,23 @@ import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
 import { Dialog, MenuItem, Popup, toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
-import { SwipeToClose } from '../ui/SwipeToClose';
+import { SwipeToClose, type Closer } from '../ui/SwipeToClose';
+import { parseSpot, takeHanded } from '../ui/zoom';
 
 const keyOf = (m: Message) => `${m.author}/${m.id}`;
 
 export default function Viewer() {
-  const { chat, author, id } = useLocalSearchParams<{ chat: string; author: string; id: string }>();
+  const { chat, author, id, spot: spotParam } = useLocalSearchParams<{ chat: string; author: string; id: string; spot?: string }>();
   const t = useT();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [all, setAll] = useState<Message[] | null>(null);
+  // The one tapped, handed over by the chat so it shows at once; the rest are read once it has grown open.
+  const [tapped] = useState(() => takeHanded(chat, author, id));
+  const [spot] = useState(() => parseSpot(spotParam));
+  const [opened, setOpened] = useState(false);
+  const closer = useRef<Closer>(null);
+  const close = useCallback(() => (closer.current ? closer.current.close() : router.back()), []);
   // Where it opened (the one tapped), and where it is now.
   const [start, setStart] = useState(0);
   const [index, setIndex] = useState(0);
@@ -49,11 +58,12 @@ export default function Viewer() {
   const [chrome, setChrome] = useState(true);
   // Being dragged to close: everything but the picture goes meanwhile.
   const [dragging, setDragging] = useState(false);
-  const bars = chrome && !dragging;
+  const bars = chrome && !dragging && opened;
   const pager = useRef<FlatList<Message>>(null);
 
   // Every photo and video in the chat, oldest first (so swiping left goes to newer ones).
   useEffect(() => {
+    if (tapped && !opened) return;
     let alive = true;
     const load = async () => {
       const list = (await core.storage.shared(chat, 'media')).reverse();
@@ -77,9 +87,19 @@ export default function Viewer() {
       alive = false;
       off();
     };
-  }, [chat, author, id]);
+  }, [chat, author, id, tapped, opened]);
 
-  const m = all?.[index] ?? null;
+  // Back shrinks it into its spot too.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      close();
+      return true;
+    });
+    return () => sub.remove();
+  }, [close]);
+
+  const list = all ?? (tapped ? [tapped] : null);
+  const m = list?.[index] ?? null;
   const f = m?.file;
   const who = m ? (m.author === core.myId ? t.youWord : core.name(m.author) || '…') : '';
   const starred = useStarred();
@@ -108,7 +128,7 @@ export default function Viewer() {
     if ((all?.length ?? 0) <= 1) router.back();
   };
 
-  if (!all) {
+  if (!list) {
     return (
       <View style={{ flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }}>
         <StatusBar style="light" />
@@ -120,11 +140,18 @@ export default function Viewer() {
   return (
     <View style={{ flex: 1 }}>
       <StatusBar style="light" hidden={!chrome} />
-      <SwipeToClose onClose={() => router.back()} onDrag={setDragging}>
+      <SwipeToClose
+        ref={closer}
+        onClose={() => router.back()}
+        onDrag={setDragging}
+        grow={{ spot, aspect: tapped?.file?.width && tapped.file.height ? tapped.file.height / tapped.file.width : null, back: index === start, onOpened: () => setOpened(true) }}
+      >
         <FlatList
+          // Just the one tapped while it grows open, then all of them, starting at it.
+          key={all ? 'all' : 'one'}
           ref={pager}
           style={{ flex: 1 }}
-          data={all}
+          data={list}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
@@ -132,7 +159,7 @@ export default function Viewer() {
           initialScrollIndex={start}
           getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
           // Which page it settled on after a swipe (in Urdu the pages run the other way, and so does x).
-          onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(all.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
+          onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(list.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
           windowSize={3}
           initialNumToRender={1}
           renderItem={({ item, index: i }) => <Page m={item} width={width} active={i === index} chrome={bars} onTap={() => setChrome((c) => !c)} />}
@@ -140,8 +167,8 @@ export default function Viewer() {
       </SwipeToClose>
 
       {bars && (
-        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <IconButton icon="back" label={t.back} onPress={() => router.back()} flip look="onAccent" size={42} testID="viewer-back" />
+        <Animated.View style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <IconButton icon="back" label={t.back} onPress={close} flip look="onAccent" size={42} testID="viewer-back" />
           <View style={{ flex: 1 }}>
             <Txt size={16} weight="700" color="#FFFFFF" lines={1}>
               {who}
@@ -192,8 +219,6 @@ export default function Viewer() {
       {/* The caption (above a video's controls). */}
       {bars && !!m?.text && (
         <Animated.View
-          entering={FadeIn.duration(150)}
-          exiting={FadeOut.duration(120)}
           pointerEvents="none"
           style={{ position: 'absolute', start: 0, end: 0, bottom: insets.bottom + (f?.kind === 'video' && haveFile(m) ? VIDEO_BAR : 0), paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' }}
         >
@@ -234,7 +259,8 @@ function Page({ m, width, active, chrome, onTap }: { m: Message; width: number; 
         )
       ) : here ? (
         <Pressable style={{ flex: 1 }} onPress={onTap}>
-          <Image source={{ uri: f.local }} style={{ flex: 1 }} contentFit="contain" testID="viewer-image" />
+          {/* Kept in memory, so it shows at once when the pages swap in after opening. */}
+          <Image source={{ uri: f.local }} style={{ flex: 1 }} contentFit="contain" cachePolicy="memory-disk" testID="viewer-image" />
         </Pressable>
       ) : (
         <Pressable style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onPress={onTap}>
@@ -294,7 +320,7 @@ function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: ()
         <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" surfaceType="textureView" testID="viewer-video" />
       </Pressable>
       {(chrome || !playing) && (
-        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
           <Pressy onPress={toggle} label={playing ? t.pause : t.play} scale={0.9} testID="viewer-play">
             <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name={playing ? 'pause' : 'play'} size={30} color="#FFFFFF" />
@@ -304,8 +330,6 @@ function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: ()
       )}
       {chrome && (
         <Animated.View
-          entering={FadeIn.duration(150)}
-          exiting={FadeOut.duration(120)}
           style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: VIDEO_BAR + insets.bottom, paddingBottom: insets.bottom, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.45)' }}
         >
           <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>

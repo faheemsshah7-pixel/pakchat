@@ -568,6 +568,31 @@ export const en7 = {
   videoNote: 'Video note',
   tapToRecord: 'Tap to record',
   swipeUpGallery: 'Swipe up for the gallery',
+  // Settings › Help › Speed check (build 8)
+  speedCheck: 'Speed check',
+  speedNote: 'How long things took on this phone, newest first.',
+  speedNone: 'Nothing timed yet. Open a few chats, then come back here.',
+  speedStart: 'Starting PakChat',
+  speedChatDrawn: 'Opening a chat: drawn',
+  speedChatIn: 'Opening a chat: slid in',
+  speedTab: 'Switching tabs',
+  speedSend: 'Sending: bubble shown',
+  // Forward: up to 5 chats, Frequently contacted first (build 8)
+  frequentlyContacted: 'Frequently contacted',
+  recentChats: 'Recent chats',
+  forwardMax: 'You can forward to up to 5 chats at once',
+  // Settings › Chats › Font size (build 8)
+  fontSizeWord: 'Font size',
+  fontSmall: 'Small',
+  fontMedium: 'Medium',
+  fontLarge: 'Large',
+  // Status reply: WhatsApp's eight quick emoji
+  replyWithEmoji: 'Reply with {emoji}',
+  // New group: settings while making it, like WhatsApp
+  groupPermissions: 'Group permissions',
+  // Chat ⋮ › Add shortcut (a chat on the home screen), like WhatsApp
+  addShortcut: 'Add shortcut',
+  shortcutNotHere: 'This phone\'s home screen can\'t add shortcuts',
 };
 
 export const ur7: typeof en7 = {
@@ -1091,4 +1116,23 @@ export const ur7: typeof en7 = {
   videoNote: 'ویڈیو نوٹ',
   tapToRecord: 'ریکارڈ کرنے کے لیے دبائیں',
   swipeUpGallery: 'گیلری کے لیے اوپر کھسکائیں',
+  speedCheck: 'رفتار کی جانچ',
+  speedNote: 'اس فون پر چیزوں میں کتنا وقت لگا، نئی سب سے اوپر۔',
+  speedNone: 'ابھی کچھ نہیں ناپا گیا۔ چند چیٹس کھولیں، پھر یہاں واپس آئیں۔',
+  speedStart: 'پاک چیٹ کا کھلنا',
+  speedChatDrawn: 'چیٹ کھولنا: نظر آئی',
+  speedChatIn: 'چیٹ کھولنا: پوری کھل گئی',
+  speedTab: 'ٹیب بدلنا',
+  speedSend: 'بھیجنا: پیغام نظر آیا',
+  frequentlyContacted: 'اکثر رابطہ',
+  recentChats: 'حالیہ چیٹس',
+  forwardMax: 'ایک وقت میں زیادہ سے زیادہ 5 چیٹس کو آگے بھیج سکتے ہیں',
+  fontSizeWord: 'حروف کا سائز',
+  fontSmall: 'چھوٹا',
+  fontMedium: 'درمیانہ',
+  fontLarge: 'بڑا',
+  replyWithEmoji: '{emoji} سے جواب دیں',
+  groupPermissions: 'گروپ کی اجازتیں',
+  addShortcut: 'شارٹ کٹ شامل کریں',
+  shortcutNotHere: 'اس فون کی ہوم اسکرین پر شارٹ کٹ نہیں لگ سکتا',
 };

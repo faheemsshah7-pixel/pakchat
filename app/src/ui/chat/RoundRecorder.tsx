@@ -12,7 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useRef, useState } from 'react';
 import { Linking, View } from 'react-native';
 import { usePanGesture } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -160,8 +160,6 @@ function RoundOverlay({ camera, elapsed, onReady, slideStyle }: { camera: React.
   const around = 2 * Math.PI * ring;
   return (
     <Animated.View
-      entering={FadeIn.duration(140)}
-      exiting={FadeOut.duration(120)}
       pointerEvents="none"
       style={{ position: 'absolute', start: 0, end: 0, bottom: '100%', alignItems: 'center', paddingBottom: 18 }}
       testID="round-recording"

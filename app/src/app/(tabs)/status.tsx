@@ -12,19 +12,23 @@ import Animated from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 
 import { core } from '../../core/core';
-import { useAuth, useStatuses, usePeople } from '../../core/hooks';
+import { useAfterStart, useAuth, usePeople, useStatuses } from '../../core/hooks';
 import type { StatusPerson } from '../../core/status';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Avatar, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
-import { rise } from '../../ui/motion';
 import { MenuItem, Sheet } from '../../ui/overlays';
 
 const PHOTO = 60;
 const CELL = 76;
 
-export default function Status() {
+/** Drawn once the chat list has shown after starting (useAfterStart), so starting up draws that first. */
+export default function StatusTab() {
+  return useAfterStart() ? <Status /> : null;
+}
+
+function Status() {
   const t = useT();
   const { theme } = useLook();
   const { me, myId } = useAuth();
@@ -52,7 +56,7 @@ export default function Status() {
         <IconButton icon="lock" label={t.statusPrivacy} onPress={() => router.push('/settings/status-privacy')} color={theme.muted} testID="status-privacy" />
       </View>
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        <Animated.View entering={rise()}>
+        <View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10, gap: 4 }} testID="status-row-list">
             {/* Add status: me, with a +. */}
             <Pressy
@@ -82,7 +86,7 @@ export default function Status() {
               <StatusCircle key={p.chat.id} p={p} i={i} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
             ))}
           </ScrollView>
-        </Animated.View>
+        </View>
         {all && !others.length && (
           <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 30, paddingHorizontal: 30 }}>
             {t.noStatuses}
@@ -111,7 +115,7 @@ function StatusCircle({ p, i, onPress, onLongPress }: { p: StatusPerson; i: numb
   const { theme } = useLook();
   const name = core.name(p.owner) || '…';
   return (
-    <Animated.View entering={i < 8 ? rise(40 + i * 25) : undefined} style={{ opacity: p.muted ? 0.5 : 1 }}>
+    <Animated.View style={{ opacity: p.muted ? 0.5 : 1 }}>
       <Pressy onPress={onPress} onLongPress={onLongPress} label={name} scale={0.94} testID="status-row">
         <View style={{ width: CELL, alignItems: 'center', gap: 6 }}>
           <Ring count={p.items.length} seen={p.seen || !!p.muted} color={theme.acc} muted={theme.faint}>

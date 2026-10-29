@@ -8,7 +8,7 @@
 import type { Place } from '@pakchat/shared';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Modal, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { addressOf, LIVE_TIMES, whereAmI } from '../../core/live';
@@ -16,7 +16,6 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../icons';
 import { Button, Glass, IconButton, Pressy, Txt } from '../kit';
-import { rise } from '../motion';
 import { toast } from '../overlays';
 import { MapTiles } from './MapTiles';
 
@@ -95,7 +94,7 @@ function Picker({ onClose, onSend, onLive }: { onClose: () => void; onSend: (p: 
           <IconButton icon="close" label={t.close} look="glass" onPress={onClose} testID="location-close" />
         </View>
         {moved && here && (
-          <Animated.View entering={FadeIn} style={{ position: 'absolute', bottom: 12, end: 12 }}>
+          <Animated.View style={{ position: 'absolute', bottom: 12, end: 12 }}>
             <IconButton icon="target" label={t.myLocation} look="glass" onPress={() => setPin({ lat: here.lat, lng: here.lng })} testID="location-recentre" />
           </Animated.View>
         )}
@@ -103,7 +102,7 @@ function Picker({ onClose, onSend, onLive }: { onClose: () => void; onSend: (p: 
 
       <View style={{ flex: 1, padding: 14, paddingBottom: insets.bottom + 14, gap: 10 }}>
         {pin && (
-          <Animated.View entering={rise()} style={{ gap: 10 }}>
+          <Animated.View style={{ gap: 10 }}>
             <Pressy onPress={() => setTimes(!times)} label={t.shareLive} scale={0.98} testID="location-live">
               <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 18 }}>
                 <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: '#18A86B22', alignItems: 'center', justifyContent: 'center' }}>
@@ -120,7 +119,7 @@ function Picker({ onClose, onSend, onLive }: { onClose: () => void; onSend: (p: 
               </Glass>
             </Pressy>
             {times && (
-              <Animated.View entering={rise()} style={{ flexDirection: 'row', gap: 8 }}>
+              <Animated.View style={{ flexDirection: 'row', gap: 8 }}>
                 {LIVE_TIMES.map((ms) => (
                   <Button key={ms} title={ms < 3_600_000 ? fill(t.forMinutes, { n: ms / 60_000 }) : fill(ms === 3_600_000 ? t.forOneHour : t.forHours, { n: ms / 3_600_000 })} look="soft" style={{ flex: 1 }} onPress={() => onLive(ms)} testID={`live-${ms / 60_000}`} />
                 ))}

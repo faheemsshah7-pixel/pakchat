@@ -4,7 +4,7 @@
 // top shows who you're with and for how long; tap it to go back to the call.
 import { router } from 'expo-router';
 import { View } from 'react-native';
-import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { calls } from '../core/calls';
@@ -29,7 +29,7 @@ export function CallBar() {
   const title = call.extra.length ? [...new Set([...others, ...call.extra])].map((u) => core.name(u) || '…').join(', ') : chat ? core.chatTitle(chat) : '';
   const line = call.state === 'active' && call.startedAt ? duration(now - call.startedAt) : call.state === 'incoming' ? t.answer : call.state === 'connecting' ? t.connectingWord : call.ringing ? t.ringingWord : t.callingWord;
   return (
-    <Animated.View entering={FadeInUp} exiting={FadeOutUp} style={{ position: 'absolute', top: insets.top + 6, start: 0, end: 0, alignItems: 'center' }} pointerEvents="box-none">
+    <Animated.View style={{ position: 'absolute', top: insets.top + 6, start: 0, end: 0, alignItems: 'center' }} pointerEvents="box-none">
       <Pressy onPress={() => router.push({ pathname: '/call', params: { id: call.id } })} label={t.backToCall} scale={0.96} testID="call-bar">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 36, paddingHorizontal: 16, borderRadius: 18, backgroundColor: '#22A35A', boxShadow: '0 6px 18px -6px rgba(0,0,0,0.35)' }}>
           <Icon name={call.video ? 'video' : 'calls'} size={16} color="#FFFFFF" stroke={2} />

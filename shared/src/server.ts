@@ -56,7 +56,7 @@ export interface ServerApi {
   chats(): Promise<ServerChat[]>;
   chat(id: string): Promise<ServerChat>;
   openDirect(userId: string): Promise<ServerChat>;
-  createGroup(title: string, memberIds: string[], options?: { onlyAdminsSend?: boolean }): Promise<ServerChat>;
+  createGroup(title: string, memberIds: string[], options?: GroupSettings): Promise<ServerChat>;
   addMembers(chatId: string, userIds: string[]): Promise<ServerChat>;
   /** Your own id means: leave. */
   removeMember(chatId: string, userId: string): Promise<void>;
@@ -110,6 +110,8 @@ type WireChat = {
 
 /** What a group's (or a community's) admins can change. */
 export type GroupChanges = { title?: string; description?: string; photo?: string; onlyAdminsSend?: boolean; groupsByMembers?: boolean; joinApproval?: boolean; membersEdit?: boolean; membersAdd?: boolean };
+/** Group permissions, which can also be set while making the group (like WhatsApp). */
+export type GroupSettings = Pick<GroupChanges, 'onlyAdminsSend' | 'membersEdit' | 'membersAdd' | 'joinApproval'>;
 
 /** An invite link, as the "Join group?" screen shows it. */
 export type InviteInfo = {
@@ -464,9 +466,12 @@ export class HttpServer implements ServerApi {
     return chatFromWire(await this.call<WireChat>('POST', '/chats/direct', { user_id: userId }));
   }
 
-  async createGroup(title: string, memberIds: string[], options: { onlyAdminsSend?: boolean } = {}) {
+  async createGroup(title: string, memberIds: string[], options: GroupSettings = {}) {
     const body: Record<string, unknown> = { title, member_ids: memberIds };
     if (options.onlyAdminsSend) body.only_admins_send = true;
+    if (options.membersEdit) body.members_edit = true;
+    if (options.membersAdd) body.members_add = true;
+    if (options.joinApproval) body.join_approval = true;
     return chatFromWire(await this.call<WireChat>('POST', '/groups', body));
   }
 

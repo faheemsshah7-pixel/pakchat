@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import KV from 'expo-sqlite/kv-store';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import Animated, { FadeIn, useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 
 import { findBackup, restore, WrongPassword, type BackupInfo } from '../core/backup';
 import { core, isOffline } from '../core/core';
@@ -14,7 +14,6 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Screen, Txt } from '../ui/kit';
 import { clock, dayLabel, fileSize } from '../ui/format';
-import { pop, rise } from '../ui/motion';
 import { toast } from '../ui/overlays';
 
 export default function Restore() {
@@ -57,10 +56,10 @@ export default function Restore() {
   return (
     <Screen>
       <Animated.View style={[{ flex: 1, padding: 24, gap: 16, justifyContent: 'center' }, lift]}>
-        <Animated.View entering={pop()} style={{ alignSelf: 'center', width: 96, height: 96, borderRadius: 32, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View style={{ alignSelf: 'center', width: 96, height: 96, borderRadius: 32, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="archive" size={44} color={theme.accInk} />
         </Animated.View>
-        <Animated.View entering={rise(80)} style={{ gap: 6 }}>
+        <Animated.View style={{ gap: 6 }}>
           <Txt size={26} weight="800" align="center">
             {t.restoreTitle}
           </Txt>
@@ -70,14 +69,14 @@ export default function Restore() {
             </Txt>
           )}
         </Animated.View>
-        <Animated.View entering={rise(140)} style={{ gap: 12 }}>
+        <Animated.View style={{ gap: 12 }}>
           <Field value={password} onChangeText={setPassword} placeholder={t.backupPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} icon="key" testID="restore-password" />
           {!!error && (
-            <Animated.View entering={FadeIn}>
+            <View>
               <Txt size={14} color={theme.danger} align="center" testID="restore-error">
                 {error}
               </Txt>
-            </Animated.View>
+            </View>
           )}
           <Button
             title={busy ? (progress !== undefined ? `${t.restoring} ${Math.round(progress * 100)}%` : t.restoring) : t.restore}

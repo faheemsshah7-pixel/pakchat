@@ -134,6 +134,18 @@ export class SqliteStorage implements Storage {
     return rows.reverse().map((r) => JSON.parse(r.json) as Message);
   }
 
+  /**
+   * The newest message of every chat that has one, by chat, in one read (the
+   * chat list). The same one `listMessages(chatId, { limit: 1 })` gives, without
+   * asking chat by chat.
+   */
+  async newestOfEach(): Promise<Map<string, Message>> {
+    const rows = await this.db.all<{ chat_id: string; json: string }>(
+      'SELECT m.chat_id AS chat_id, m.json AS json FROM chats c JOIN messages m ON m.rowid = (SELECT rowid FROM messages WHERE chat_id = c.id ORDER BY ord DESC, sent_at DESC LIMIT 1)',
+    );
+    return new Map(rows.map((r) => [r.chat_id, JSON.parse(r.json) as Message]));
+  }
+
   // ---- The outbox ----
 
   async putOutbox(item: OutboxItem) {
@@ -230,6 +242,20 @@ export class SqliteStorage implements Storage {
     );
     const list = rows.map((r) => JSON.parse(r.json) as Message);
     return which === 'links' ? list.filter((m) => linksIn(m.text ?? '').length > 0) : list;
+  }
+
+  /**
+   * The chats I've written to most since `since` (ms), most first, up to
+   * `limit`: Forward's "Frequently contacted", like WhatsApp's. Only real
+   * messages count (not calls or notes like "You changed the group name").
+   */
+  async frequentChats(me: string, since: number, limit = 5): Promise<string[]> {
+    const rows = await this.db.all<{ chat_id: string }>(
+      `SELECT chat_id, COUNT(*) AS n FROM messages WHERE author = ? AND sent_at > ? AND json_extract(json, '$.kind') NOT IN ('system', 'call')
+       GROUP BY chat_id ORDER BY n DESC, MAX(sent_at) DESC LIMIT ?`,
+      [me, since, limit],
+    );
+    return rows.map((r) => r.chat_id);
   }
 
   /**

@@ -91,6 +91,8 @@ export type FileModule = {
   liveLocationStop(): void;
   transcriptsAvailable(): boolean;
   transcribe(uri: string, language: string): Promise<string>;
+  /** Asks the home screen to add a chat (Shortcuts.kt). See shortcut.ts for the JSON. False if it can't. */
+  addShortcut(json: string): boolean;
   addListener(event: 'liveStop', fn: () => void): EventSubscription;
   addListener(event: 'pip', fn: (e: { on: boolean }) => void): EventSubscription;
   addListener(event: 'voiceEar', fn: (e: { near?: boolean; done?: boolean }) => void): EventSubscription;

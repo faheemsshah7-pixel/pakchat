@@ -2,7 +2,6 @@
 // sends one message to many people, each in our own chat (core/broadcasts.ts).
 import { router } from 'expo-router';
 import { FlatList, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { useBroadcasts, usePeople } from '../core/hooks';
@@ -10,7 +9,6 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Divider, Empty, Fab, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
-import { rise } from '../ui/motion';
 
 export default function Broadcasts() {
   const t = useT();
@@ -34,7 +32,7 @@ export default function Broadcasts() {
           keyExtractor={(b) => b.id}
           contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 110 }}
           renderItem={({ item: b, index }) => (
-            <Animated.View entering={index < 12 ? rise(index * 25) : undefined}>
+            <View>
               <Glass style={{ marginBottom: 8, borderRadius: 20 }}>
                 <Pressy onPress={() => router.push({ pathname: '/broadcast/[id]', params: { id: b.id } })} label={b.name} scale={0.98} testID="broadcast-row">
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 }}>
@@ -52,7 +50,7 @@ export default function Broadcasts() {
                   </View>
                 </Pressy>
               </Glass>
-            </Animated.View>
+            </View>
           )}
           ItemSeparatorComponent={() => <Divider />}
         />

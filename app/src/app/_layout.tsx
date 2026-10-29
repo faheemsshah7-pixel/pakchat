@@ -30,9 +30,9 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 export default function Root() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      {/* When the phone's "Remove animations" is on, Reanimated skips animations, and screens
-          that slide in after a short wait (sign-in's buttons) could stay invisible. The emulator
-          test caught it. So our animations always play; they're short and soft anyway. */}
+      {/* When the phone's "Remove animations" is on, Reanimated jumps every animation to its
+          end. The few left (a status's progress bar, things springing back after a drag) need
+          to play, or a status would skip straight to the next one, so they always run. */}
       <ReducedMotionConfig mode={ReduceMotion.Never} />
       <SafeAreaProvider>
         <ThemeProvider>
@@ -148,15 +148,15 @@ function App() {
           <Stack.Screen name="chat/[id]" />
           <Stack.Screen name="info/[id]" />
           <Stack.Screen name="verify/[id]" />
-          <Stack.Screen name="new-chat" options={{ animation: 'fade_from_bottom' }} />
-          <Stack.Screen name="new-call" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="new-chat" />
+          <Stack.Screen name="new-call" />
           <Stack.Screen name="call-info" />
-          <Stack.Screen name="new-group" options={{ animation: 'fade_from_bottom' }} />
-          <Stack.Screen name="list" options={{ animation: 'fade_from_bottom' }} />
-          <Stack.Screen name="search" options={{ animation: 'fade' }} />
+          <Stack.Screen name="new-group" />
+          <Stack.Screen name="list" />
+          <Stack.Screen name="search" options={{ animation: 'none' }} />
           <Stack.Screen name="archived" />
           <Stack.Screen name="starred" />
-          <Stack.Screen name="forward" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="forward" />
           <Stack.Screen name="message-info" />
           <Stack.Screen name="poll-votes" />
           <Stack.Screen name="media/[id]" />
@@ -177,31 +177,31 @@ function App() {
           <Stack.Screen name="settings/help" />
           <Stack.Screen name="settings/backup" />
           <Stack.Screen name="restore" />
-          <Stack.Screen name="contact" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="contact" />
           {/* See-through, so the chat shows under a photo dragged away to close it (ui/SwipeToClose.tsx). */}
-          <Stack.Screen name="viewer" options={{ animation: 'fade', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
-          <Stack.Screen name="photo" options={{ animation: 'fade', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
+          <Stack.Screen name="viewer" options={{ animation: 'none', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
+          <Stack.Screen name="photo" options={{ animation: 'none', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
           <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: '#0B1424' } }} />
-          <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
-          <Stack.Screen name="status-new" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="status/[id]" options={{ animation: 'none', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="status-new" />
           <Stack.Screen name="settings/status-privacy" />
-          <Stack.Screen name="once" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="once" options={{ animation: 'none', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="invite/[id]" />
-          <Stack.Screen name="join/[code]" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="join/[code]" />
           <Stack.Screen name="settings/index" />
           <Stack.Screen name="community/[id]" />
-          <Stack.Screen name="new-community" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="new-community" />
           <Stack.Screen name="broadcasts" />
           <Stack.Screen name="broadcast/[id]" />
-          <Stack.Screen name="broadcast-edit" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="broadcast-edit" />
           <Stack.Screen name="wallpaper" />
           <Stack.Screen name="locked" />
           <Stack.Screen name="settings/lock" />
-          <Stack.Screen name="calllink/[code]" options={{ animation: 'fade_from_bottom' }} />
-          <Stack.Screen name="send-to" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="calllink/[code]" />
+          <Stack.Screen name="send-to" />
         </Stack.Protected>
         <Stack.Protected guard={state === 'signedOut'}>
-          <Stack.Screen name="sign-in" options={{ animation: 'fade' }} />
+          <Stack.Screen name="sign-in" options={{ animation: 'none' }} />
         </Stack.Protected>
       </Stack>
       {state === 'signedIn' && <CallBar />}

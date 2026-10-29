@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
@@ -28,7 +28,7 @@ import { VoiceBody } from './VoiceBody';
 import { bodyLine, clock, systemText } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
-import { fade, pop, smooth, snappy, tick } from '../motion';
+import { smooth, tick } from '../motion';
 
 const PULL = 64;
 
@@ -57,6 +57,8 @@ type Props = {
   above?: ReactNode;
   /** Photos and videos sent together (oldest first, `m` the newest): one album (Album.tsx). */
   album?: Message[];
+  /** How big the words are (Settings › Chats › Font size). */
+  textSize: number;
 };
 
 export const Bubble = memo(function Bubble(p: Props) {
@@ -79,21 +81,12 @@ function SystemNote({ m }: { m: Message }) {
   );
 }
 
-function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above, album }: Props) {
+function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above, album, textSize }: Props) {
   const t = useT();
   const { theme, rtl, lang } = useLook();
   const mine = m.author === core.myId;
   const x = useSharedValue(0);
   const over = useSharedValue(0);
-  const picked = useSharedValue(selected ? 1 : 0);
-
-  useEffect(() => {
-    picked.value = withTiming(selected ? 1 : 0, fade);
-  }, [selected, picked]);
-  const lit = useSharedValue(0);
-  useEffect(() => {
-    if (flash) lit.value = withSequence(withTiming(1, { duration: 200 }), withDelay(700, withTiming(0, { duration: 500 })));
-  }, [flash, lit]);
 
   // Towards the middle of the screen: right for theirs, left for mine (the other way round in Urdu).
   const dir = (mine ? -1 : 1) * (rtl ? -1 : 1);
@@ -125,8 +118,6 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
     const pull = Math.abs(x.value);
     return { opacity: interpolate(pull, [10, PULL], [0, 1], 'clamp'), transform: [{ scale: interpolate(pull, [0, PULL], [0.5, 1], 'clamp') }] };
   });
-  const highlight = useAnimatedStyle(() => ({ opacity: picked.value }));
-  const flashing = useAnimatedStyle(() => ({ opacity: lit.value }));
 
   const name = group && !mine && first ? core.name(m.author) || '…' : '';
   const urdu = !!m.text && hasUrdu(m.text);
@@ -197,7 +188,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           {!!m.text && (
             <Text
               style={[
-                fontStyle(m.text, lang, 15.5, '400'),
+                fontStyle(m.text, lang, textSize, '400'),
                 { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left', maxWidth: 236 },
               ]}
             >
@@ -210,7 +201,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           {m.link && <LinkBody link={m.link} mine={mine} />}
           <Text
             style={[
-              fontStyle(m.text ?? '', lang, 15.5, '400'),
+              fontStyle(m.text ?? '', lang, textSize, '400'),
               { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left' },
             ]}
           >
@@ -237,9 +228,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
 
   return (
     <View style={{ marginTop: first ? 6 : 2 }}>
-      {/* The picked-message tint, only while picking (one less layer per bubble while scrolling). */}
-      {(selecting || selected) && <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }, highlight]} />}
-      {flash && <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }, flashing]} />}
+      {/* The picked-message tint; and the same, for a moment, on a message just jumped to (the chat turns `flash` off). */}
+      {(selected || flash) && <View pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }]} />}
       {above}
       <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
         {/* The reply arrow, waiting behind the bubble. */}
@@ -404,7 +394,7 @@ function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: bo
   return (
     <View style={{ flexDirection: 'row', gap: 4, marginTop: -6, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 10 }}>
       {[...counts].map(([emoji, c]) => (
-        <Animated.View key={emoji} entering={pop()}>
+        <Animated.View key={emoji}>
           <Pressy onPress={() => onPress(emoji)} scale={0.9} label={emoji}>
             <View
               style={{
@@ -478,7 +468,7 @@ function PollOption({ text, count, share, on, onPress, testID }: { text: string;
   const { theme } = useLook();
   const w = useSharedValue(share);
   useEffect(() => {
-    w.value = withSpring(share, snappy);
+    w.value = share;
   }, [share, w]);
   const bar = useAnimatedStyle(() => ({ width: `${Math.round(w.value * 100)}%` }));
   return (
@@ -530,7 +520,7 @@ export function DayLabel({ text }: { text: string }) {
 export function TypingDots({ name }: { name?: string }) {
   const { theme } = useLook();
   return (
-    <Animated.View entering={pop()} style={{ alignSelf: 'flex-start', marginTop: 4, gap: 3 }}>
+    <Animated.View style={{ alignSelf: 'flex-start', marginTop: 4, gap: 3 }}>
       {!!name && (
         <Txt size={11.5} weight="600" color={theme.muted} style={{ marginStart: 6 }}>
           {name}
@@ -557,32 +547,9 @@ export function TypingDots({ name }: { name?: string }) {
 }
 
 function Dot({ delay }: { delay: number }) {
-  const { theme, reduceMotion } = useLook();
-  const y = useSharedValue(0);
-  useEffect(() => {
-    if (reduceMotion) return;
-    let alive = true;
-    // Up, down, rest; then again, each dot a little after the one before.
-    const bob = () => {
-      if (!alive) return;
-      y.value = withSpring(-4, snappy, () => {
-        'worklet';
-        y.value = withSpring(0, snappy);
-      });
-    };
-    const start = setTimeout(() => {
-      bob();
-      timer = setInterval(bob, 900);
-    }, delay);
-    let timer: ReturnType<typeof setInterval> | undefined;
-    return () => {
-      alive = false;
-      clearTimeout(start);
-      if (timer) clearInterval(timer);
-    };
-  }, [delay, reduceMotion, y]);
-  const style = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }], opacity: interpolate(y.value, [-4, 0], [1, 0.45]) }));
-  return <Animated.View style={[{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.acc }, style]} />;
+  // Still dots (they used to bob): the words "typing…" at the top say it too, and nothing moves.
+  const { theme } = useLook();
+  return <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.acc, opacity: delay ? 0.7 : 1 }} />;
 }
 
 /** The colour halfway along a two-colour fade ("#RRGGBB" each), for the plain bubble. */

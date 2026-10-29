@@ -1,11 +1,12 @@
 // new-group.tsx: make a group (or, from Group info, add people to one).
 //
 // Step 1: pick people. Each one you pick pops into the row at the top.
-// Step 2: give the group a name, then Create.
+// Step 2: give the group a name, and (like WhatsApp) set its disappearing
+// messages and Group permissions before it's made, then Create.
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { BackHandler, FlatList, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, FadeInRight, LinearTransition, ZoomOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { core, isOffline, type Person } from '../core/core';
 import { defaultTimer } from '../core/timer';
@@ -13,9 +14,9 @@ import { useChat, usePeople } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
-import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
-import { toast } from '../ui/overlays';
-import { pop, rise } from '../ui/motion';
+import { TIMERS, timerLabel } from '../ui/format';
+import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
+import { MenuItem, Sheet, toast } from '../ui/overlays';
 
 export default function NewGroup() {
   const { add } = useLocalSearchParams<{ add?: string }>();
@@ -28,7 +29,13 @@ export default function NewGroup() {
   const [step, setStep] = useState<1 | 2>(1);
   const lift = useKeyboardLift();
   const [title, setTitle] = useState('');
-  const [onlyAdmins, setOnlyAdmins] = useState(false);
+  // Its settings, set before it's made: the timer starts at the default one (Settings › Privacy).
+  const [onlyAdminsSend, setOnlyAdminsSend] = useState(false);
+  const [membersEdit, setMembersEdit] = useState(false);
+  const [membersAdd, setMembersAdd] = useState(false);
+  const [joinApproval, setJoinApproval] = useState(false);
+  const [timer, setTimer] = useState(defaultTimer);
+  const [sheet, setSheet] = useState<'timer' | 'permissions' | null>(null);
   const [busy, setBusy] = useState(false);
 
   const inGroup = new Set(existing?.members.map((m) => m.userId) ?? []);
@@ -80,7 +87,7 @@ export default function NewGroup() {
         if (left.length) toast(fill(t.couldntAdd, { names: left.map((p) => p.name).join(', ') }), undefined, 5000);
         router.back();
       } else {
-        const chat = await core.client.createGroup(title.trim(), picked.map((p) => p.id), { onlyAdminsSend: onlyAdmins, defaultTimer: defaultTimer() });
+        const chat = await core.client.createGroup(title.trim(), picked.map((p) => p.id), { onlyAdminsSend, membersEdit, membersAdd, joinApproval, defaultTimer: timer });
         const left = missing(chat.members);
         if (left.length) toast(fill(t.couldntAdd, { names: left.map((p) => p.name).join(', ') }), undefined, 5000);
         router.replace({ pathname: '/chat/[id]', params: { id: chat.id } });
@@ -96,20 +103,17 @@ export default function NewGroup() {
     return (
       <Screen>
         <TopBar title={t.newGroup} onBack={() => setStep(1)} />
-        <Animated.View entering={FadeInRight.springify().damping(18).stiffness(110)} style={{ padding: 16, gap: 14 }}>
+        <Animated.View style={{ padding: 16, gap: 14 }}>
           <View style={{ alignItems: 'center', marginVertical: 10 }}>
-            <Animated.View entering={pop()}>
+            <View>
               <Avatar id={title || 'new'} name={title} size={96} group />
-            </Animated.View>
+            </View>
           </View>
           <Field value={title} onChangeText={setTitle} placeholder={t.groupName} maxLength={50} autoFocus testID="group-title" />
-          <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 18 }}>
-            <View style={{ flex: 1 }}>
-              <Txt size={15} weight="600">
-                {t.onlyAdminsSend}
-              </Txt>
-            </View>
-            <Toggle on={onlyAdmins} onChange={setOnlyAdmins} label={t.onlyAdminsSend} />
+          <Glass style={{ borderRadius: 18 }}>
+            <SettingRow icon="timer" title={t.disappearing} sub={timerLabel(timer, t)} onPress={() => setSheet('timer')} testID="group-timer" />
+            <Divider />
+            <SettingRow icon="shield" title={t.groupPermissions} onPress={() => setSheet('permissions')} testID="group-permissions" />
           </Glass>
           <Txt size={13} weight="700" color={theme.sectionText}>
             {t.members.replace('{n}', String(picked.length + 1))}
@@ -126,6 +130,49 @@ export default function NewGroup() {
           </View>
           <Button title={t.createGroup} onPress={finish} busy={busy} disabled={!title.trim()} testID="create-group" />
         </Animated.View>
+
+        <Sheet visible={sheet === 'timer'} onClose={() => setSheet(null)} title={t.disappearing}>
+          <View style={{ paddingHorizontal: 16, gap: 4 }}>
+            {TIMERS.map((s) => (
+              <MenuItem
+                key={s}
+                icon={timer === s ? 'check' : undefined}
+                label={timerLabel(s, t)}
+                onPress={() => {
+                  setTimer(s);
+                  setSheet(null);
+                }}
+                testID={`group-timer-${s}`}
+              />
+            ))}
+          </View>
+        </Sheet>
+        <Sheet visible={sheet === 'permissions'} onClose={() => setSheet(null)} title={t.groupPermissions}>
+          <View style={{ paddingHorizontal: 4 }}>
+            <SettingRow icon="lock" title={t.onlyAdminsSend} right={<Toggle on={onlyAdminsSend} onChange={setOnlyAdminsSend} label={t.onlyAdminsSend} testID="group-only-admins" />} />
+            <Divider />
+            <SettingRow
+              icon="edit"
+              title={t.membersEditInfo}
+              sub={t.membersEditInfoSub}
+              right={<Toggle on={membersEdit} onChange={setMembersEdit} label={t.membersEditInfo} testID="group-members-edit" />}
+            />
+            <Divider />
+            <SettingRow
+              icon="group"
+              title={t.membersAddOthers}
+              sub={t.membersAddOthersSub}
+              right={<Toggle on={membersAdd} onChange={setMembersAdd} label={t.membersAddOthers} testID="group-members-add" />}
+            />
+            <Divider />
+            <SettingRow
+              icon="userPlus"
+              title={t.approveMembers}
+              sub={t.approveMembersSub}
+              right={<Toggle on={joinApproval} onChange={setJoinApproval} label={t.approveMembers} testID="group-approve" />}
+            />
+          </View>
+        </Sheet>
       </Screen>
     );
   }
@@ -135,10 +182,10 @@ export default function NewGroup() {
       <TopBar title={add ? t.addMembers : t.newGroup} subtitle={t.pickPeople} onBack={() => router.back()} />
 
       {picked.length > 0 && (
-        <Animated.View entering={FadeIn}>
+        <View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 16, paddingTop: 12 }}>
             {picked.map((p) => (
-              <Animated.View key={p.id} entering={pop()} exiting={ZoomOut.duration(140)} layout={LinearTransition.springify().damping(30).stiffness(210)}>
+              <Animated.View key={p.id}>
                 <Pressy onPress={() => toggle(p)} label={p.name} scale={0.9}>
                   <View style={{ alignItems: 'center', width: 62, gap: 4 }}>
                     <View>
@@ -155,7 +202,7 @@ export default function NewGroup() {
               </Animated.View>
             ))}
           </ScrollView>
-        </Animated.View>
+        </View>
       )}
 
       <View style={{ padding: 14 }}>
@@ -186,7 +233,7 @@ export default function NewGroup() {
         renderItem={({ item, index }) => {
           const on = isPicked(item.id);
           return (
-            <Animated.View entering={rise(Math.min(index, 10) * 25)}>
+            <View>
               <Pressy onPress={() => toggle(item)} label={item.name} scale={0.98} testID={`pick-${item.name}`}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: on ? theme.selected : 'transparent' }}>
                   <Avatar id={item.id} name={item.name} size={44} />
@@ -208,20 +255,20 @@ export default function NewGroup() {
                     }}
                   >
                     {on && (
-                      <Animated.View entering={pop()}>
+                      <View>
                         <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
-                      </Animated.View>
+                      </View>
                     )}
                   </View>
                 </View>
               </Pressy>
-            </Animated.View>
+            </View>
           );
         }}
       />
 
       {picked.length > 0 && (
-        <Animated.View entering={rise()} style={[{ position: 'absolute', start: 16, end: 16 }, lift]}>
+        <Animated.View style={[{ position: 'absolute', start: 16, end: 16 }, lift]}>
           <Button title={add ? t.addMembers : t.continue} icon={add ? 'userPlus' : 'forwardArrow'} onPress={() => (add ? finish() : setStep(2))} busy={busy} testID="group-next" />
         </Animated.View>
       )}

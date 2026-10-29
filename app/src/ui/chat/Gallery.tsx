@@ -10,7 +10,7 @@ import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, FlatList, Modal, ScrollView, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { outsideFor } from '../../core/lock';
@@ -235,7 +235,7 @@ function GalleryScreen({ ask }: { ask: Ask }) {
         />
       )}
       {picked.length > 0 && (
-        <Animated.View entering={FadeIn} exiting={FadeOut} style={{ position: 'absolute', end: 18, bottom: insets.bottom + 22 }}>
+        <Animated.View style={{ position: 'absolute', end: 18, bottom: insets.bottom + 22 }}>
           <Pressy onPress={() => ask.done(picked.map(pickedOf))} label={t.send} scale={0.92} testID="gallery-done">
             <View
               style={{

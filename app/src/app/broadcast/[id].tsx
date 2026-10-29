@@ -9,7 +9,6 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, TextInput, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { dropBroadcast, editBroadcast, forgetBroadcastSent, sendBroadcastFiles, sendBroadcastText, unsendBroadcast } from '../../core/broadcasts';
@@ -23,7 +22,6 @@ import { MediaComposer, type Ready } from '../../ui/chat/MediaComposer';
 import { bodyLine, clock, fileSize } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
-import { rise } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
 type Item = ReturnType<typeof useBroadcastSent>[number];
@@ -75,7 +73,7 @@ export default function BroadcastPage() {
     if (!words) return;
     setText('');
     void sendBroadcastText(id, words)
-      .then(() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 200))
+      .then(() => setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 200))
       .catch((err: unknown) => toast(isOffline(err) ? t.offline : t.couldNot));
   }
 
@@ -108,9 +106,9 @@ export default function BroadcastPage() {
             </Txt>
           }
           renderItem={({ item, index }) => (
-            <Animated.View entering={index >= sent.length - 3 ? rise() : undefined}>
+            <View>
               <Sent item={item} onPress={() => setLooking(item)} onLongPress={() => setHeld(item)} />
-            </Animated.View>
+            </View>
           )}
         />
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 8 }}>

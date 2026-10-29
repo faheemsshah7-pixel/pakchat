@@ -3,7 +3,7 @@
 import { View } from 'react-native';
 
 import { previewTone, toneName, TONES } from '../core/tones';
-import { useT, type Strings } from '../i18n';
+import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from './icons';
 import { Divider, Pressy, Txt } from './kit';

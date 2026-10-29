@@ -16,7 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { FlatList, useWindowDimensions, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { RTCView } from 'react-native-webrtc';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -298,16 +298,10 @@ function endText(r: EndReason | null, t: Strings) {
   }
 }
 
-/** A soft ring growing out of the picture while it rings. */
+/** The picture while it rings (it used to pulse; now nothing moves, like WhatsApp). */
 function Pulse({ children }: { children: ReactNode }) {
-  const v = useSharedValue(0);
-  useEffect(() => {
-    v.value = withRepeat(withTiming(1, { duration: 1600 }), -1, false);
-  }, [v]);
-  const ring = useAnimatedStyle(() => ({ opacity: 0.35 * (1 - v.value), transform: [{ scale: 1 + v.value * 0.5 }] }));
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 18 }}>
-      <Animated.View style={[{ position: 'absolute', width: 110, height: 110, borderRadius: 40, backgroundColor: INK }, ring]} />
       {children}
     </View>
   );
@@ -366,7 +360,7 @@ function Picture({ call, small }: { call: CallView; small?: boolean }) {
       {!waiting && !flip && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={full} zOrder={0} />}
       {call.local && !waiting && !small && (
         <GestureDetector gesture={drag}>
-          <Animated.View entering={FadeIn} style={[{ position: 'absolute', top: insets.top + 110, end: 14, width: SELF_W, height: SELF_H, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }, moved]}>
+          <Animated.View style={[{ position: 'absolute', top: insets.top + 110, end: 14, width: SELF_W, height: SELF_H, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }, moved]}>
             <Pressy onPress={() => other?.stream && setSwapped((v) => !v)} label={t.swapVideo} scale={0.96} style={{ flex: 1 }} testID="call-self-view">
               {flip && other?.stream ? (
                 <RTCView key={`small-${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={{ flex: 1 }} zOrder={1} />
@@ -516,7 +510,7 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
   return (
     <View style={{ gap: 22, opacity: over ? 0.5 : 1 }} pointerEvents={over ? 'none' : 'auto'}>
       {call.sharing && (
-        <Animated.View entering={FadeIn} style={{ alignItems: 'center' }}>
+        <Animated.View style={{ alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 14, paddingEnd: 6, paddingVertical: 6, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.45)' }} testID="call-sharing">
             <Icon name="screenShare" size={18} color={INK} />
             <Txt size={13.5} weight="600" color={INK}>

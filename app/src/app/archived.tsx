@@ -7,10 +7,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { BackHandler, FlatList, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { core } from '../core/core';
-import { useAllTyping, useChatList, useSettings, type ChatRow as Row } from '../core/hooks';
+import { useAllTyping, useChatList, useSettings, useStable, type ChatRow as Row } from '../core/hooks';
 import { fill, useT, type Strings } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { MuteSheet } from '../ui/MuteSheet';
@@ -18,7 +17,7 @@ import { DeleteChats } from '../ui/DeleteChats';
 import { PhotoPeek } from '../ui/PhotoPeek';
 import { ChatRow } from '../ui/ChatRow';
 import { Empty, IconButton, Pressy, Screen, SettingRow, Toggle, TopBar, Txt } from '../ui/kit';
-import { Dialog, MenuItem, Popup, Sheet, toast } from '../ui/overlays';
+import { MenuItem, Popup, Sheet, toast } from '../ui/overlays';
 import { tick } from '../ui/motion';
 
 export default function Archived() {
@@ -56,6 +55,9 @@ export default function Archived() {
       return next;
     });
   }
+  // The same two functions every time, so a row only redraws when its own chat changes (ChatRow.tsx).
+  const openRow = useStable((row: Row) => (selecting ? togglePick(row.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: row.chat.id } })));
+  const holdRow = useStable((row: Row) => togglePick(row.chat.id));
 
   const pickedRows = rows.filter((r) => picked.has(r.chat.id));
   const allMuted = pickedRows.length > 0 && pickedRows.every((r) => r.prefs.muted);
@@ -68,7 +70,7 @@ export default function Archived() {
   }
 
   const header = selecting ? (
-    <Animated.View key="picking" entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)} style={{ marginHorizontal: 10, marginTop: 10 }}>
+    <View key="picking" style={{ marginHorizontal: 10, marginTop: 10 }}>
       <LinearGradient
         colors={theme.grad}
         start={{ x: 0, y: 0 }}
@@ -86,7 +88,7 @@ export default function Archived() {
         <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setChatAction('delete')} />
         <IconButton icon="more" label={t.moreOptions} look="onAccent" onPress={() => setPickMenu(true)} />
       </LinearGradient>
-    </Animated.View>
+    </View>
   ) : (
     <TopBar key="title" title={t.archived} onBack={() => router.back()} right={<IconButton icon="more" label={t.moreOptions} onPress={() => setMenu(true)} testID="archived-menu" />} />
   );
@@ -110,18 +112,18 @@ export default function Archived() {
         }
         ListEmptyComponent={all ? <Empty icon="archive" text={t.noArchived} /> : undefined}
         renderItem={({ item, index }) => (
-          <Animated.View exiting={FadeOut} style={{ marginBottom: 4 }}>
+          <View style={{ marginBottom: 4 }}>
             <ChatRow
               row={item}
               typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== core.myId)}
               online={false}
               selecting={selecting}
               selected={picked.has(item.chat.id)}
-              onPress={() => (selecting ? togglePick(item.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: item.chat.id } }))}
-              onLongPress={() => togglePick(item.chat.id)}
-              onAvatar={item.prefs.lock ? undefined : () => setPeek(item)}
+              onPress={openRow}
+              onLongPress={holdRow}
+              onAvatar={item.prefs.lock ? undefined : setPeek}
             />
-          </Animated.View>
+          </View>
         )}
       />
 

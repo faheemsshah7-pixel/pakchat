@@ -16,6 +16,8 @@
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  <!-- Add shortcut (a chat on the home screen) on Android 7 and older (Shortcuts.kt). -->
+  <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
   <!-- The phone makers' "Autostart" settings pages, so PakChat may open them (see Autostart.kt). -->
   <queries>
     <package android:name="com.miui.securitycenter" />

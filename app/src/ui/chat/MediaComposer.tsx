@@ -15,7 +15,7 @@ import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { Image as RNImage, KeyboardAvoidingView, Modal, PixelRatio, Pressable, ScrollView, TextInput, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 
@@ -28,7 +28,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon, type IconName } from '../icons';
 import { fontStyle, Pressy, Txt } from '../kit';
-import { pop, rise, tick } from '../motion';
+import { tick } from '../motion';
 import { Sheet, toast } from '../overlays';
 import { Canvas, type CanvasRef, type Layer, type NewLayer, type Stroke, UNITS } from './editor/Canvas';
 import { CropTool, fit, type Rect } from './editor/CropTool';
@@ -287,7 +287,7 @@ export function MediaComposer({
 
           {/* Drawing: the colours down the side, and undo. */}
           {tool === 'draw' && (
-            <Animated.View entering={FadeIn} exiting={FadeOut} style={{ position: 'absolute', end: 10, top: 10, gap: 8, alignItems: 'center' }}>
+            <Animated.View style={{ position: 'absolute', end: 10, top: 10, gap: 8, alignItems: 'center' }}>
               <Round icon="undo" label={t.undoWord} onPress={() => change(d.key, { strokes: d.strokes.slice(0, -1) })} id="draw-undo" />
               <Colors color={color} onPick={setColor} vertical />
             </Animated.View>
@@ -370,7 +370,7 @@ export function MediaComposer({
 
         {/* Words: write them big, pick a colour, Done puts them on the photo. */}
         {tool === 'text' && writing && (
-          <Animated.View entering={FadeIn.duration(120)} style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', paddingTop: insets.top + 10, zIndex: 5 }}>
+          <Animated.View style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', paddingTop: insets.top + 10, zIndex: 5 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 }}>
               <Pressy
                 onPress={() => {
@@ -455,7 +455,7 @@ function StickerPicker({ visible, onClose, onPick }: { visible: boolean; onClose
     <Sheet visible={visible} onClose={onClose} title={t.stickers}>
       <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 8, gap: 4 }}>
         {[...saved.map((s) => s.uri), ...PACK.map((s) => s.source)].map((src, i) => (
-          <Animated.View key={String(src)} entering={i < 16 ? pop(i * 15) : undefined}>
+          <Animated.View key={String(src)}>
             <Pressy onPress={() => onPick({ kind: 'sticker', source: src })} label={t.sticker} scale={0.88} testID={i === 0 ? 'editor-sticker-first' : undefined}>
               <Image source={typeof src === 'number' ? src : { uri: src }} style={{ width: 76, height: 76, margin: 2 }} contentFit="contain" />
             </Pressy>
@@ -508,7 +508,7 @@ function VideoPart({ p, onTrim, onLength }: { p: Picked; onTrim: (trim: { start:
       <Pressable style={{ flex: 1 }} onPress={() => (playing ? player.pause() : player.play())} accessibilityLabel={playing ? t.pause : t.play}>
         <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} testID="editor-video" />
         {!playing && (
-          <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(120)} pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="play" size={28} color="#FFFFFF" />
             </View>
@@ -516,7 +516,7 @@ function VideoPart({ p, onTrim, onLength }: { p: Picked; onTrim: (trim: { start:
         )}
       </Pressable>
       {!gif && length > 1500 && (
-        <Animated.View entering={rise()} style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2 }}>
+        <Animated.View style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2 }}>
           <TrimStrip
             p={p}
             length={length}

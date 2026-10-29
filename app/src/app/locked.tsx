@@ -4,17 +4,18 @@
 // locks again once you leave it.
 import { router } from 'expo-router';
 import { useEffect } from 'react';
-import { FlatList, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import { FlatList } from 'react-native';
 
 import { core } from '../core/core';
-import { useAllPresence, useAllTyping, useCore, useLockedChats } from '../core/hooks';
+import { useAllPresence, useAllTyping, useCore, useLockedChats, useStable, type ChatRow as Row } from '../core/hooks';
 import { chatOpen, FOLDER, leftChat, openWith } from '../core/lock';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { ChatRow } from '../ui/ChatRow';
 import { Empty, Screen, TopBar, Txt } from '../ui/kit';
 import { LockedGate } from '../ui/LockedGate';
+
+const nothing = () => {};
 
 export default function Locked() {
   const open = useCore(['lock'], () => chatOpen(FOLDER));
@@ -29,6 +30,10 @@ function Folder() {
   const rows = useLockedChats();
   const typing = useAllTyping();
   const presence = useAllPresence();
+  const openRow = useStable((row: Row) => {
+    openWith(row.chat.id);
+    router.push({ pathname: '/chat/[id]', params: { id: row.chat.id } });
+  });
   return (
     <Screen>
       <TopBar title={t.lockedChats} onBack={() => router.back()} />
@@ -40,23 +45,16 @@ function Folder() {
         keyExtractor={(r) => r.chat.id}
         contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 40 }}
         ListEmptyComponent={rows ? <Empty icon="lock" text={t.noLockedChats} /> : undefined}
-        renderItem={({ item, index }) => (
-          <Animated.View>
-            <View>
-              <ChatRow
-                row={item}
-                typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== core.myId)}
-                online={!!(item.other && presence[item.other]?.online)}
-                selecting={false}
-                selected={false}
-                onPress={() => {
-                  openWith(item.chat.id);
-                  router.push({ pathname: '/chat/[id]', params: { id: item.chat.id } });
-                }}
-                onLongPress={() => {}}
-              />
-            </View>
-          </Animated.View>
+        renderItem={({ item }) => (
+          <ChatRow
+            row={item}
+            typing={Object.keys(typing[item.chat.id] ?? {}).filter((id) => id !== core.myId)}
+            online={!!(item.other && presence[item.other]?.online)}
+            selecting={false}
+            selected={false}
+            onPress={openRow}
+            onLongPress={nothing}
+          />
         )}
       />
     </Screen>

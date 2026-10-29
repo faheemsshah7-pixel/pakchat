@@ -15,12 +15,11 @@ import { router, useFocusEffect } from 'expo-router';
 import type { Chat } from '@pakchat/shared';
 import { useCallback, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { clearCallLog, type CallLogEntry } from '../../core/calls';
 import { grouped, type CallGroup } from '../../core/callGroups';
 import { core } from '../../core/core';
-import { useCallLinks, useCallLog, useFavouriteChats, useLinkCall, usePeople, useUpcomingPlans } from '../../core/hooks';
+import { useAfterStart, useCallLinks, useCallLog, useFavouriteChats, useLinkCall, usePeople, useUpcomingPlans } from '../../core/hooks';
 import type { PlanNote } from '../../core/plans';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -28,12 +27,16 @@ import { startCall } from '../../ui/CallBar';
 import { duration, listTime, whenLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Empty, Fab, Field, Glass, IconButton, Pressy, Screen, Section, Txt } from '../../ui/kit';
-import { rise } from '../../ui/motion';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
 import { isOffline } from '../../core/core';
 
-export default function Calls() {
+/** Drawn once the chat list has shown after starting (useAfterStart), so starting up draws that first. */
+export default function CallsTab() {
+  return useAfterStart() ? <Calls /> : null;
+}
+
+function Calls() {
   const t = useT();
   const { theme } = useLook();
   const list = useCallLog();
@@ -137,7 +140,7 @@ export default function Calls() {
         renderItem={({ item: g, index }) => {
           const e = g.first;
           return (
-            <Animated.View entering={index < 12 ? rise(index * 25) : undefined}>
+            <View>
               <Pressy
                 onPress={() => router.push({ pathname: '/call-info', params: { chat: e.chatId, ids: g.all.map((x) => x.id).join(',') } })}
                 onLongPress={() => setHolding(g)}
@@ -169,7 +172,7 @@ export default function Calls() {
                   />
                 </View>
               </Pressy>
-            </Animated.View>
+            </View>
           );
         }}
       />

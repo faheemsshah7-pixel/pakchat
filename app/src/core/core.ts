@@ -121,7 +121,14 @@ export type AppSettings = {
   reactionAlerts?: boolean;
   /** Settings › Notifications: the ringtone for calls ('' is the phone's own). */
   callTone?: string;
+  /** Settings › Chats › Font size: how big messages' words are in chats (default medium), like WhatsApp. */
+  fontSize?: FontSize;
 };
+
+export type FontSize = 'small' | 'medium' | 'large';
+
+/** Messages' words at each font size (Bubble.tsx). Medium is what it always was. */
+export const MESSAGE_TEXT: Record<FontSize, number> = { small: 14, medium: 15.5, large: 18 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
   conversationTones: true,
@@ -271,17 +278,28 @@ class Core {
     this.at('opening the database');
     this.storage = await openStorage();
     this.at('reading saved names and settings');
-    this.people = (await this.storage.getValue<Record<string, Person>>('app:people')) ?? {};
-    this.contacts = (await this.storage.getValue<Record<string, Contact>>('app:contacts')) ?? {};
-    this.ways = (await this.storage.getValue<Record<string, Ways>>('app:ways')) ?? {};
-    this.prefs = (await this.storage.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
+    // All asked for at once, so the start doesn't wait on each in turn.
+    const s = this.storage;
+    const [people, contacts, ways, prefs, settings, starred, lists] = await Promise.all([
+      s.getValue<Record<string, Person>>('app:people'),
+      s.getValue<Record<string, Contact>>('app:contacts'),
+      s.getValue<Record<string, Ways>>('app:ways'),
+      s.getValue<Record<string, ChatPrefs>>('app:prefs'),
+      s.getValue<Partial<AppSettings>>('app:settings'),
+      s.getValue<Record<string, true>>('app:starred'),
+      s.getValue<ChatList[]>('app:lists'),
+    ]);
+    this.people = people ?? {};
+    this.contacts = contacts ?? {};
+    this.ways = ways ?? {};
+    this.prefs = prefs ?? {};
     this.unmuteDue();
-    this.settings = { ...DEFAULT_SETTINGS, ...((await this.storage.getValue<Partial<AppSettings>>('app:settings')) ?? {}) };
+    this.settings = { ...DEFAULT_SETTINGS, ...(settings ?? {}) };
     // First time with the missed-calls number: start from now, not from every old missed call.
     if (this.settings.callsSeenAt === undefined) this.setSettings({ callsSeenAt: Date.now() });
     startLock();
-    this.starred = (await this.storage.getValue<Record<string, true>>('app:starred')) ?? {};
-    this.lists = (await this.storage.getValue<ChatList[]>('app:lists')) ?? [];
+    this.starred = starred ?? {};
+    this.lists = lists ?? [];
     this.at('loading the encryption');
     this.makeClient();
     this.at('opening your keys');

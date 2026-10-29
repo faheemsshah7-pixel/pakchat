@@ -2,19 +2,22 @@
 //
 // Bars at the top fill as each status shows (words and photos for 5 seconds,
 // a video to its end, up to 30). Tap the right side for the next, the left
-// for the one before; hold to pause; swipe down to close. After someone's
-// last status comes the next person's.
+// for the one before; hold to pause (everything over it fades away); swipe
+// down to close. After someone's last status comes the next person's.
 //
 // Someone else's: watching sends them a read receipt (their "seen by" list),
-// the ❤️ likes it, and the box sends a reply to your chat with them.
-// Mine: the 👁 shows who saw it (and who liked it), and it can be deleted.
+// the ❤️ likes it (their phone says "liked your status"), and the box sends a
+// reply to your chat with them. Tapping the box dims the status and shows
+// WhatsApp's eight quick emoji: one tap sends that emoji as the reply.
+// Mine: the 👁 shows who saw it (and who liked it), and it can be forwarded
+// to chats (like WhatsApp's) or deleted.
 import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, TextInput, View, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Pressable, TextInput, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,6 +35,8 @@ import { Avatar, fontStyle, IconButton, Pressy, Txt } from '../../ui/kit';
 import { tick } from '../../ui/motion';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 
+/** WhatsApp's quick replies to a status, in its order. */
+const QUICK = ['😍', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯'];
 
 export default function StatusViewer() {
   const t = useT();
@@ -69,12 +74,23 @@ export default function StatusViewer() {
   const item: Message | null = items[at] ?? null;
 
   const [holding, setHolding] = useState(false);
+  // Held down (not just tapped): everything over the picture goes, as on WhatsApp (at once).
+  const ui = useSharedValue(1);
+  const [hidden, setHidden] = useState(false);
+  const hide = (on: boolean) => {
+    setHidden(on);
+    ui.value = on ? 0 : 1;
+  };
+  const uiStyle = useAnimatedStyle(() => ({ opacity: ui.value }));
   const [typing, setTyping] = useState(false);
   const [seenBy, setSeenBy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [ready, setReady] = useState(false);
   const [reply, setReply] = useState('');
-  const paused = holding || typing || seenBy || deleting || !ready;
+  // Forwarding it: the chats to send to show over it, so it waits until back here.
+  const [away, setAway] = useState(false);
+  useFocusEffect(useCallback(() => setAway(false), []));
+  const paused = holding || typing || seenBy || deleting || away || !ready;
 
   // Nothing (left) to show: close.
   useEffect(() => {
@@ -153,10 +169,11 @@ export default function StatusViewer() {
   });
   const pullStyle = useAnimatedStyle(() => ({ transform: [{ translateY: pull.value }], opacity: 1 - Math.min(0.5, pull.value / 600) }));
 
-  async function sendReply() {
-    const words = reply.trim();
+  async function sendReply(quick?: string) {
+    const words = quick ?? reply.trim();
     if (!words || !item) return;
-    setReply('');
+    if (quick) Keyboard.dismiss();
+    else setReply('');
     setTyping(false);
     try {
       await replyToStatus(item, words);
@@ -164,6 +181,16 @@ export default function StatusViewer() {
     } catch (err) {
       toast(isOffline(err) ? t.offline : t.couldNot);
     }
+  }
+
+  /** Mine, to chats: a photo or video as itself (with its words), words on a colour as a message. */
+  function forward() {
+    if (!item) return;
+    if (item.file && !haveFile(item)) return toast(t.couldNot);
+    setAway(true);
+    const files = item.file ? [[item.chatId, item.author, item.id]] : [];
+    const texts = item.file ? [] : [item.text ?? ''];
+    router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), files: JSON.stringify(files) } });
   }
 
   function like() {
@@ -186,18 +213,23 @@ export default function StatusViewer() {
           <Pressable
             style={{ flex: 1 }}
             onPressIn={() => setHolding(true)}
-            onPressOut={() => setHolding(false)}
+            onPressOut={() => {
+              setHolding(false);
+              if (hidden) hide(false);
+            }}
             onPress={(e) => (e.nativeEvent.locationX < width / 3 ? prev() : next())}
             delayLongPress={250}
-            onLongPress={() => {}}
+            onLongPress={() => hide(true)}
             accessibilityLabel={t.nextStatus}
             testID="status-tap"
           >
             <Shown key={key} m={item} playing={!paused} onReady={() => setReady(true)} />
           </Pressable>
+          {/* Replying: the status dims behind the box (a tap on it puts the keyboard away). */}
+          {typing && <Pressable style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => Keyboard.dismiss()} accessible={false} />}
 
           {/* Bars, who, when. */}
-          <View style={{ position: 'absolute', top: insets.top + 8, start: 10, end: 10, gap: 10 }} pointerEvents="box-none">
+          <Animated.View style={[{ position: 'absolute', top: insets.top + 8, start: 10, end: 10, gap: 10 }, uiStyle]} pointerEvents={hidden ? 'none' : 'box-none'}>
             <View style={{ flexDirection: 'row', gap: 4 }} pointerEvents="none">
               {items.map((m, i) => (
                 <Bar key={m.id} state={i < at ? 1 : i > at ? 0 : null} progress={progress} />
@@ -214,12 +246,13 @@ export default function StatusViewer() {
                   {listTime(item.sentAt, t)}
                 </Txt>
               </View>
+              {mine && <IconButton icon="forward" label={t.forward} onPress={forward} color="#FFFFFF" flip testID="status-forward" />}
               {mine && <IconButton icon="trash" label={t.deleteStatus} onPress={() => setDeleting(true)} color="#FFFFFF" testID="status-delete" />}
             </View>
-          </View>
+          </Animated.View>
 
-          {/* Mine: who saw it. Theirs: reply and like. */}
-          <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: insets.bottom + 10 }}>
+          {/* Mine: who saw it. Theirs: reply and like. (Faded, not removed, while held, so the picture doesn't jump.) */}
+          <Animated.View style={[{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: insets.bottom + 10 }, uiStyle]} pointerEvents={hidden ? 'none' : 'auto'}>
             {mine ? (
               <Pressy onPress={() => setSeenBy(true)} label={t.seenBy} scale={0.95} testID="status-seen">
                 <View style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}>
@@ -230,28 +263,41 @@ export default function StatusViewer() {
                 </View>
               </Pressy>
             ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
-                <TextInput
-                  value={reply}
-                  onChangeText={setReply}
-                  onFocus={() => setTyping(true)}
-                  onBlur={() => setTyping(false)}
-                  placeholder={t.replyToStatus}
-                  placeholderTextColor="rgba(255,255,255,0.65)"
-                  multiline
-                  maxLength={4000}
-                  cursorColor="#FFFFFF"
-                  style={[fontStyle(reply || null, lang, 15.5, '400'), { flex: 1, color: '#FFFFFF', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', paddingHorizontal: 16, paddingVertical: 10, maxHeight: 110 }]}
-                  testID="status-reply"
-                />
-                {reply.trim() ? (
-                  <IconButton icon="send" label={t.send} onPress={() => void sendReply()} color="#FFFFFF" flip testID="status-reply-send" />
-                ) : (
-                  <IconButton icon="heart" label={t.likeStatus} onPress={like} color={liked ? '#E5484D' : '#FFFFFF'} testID="status-like" />
+              <>
+                {typing && !reply && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingBottom: 18 }} testID="status-quick">
+                    {QUICK.map((e) => (
+                      <Pressy key={e} onPress={() => void sendReply(e)} label={fill(t.replyWithEmoji, { emoji: e })} style={{ width: '25%' }} testID={`status-quick-${e}`}>
+                        <Txt size={36} align="center" style={{ paddingVertical: 10 }}>
+                          {e}
+                        </Txt>
+                      </Pressy>
+                    ))}
+                  </View>
                 )}
-              </View>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+                  <TextInput
+                    value={reply}
+                    onChangeText={setReply}
+                    onFocus={() => setTyping(true)}
+                    onBlur={() => setTyping(false)}
+                    placeholder={t.replyToStatus}
+                    placeholderTextColor="rgba(255,255,255,0.65)"
+                    multiline
+                    maxLength={4000}
+                    cursorColor="#FFFFFF"
+                    style={[fontStyle(reply || null, lang, 15.5, '400'), { flex: 1, color: '#FFFFFF', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', paddingHorizontal: 16, paddingVertical: 10, maxHeight: 110 }]}
+                    testID="status-reply"
+                  />
+                  {reply.trim() ? (
+                    <IconButton icon="send" label={t.send} onPress={() => void sendReply()} color="#FFFFFF" flip testID="status-reply-send" />
+                  ) : (
+                    <IconButton icon="heart" label={t.likeStatus} onPress={like} color={liked ? '#E5484D' : '#FFFFFF'} testID="status-like" />
+                  )}
+                </View>
+              </>
             )}
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
 
         <Sheet visible={seenBy} onClose={() => setSeenBy(false)} title={fill(t.seenByCount, { n: viewers.length })}>

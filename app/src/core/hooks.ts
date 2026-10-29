@@ -5,13 +5,14 @@
 // waits for the network: what's on the phone shows at once, and new things
 // slide in as they arrive.
 import type { Chat, Message } from '@pakchat/shared';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { Found } from '../data/sqliteStorage';
 import { broadcast, broadcasts, sentTo, summaryOf, type Broadcast, type BroadcastSent } from './broadcasts';
 import { core, type AppSettings, type ChatPrefs, type Person, type Presence } from './core';
 import { calls, callLog, onCallLog, type CallLogEntry, type CallView } from './calls';
 import { moving } from './files';
+import { reuse, same } from './reuse';
 import { loadStatuses, type StatusPerson } from './status';
 import { isAppLocked } from './lock';
 import { upcomingPlans, type PlanNote } from './plans';
@@ -70,6 +71,65 @@ function useLoaded<T>(topics: Topic[], load: () => Promise<T>, initial: T, deps:
   return value;
 }
 
+/**
+ * Like useLoaded, but one reading shared by every screen that shows it: the chat
+ * list, the tab bar's count and a sheet inside an open chat all read the chats
+ * once per change, not once each. It reads while anything shows it, and the last
+ * answer stays for the next screen that asks, while it reads again.
+ */
+function sharedLoad<T>(topics: Topic[], load: () => Promise<T>, later?: () => number) {
+  let value: T | null = null;
+  const watchers = new Set<() => void>();
+  let offs: (() => void)[] = [];
+  let running = false;
+  let again = false;
+  // If changes come quickly, run once more after the current read instead of many at once.
+  const run = async (wait: number) => {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    do {
+      if (wait > 0) await new Promise((done) => setTimeout(done, wait));
+      again = false;
+      if (!watchers.size) break;
+      try {
+        const v = await load();
+        if (v !== value) {
+          value = v;
+          watchers.forEach((w) => w());
+        }
+      } catch {
+        // The database is closed while signing out; the next change reads again.
+      }
+      wait = later?.() ?? 0;
+    } while (again && watchers.size);
+    running = false;
+  };
+  const changed = () => void run(later?.() ?? 0);
+  const subscribe = (w: () => void) => {
+    watchers.add(w);
+    if (watchers.size === 1) {
+      offs = topics.map((t) => core.on(t, changed));
+      void run(0);
+    }
+    return () => {
+      watchers.delete(w);
+      if (!watchers.size) {
+        offs.forEach((off) => off());
+        offs = [];
+      }
+    };
+  };
+  // Signed out (or in as someone else) with nothing showing it: forget the last answer.
+  core.on('auth', () => {
+    if (!watchers.size) value = null;
+  });
+  const read = () => value;
+  return () => useSyncExternalStore(subscribe, read, read);
+}
+
 // ---- Signing in ----
 
 export function useAuth() {
@@ -103,29 +163,48 @@ export type ChatRow = {
 const chatCache = new Map<string, Chat>();
 core.on('auth', () => chatCache.clear());
 
-/** Every chat with its newest message, pinned first, then newest. */
-export function useChatList(): ChatRow[] | null {
-  // Chats in the Locked chats folder only show there (useLockedChats).
-  return useLoaded<ChatRow[] | null>(['chats', 'prefs', 'people', 'auth'], () => chatRows((c) => core.prefs[c.id]?.lock !== 'folder'), null, []);
-}
+/**
+ * Out of sight under an open chat, the list waits a moment before reading
+ * again, gathering what comes meanwhile into one read, so the chat on screen
+ * comes first. It's still up to date by the time you go back.
+ */
+const underChat = () => (core.viewing ? 300 : 0);
+
+/** Every chat with its newest message, pinned first, then newest. Chats in the Locked chats folder only show there (useLockedChats). */
+export const useChatList: () => ChatRow[] | null = sharedLoad(['chats', 'prefs', 'people', 'auth'], () => chatRows('list'), underChat);
 
 /** The chats in the Locked chats folder (only once it's opened). */
-export function useLockedChats(): ChatRow[] | null {
-  return useLoaded<ChatRow[] | null>(['chats', 'prefs', 'people', 'auth'], () => chatRows((c) => core.prefs[c.id]?.lock === 'folder'), null, []);
+export const useLockedChats: () => ChatRow[] | null = sharedLoad(['chats', 'prefs', 'people', 'auth'], () => chatRows('folder'), underChat);
+
+/** Each chat's row as last read, and each list as last read, so a row that hasn't changed isn't drawn again. */
+const rowCache = new Map<string, ChatRow>();
+const listCache = new Map<'list' | 'folder', ChatRow[]>();
+core.on('auth', () => (rowCache.clear(), listCache.clear()));
+
+/** The same chat as last read keeps its old copy (see reuse.ts). */
+function keepChat(chat: Chat) {
+  const old = chatCache.get(chat.id);
+  if (old && same(old, chat)) return old;
+  chatCache.set(chat.id, chat);
+  return chat;
 }
 
-async function chatRows(keep: (chat: Chat) => boolean): Promise<ChatRow[]> {
+async function chatRows(which: 'list' | 'folder'): Promise<ChatRow[]> {
   if (core.state !== 'signedIn') return [];
-  const chats = await core.client.chats();
-  for (const chat of chats) chatCache.set(chat.id, chat);
+  // Every chat, and the newest message of each, in two reads (not one per chat).
+  const [chats, newest] = await Promise.all([core.client.chats(), core.storage.newestOfEach()]);
   const rows: ChatRow[] = [];
-  for (const chat of chats) {
+  for (const fresh of chats) {
+    const chat = keepChat(fresh);
     // Statuses have their own tab, communities theirs, and call links are in Calls.
-    if (chat.kind === 'status' || chat.kind === 'community' || chat.callLink || !keep(chat)) continue;
-    // The newest few, in case the very newest is a disappearing message whose time is up.
-    // In a group, the unread ones too (up to 50), to see if any is for me.
+    // Chats in the Locked chats folder only show there.
+    if (chat.kind === 'status' || chat.kind === 'community' || chat.callLink || (core.prefs[chat.id]?.lock === 'folder') !== (which === 'folder')) continue;
+    const top = newest.get(chat.id);
+    let recent = top ? core.forgetExpired([top]) : [];
+    // In a group, the unread ones too (up to 50), to see if any is for me. And if the
+    // very newest is a disappearing message whose time is up, the few before it.
     const unread = chat.kind === 'group' ? Math.min(chat.unread, 50) : 0;
-    const recent = core.forgetExpired(await core.client.messages(chat.id, { limit: Math.max(5, unread) }));
+    if (unread > 0 || (top && !recent.length)) recent = core.forgetExpired(await core.client.messages(chat.id, { limit: Math.max(5, unread) }));
     const last = recent.at(-1);
     const mentioned = unread > 0 && recent.slice(-unread).some((m) => m.author !== core.myId && !m.deleted && (m.mentions?.includes(core.myId) || m.replyTo?.author === core.myId));
     const prefs = core.prefs[chat.id] ?? {};
@@ -134,10 +213,19 @@ async function chatRows(keep: (chat: Chat) => boolean): Promise<ChatRow[]> {
     if (!last && chat.kind === 'direct' && !prefs.draft) continue;
     // Deleted here: gone from the list until something new comes in.
     if (!last && prefs.deletedAt) continue;
-    rows.push({ chat, title: core.chatTitle(chat), other: core.otherPerson(chat), last: last ?? null, prefs, mentioned });
+    const row: ChatRow = { chat, title: core.chatTitle(chat), other: core.otherPerson(chat), last: last ?? null, prefs, mentioned };
+    const old = rowCache.get(chat.id);
+    if (old && same(old, row)) rows.push(old);
+    else {
+      rowCache.set(chat.id, row);
+      rows.push(row);
+    }
   }
   rows.sort((a, b) => (b.prefs.pinnedAt ?? 0) - (a.prefs.pinnedAt ?? 0) || activity(b) - activity(a));
-  return rows;
+  // Nothing changed at all: the same list, so the screen isn't drawn again.
+  const list = reuse(listCache.get(which), rows, (r) => r.chat.id);
+  listCache.set(which, list);
+  return list;
 }
 
 /** My communities, each with its groups on this phone (announcements first), for the Communities tab. */
@@ -167,8 +255,8 @@ export function useChat(chatId: string): Chat | null | undefined {
     ['chats', 'auth'],
     async () => {
       const chat = await core.storage.getChat(chatId);
-      if (chat) chatCache.set(chatId, chat);
-      else chatCache.delete(chatId);
+      if (chat) return keepChat(chat);
+      chatCache.delete(chatId);
       return chat;
     },
     chatCache.get(chatId),
@@ -192,10 +280,14 @@ const pages = new Map<string, Page>();
 // Signing out (or in as someone else) forgets them.
 core.on('auth', () => pages.clear());
 
-async function readPage(chatId: string, limit: number): Promise<Page> {
+const keyOf = (m: Message) => `${m.author}/${m.id}`;
+
+/** Reads a page. Messages the same as in `old` keep their old copies, and if none changed, `old` comes back (reuse.ts). */
+async function readPage(chatId: string, limit: number, old?: Page | null): Promise<Page> {
   const all = await core.client.messages(chatId, { limit });
   // Disappearing messages: the ones whose time is up are hidden and removed from the phone.
-  const page = { list: core.forgetExpired(all), read: all.length };
+  const list = reuse(old?.list, core.forgetExpired(all), keyOf);
+  const page = old && list === old.list && all.length === old.read ? old : { list, read: all.length };
   if (limit === PAGE) {
     pages.set(chatId, page);
     // Only the last few dozen chats are kept.
@@ -220,7 +312,18 @@ export function warmChats(chatIds: string[]) {
 
 export function useMessages(chatId: string) {
   const [limit, setLimit] = useState(PAGE);
-  const loaded = useLoaded<Page | null>([`messages:${chatId}`, 'auth'], () => readPage(chatId, limit), pages.get(chatId) ?? null, [chatId, limit]);
+  // What's on screen: a re-read keeps every message that didn't change, so only its bubble is drawn again.
+  const shown = useRef<{ chatId: string; page: Page } | null>(null);
+  const loaded = useLoaded<Page | null>(
+    [`messages:${chatId}`, 'auth'],
+    async () => {
+      const page = await readPage(chatId, limit, shown.current?.chatId === chatId ? shown.current.page : pages.get(chatId));
+      shown.current = { chatId, page };
+      return page;
+    },
+    pages.get(chatId) ?? null,
+    [chatId, limit],
+  );
   // A full page means there may be older ones (counted before hiding any, so paging never stops early).
   const hasMore = (loaded?.read ?? 0) >= limit;
   const more = useCallback(() => {
@@ -487,3 +590,43 @@ export function useAppLocked(): boolean {
   return useCore(['lock', 'settings'], () => isAppLocked());
 }
 
+
+/**
+ * A function that stays the same from one draw to the next but always runs the
+ * newest `fn`. Handed to rows that only redraw when their own things change
+ * (ChatRow), so a new function each time doesn't make them all redraw.
+ */
+export function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn);
+  useLayoutEffect(() => {
+    ref.current = fn;
+  });
+  return useCallback((...args: A) => ref.current(...args), []);
+}
+
+// ---- Starting up ----
+
+let listShown = false;
+const startWatchers = new Set<() => void>();
+
+/** The chat list is on screen: the other tabs may draw now (useAfterStart). */
+export function markListShown() {
+  if (listShown) return;
+  listShown = true;
+  startWatchers.forEach((w) => w());
+}
+
+/**
+ * False until the chat list has shown after PakChat starts. The other tabs wait
+ * for it, so starting up draws the chat list first and the rest just after
+ * (they're all ready before you can get to them).
+ */
+export function useAfterStart() {
+  return useSyncExternalStore(
+    (w) => {
+      startWatchers.add(w);
+      return () => startWatchers.delete(w);
+    },
+    () => listShown,
+  );
+}

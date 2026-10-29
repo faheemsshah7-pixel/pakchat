@@ -5,14 +5,14 @@
 //   Gallery   Camera   Document   Audio
 //   Location  Contact  Poll     Event
 import { Modal, Pressable, View } from 'react-native';
-import Animated, { FadeOutDown } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon, type IconName } from '../icons';
 import { Glass, Pressy, Txt } from '../kit';
-import { pop, rise, tick } from '../motion';
+import { tick } from '../motion';
 
 export type AttachKind = 'gallery' | 'camera' | 'document' | 'audio' | 'location' | 'contact' | 'poll' | 'event';
 
@@ -46,12 +46,12 @@ export function AttachMenu({ visible, onClose, onPick }: { visible: boolean; onC
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel={t.close}>
         {visible && (
-          <Animated.View entering={rise()} exiting={FadeOutDown.duration(130)} style={{ position: 'absolute', start: 10, end: 10, bottom: insets.bottom + 76 }}>
+          <Animated.View style={{ position: 'absolute', start: 10, end: 10, bottom: insets.bottom + 76 }}>
             <Pressable onPress={() => {}}>
               <Glass strong style={{ borderRadius: 28, paddingVertical: 14, paddingHorizontal: 6, boxShadow: `0 22px 44px -18px ${theme.shadow}` }} testID="attach-menu">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 10 }}>
                   {TILES.map((x, i) => (
-                    <Animated.View key={x.key} entering={pop(40 + i * 35)} style={{ width: '25%', alignItems: 'center' }}>
+                    <Animated.View key={x.key} style={{ width: '25%', alignItems: 'center' }}>
                       <Pressy
                         onPress={() => {
                           tick();

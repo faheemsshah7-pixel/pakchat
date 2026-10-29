@@ -1,8 +1,10 @@
 // ChatRow.tsx: one chat in the list. Swiping sideways moves between the tabs,
 // like WhatsApp, so pin and archive are in the hold menu (not a swipe on the row).
-import { useMemo } from 'react';
+//
+// A row only redraws when its own chat changes (or its typing, online or
+// picked): a new message in one chat doesn't redraw every row in the list.
+import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { plainText } from '../core/richText';
@@ -12,9 +14,34 @@ import { useTheme } from '../theme/ThemeProvider';
 import { listTime, preview } from './format';
 import { Icon } from './icons';
 import { Avatar, Pressy, Txt } from './kit';
-import { fade } from './motion';
 
-export function ChatRow({
+type Props = {
+  row: Row;
+  typing: string[];
+  online: boolean;
+  selecting: boolean;
+  selected: boolean;
+  /** The handlers get the row. Hand in ones that stay the same (useStable), so rows needn't redraw for them. */
+  onPress: (row: Row) => void;
+  onLongPress: (row: Row) => void;
+  /** Tapping the picture (not while picking): it pops up bigger, like WhatsApp. */
+  onAvatar?: (row: Row) => void;
+};
+
+export const ChatRow = memo(
+  ChatRowView,
+  (a: Props, b: Props) =>
+    a.row === b.row &&
+    a.online === b.online &&
+    a.selecting === b.selecting &&
+    a.selected === b.selected &&
+    a.onPress === b.onPress &&
+    a.onLongPress === b.onLongPress &&
+    a.onAvatar === b.onAvatar &&
+    a.typing.join() === b.typing.join(),
+);
+
+function ChatRowView({
   row,
   typing,
   online,
@@ -23,21 +50,10 @@ export function ChatRow({
   onPress,
   onLongPress,
   onAvatar,
-}: {
-  row: Row;
-  typing: string[];
-  online: boolean;
-  selecting: boolean;
-  selected: boolean;
-  onPress: () => void;
-  onLongPress: () => void;
-  /** Tapping the picture (not while picking): it pops up bigger, like WhatsApp. */
-  onAvatar?: () => void;
-}) {
+}: Props) {
   const t = useT();
   const theme = useTheme();
   const { chat, last, prefs, title } = row;
-  const pickedStyle = useAnimatedStyle(() => ({ opacity: withTiming(selected ? 1 : 0, fade) }), [selected]);
 
   // What the second line says: someone typing, a draft, or the newest message.
   const line = useMemo(() => {
@@ -63,7 +79,7 @@ export function ChatRow({
 
   return (
     <View style={{ borderRadius: 18, overflow: 'hidden' }}>
-          <Pressy onPress={onPress} onLongPress={onLongPress} scale={0.985} label={title} testID={`chat-${title}`}>
+          <Pressy onPress={() => onPress(row)} onLongPress={() => onLongPress(row)} scale={0.985} label={title} testID={`chat-${title}`}>
             <View
               style={{
                 flexDirection: 'row',
@@ -75,9 +91,9 @@ export function ChatRow({
                 backgroundColor: theme.dark ? theme.bg : '#FFFFFF',
               }}
             >
-              <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }, pickedStyle]} />
+              {selected && <View style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }]} />}
               <View>
-                <Pressy onPress={onAvatar} disabled={!onAvatar || selecting} label={t.profilePhoto} scale={0.92} testID={`avatar-${title}`}>
+                <Pressy onPress={onAvatar && (() => onAvatar(row))} disabled={!onAvatar || selecting} label={t.profilePhoto} scale={0.92} testID={`avatar-${title}`}>
                   <Avatar id={chat.id} name={title} size={50} online={online} group={chat.kind === 'group'} />
                 </Pressy>
                 {selected && (

@@ -3,7 +3,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { MAX_BROADCAST, saveBroadcast } from '../core/broadcasts';
 import { core } from '../core/core';
@@ -12,7 +11,6 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt } from '../ui/kit';
-import { rise } from '../ui/motion';
 import { toast } from '../ui/overlays';
 
 export default function BroadcastEdit() {
@@ -72,7 +70,7 @@ export default function BroadcastEdit() {
         renderItem={({ item, index }) => {
           const on = chosen.includes(item.id);
           return (
-            <Animated.View entering={rise(Math.min(index, 10) * 25)}>
+            <View>
               <Pressy onPress={() => toggle(item.id)} label={item.name} scale={0.98} testID={`pick-${item.name}`}>
                 <View
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: on ? theme.selected : 'transparent' }}
@@ -97,7 +95,7 @@ export default function BroadcastEdit() {
                   </View>
                 </View>
               </Pressy>
-            </Animated.View>
+            </View>
           );
         }}
       />

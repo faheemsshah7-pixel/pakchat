@@ -3,7 +3,6 @@
 // delete (scheduled.ts).
 import { useState } from 'react';
 import { ScrollView, TextInput, View } from 'react-native';
-import Animated, { FadeOut } from 'react-native-reanimated';
 
 import { useScheduled } from '../../core/hooks';
 import { changePlan, dropPlan, sendPlanNow, SOONEST_MS, type Planned } from '../../core/scheduled';
@@ -12,7 +11,6 @@ import { useLook } from '../../theme/ThemeProvider';
 import { whenLabel } from '../format';
 import { Icon } from '../icons';
 import { Button, fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
-import { rise } from '../motion';
 import { Sheet, toast } from '../overlays';
 import { SchedulePicker } from '../SchedulePicker';
 
@@ -33,7 +31,7 @@ export function ScheduledBar({ chatId }: { chatId: string }) {
   return (
     <>
       {list.length > 0 && (
-        <Animated.View entering={rise()} exiting={FadeOut.duration(120)}>
+        <View>
           <Pressy onPress={() => setOpen(true)} label={fill(list.length === 1 ? t.scheduledOne : t.scheduledMany, { n: list.length })} scale={0.98} testID="scheduled-bar">
             <Glass style={{ marginHorizontal: 14, marginTop: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <Icon name="schedule" size={17} color={theme.accInk} />
@@ -45,7 +43,7 @@ export function ScheduledBar({ chatId }: { chatId: string }) {
               </Txt>
             </Glass>
           </Pressy>
-        </Animated.View>
+        </View>
       )}
 
       <Sheet visible={open && !editing && !timing} onClose={() => setOpen(false)} title={t.scheduledTitle}>

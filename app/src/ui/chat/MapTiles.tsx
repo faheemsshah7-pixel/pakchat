@@ -78,7 +78,7 @@ export function MapTiles({
     <GestureDetector gesture={pan}>
       <View style={{ width, height, overflow: 'hidden', backgroundColor: '#E8E4DA', direction: 'ltr' }}>
         {tiles.map((t) => (
-          <Image key={t.key} source={{ uri: t.url, headers: HEADERS }} style={{ position: 'absolute', left: t.x, top: t.y, width: TILE, height: TILE }} cachePolicy="disk" transition={120} />
+          <Image key={t.key} source={{ uri: t.url, headers: HEADERS }} style={{ position: 'absolute', left: t.x, top: t.y, width: TILE, height: TILE }} cachePolicy="disk" />
         ))}
         {children}
         <View pointerEvents="none" style={{ position: 'absolute', right: 0, bottom: 0, paddingHorizontal: 4, paddingVertical: 1, backgroundColor: 'rgba(255,255,255,0.75)', borderTopLeftRadius: 4 }}>

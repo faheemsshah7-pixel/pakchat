@@ -4,7 +4,6 @@
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { core, isOffline } from '../core/core';
 import { defaultTimer } from '../core/timer';
@@ -14,7 +13,6 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
-import { rise } from '../ui/motion';
 import { toast } from '../ui/overlays';
 
 export default function NewChat() {
@@ -102,14 +100,14 @@ export default function NewChat() {
         />
         <Button title={t.find} onPress={find} busy={busy} disabled={!query.trim()} testID="find" />
         {!!note && (
-          <Animated.View entering={FadeIn}>
+          <View>
             <Txt size={14} color={theme.muted} align="center" testID="find-note">
               {note}
             </Txt>
-          </Animated.View>
+          </View>
         )}
         {found && (
-          <Animated.View entering={rise()}>
+          <View>
             <Pressy onPress={() => open(found.id)} label={found.name} testID="found-person" scale={0.97}>
               <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 20 }}>
                 <Avatar id={found.id} name={found.name} size={48} />
@@ -123,7 +121,7 @@ export default function NewChat() {
                 </View>
               </Glass>
             </Pressy>
-          </Animated.View>
+          </View>
         )}
       </View>
 
@@ -174,7 +172,7 @@ export default function NewChat() {
           ) : undefined
         }
         renderItem={({ item, index }) => (
-          <Animated.View entering={rise(Math.min(index, 10) * 25)}>
+          <View>
             <Pressy onPress={() => open(item.id)} label={item.name} scale={0.98} testID={`person-${item.name}`}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
                 <Avatar id={item.id} name={item.name} size={44} />
@@ -190,7 +188,7 @@ export default function NewChat() {
                 </View>
               </View>
             </Pressy>
-          </Animated.View>
+          </View>
         )}
       />
     </Screen>

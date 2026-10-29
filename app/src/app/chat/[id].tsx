@@ -3,27 +3,29 @@
 // The messages come from the phone's database (useMessages) and new ones slide
 // up from the bottom as they arrive. Hold a message to pick it (then reply,
 // react, star, copy, edit, pin, forward or delete); swipe one to reply.
-import type { ChatQuote, LinkPreview, Message, Place, Ref, SharedContact } from '@pakchat/shared';
+import type { ChatQuote, Gif, LinkPreview, Message, Place, Ref, SharedContact } from '@pakchat/shared';
 import { EDIT_MINUTES, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, BackHandler, FlatList, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
-import Animated, { FadeIn, FadeOut, KeyboardState, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue, ZoomOut } from 'react-native-reanimated';
+import Animated, { KeyboardState, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { core } from '../../core/core';
+import { core, MESSAGE_TEXT } from '../../core/core';
 import { haveFile, loadLimits, sendPicked, takeHandOff, TooBig, type Picked } from '../../core/files';
 import { startLive } from '../../core/live';
 import { allowExactAlarms, exactAlarms, plan, SOONEST_MS } from '../../core/scheduled';
+import { addShortcut } from '../../core/shortcut';
 import { saveSticker, sendGif, sendSticker, unsaveSticker } from '../../core/stickers';
+import { lapTimer, startTimer, stopTimer, timing } from '../../core/speed';
 import { sendVoice, type Recorded } from '../../core/voice';
 import { calls } from '../../core/calls';
 import { slowPhone } from '../../core/phone';
 import { dismissChatAlert } from '../../core/push';
 import { defaultTimer } from '../../core/timer';
-import { useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePerson, usePresence, useSettings, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
+import { useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePerson, usePresence, useSettings, useStable, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
 import { Backdrop } from '../../ui/chat/Backdrop';
 import { chatOpen, leftChat } from '../../core/lock';
 import { LeftGroupChoices } from '../../ui/DeleteChats';
@@ -56,7 +58,7 @@ import { dayLabel, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../.
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
-import { arrive, pop, rise, thud, tick } from '../../ui/motion';
+import { arrive, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
 type Item = { key: string; kind: 'msg'; m: Message; first: boolean; album?: Message[] } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
@@ -148,7 +150,7 @@ function ChatScreen() {
   // When the newest messages were last on screen: anything from them after that is "unseen".
   const [bottomAt, setBottomAt] = useState(Date.now);
   const wasAtBottom = useRef(true);
-  // Only messages newer than opening the chat get the slide-in (not the ones already there).
+  // Only messages newer than opening the chat rise into place (not the ones already there).
   const [openedAt] = useState(Date.now);
   const now = useNow(15_000);
   const listRef = useRef<FlatList<Item>>(null);
@@ -179,6 +181,13 @@ function ChatScreen() {
   // slide stays smooth. Half a second at most, in case the "done" never comes.
   const navigation = useNavigation();
   const [settled, setSettled] = useState(false);
+  // Timed from the tap on the chat list (Settings › Help › Speed check): drawn, then slid in.
+  useEffect(() => {
+    requestAnimationFrame(() => lapTimer('chat', 'chatDrawn'));
+  }, []);
+  useEffect(() => {
+    if (settled) stopTimer('chat', 'chatIn');
+  }, [settled]);
   useEffect(() => {
     const done = () => setSettled(true);
     const off = navigation.addListener('transitionEnd' as never, done);
@@ -247,7 +256,7 @@ function ChatScreen() {
 
   // "3 unread messages": how many were unread when the chat opened (before it's marked read),
   // shown above the first of them, like WhatsApp. It goes once I send something.
-  const [unreadOpen, setUnreadOpen] = useState<number | null>(null);
+  const [unreadOpen, setUnreadOpen] = useState<number | null>(() => chat?.unread ?? null);
   if (unreadOpen === null && chat) setUnreadOpen(chat.unread);
   const unreadMark = unreadAt(list, unreadOpen, openedAt);
   const unreadKey = unreadMark?.key;
@@ -334,13 +343,13 @@ function ChatScreen() {
       setJumping(null);
       if (index < 0) return;
       setFlash(jumping);
-      listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+      listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
     }, 0);
     return () => clearTimeout(go);
   }, [jumping, items, list, hasMore, more]);
   useEffect(() => {
     if (!flash) return;
-    const off = setTimeout(() => setFlash(null), 1600);
+    const off = setTimeout(() => setFlash(null), 1200);
     return () => clearTimeout(off);
   }, [flash]);
 
@@ -464,7 +473,7 @@ function ChatScreen() {
   function replyFor() {
     const reply = replyTo;
     setReplyTo(null);
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
     return reply ? ref(reply) : undefined;
   }
 
@@ -552,7 +561,7 @@ function ChatScreen() {
 
   function shareLive(ms: number) {
     setLocationOpen(false);
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
     void startLive(id, ms, { title: t.liveSharingTitle, text: fill(t.liveSharingText, { name: core.chatTitle(chat!) }), stop: t.stopWord })
       .then((ok) => !ok && toast(t.locationNeeded))
       .catch(() => toast(t.couldNot));
@@ -569,7 +578,7 @@ function ChatScreen() {
     const reply = replyTo;
     setReplyTo(null);
     void act(() => work(reply ? ref(reply) : undefined));
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }
 
   /** Opens a picker; what's picked (and not too big) comes back. */
@@ -672,6 +681,31 @@ function ChatScreen() {
     setReplyTo(m);
   }, []);
 
+  // The message box only redraws when its own things change (typing "typing…" or a
+  // tick turning blue leaves it alone), so it gets the same functions every time.
+  const composerCancel = useStable(() => (setReplyTo(null), setEditing(null), setQuote(null)));
+  // Sending is timed from the tap to the new bubble showing (Settings › Help › Speed check).
+  const sendFrom = useRef<string | null>(null);
+  const composerSend = useStable((text: string, mentions: string[], link?: LinkPreview) => {
+    if (!editing) {
+      startTimer('send');
+      sendFrom.current = list?.length ? keyOf(list[list.length - 1]) : null;
+    }
+    send(text, mentions, link);
+  });
+  useEffect(() => {
+    const newest = list?.at(-1);
+    if (!newest || !timing('send') || newest.author !== core.myId || keyOf(newest) === sendFrom.current) return;
+    requestAnimationFrame(() => stopTimer('send', 'send'));
+  }, [list]);
+  const composerSchedule = useStable(askSchedule);
+  const composerAttach = useStable(() => setAttach(true));
+  const composerCamera = useStable(() => setCameraOpen(true));
+  const composerRound = useStable(sendRound);
+  const composerVoice = useStable(sendVoiceNote);
+  const composerGif = useStable((g: Gif) => sendExtra((r) => sendGif(id, g, r)));
+  const composerSticker = useStable((from: string | number) => sendExtra((r) => sendSticker(id, from, r)));
+
   // ---- The header ----
 
   const title = chat ? core.chatTitle(chat) : '';
@@ -701,7 +735,7 @@ function ChatScreen() {
   // The picked bar gets one more button for a sticker, so they're a little smaller then.
   const bs = pickedSticker ? 38 : 42;
   const header = searching && !selecting ? (
-    <Animated.View key="search" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
+    <Animated.View key="search" style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
       <IconButton icon="back" label={t.back} onPress={stopSearch} flip size={42} iconSize={23} testID="search-close" />
       <TextInput
         value={searchText}
@@ -723,7 +757,7 @@ function ChatScreen() {
       <IconButton icon="down" label={t.newerMatch} size={40} onPress={() => stepHit(-1)} testID="search-down" />
     </Animated.View>
   ) : selecting ? (
-    <Animated.View key="pick" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
+    <Animated.View key="pick" style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="close" label={t.cancelSelection} onPress={done} size={bs} testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
           <Txt size={18} weight="700">
@@ -776,7 +810,7 @@ function ChatScreen() {
         <IconButton icon="more" label={t.moreOptions} size={bs} onPress={() => setPickMenu(true)} testID="pick-more" />
     </Animated.View>
   ) : (
-    <Animated.View key="title" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
+    <Animated.View key="title" style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="back" label={t.back} onPress={() => router.back()} flip size={42} iconSize={23} testID="back" />
         <Pressy onPress={() => router.push({ pathname: '/info/[id]', params: { id } })} label={title} scale={0.98} style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center' }} testID="chat-header">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -786,7 +820,7 @@ function ChatScreen() {
                 {title}
               </Txt>
               {!!subtitle && (
-                <Animated.View key={subtitle} entering={FadeIn.duration(160)}>
+                <Animated.View key={subtitle}>
                   {/* "last seen today at 4:20 pm" slides along so the time shows, like WhatsApp. */}
                   <Marquee text={subtitle} size={12} weight="500" color={typing.length || presence?.online ? theme.acc : theme.muted} testID="chat-subtitle" />
                 </Animated.View>
@@ -805,6 +839,7 @@ function ChatScreen() {
   );
 
   const wallpaper = prefs.wallpaper ?? settings.wallpaper;
+  const textSize = MESSAGE_TEXT[settings.fontSize ?? 'medium'];
   if (chat === null) {
     return (
       <Screen>
@@ -826,7 +861,7 @@ function ChatScreen() {
       <Animated.View style={[{ flex: 1 }, lift]}>
 
         {pinned && !selecting && (
-          <Animated.View entering={rise()} exiting={FadeOut}>
+          <View>
             <Pressy onPress={() => jumpTo(pinned)} label={t.pinnedMessage} scale={0.98}>
               <Glass style={{ marginHorizontal: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Icon name="pin" size={16} color={theme.accInk} />
@@ -840,7 +875,7 @@ function ChatScreen() {
                 </View>
               </Glass>
             </Pressy>
-          </Animated.View>
+          </View>
         )}
 
         <View style={{ flex: 1 }}>
@@ -883,7 +918,7 @@ function ChatScreen() {
             }
             ListHeaderComponent={
               list && list.length === 0 && mayWrite ? (
-                <Animated.View entering={pop(150)} style={{ alignSelf: 'center', marginVertical: 20 }}>
+                <Animated.View style={{ alignSelf: 'center', marginVertical: 20 }}>
                   <Button title={t.sayHi} look="soft" onPress={() => send(t.salam, [])} testID="say-hi" />
                 </Animated.View>
               ) : undefined
@@ -893,12 +928,10 @@ function ChatScreen() {
               if (item.kind === 'unread') return <UnreadStrip text={item.text} />;
               if (item.kind === 'typing') return <TypingDots name={group ? core.name(typing[0]) : undefined} />;
               const m = item.m;
-              const isNew = m.sentAt > openedAt;
               const k = keyOf(m);
               const showBar = one !== null && keyOf(one) === k && !m.deleted;
-              return (
-                <Animated.View entering={isNew ? arrive : undefined}>
-                  <Bubble
+              const bubble = (
+                <Bubble
                     m={m}
                     group={!!group}
                     quoted={m.replyTo ? (byKey.get(keyOf(m.replyTo)) ?? null) : null}
@@ -910,6 +943,7 @@ function ChatScreen() {
                     selected={item.album ? item.album.every((x) => picked.has(keyOf(x))) : picked.has(k)}
                     flash={flash === k || (!!flash && !!item.album?.some((x) => keyOf(x) === flash))}
                     album={item.album}
+                    textSize={textSize}
                     onPress={onPress}
                     onLongPress={onLongPress}
                     onReply={reply}
@@ -919,8 +953,9 @@ function ChatScreen() {
                     onRetry={retry}
                     above={showBar ? <ReactionBar mine={m.author === core.myId} current={m.reactions?.[core.myId]} onPick={(e) => react(m, e)} onMore={() => setReactingTo(m)} /> : undefined}
                   />
-                </Animated.View>
               );
+              // One sent or come in while the chat is open rises into place, like WhatsApp's (not the ones already there).
+              return m.sentAt > openedAt ? <Animated.View entering={arrive}>{bubble}</Animated.View> : bubble;
             }}
           />
 
@@ -928,8 +963,8 @@ function ChatScreen() {
 
           {/* Back to the newest, when you've scrolled up. */}
           {!atBottom && (
-            <Animated.View entering={pop()} exiting={ZoomOut.duration(140)} style={{ position: 'absolute', end: 16, bottom: 12 }}>
-              <Pressy onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })} label={t.newest} scale={0.9} testID="to-bottom">
+            <Animated.View style={{ position: 'absolute', end: 16, bottom: 12 }}>
+              <Pressy onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })} label={t.newest} scale={0.9} testID="to-bottom">
                 <Glass strong style={{ width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="down" size={22} color={theme.accInk} />
                   {unseen > 0 && (
@@ -955,15 +990,15 @@ function ChatScreen() {
                 replyTo={replyTo}
                 editing={editing}
                 quote={quote}
-                onCancel={() => (setReplyTo(null), setEditing(null), setQuote(null))}
-                onSend={send}
-                onSchedule={askSchedule}
-                onAttach={() => setAttach(true)}
-                onCamera={() => setCameraOpen(true)}
-                onRound={sendRound}
-                onVoice={sendVoiceNote}
-                onGif={(g) => sendExtra((r) => sendGif(id, g, r))}
-                onSticker={(from) => sendExtra((r) => sendSticker(id, from, r))}
+                onCancel={composerCancel}
+                onSend={composerSend}
+                onSchedule={composerSchedule}
+                onAttach={composerAttach}
+                onCamera={composerCamera}
+                onRound={composerRound}
+                onVoice={composerVoice}
+                onGif={composerGif}
+                onSticker={composerSticker}
               />
             </>
           ) : (
@@ -1009,6 +1044,10 @@ function ChatScreen() {
         <MenuItem icon="wallpaper" label={t.wallpaper} onPress={() => (setMenu(false), router.push({ pathname: '/wallpaper', params: { chat: id } }))} testID="menu-wallpaper" />
         {!chat?.onlyAdminsSend && <MenuItem icon="calendar" label={t.scheduleCall} onPress={() => (setMenu(false), setPlanOpen(true))} testID="menu-schedule-call" />}
         <MenuItem icon="export" label={t.exportChat} onPress={() => (setMenu(false), setExportOpen(true))} testID="menu-export" />
+        {/* Not for a locked chat: the home screen would show its name and photo. */}
+        {chat && !prefs.lock && (
+          <MenuItem icon="plus" label={t.addShortcut} onPress={() => (setMenu(false), addShortcut(chat) || toast(t.shortcutNotHere))} testID="menu-shortcut" />
+        )}
         {(group || (other && other !== core.myId)) && <MenuItem icon="warning" label={t.report} onPress={() => (setMenu(false), setReportOf(null))} testID="menu-report" />}
         <MenuItem icon="trash" label={t.clearChat} danger onPress={() => (setMenu(false), setClearing(true))} />
       </Popup>
@@ -1225,7 +1264,7 @@ function ChatScreen() {
         onClose={() => setPollOpen(false)}
         onSend={(q, options, multi) => {
           setPollOpen(false);
-          listRef.current?.scrollToOffset({ offset: 0, animated: true });
+          listRef.current?.scrollToOffset({ offset: 0, animated: false });
           void act(() => core.client.sendPoll(id, q, options, multi));
         }}
       />
@@ -1236,7 +1275,7 @@ function ChatScreen() {
         onClose={() => setEventOpen(false)}
         onSend={(e) => {
           setEventOpen(false);
-          listRef.current?.scrollToOffset({ offset: 0, animated: true });
+          listRef.current?.scrollToOffset({ offset: 0, animated: false });
           const { call, ...rest } = e;
           void act(() => core.client.sendPlan(id, { ...rest, general: true, video: call === 'video', ...(call ? { call: true as const } : {}) }));
         }}
@@ -1284,7 +1323,7 @@ function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => voi
   const { theme } = useLook();
   const person = usePerson(userId);
   return (
-    <Animated.View entering={rise()} style={{ alignSelf: 'center', width: '88%', marginBottom: 12 }}>
+    <Animated.View style={{ alignSelf: 'center', width: '88%', marginBottom: 12 }}>
       <Glass strong style={{ padding: 16, borderRadius: 22, alignItems: 'center', gap: 8 }} testID="not-in-contacts">
         <Avatar id={userId} name={person?.name ?? ''} size={56} />
         <Txt size={16} weight="700" align="center">
@@ -1310,10 +1349,10 @@ function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current
   const t = useT();
   const { theme } = useLook();
   return (
-    <Animated.View entering={pop()} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3 }}>
+    <Animated.View style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3 }}>
       <Glass strong style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 3, borderRadius: 26, boxShadow: `0 16px 34px -14px ${theme.shadow}` }}>
         {REACTIONS.map((e, i) => (
-          <Animated.View key={e} entering={pop(30 + i * 30)}>
+          <Animated.View key={e}>
             <Pressy onPress={() => onPick(e)} label={e} scale={0.8} testID={`react-${e}`}>
               <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: current === e ? theme.accSoft : 'transparent' }}>
                 <Txt size={24} align="center">
@@ -1324,7 +1363,7 @@ function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current
           </Animated.View>
         ))}
         {/* Any other emoji (or the one I picked from there, shown here). */}
-        <Animated.View entering={pop(30 + REACTIONS.length * 30)}>
+        <View>
           <Pressy onPress={current && !REACTIONS.includes(current) ? () => onPick(current) : onMore} label={t.moreReactions} scale={0.8} testID="react-more">
             <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: current && !REACTIONS.includes(current) ? theme.accSoft : theme.glass }}>
               {current && !REACTIONS.includes(current) ? (
@@ -1336,7 +1375,7 @@ function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current
               )}
             </View>
           </Pressy>
-        </Animated.View>
+        </View>
       </Glass>
     </Animated.View>
   );
@@ -1411,7 +1450,7 @@ function DatePill({ pill }: { pill: Pill }) {
   const text = useSyncExternalStore(pill.subscribe, pill.get);
   if (!text) return null;
   return (
-    <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(200)} pointerEvents="none" style={{ position: 'absolute', top: 8, alignSelf: 'center' }}>
+    <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 8, alignSelf: 'center' }}>
       <View style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, backgroundColor: theme.dark ? '#22252C' : '#FFFFFF', boxShadow: `0 2px 8px -3px ${theme.shadow}` }}>
         <Txt size={12.5} weight="600" color={theme.sectionText}>
           {text}

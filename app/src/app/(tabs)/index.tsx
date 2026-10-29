@@ -7,14 +7,14 @@ import KV from 'expo-sqlite/kv-store';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, FlatList, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { findBackup } from '../../core/backup';
 import { handOffMedia, type Picked } from '../../core/files';
 import { chatOpen, FOLDER, leftFolder, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
-import { useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useConnected, useCore, useLists, useSettings, warmChats, type ChatRow as Row } from '../../core/hooks';
+import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useConnected, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
@@ -26,10 +26,11 @@ import { PhotoPeek } from '../../ui/PhotoPeek';
 import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { Icon } from '../../ui/icons';
 import { Chip, Empty, Fab, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
-import { listLayout, rise, thud, tick } from '../../ui/motion';
+import { thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 import { AddToListSheet } from '../../ui/AddToListSheet';
 import { ChatLockSheet } from '../../ui/ChatLockSheet';
+import { startTimer, stopTimer } from '../../core/speed';
 
 // The chips above the chats. `list:<id>` is one of your own lists.
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
@@ -118,6 +119,17 @@ export default function Chats() {
     }
   }, [myId]);
 
+  // Starting PakChat is timed up to the chat list showing (Settings › Help › Speed check).
+  const shown = rows !== null;
+  useEffect(() => {
+    if (!shown) return;
+    requestAnimationFrame(() => {
+      stopTimer('start', 'start');
+      // Then the other tabs draw (useAfterStart).
+      setTimeout(markListShown, 50);
+    });
+  }, [shown]);
+
   // The chats at the top are read ahead of time, so opening one is instant.
   const top = (rows ?? [])
     .slice(0, 8)
@@ -204,6 +216,19 @@ export default function Chats() {
       return next;
     });
   }, []);
+  // The same two functions every time, so a row only redraws when its own chat changes (ChatRow.tsx).
+  const openRow = useStable((row: Row) => {
+    if (selecting) togglePick(row.chat.id);
+    else if (row.prefs.lock) void openLocked(row.chat.id);
+    else {
+      startTimer('chat');
+      router.push({ pathname: '/chat/[id]', params: { id: row.chat.id } });
+    }
+  });
+  const holdRow = useStable((row: Row) => {
+    thud();
+    togglePick(row.chat.id);
+  });
 
   const pickedRows = (rows ?? []).filter((r) => picked.has(r.chat.id));
   const allPinned = pickedRows.length > 0 && pickedRows.every((r) => r.prefs.pinnedAt);
@@ -224,7 +249,7 @@ export default function Chats() {
   }
 
   const header = selecting ? (
-    <Animated.View key="picking" entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)} style={{ marginHorizontal: 10, marginTop: 10 }}>
+    <Animated.View key="picking" style={{ marginHorizontal: 10, marginTop: 10 }}>
       <LinearGradient
         colors={theme.grad}
         start={{ x: 0, y: 0 }}
@@ -245,7 +270,7 @@ export default function Chats() {
       </LinearGradient>
     </Animated.View>
   ) : (
-    <Animated.View key="title" entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 18, paddingStart: 20, paddingEnd: 14 }}>
+    <Animated.View key="title" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 18, paddingStart: 20, paddingEnd: 14 }}>
       <View style={{ flex: 1 }}>
         <Txt size={27} weight="800" style={{ letterSpacing: -0.9 }}>
           {t.appName}
@@ -299,7 +324,7 @@ export default function Chats() {
       </ScrollView>
 
       {!connected && (
-        <Animated.View entering={rise()} exiting={FadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>
+        <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint }} />
           <Txt size={12.5} weight="500" color={theme.muted} testID="connecting">
             {t.connecting}
@@ -313,7 +338,6 @@ export default function Chats() {
           data={items}
           extraData={[picked, typing, presence]}
           keyExtractor={(it) => (it.kind === 'row' ? it.row.chat.id : `community-${it.id}`)}
-          itemLayoutAnimation={listLayout}
           ref={list}
           onLayout={(e) => setListHeight(Math.round(e.nativeEvent.layout.height))}
           onScroll={(e) => {
@@ -370,11 +394,11 @@ export default function Chats() {
           }
           ListFooterComponent={
             visible.length > 0 && visible.length < 4 && !selecting ? (
-              <Animated.View entering={FadeIn.delay(400)}>
+              <View>
                 <Txt size={12.5} color={theme.muted} align="center" style={{ marginTop: 18, paddingHorizontal: 30 }}>
                   {t.swipeHint}
                 </Txt>
-              </Animated.View>
+              </View>
             ) : undefined
           }
           renderItem={({ item: it, index }) =>
@@ -389,21 +413,18 @@ export default function Chats() {
                 </View>
               </Pressy>
             ) : (
-              <Animated.View exiting={FadeOut.duration(160)}>
+              <View>
                 <ChatRow
                   row={it.row}
                   typing={Object.keys(typing[it.row.chat.id] ?? {}).filter((id) => id !== myId)}
                   online={!!(it.row.other && presence[it.row.other]?.online)}
                   selecting={selecting}
                   selected={picked.has(it.row.chat.id)}
-                  onPress={() => (selecting ? togglePick(it.row.chat.id) : it.row.prefs.lock ? void openLocked(it.row.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: it.row.chat.id } }))}
-                  onLongPress={() => {
-                    thud();
-                    togglePick(it.row.chat.id);
-                  }}
-                  onAvatar={it.row.prefs.lock ? undefined : () => setPeek(it.row)}
+                  onPress={openRow}
+                  onLongPress={holdRow}
+                  onAvatar={it.row.prefs.lock ? undefined : setPeek}
                 />
-              </Animated.View>
+              </View>
             )
           }
         />

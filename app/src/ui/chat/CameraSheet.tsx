@@ -21,7 +21,7 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Linking, Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -35,7 +35,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon, type IconName } from '../icons';
 import { Pressy, Txt } from '../kit';
-import { smooth, snappy, thud, tick } from '../motion';
+import { thud, tick } from '../motion';
 import { pickedOf } from './Gallery';
 import type { RoundVideo } from './RoundRecorder';
 import { toast } from '../overlays';
@@ -82,7 +82,7 @@ export function CameraSheet({
   }, [visible]);
 
   return (
-    <Modal visible={visible} animationType="fade" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
+    <Modal visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       {/* Swipes inside a Modal need their own gesture root on Android. */}
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
         {visible && ok && <Camera onClose={onClose} onTaken={onTaken} onGallery={onGallery} onRound={onRound} />}
@@ -111,7 +111,6 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
   const readyWait = useRef<(() => void) | null>(null);
   const recording = useRef<Promise<{ uri: string } | undefined> | null>(null);
   const startedAt = useRef(0);
-  const press = useSharedValue(0);
   const note = kind === 'note';
   const limit = note ? MAX_NOTE_S : MAX_VIDEO_S;
 
@@ -219,7 +218,6 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
   }
 
   function pressIn() {
-    press.value = withSpring(1, snappy);
     if (kind !== 'photo') return;
     held.current = true;
     holdTimer.current = setTimeout(() => {
@@ -229,7 +227,6 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
   }
 
   async function pressOut() {
-    press.value = withSpring(0, snappy);
     if (kind !== 'photo') {
       // Video and Video note: tap to start, tap again to stop.
       if (filming) return void stopFilm();
@@ -246,10 +243,8 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
     void stopFilm();
   }
 
-  const ring = useAnimatedStyle(() => ({ transform: [{ scale: 1 + press.value * 0.12 }] }));
-  // White for a photo; red for video; a red rounded square while filming.
+  // White for a photo; red for video; a small red rounded square while filming.
   const dotColor = kind === 'photo' && !filming ? '#FFFFFF' : RED;
-  const dot = useAnimatedStyle(() => ({ transform: [{ scale: withTiming(filming ? 0.5 : 1, { duration: 160 }) }], borderRadius: withTiming(filming ? 8 : 29, { duration: 160 }) }));
 
   const circle = Math.min(width - 56, 300);
   const camera = (
@@ -263,7 +258,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
       videoQuality={note ? '720p' : '1080p'}
       mirror={facing === 'front'}
       onCameraReady={ready}
-      animateShutter
+      animateShutter={false}
       testID="camera-view"
     />
   );
@@ -291,8 +286,6 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
           <Round icon="close" size={42} label={t.close} onPress={onClose} testID="camera-close" />
           {filming && (
             <Animated.View
-              entering={FadeIn}
-              exiting={FadeOut}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.45)' }}
             >
               <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: RED }} />
@@ -324,9 +317,9 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
               accessibilityHint={kind === 'photo' ? t.tapPhotoHoldVideo : t.tapToRecord}
               testID="shutter"
             >
-              <Animated.View style={[{ width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }, ring]}>
-                <Animated.View style={[{ width: 58, height: 58, backgroundColor: dotColor }, dot]} />
-              </Animated.View>
+              <View style={{ width: 74, height: 74, borderRadius: 37, borderWidth: 4, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: filming ? 29 : 58, height: filming ? 29 : 58, borderRadius: filming ? 8 : 29, backgroundColor: dotColor }} />
+              </View>
             </Pressable>
             <View style={{ opacity: filming ? 0 : 1 }} pointerEvents={filming ? 'none' : 'auto'}>
               <Round icon="flipCamera" size={52} label={t.flipCamera} onPress={() => setFacing(facing === 'back' ? 'front' : 'back')} testID="camera-flip" />
@@ -356,7 +349,7 @@ function Round({ icon, size, label, onPress, testID }: { icon: IconName; size: n
 
 const MODE_W = 116;
 
-/** The modes in a row, the chosen one in the middle in a soft pill; it slides when you change. */
+/** The modes in a row, the chosen one in the middle in a soft pill (it moves there at once). */
 function Modes({ kinds, kind, onPick }: { kinds: Kind[]; kind: Kind; onPick: (k: Kind) => void }) {
   const t = useT();
   const { rtl } = useLook();
@@ -364,10 +357,9 @@ function Modes({ kinds, kind, onPick }: { kinds: Kind[]; kind: Kind; onPick: (k:
   // The row is centred; this moves it so the chosen one sits in the middle.
   const middle = (kinds.length - 1) / 2;
   const shift = (middle - kinds.indexOf(kind)) * MODE_W * (rtl ? -1 : 1);
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: withSpring(shift, smooth) }] }), [shift]);
   return (
     <View style={{ alignItems: 'center' }}>
-      <Animated.View style={[{ flexDirection: 'row' }, slide]}>
+      <View style={{ flexDirection: 'row', transform: [{ translateX: shift }] }}>
         {kinds.map((k) => (
           <Pressable key={k} onPress={() => onPick(k)} accessibilityRole="button" accessibilityLabel={label[k]} accessibilityState={{ selected: k === kind }} testID={`camera-mode-${k}`}>
             <View style={{ width: MODE_W, alignItems: 'center' }}>
@@ -379,7 +371,7 @@ function Modes({ kinds, kind, onPick }: { kinds: Kind[]; kind: Kind; onPick: (k:
             </View>
           </Pressable>
         ))}
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -462,7 +454,7 @@ function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGaller
   return (
     <View>
       {picked.length > 0 && (
-        <Animated.View entering={FadeIn} exiting={FadeOut} style={{ alignSelf: 'flex-end', marginEnd: 14, marginBottom: 10 }}>
+        <Animated.View style={{ alignSelf: 'flex-end', marginEnd: 14, marginBottom: 10 }}>
           <Pressy onPress={send} label={t.send} scale={0.92} testID="camera-recent-send">
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, height: 48, borderRadius: 24, backgroundColor: theme.acc }}>
               <Icon name="send" size={19} color="#FFFFFF" flip />

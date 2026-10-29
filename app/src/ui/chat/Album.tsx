@@ -69,7 +69,7 @@ export function AlbumTile({
   const t = useT();
   const { theme } = useLook();
   const f = m.file!;
-  const { tap, progress, here, paused, moving } = useFileTap(m, mine, selecting, onPick);
+  const { tap, progress, here, paused, moving, spot } = useFileTap(m, mine, selecting, onPick);
   const sharp = f.kind === 'video' && !!f.poster;
   const source = here && f.kind === 'image' ? { uri: f.local } : sharp ? { uri: f.poster } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
   const badge = moving ? (
@@ -95,9 +95,9 @@ export function AlbumTile({
       scale={0.97}
       testID={more > 0 ? 'album-more' : 'album-tile'}
     >
-      <View style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden', backgroundColor: theme.glass }}>
+      <View ref={spot} collapsable={false} style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden', backgroundColor: theme.glass }}>
         {source && (
-          <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} transition={150} recyclingKey={m.id} />
+          <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} recyclingKey={m.id} />
         )}
         {more > 0 ? (
           <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>

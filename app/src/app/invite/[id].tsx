@@ -7,7 +7,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import { ScrollView, Share, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { core, serverUrl } from '../../core/core';
 import { useChat } from '../../core/hooks';
@@ -16,7 +15,6 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { whenLabel } from '../../ui/format';
 import { Avatar, Button, Chip, Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
-import { rise } from '../../ui/motion';
 import { Dialog, toast } from '../../ui/overlays';
 
 const EXPIRES = [0, 3_600, 86_400, 7 * 86_400, 30 * 86_400];
@@ -73,7 +71,7 @@ export default function Invite() {
     <Screen>
       <TopBar title={t.inviteLink} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40, gap: 12 }}>
-        <Animated.View entering={rise()}>
+        <View>
           <Glass style={{ padding: 16, borderRadius: 22, gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Avatar id={id} name={title} size={52} group />
@@ -106,7 +104,7 @@ export default function Invite() {
               </Txt>
             )}
           </Glass>
-        </Animated.View>
+        </View>
 
         {link && !ended && (
           <Glass>

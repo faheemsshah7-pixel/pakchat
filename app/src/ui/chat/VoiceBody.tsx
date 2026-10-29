@@ -26,7 +26,6 @@ import { useLook } from '../../theme/ThemeProvider';
 import { duration as clockOf } from '../format';
 import { Icon } from '../icons';
 import { Pressy, Txt } from '../kit';
-import { rise } from '../motion';
 import { toast } from '../overlays';
 
 let canTranscribe: boolean | null = null;
@@ -171,7 +170,7 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
         </View>
       </View>
       {!!f.transcript && shown && (
-        <Animated.View entering={rise()} style={{ maxWidth: 236, paddingTop: 2, paddingBottom: 2 }} testID="voice-transcript">
+        <Animated.View style={{ maxWidth: 236, paddingTop: 2, paddingBottom: 2 }} testID="voice-transcript">
           <Txt size={13.5} color={ink} style={{ fontStyle: 'italic' }}>
             {f.transcript}
           </Txt>

@@ -1948,3 +1948,37 @@ picture). Video: tap to start and stop. Video note: a round video with the front
 - Swipe from Chats to Status to Calls and back.
 - Open the camera, pick two recent photos, Send; swipe to Video and record; try Video note.
 - Share your screen Pixel to Realme and scroll.
+
+## Step 36: build 8, speed and the six small differences
+
+### Only screens slide
+Every animation is gone except screens sliding in and out, plus three touches WhatsApp has: a
+sent message rises in (`arrive` in `ui/motion.ts`), a photo grows out of its spot in the chat
+and shrinks back when closed (`ui/zoom.ts`, `ui/SwipeToClose.tsx`), and things you drag follow
+your finger and settle back.
+
+### Faster on older phones
+- The chat list reads the newest message of every chat in one query (`newestOfEach`), and every
+  screen that shows the list shares one read (`sharedLoad` in `core/hooks.ts`), which waits while
+  a chat is sliding open.
+- Messages and chat rows that didn't change keep the same object (`core/reuse.ts`), so only the
+  ones that changed are drawn again. The message bar is drawn again only when it has to.
+- At startup only the Chats tab is drawn; the other three wait until the list has shown.
+- Settings › Help › Speed check lists how long starting, opening a chat, switching tabs and
+  sending took on this phone (`core/speed.ts`). Anything over 400 ms shows in red.
+
+### The six small differences
+- Forward: up to 5 chats, the ones you write to most ("Frequently contacted") on top.
+- Settings › Chats › Font size: Small, Medium or Large for messages.
+- Your own status: the forward arrow sends it to chats.
+- Status reply: tap the box and WhatsApp's eight quick emoji show; a tap sends one.
+- New group: Disappearing messages and Group permissions can be set before Create.
+- Chat ⋮ › Add shortcut puts the chat on the home screen (`Shortcuts.kt`). Not for locked chats.
+- Media, Docs and Links swipe sideways, with the line following your finger.
+
+### Try it
+- Settings › Help › Speed check on the Realme, after opening a few chats.
+- Open a photo, swipe it down: it goes back into its spot.
+- Forward a message: pick a sixth chat.
+- Make a group with 24 hours on, and members allowed to add people.
+- Add a chat to the home screen and open it from there.

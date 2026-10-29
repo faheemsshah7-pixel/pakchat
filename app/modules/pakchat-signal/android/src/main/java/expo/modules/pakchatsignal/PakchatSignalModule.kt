@@ -172,6 +172,9 @@ class PakchatSignalModule : Module() {
       Transcribe.run(context(), uri, language, promise)
     }
 
+    /** A chat on the home screen (Shortcuts.kt). False if this phone's home screen can't take one. */
+    Function("addShortcut") { json: String -> Shortcuts.add(context(), json) }
+
     // ---- Files (see FileLock and FileTransfer) ----
 
     /** How big a file is once locked, so the app can ask the server for room first. */

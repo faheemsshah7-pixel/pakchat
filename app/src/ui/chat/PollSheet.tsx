@@ -3,13 +3,12 @@
 // (The chat gives it a new key each time it opens, so it always starts empty.)
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import Animated, { FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Button, Field, Toggle, Txt } from '../kit';
 import { Sheet } from '../overlays';
-import { rise } from '../motion';
 
 const MAX = 12;
 
@@ -39,7 +38,7 @@ export function PollSheet({ visible, onClose, onSend }: { visible: boolean; onCl
           {t.pollOptions}
         </Txt>
         {options.map((o, i) => (
-          <Animated.View key={i} entering={i > 1 ? rise() : undefined} exiting={FadeOut}>
+          <Animated.View key={i}>
             <Field value={o} onChangeText={(v) => setOption(i, v)} placeholder={`${t.pollOption} ${i + 1}`} testID={`poll-option-${i}`} maxLength={100} />
           </Animated.View>
         ))}

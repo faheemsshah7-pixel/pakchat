@@ -3,14 +3,16 @@
 //   Media   every photo and video, newest first, in a grid. Tap one to see it full screen.
 //   Docs    documents and audio files. Tap to open (or download first).
 //   Links   messages with a web address. Tap the address to open it in the browser.
-// Each tab is grouped by month ("This month", "September", …).
+// Each tab is grouped by month ("This month", "September", …). Swipe between
+// the tabs, or tap one, like WhatsApp; the line under them follows your finger.
 //
 // It's all read from the phone (sqliteStorage.ts, shared): the server never knows.
 import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { FlatList, Linking, useWindowDimensions, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, FlatList, Linking, StyleSheet, useWindowDimensions, View, type HostInstance } from 'react-native';
+import { TabView, type NavigationState, type SceneRendererProps } from 'react-native-tab-view';
 
 import { core, isOffline } from '../../core/core';
 import { Cancelled, download, FileBroken, FileGone, haveFile } from '../../core/files';
@@ -21,8 +23,9 @@ import { linksIn } from '../../data/sqliteStorage';
 import { open } from '../../ui/chat/FileBody';
 import { duration, fileSize, listTime, monthLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
-import { Chip, Empty, Glass, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
+import { Empty, Glass, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
+import { openViewer } from '../../ui/zoom';
 
 type Tab = 'media' | 'docs' | 'links';
 
@@ -54,68 +57,108 @@ function byMonth(list: Message[], perRow: number, t: Parameters<typeof monthLabe
 export default function Media() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
-  const { theme } = useLook();
   const chat = useChat(id);
-  const [tab, setTab] = useState<Tab>('media');
-  const [loaded, setLoaded] = useState<{ tab: Tab; list: Message[] } | null>(null);
-  // Nothing shows until the tab picked has been read (not the last tab's list).
-  const list = loaded?.tab === tab ? loaded.list : null;
-
-  // Read again when the chat changes (a new photo, a download finishing).
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      void core.storage
-        .shared(id, tab)
-        .then((l) => alive && setLoaded({ tab, list: l }))
-        .catch(() => {});
-    load();
-    const off = core.on(`messages:${id}`, load);
-    return () => {
-      alive = false;
-      off();
-    };
-  }, [id, tab]);
-
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'media', label: t.mediaTab },
-    { key: 'docs', label: t.docsTab },
-    { key: 'links', label: t.linksTab },
-  ];
+  const { width } = useWindowDimensions();
+  const [index, setIndex] = useState(0);
+  const routes = useMemo(
+    () => [
+      { key: 'media' as Tab, title: t.mediaTab },
+      { key: 'docs' as Tab, title: t.docsTab },
+      { key: 'links' as Tab, title: t.linksTab },
+    ],
+    [t],
+  );
 
   return (
     <Screen>
       <TopBar title={chat ? core.chatTitle(chat) : t.media} onBack={() => router.back()} />
-      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 10 }}>
-        {tabs.map((x) => (
-          <Chip key={x.key} label={x.label} on={tab === x.key} onPress={() => setTab(x.key)} testID={`media-tab-${x.key}`} />
-        ))}
-      </View>
-      {list && !list.length ? (
-        <Empty icon={tab === 'media' ? 'photo' : tab === 'docs' ? 'doc' : 'link'} text={tab === 'media' ? t.noMedia : tab === 'docs' ? t.noDocs : t.noLinks} />
-      ) : (
-        <FlatList
-          data={byMonth(list ?? [], tab === 'media' ? 3 : 1, t)}
-          keyExtractor={(e) => e.key}
-          contentContainerStyle={{ paddingHorizontal: tab === 'media' ? 3 : 12, paddingBottom: 30 }}
-          renderItem={({ item }) =>
-            'month' in item ? (
-              <Txt size={13} weight="700" color={theme.muted} style={{ marginHorizontal: tab === 'media' ? 9 : 4, marginTop: 14, marginBottom: 8 }}>
-                {item.month}
-              </Txt>
-            ) : tab === 'media' ? (
-              <View style={{ flexDirection: 'row' }}>
-                {item.items.map((m) => (
-                  <Tile key={m.id} m={m} />
-                ))}
-              </View>
-            ) : (
-              <View style={{ marginBottom: 8 }}>{tab === 'docs' ? <DocRow m={item.items[0]} /> : <LinkRow m={item.items[0]} />}</View>
-            )
-          }
-        />
-      )}
+      {/* Like WhatsApp: swipe between Media, Docs and Links, or tap one; the line under them follows. */}
+      <TabView
+        navigationState={{ index, routes }}
+        onIndexChange={setIndex}
+        initialLayout={{ width }}
+        lazy
+        renderScene={({ route }) => <Shared chatId={id} tab={route.key} />}
+        renderTabBar={(p) => <Tabs {...p} />}
+      />
     </Screen>
+  );
+}
+
+/** Media, Docs and Links across the top, with the line under the one showing (it moves with your finger). */
+function Tabs({ navigationState, position, jumpTo }: SceneRendererProps & { navigationState: NavigationState<{ key: Tab; title: string }> }) {
+  const { theme, rtl } = useLook();
+  const [width, setWidth] = useState(0);
+  const each = width / navigationState.routes.length;
+  return (
+    <View
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      style={{ flexDirection: 'row', marginTop: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.glassLine }}
+    >
+      {navigationState.routes.map((r, i) => (
+        <Pressy key={r.key} style={{ flex: 1 }} onPress={() => jumpTo(r.key)} label={r.title} testID={`media-tab-${r.key}`}>
+          <View style={{ height: 46, alignItems: 'center', justifyContent: 'center' }}>
+            <Txt size={14.5} weight="700" color={navigationState.index === i ? theme.accInk : theme.muted}>
+              {r.title}
+            </Txt>
+          </View>
+        </Pressy>
+      ))}
+      {width > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={{ position: 'absolute', bottom: 0, start: 0, width: each, height: 3, paddingHorizontal: each * 0.18, transform: [{ translateX: Animated.multiply(position, rtl ? -each : each) }] }}
+        >
+          <View style={{ flex: 1, borderRadius: 2, backgroundColor: theme.acc }} />
+        </Animated.View>
+      )}
+    </View>
+  );
+}
+
+/** One tab's things, by month. Read again when the chat changes (a new photo, a download finishing). */
+function Shared({ chatId, tab }: { chatId: string; tab: Tab }) {
+  const t = useT();
+  const { theme } = useLook();
+  const [list, setList] = useState<Message[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      void core.storage
+        .shared(chatId, tab)
+        .then((l) => alive && setList(l))
+        .catch(() => {});
+    load();
+    const off = core.on(`messages:${chatId}`, load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [chatId, tab]);
+
+  if (list && !list.length) return <Empty icon={tab === 'media' ? 'photo' : tab === 'docs' ? 'doc' : 'link'} text={tab === 'media' ? t.noMedia : tab === 'docs' ? t.noDocs : t.noLinks} />;
+  return (
+    <FlatList
+      data={byMonth(list ?? [], tab === 'media' ? 3 : 1, t)}
+      keyExtractor={(e) => e.key}
+      contentContainerStyle={{ paddingHorizontal: tab === 'media' ? 3 : 12, paddingBottom: 30 }}
+      renderItem={({ item }) =>
+        'month' in item ? (
+          <Txt size={13} weight="700" color={theme.muted} style={{ marginHorizontal: tab === 'media' ? 9 : 4, marginTop: 14, marginBottom: 8 }}>
+            {item.month}
+          </Txt>
+        ) : tab === 'media' ? (
+          <View style={{ flexDirection: 'row' }}>
+            {item.items.map((m) => (
+              <Tile key={m.id} m={m} />
+            ))}
+          </View>
+        ) : (
+          <View style={{ marginBottom: 8 }}>{tab === 'docs' ? <DocRow m={item.items[0]} /> : <LinkRow m={item.items[0]} />}</View>
+        )
+      }
+    />
   );
 }
 
@@ -126,9 +169,10 @@ function Tile({ m }: { m: Message }) {
   const side = Math.floor((width - 6 - 9) / 3);
   const f = m.file!;
   const source = f.kind === 'image' && f.local ? { uri: f.local } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
+  const spot = useRef<HostInstance>(null);
   return (
-    <Pressy onPress={() => router.push({ pathname: '/viewer', params: { chat: m.chatId, author: m.author, id: m.id } })} label={f.kind} scale={0.96} testID="media-item">
-      <View style={{ width: side, height: side, margin: 1.5, borderRadius: 6, overflow: 'hidden', backgroundColor: theme.glass }}>
+    <Pressy onPress={() => void openViewer(m, spot.current)} label={f.kind} scale={0.96} testID="media-item">
+      <View ref={spot} collapsable={false} style={{ width: side, height: side, margin: 1.5, borderRadius: 6, overflow: 'hidden', backgroundColor: theme.glass }}>
         {source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={f.local ? 0 : 4} />}
         {f.kind === 'video' && (
           <View style={{ position: 'absolute', start: 5, bottom: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>

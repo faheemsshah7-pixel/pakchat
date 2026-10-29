@@ -1,12 +1,10 @@
 // Coming.tsx: a calm "coming in a later update" page for tabs and settings not built yet.
 import { View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import type { IconName } from './icons';
 import { Empty, Screen, Txt } from './kit';
-import { rise } from './motion';
 
 export function Coming({ tab, title }: { tab?: 'status' | 'calls'; title?: string }) {
   const t = useT();
@@ -25,11 +23,11 @@ export function Coming({ tab, title }: { tab?: 'status' | 'calls'; title?: strin
       )}
       <View style={{ flex: 1, justifyContent: 'center' }}>
         <Empty icon={icon} text={text}>
-          <Animated.View entering={rise(200)}>
+          <View>
             <Txt size={13} weight="600" color={theme.accInk} align="center">
               {t.comingSoon}
             </Txt>
-          </Animated.View>
+          </View>
         </Empty>
       </View>
     </Screen>

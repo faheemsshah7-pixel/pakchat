@@ -8,18 +8,22 @@ import { router } from 'expo-router';
 import { ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { useCommunities, type CommunityRow } from '../../core/hooks';
+import { useAfterStart, useCommunities, type CommunityRow } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { GroupLine } from '../../ui/GroupLine';
 import { Avatar, Empty, Glass, Pressy, Screen, Txt } from '../../ui/kit';
-import { rise } from '../../ui/motion';
 
 /** How many of a community's groups its card shows (the rest: "View all"). */
 const SHOWN = 3;
 
-export default function Communities() {
+/** Drawn once the chat list has shown after starting (useAfterStart), so starting up draws that first. */
+export default function CommunitiesTab() {
+  return useAfterStart() ? <Communities /> : null;
+}
+
+function Communities() {
   const t = useT();
   const { theme } = useLook();
   const list = useCommunities();
@@ -32,7 +36,7 @@ export default function Communities() {
         </Txt>
       </View>
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 110, gap: 12 }}>
-        <Animated.View entering={rise()}>
+        <View>
           <Pressy onPress={() => router.push('/new-community')} label={t.newCommunity} scale={0.98} testID="new-community">
             <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 22 }}>
               <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
@@ -65,11 +69,11 @@ export default function Communities() {
               </View>
             </Glass>
           </Pressy>
-        </Animated.View>
+        </View>
 
         {list && !list.length && <Empty icon="community" text={t.noCommunities} />}
         {(list ?? []).map((c, i) => (
-          <Animated.View key={c.community.id} entering={i < 8 ? rise(60 + i * 40) : undefined}>
+          <Animated.View key={c.community.id}>
             <CommunityCard row={c} />
           </Animated.View>
         ))}

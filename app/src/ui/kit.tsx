@@ -3,7 +3,7 @@
 //   Screen       the sky (or graphite) background, safe from the notch, right-to-left in Urdu
 //   Txt          words, in Inter (English) or Noto Nastaliq (Urdu), picked by the words themselves
 //   Glass        a frosted card
-//   Pressy       anything you can tap: it sinks a little under your finger, on a spring
+//   Pressy       anything you can tap: it dims under your finger
 //   IconButton   a round-cornered button with an icon
 //   Avatar       a person or group's picture, or their first letter on a soft tile
 //   Chip         a filter like "All" or "Unread"
@@ -14,19 +14,8 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, type ReactNode } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-  type StyleProp,
-  type TextInputProps,
-  type TextStyle,
-  type ViewStyle,
-} from 'react-native';
-import Animated, { interpolate, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
+import Animated, { interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
@@ -37,7 +26,6 @@ import { useT } from '../i18n';
 import { useLook, useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './icons';
 import { hasUrdu, hash, initials, TINTS_DARK, TINTS_SKY } from './letters';
-import { fade, pop, snappy } from './motion';
 
 export { avatarTint, hasUrdu, initials } from './letters';
 
@@ -177,7 +165,7 @@ export function Glass({ children, style, strong, testID }: { children?: ReactNod
   );
 }
 
-/** Anything tappable. It sinks to 96% under your finger and springs back. */
+/** Anything tappable. It dims under your finger, at once. */
 // The size and place keys that Pressy copies onto its outer Pressable (see below).
 const OUTER_KEYS = ['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'width', 'minWidth', 'maxWidth'] as const;
 
@@ -187,7 +175,6 @@ export function Pressy({
   onLongPress,
   style,
   disabled,
-  scale = 0.96,
   label,
   testID,
   hitSlop,
@@ -197,13 +184,12 @@ export function Pressy({
   onLongPress?: () => void;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  /** No longer used: nothing shrinks when pressed (owner, 29 Oct: only screens slide). */
   scale?: number;
   label?: string;
   testID?: string;
   hitSlop?: number;
 }) {
-  const down = useSharedValue(0);
-  const anim = useAnimatedStyle(() => ({ transform: [{ scale: interpolate(down.value, [0, 1], [1, scale]) }] }));
   // How big the button is in its row (flex: 1, a width, alignSelf) has to be set on
   // the outer Pressable too. With it only on the inner view, the Pressable shrank
   // to fit, so a `flex: 1` button (like the chat title) got no room for its text.
@@ -228,10 +214,10 @@ export function Pressy({
       onPress={onPress}
       onLongPress={onLongPress}
       hitSlop={hitSlop}
-      onPressIn={() => down.set(withSpring(1, snappy))}
-      onPressOut={() => down.set(withSpring(0, snappy))}
     >
-      <Animated.View style={[inner, anim, disabled && { opacity: 0.5 }]}>{children}</Animated.View>
+      {/* While a finger is on it, it dims at once. Only this view redraws (what's inside is left alone),
+          and nothing is set up per button for it, so a long list of them opens quicker. */}
+      {({ pressed }) => <View style={[inner, { opacity: disabled ? 0.5 : pressed ? 0.6 : 1 }]}>{children}</View>}
     </Pressable>
   );
 }
@@ -379,7 +365,7 @@ export function Avatar({
   return (
     <View style={{ width: size, height: size }}>
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: radius, backgroundColor: a }} contentFit="cover" transition={150} />
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: radius, backgroundColor: a }} contentFit="cover" />
       ) : (
         <LinearGradient
           colors={[a, b]}
@@ -398,7 +384,6 @@ export function Avatar({
       )}
       {online && (
         <Animated.View
-          entering={pop()}
           style={{
             position: 'absolute',
             end: -2,
@@ -440,7 +425,7 @@ export function Chip({
   const { theme, lang } = useLook();
   const v = useSharedValue(on ? 1 : 0);
   useEffect(() => {
-    v.value = withTiming(on ? 1 : 0, fade);
+    v.value = on ? 1 : 0;
   }, [on, v]);
   const fill = useAnimatedStyle(() => ({ opacity: v.value }));
   const words = useAnimatedStyle(() => ({ color: interpolateColor(v.value, [0, 1], [theme.text, theme.onAcc]) }));
@@ -486,13 +471,13 @@ export function Chip({
   );
 }
 
-/** An on/off switch. The knob springs across; in Urdu it moves the other way. */
+/** An on/off switch. The knob jumps across (no animation); in Urdu it sits the other way. */
 export function Toggle({ on, onChange, label, testID }: { on: boolean; onChange: (on: boolean) => void; label: string; testID?: string }) {
   const theme = useTheme();
   const { rtl } = useLook();
   const v = useSharedValue(on ? 1 : 0);
   useEffect(() => {
-    v.value = withSpring(on ? 1 : 0, snappy);
+    v.value = on ? 1 : 0;
   }, [on, v]);
   const track = useAnimatedStyle(() => ({ backgroundColor: interpolateColor(v.value, [0, 1], [theme.faint, theme.acc]) }));
   const knob = useAnimatedStyle(() => ({ transform: [{ translateX: v.value * 20 * (rtl ? -1 : 1) }] }));
@@ -505,11 +490,11 @@ export function Toggle({ on, onChange, label, testID }: { on: boolean; onChange:
   );
 }
 
-/** The big round-cornered + button. It pops in when the screen opens. */
+/** The big round-cornered + button. */
 export function Fab({ icon, onPress, label, testID, bottom = 22 }: { icon: IconName; onPress: () => void; label: string; testID?: string; bottom?: number }) {
   const theme = useTheme();
   return (
-    <Animated.View entering={pop(120)} style={{ position: 'absolute', end: 22, bottom }}>
+    <Animated.View style={{ position: 'absolute', end: 22, bottom }}>
       <Pressy onPress={onPress} label={label} testID={testID} scale={0.9}>
         <LinearGradient
           colors={theme.grad}
@@ -659,11 +644,11 @@ export function Empty({ icon, text, children }: { icon: IconName; text: string; 
   const t = useTheme();
   return (
     <View style={{ alignItems: 'center', paddingHorizontal: 36, paddingVertical: 48, gap: 14 }}>
-      <Animated.View entering={pop()}>
+      <View>
         <View style={{ width: 84, height: 84, borderRadius: 28, backgroundColor: t.accSoft, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={icon} size={38} color={t.accInk} stroke={1.6} />
         </View>
-      </Animated.View>
+      </View>
       <Txt size={15} color={t.muted} align="center">
         {text}
       </Txt>

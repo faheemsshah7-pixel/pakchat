@@ -14,10 +14,10 @@
 import type { Chat, ChatQuote, Gif, LinkPreview, Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Keyboard, TextInput, View, type TextInputInstance } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeOut, FadeOutDown, interpolate, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { firstUrl, previewOf } from '../../core/links';
@@ -27,12 +27,13 @@ import { useLook } from '../../theme/ThemeProvider';
 import { bodyLine } from '../format';
 import { Icon } from '../icons';
 import { fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
-import { lively, rise, thud } from '../motion';
+import { thud } from '../motion';
 import { ExtrasPanel } from './ExtrasPanel';
 import { useRoundRecorder, type RoundVideo } from './RoundRecorder';
 import { useVoiceRecorder } from './VoiceRecorder';
 
-export function Composer({
+/** The message box. It only redraws when something it's given changes (the chat hands it the same functions each time). */
+export const Composer = memo(function Composer({
   chat,
   replyTo,
   editing,
@@ -193,14 +194,14 @@ export function Composer({
     setMentions((old) => [...new Set([...old, p.id])]);
   }
 
-  // The mic turns into "send" with a quarter turn and a pop.
+  // The mic turns into "send" at once when there's something to send (no animation).
   const hasText = text.trim().length > 0;
   const v = useSharedValue(hasText ? 1 : 0);
   useEffect(() => {
-    v.value = withSpring(hasText ? 1 : 0, lively);
+    v.value = hasText ? 1 : 0;
   }, [hasText, v]);
-  const micStyle = useAnimatedStyle(() => ({ opacity: 1 - v.value, transform: [{ scale: interpolate(v.value, [0, 1], [1, 0.4]) }, { rotate: `${v.value * -90}deg` }] }));
-  const sendStyle = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ scale: interpolate(v.value, [0, 1], [0.4, 1]) }, { rotate: `${(1 - v.value) * 90}deg` }] }));
+  const micStyle = useAnimatedStyle(() => ({ opacity: 1 - v.value }));
+  const sendStyle = useAnimatedStyle(() => ({ opacity: v.value }));
 
   // Voice notes: the mic button records (hold, slide, lock, or tap).
   const voice = useVoiceRecorder({ enabled: !hasText && !editing, onSend: onVoice });
@@ -215,11 +216,11 @@ export function Composer({
   return (
     // No layout animation on this outer view: it moves with the keyboard every frame,
     // and an animation here lagged behind and bounced. The parts inside fade in on their own.
-    <Animated.View>
+    <View>
       {round.overlay}
 
       {suggestions.length > 0 && (
-        <Animated.View entering={rise()} exiting={FadeOutDown.duration(120)}>
+        <View>
           <Glass strong style={{ marginHorizontal: 10, marginBottom: 6, paddingVertical: 4, borderRadius: 18 }}>
             {suggestions.map((p) => (
               <Pressy key={p.id} onPress={() => mention(p)} label={p.name} scale={0.98}>
@@ -231,7 +232,7 @@ export function Composer({
               </Pressy>
             ))}
           </Glass>
-        </Animated.View>
+        </View>
       )}
 
       {voice.lockHint}
@@ -253,7 +254,7 @@ export function Composer({
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginHorizontal: 10, marginTop: 10, marginBottom: 10 }}>
         <Glass style={{ flex: 1, padding: 4, borderRadius: 24 }}>
           {banner && !recording && (
-            <Animated.View entering={rise()} exiting={FadeOut.duration(100)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }}>
+            <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }}>
               <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
                 <Txt size={13} weight="700" color={theme.accInk}>
                   {editing ? t.editing : fill(t.replyingTo, { name: banner.author === core.myId ? t.youWord : core.name(banner.author) || '…' })}
@@ -276,7 +277,7 @@ export function Composer({
             </Animated.View>
           )}
           {privately && !recording && (
-            <Animated.View entering={rise()} exiting={FadeOut.duration(100)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }} testID="private-reply">
+            <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }} testID="private-reply">
               <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
                 <Txt size={13} weight="700" color={theme.accInk}>
                   {fill(t.replyingPrivately, { name: core.name(privately.author) || '…' })}
@@ -331,7 +332,7 @@ export function Composer({
                 />
                 <IconButton icon="attach" label={t.attachFile} size={42} iconSize={21} color={theme.muted} onPress={() => (Keyboard.dismiss(), setPanel(false), onAttach())} testID="attach" />
                 {!hasText && !editing && (
-                  <Animated.View entering={FadeIn.duration(140)} exiting={FadeOut.duration(90)}>
+                  <View>
                     <GestureDetector gesture={round.gesture}>
                       <View
                         accessible
@@ -345,7 +346,7 @@ export function Composer({
                         <Icon name="camera" size={22} color={round.recording ? theme.acc : theme.muted} />
                       </View>
                     </GestureDetector>
-                  </Animated.View>
+                  </View>
                 )}
               </>
             )}
@@ -381,16 +382,16 @@ export function Composer({
           </GestureDetector>
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
-}
+});
 
 /** The preview of a web address in the box, before it's sent. */
 function LinkCard({ card, onClose }: { card: LinkPreview; onClose: () => void }) {
   const t = useT();
   const { theme } = useLook();
   return (
-    <Animated.View entering={rise()} exiting={FadeOut.duration(100)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, margin: 2, marginBottom: 4, padding: 6, borderRadius: 16, backgroundColor: theme.accSoft }} testID="link-card">
+    <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, margin: 2, marginBottom: 4, padding: 6, borderRadius: 16, backgroundColor: theme.accSoft }} testID="link-card">
       {card.thumb ? (
         <Image source={{ uri: `data:image/jpeg;base64,${card.thumb}` }} style={{ width: 52, height: 52, borderRadius: 11 }} contentFit="cover" />
       ) : (

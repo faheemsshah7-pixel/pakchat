@@ -19,7 +19,7 @@ import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content
 import { isBody, isChange, LIVE_MAX_MS, parseContent, writeContent } from './content';
 import { randomId } from './ids';
 import { changeAllowed, maySend, statusOwner } from './rules';
-import type { GroupChanges, Me, ServerApi, ServerChat, SignedIn } from './server';
+import type { GroupChanges, GroupSettings, Me, ServerApi, ServerChat, SignedIn } from './server';
 import { OfflineError, ServerError } from './server';
 import type { DeviceKeys, PreKeys, SignalApi } from './signal';
 import { errorCode, SEALED, SignalError } from './signal';
@@ -494,7 +494,7 @@ export class PakChat {
   }
 
   /** A new group. `defaultTimer` as for openDirect: a new group starts with it. */
-  async createGroup(title: string, memberIds: string[], options?: { onlyAdminsSend?: boolean; defaultTimer?: number }) {
+  async createGroup(title: string, memberIds: string[], options?: GroupSettings & { defaultTimer?: number }) {
     const { defaultTimer = 0, ...rest } = options ?? {};
     const sc = await this.o.server.createGroup(title, memberIds, rest);
     const chat = await this.inLane(() => this.saveChat(sc));

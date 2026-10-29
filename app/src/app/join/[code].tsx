@@ -11,7 +11,6 @@ import { core, isOffline } from '../../core/core';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Avatar, Button, Glass, Screen, TopBar, Txt } from '../../ui/kit';
-import { pop } from '../../ui/motion';
 import { toast } from '../../ui/overlays';
 
 export default function Join() {
@@ -74,7 +73,7 @@ export default function Join() {
             {t.linkNoLonger}
           </Txt>
         ) : (
-          <Animated.View entering={pop()} style={{ alignSelf: 'stretch' }}>
+          <Animated.View style={{ alignSelf: 'stretch' }}>
             <Glass strong style={{ padding: 22, borderRadius: 28, alignItems: 'center', gap: 10 }}>
               <Avatar id={info.chatId} name={info.title} size={88} group />
               <Txt size={22} weight="800" align="center" testID="join-title">

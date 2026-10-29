@@ -253,6 +253,19 @@ describe('against the real server', () => {
     await expect(zara.server.inviteInfo(link.code)).rejects.toBeInstanceOf(ServerError);
   });
 
+  test('build 8: permissions and disappearing messages set while making a group', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'wasm');
+    const bilal = await person('Bilal', 'node');
+    const g = await ali.client.createGroup('Book club', [sara.id], { membersEdit: true, membersAdd: true, joinApproval: true, defaultTimer: 86_400 });
+    expect(g).toMatchObject({ membersEdit: true, membersAdd: true, joinApproval: true, onlyAdminsSend: false });
+    expect((await ali.storage.getChat(g.id))!.timer).toBe(86_400);
+    // Sara isn't an admin, but members may add people.
+    await eventually(async () => expect((await sara.storage.getChat(g.id))?.membersAdd).toBe(true));
+    await sara.client.addMembers(g.id, [bilal.id]);
+    await eventually(async () => expect((await ali.storage.getChat(g.id))!.members.map((m) => m.userId)).toContain(bilal.id));
+  });
+
   test('phase 7: a community with announcements, a linked group, and a group joined from its list', async () => {
     const ali = await person('Ali', 'node');
     const sara = await person('Sara', 'wasm');

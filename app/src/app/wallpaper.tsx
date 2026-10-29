@@ -11,7 +11,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState, type ReactNode } from 'react';
 import { BackHandler, FlatList, ScrollView, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, type Wallpaper } from '../core/core';
@@ -227,7 +227,7 @@ function Look({ looking, onClose, onSet }: { looking: Looking; onClose: () => vo
   }, [onClose]);
 
   return (
-    <Animated.View entering={FadeIn.duration(160)} exiting={FadeOut.duration(140)} style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: theme.bg, zIndex: 10 }}>
+    <Animated.View style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: theme.bg, zIndex: 10 }}>
       <FlatList
         data={list}
         horizontal

@@ -15,7 +15,6 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt, useKeyboardLift } from '../ui/kit';
-import { pop, rise } from '../ui/motion';
 
 export default function ListScreen() {
   // chats: a new list's first chats (from "Add to list" › New list).
@@ -65,7 +64,7 @@ export default function ListScreen() {
         renderItem={({ item, index }) => {
           const on = picked.has(item.chat.id);
           return (
-            <Animated.View entering={rise(Math.min(index, 10) * 25)}>
+            <View>
               <Pressy onPress={() => toggle(item.chat.id)} label={item.title} scale={0.98} testID={`list-pick-${item.title}`}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 16, backgroundColor: on ? theme.selected : 'transparent' }}>
                   <Avatar id={item.chat.id} name={item.title} size={44} group={item.chat.kind === 'group'} />
@@ -75,13 +74,13 @@ export default function ListScreen() {
                     </Txt>
                   </View>
                   {on && (
-                    <Animated.View entering={pop()} style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
+                    <Animated.View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="check" size={14} color="#FFFFFF" stroke={3} />
                     </Animated.View>
                   )}
                 </View>
               </Pressy>
-            </Animated.View>
+            </View>
           );
         }}
       />

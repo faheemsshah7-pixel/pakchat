@@ -1,7 +1,6 @@
 // settings/blocked.tsx: people you've blocked. Tap Unblock to let them reach you again.
 import { router } from 'expo-router';
 import { FlatList, View } from 'react-native';
-import Animated, { FadeOut } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
 import { useBlocked } from '../../core/hooks';
@@ -22,7 +21,7 @@ export default function Blocked() {
         ListEmptyComponent={blocked ? <Empty icon="flag" text={t.noBlocked} /> : undefined}
         ItemSeparatorComponent={Divider}
         renderItem={({ item }) => (
-          <Animated.View exiting={FadeOut}>
+          <View>
             <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 18 }}>
               <Avatar id={item.id} name={item.name} size={42} />
               <View style={{ flex: 1 }}>
@@ -37,7 +36,7 @@ export default function Blocked() {
                 onPress={() => void core.block(item.id, false).then(() => toast(t.unblocked), () => toast(t.couldNot))}
               />
             </Glass>
-          </Animated.View>
+          </View>
         )}
       />
     </Screen>

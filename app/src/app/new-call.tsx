@@ -16,7 +16,6 @@ import { useLook } from '../theme/ThemeProvider';
 import { startCall } from '../ui/CallBar';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
-import { rise } from '../ui/motion';
 import { Sheet, toast } from '../ui/overlays';
 import Animated from 'react-native-reanimated';
 
@@ -133,7 +132,7 @@ export default function NewCall() {
         contentContainerStyle={{ marginHorizontal: 12, paddingBottom: 30 }}
         ItemSeparatorComponent={Divider}
         renderItem={({ item, index }) => (
-          <Animated.View entering={rise(Math.min(index, 10) * 25)}>
+          <View>
             <Pressy onPress={() => (group ? togglePick(item.id) : fav ? void toggleFavourite(item.id) : void call(item.id, false))} label={item.name} scale={0.98} testID={`call-person-${item.name}`}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 8 }}>
                 <Avatar id={item.id} name={item.name.replace(/^~ /, '')} size={44} />
@@ -154,13 +153,13 @@ export default function NewCall() {
                 )}
               </View>
             </Pressy>
-          </Animated.View>
+          </View>
         )}
       />
 
       {/* New group call: voice or video, once someone is picked. */}
       {group && group.length > 0 && (
-        <Animated.View entering={rise()} style={{ flexDirection: 'row', gap: 10, padding: 14 }}>
+        <Animated.View style={{ flexDirection: 'row', gap: 10, padding: 14 }}>
           <Button title={t.voiceCall} icon="calls" onPress={() => void call(group[0], false, group.slice(1))} style={{ flex: 1 }} testID="group-call-voice" />
           <Button title={t.videoCall} icon="video" look="soft" onPress={() => void call(group[0], true, group.slice(1))} style={{ flex: 1 }} testID="group-call-video" />
         </Animated.View>

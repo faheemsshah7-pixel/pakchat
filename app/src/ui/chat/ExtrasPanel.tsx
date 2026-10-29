@@ -9,7 +9,6 @@ import type { Gif } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, TextInput, View } from 'react-native';
-import Animated, { FadeOutDown } from 'react-native-reanimated';
 
 import { isOffline } from '../../core/core';
 import { useRecentStickers, useSavedStickers } from '../../core/hooks';
@@ -18,7 +17,7 @@ import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon, type IconName } from '../icons';
 import { fontStyle, Glass, Pressy, Txt } from '../kit';
-import { rise, tick } from '../motion';
+import { tick } from '../motion';
 import { toast } from '../overlays';
 import { squarePhoto } from './attachments';
 
@@ -47,7 +46,7 @@ export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string
   ];
 
   return (
-    <Animated.View entering={rise()} exiting={FadeOutDown.duration(120)}>
+    <View>
       <Glass strong style={{ marginHorizontal: 10, marginTop: 8, borderRadius: 20, overflow: 'hidden' }}>
         <View style={{ height: HEIGHT }}>
           {tab === 'emoji' && <EmojiTab onEmoji={onEmoji} />}
@@ -80,7 +79,7 @@ export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string
           })}
         </View>
       </Glass>
-    </Animated.View>
+    </View>
   );
 }
 

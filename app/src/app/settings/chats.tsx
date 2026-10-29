@@ -1,22 +1,21 @@
 // settings/chats.tsx: Settings › Chats, like WhatsApp's. Theme (Sky, Graphite or
 // Auto, which follows the phone, and one of six accent colours: the whole app
-// changes at once, and remembers it), wallpaper, link previews, archived chats
-// and chat backup.
+// changes at once, and remembers it), wallpaper, font size (how big messages'
+// words are), link previews, archived chats and chat backup.
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
-import { core } from '../../core/core';
+import { core, type FontSize } from '../../core/core';
 import { useChatList, useSettings } from '../../core/hooks';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { ACCENTS, accentGradient, makeTheme, type ModeChoice } from '../../theme/palette';
 import { Icon } from '../../ui/icons';
 import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
-import { pop, tick } from '../../ui/motion';
-import { Dialog, toast } from '../../ui/overlays';
+import { tick } from '../../ui/motion';
+import { Dialog, Sheet, toast } from '../../ui/overlays';
 
 export default function ChatsSettings() {
   const t = useT();
@@ -24,6 +23,13 @@ export default function ChatsSettings() {
   const settings = useSettings();
   const rows = useChatList();
   const [archivingAll, setArchivingAll] = useState(false);
+  const [sizing, setSizing] = useState(false);
+  const sizes: { key: FontSize; label: string }[] = [
+    { key: 'small', label: t.fontSmall },
+    { key: 'medium', label: t.fontMedium },
+    { key: 'large', label: t.fontLarge },
+  ];
+  const size = settings.fontSize ?? 'medium';
 
   const modes: { key: ModeChoice; label: string }[] = [
     { key: 'sky', label: t.sky },
@@ -60,9 +66,9 @@ export default function ChatsSettings() {
                       style={{ width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }}
                     >
                       {on && (
-                        <Animated.View entering={pop()}>
+                        <View>
                           <Icon name="check" size={15} color="#FFFFFF" stroke={3} />
-                        </Animated.View>
+                        </View>
                       )}
                     </LinearGradient>
                   </View>
@@ -79,6 +85,8 @@ export default function ChatsSettings() {
 
         <Section title={t.chatSettingsWord} />
         <Glass>
+          <SettingRow icon="text" title={t.fontSizeWord} sub={sizes.find((x) => x.key === size)?.label} onPress={() => setSizing(true)} testID="font-size" />
+          <Divider />
           <SettingRow
             icon="link"
             title={t.linkPreviews}
@@ -105,6 +113,36 @@ export default function ChatsSettings() {
           <SettingRow icon="upload" title={t.backup} onPress={() => router.push('/settings/backup')} testID="open-backup" />
         </Glass>
       </ScrollView>
+
+      {/* Font size: Small, Medium or Large, like WhatsApp's. */}
+      <Sheet visible={sizing} onClose={() => setSizing(false)} title={t.fontSizeWord}>
+        <View style={{ paddingHorizontal: 16, gap: 4 }}>
+          {sizes.map((x) => {
+            const on = size === x.key;
+            return (
+              <Pressy
+                key={x.key}
+                label={x.label}
+                testID={`font-${x.key}`}
+                onPress={() => {
+                  tick();
+                  setSizing(false);
+                  core.setSettings({ fontSize: x.key });
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: on ? theme.accSoft : 'transparent' }}>
+                  <View style={{ flex: 1 }}>
+                    <Txt size={x.key === 'small' ? 14 : x.key === 'large' ? 18 : 15.5} weight={on ? '700' : '500'} color={on ? theme.accInk : theme.text}>
+                      {x.label}
+                    </Txt>
+                  </View>
+                  {on && <Icon name="check" size={20} color={theme.accInk} stroke={2.4} />}
+                </View>
+              </Pressy>
+            );
+          })}
+        </View>
+      </Sheet>
 
       <Dialog
         visible={archivingAll}

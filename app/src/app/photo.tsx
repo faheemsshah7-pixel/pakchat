@@ -5,7 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import { useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
@@ -29,9 +29,9 @@ export default function Photo() {
       <SwipeToClose onClose={() => router.back()} onDrag={setDragging}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           {uri ? (
-            <Animated.View entering={FadeIn.duration(180)}>
+            <View>
               <Image source={{ uri }} style={{ width, height: width }} contentFit="contain" />
-            </Animated.View>
+            </View>
           ) : (
             <Txt size={15} color="#B8BCC6" testID="no-photo">
               {t.noProfilePhoto}
@@ -41,7 +41,7 @@ export default function Photo() {
       </SwipeToClose>
       {/* The bar stays put (and goes while the photo is dragged). */}
       {!dragging && (
-        <Animated.View entering={FadeIn.duration(150)} style={{ position: 'absolute', top: 0, start: 0, end: 0, flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: insets.top + 6, paddingHorizontal: 8 }}>
+        <Animated.View style={{ position: 'absolute', top: 0, start: 0, end: 0, flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: insets.top + 6, paddingHorizontal: 8 }}>
           <IconButton icon="back" label={t.back} color="#FFFFFF" onPress={() => router.back()} />
           <Txt size={18} weight="700" color="#FFFFFF" lines={1} style={{ flex: 1 }}>
             {title}

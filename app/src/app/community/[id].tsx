@@ -26,7 +26,7 @@ import { GroupLine } from '../../ui/GroupLine';
 import { GroupPicker } from '../../ui/GroupPicker';
 import { Icon, type IconName } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
-import { pop, rise, thud } from '../../ui/motion';
+import { thud } from '../../ui/motion';
 import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
@@ -243,7 +243,7 @@ export default function Community() {
         }
       />
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 40 }}>
-        <Animated.View entering={pop()} style={{ alignItems: 'center', gap: 6, paddingVertical: 12 }}>
+        <Animated.View style={{ alignItems: 'center', gap: 6, paddingVertical: 12 }}>
           {admin ? (
             <Pressy onPress={() => setPhotoOpen(true)} label={t.profilePhoto} scale={0.95} testID="community-photo">
               <Avatar id={id} name={name} size={88} group square />
@@ -268,7 +268,7 @@ export default function Community() {
         </Animated.View>
 
         {(admin || maySuggest) && (
-          <Animated.View entering={rise(60)} style={{ flexDirection: 'row', gap: 10, marginBottom: 4 }}>
+          <Animated.View style={{ flexDirection: 'row', gap: 10, marginBottom: 4 }}>
             {admin && <Action icon="link" label={t.inviteLink} onPress={() => router.push({ pathname: '/invite/[id]', params: { id } })} testID="community-invite" />}
             {admin && <Action icon="plus" label={t.addGroups} onPress={() => setAdding(true)} testID="community-add" />}
             {admin && <Action icon="group" label={t.newGroupHere} onPress={() => setMaking(true)} testID="community-new-group" />}

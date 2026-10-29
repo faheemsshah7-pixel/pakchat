@@ -7,7 +7,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Share, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { core, isOffline, serverUrl } from '../../core/core';
 import { useCall, useChat, useLinkCall } from '../../core/hooks';
@@ -17,7 +16,6 @@ import { useLook } from '../../theme/ThemeProvider';
 import { startCall } from '../../ui/CallBar';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Glass, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
-import { pop, rise } from '../../ui/motion';
 import { toast } from '../../ui/overlays';
 
 export const callLinkUrl = (code: string) => `${serverUrl()}/calllink/${code}`;
@@ -72,7 +70,7 @@ export default function CallLink() {
         </View>
       ) : (
         <View style={{ padding: 14, gap: 12 }}>
-          <Animated.View entering={pop()}>
+          <View>
             <Glass strong style={{ padding: 22, borderRadius: 28, alignItems: 'center', gap: 10 }}>
               <View style={{ width: 84, height: 84, borderRadius: 28, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="link" size={38} color={theme.accInk} />
@@ -99,8 +97,8 @@ export default function CallLink() {
                 </View>
               )}
             </Glass>
-          </Animated.View>
-          <Animated.View entering={rise(80)}>
+          </View>
+          <View>
             <Glass>
               <View style={{ padding: 14 }}>
                 <Txt size={14} weight="600" color={theme.accInk} selectable testID="calllink-url">
@@ -128,7 +126,7 @@ export default function CallLink() {
                 testID="calllink-copy"
               />
             </Glass>
-          </Animated.View>
+          </View>
         </View>
       )}
     </Screen>

@@ -9,7 +9,6 @@ import { formatPhone, normalizePhone } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { core, isOffline, type Contact } from '../core/core';
 import { usePeople } from '../core/hooks';
@@ -180,11 +179,11 @@ export default function SaveContact() {
         )}
 
         {!!error && (
-          <Animated.View entering={FadeIn}>
+          <View>
             <Txt size={14} color={theme.danger} align="center" testID="contact-error">
               {error}
             </Txt>
-          </Animated.View>
+          </View>
         )}
         <Button title={t.save} onPress={save} busy={busy} disabled={!name || (!id && !phone.trim() && !email.trim())} testID="contact-save" />
         {saved && <Button title={t.removeContact} look="danger" onPress={remove} testID="contact-remove" />}

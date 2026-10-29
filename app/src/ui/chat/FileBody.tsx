@@ -12,10 +12,10 @@
 import type { Message } from '@pakchat/shared';
 import { File } from 'expo-file-system';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { View } from 'react-native';
+import { useRef } from 'react';
+import { View, type HostInstance } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 import { useFileProgress } from '../../core/hooks';
@@ -28,6 +28,7 @@ import { duration, fileSize } from '../format';
 import { Icon } from '../icons';
 import { Pressy, Txt } from '../kit';
 import { toast } from '../overlays';
+import { openViewer } from '../zoom';
 
 const WIDE = 236;
 /** How big a sticker shows. */
@@ -35,7 +36,8 @@ export const STICKER_SHOWN = 150;
 
 /**
  * Tapping a file: download it, stop it, send it again, or open it once it's
- * here (FileBody, and each photo of an album, Album.tsx).
+ * here (FileBody, and each photo of an album, Album.tsx). Put `spot` on the
+ * picture, so the viewer grows out of it (zoom.ts).
  */
 export function useFileTap(m: Message, mine: boolean, selecting: boolean, onPick: () => void) {
   const t = useT();
@@ -43,12 +45,13 @@ export function useFileTap(m: Message, mine: boolean, selecting: boolean, onPick
   const here = haveFile(m);
   const sending = mine && m.status === 'queued';
   const paused = mine && m.status === 'paused';
+  const spot = useRef<HostInstance>(null);
 
   async function tap() {
     if (selecting) return onPick();
     // The upload button: send it again.
     if (paused) return void resumeSend(m).catch(() => {});
-    if (here && !sending) return open(m);
+    if (here && !sending) return open(m, spot.current);
     // The ✕: stop it.
     if (sending) return void pauseSend(m).catch(() => {});
     if (progress !== undefined) return cancelDownload(m);
@@ -60,14 +63,14 @@ export function useFileTap(m: Message, mine: boolean, selecting: boolean, onPick
     }
   }
 
-  return { tap, progress, here, sending, paused, moving: progress !== undefined || sending };
+  return { tap, progress, here, sending, paused, moving: progress !== undefined || sending, spot };
 }
 
 export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boolean; selecting: boolean; onPick: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const f = m.file!;
-  const { tap, progress, here, sending, paused } = useFileTap(m, mine, selecting, onPick);
+  const { tap, progress, here, sending, paused, spot } = useFileTap(m, mine, selecting, onPick);
   const ink = mine ? theme.bubbleMineText : theme.text;
   const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
 
@@ -115,6 +118,8 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
     return (
       <Pressy onPress={tap} onLongPress={onPick} label={f.kind === 'image' ? t.photoLabel : t.videoLabel} scale={0.98} testID={`file-${f.kind}`}>
         <View
+          ref={spot}
+          collapsable={false}
           style={{
             width: WIDE,
             height,
@@ -127,7 +132,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
           {f.gif && here ? (
             <GifView uri={f.local!} />
           ) : (
-            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} transition={150} />
+            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} />
           )}
           {badge && (
             <View
@@ -288,17 +293,14 @@ export function Stop({ progress, size, label }: { progress: number; size: number
   );
 }
 
-/** Opens a file that's here: photos and videos in PakChat's viewer, documents in another app. */
-export async function open(m: Message) {
+/**
+ * Opens a file that's here: photos and videos in PakChat's viewer (growing out
+ * of `from`, the picture tapped, when given), documents in another app.
+ */
+export async function open(m: Message, from?: HostInstance | null) {
   const f = m.file;
   if (!f?.local) return;
-  if (f.kind === 'image' || f.kind === 'video') {
-    router.push({
-      pathname: '/viewer',
-      params: { chat: m.chatId, author: m.author, id: m.id },
-    });
-    return;
-  }
+  if (f.kind === 'image' || f.kind === 'video') return openViewer(m, from);
   try {
     await outsideFor(() => new File(f.local!).preview({ mimeType: f.mime }));
   } catch {
