@@ -561,6 +561,13 @@ export const en7 = {
   pickUpTo: 'You can pick up to {n} at once',
   otherGallery: 'Phone\'s gallery',
   recentsWord: 'Recents',
+  // Build 7: albums
+  albumCount: '{photos} photos, {videos} videos',
+  downloadAll: 'Download all',
+  // Build 7: the camera's modes, like WhatsApp
+  videoNote: 'Video note',
+  tapToRecord: 'Tap to record',
+  swipeUpGallery: 'Swipe up for the gallery',
 };
 
 export const ur7: typeof en7 = {
@@ -1079,4 +1086,9 @@ export const ur7: typeof en7 = {
   pickUpTo: 'آپ ایک وقت میں {n} تک چن سکتے ہیں',
   otherGallery: 'فون کی گیلری',
   recentsWord: 'حالیہ',
+  albumCount: '{photos} تصاویر، {videos} ویڈیوز',
+  downloadAll: 'سب ڈاؤن لوڈ کریں',
+  videoNote: 'ویڈیو نوٹ',
+  tapToRecord: 'ریکارڈ کرنے کے لیے دبائیں',
+  swipeUpGallery: 'گیلری کے لیے اوپر کھسکائیں',
 };

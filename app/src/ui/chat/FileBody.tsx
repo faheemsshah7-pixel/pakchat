@@ -33,16 +33,16 @@ const WIDE = 236;
 /** How big a sticker shows. */
 export const STICKER_SHOWN = 150;
 
-export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boolean; selecting: boolean; onPick: () => void }) {
+/**
+ * Tapping a file: download it, stop it, send it again, or open it once it's
+ * here (FileBody, and each photo of an album, Album.tsx).
+ */
+export function useFileTap(m: Message, mine: boolean, selecting: boolean, onPick: () => void) {
   const t = useT();
-  const { theme } = useLook();
-  const f = m.file!;
   const progress = useFileProgress(tagOf(m.chatId, m));
   const here = haveFile(m);
   const sending = mine && m.status === 'queued';
   const paused = mine && m.status === 'paused';
-  const ink = mine ? theme.bubbleMineText : theme.text;
-  const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
 
   async function tap() {
     if (selecting) return onPick();
@@ -59,6 +59,17 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
       toast(err instanceof FileGone ? t.fileGone : err instanceof FileBroken ? t.fileBroken : isOffline(err) ? t.offline : t.couldNot);
     }
   }
+
+  return { tap, progress, here, sending, paused, moving: progress !== undefined || sending };
+}
+
+export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boolean; selecting: boolean; onPick: () => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const f = m.file!;
+  const { tap, progress, here, sending, paused } = useFileTap(m, mine, selecting, onPick);
+  const ink = mine ? theme.bubbleMineText : theme.text;
+  const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
 
   // What sits over a photo or video, or at the end of a document's row.
   const moving = progress !== undefined || sending;
@@ -242,7 +253,7 @@ function GifView({ uri }: { uri: string }) {
 }
 
 /** A ring that fills as the file moves, around a ✕ that stops it. */
-function Stop({ progress, size, label }: { progress: number; size: number; label: string }) {
+export function Stop({ progress, size, label }: { progress: number; size: number; label: string }) {
   const r = size / 2 - 3;
   const round = 2 * Math.PI * r;
   return (

@@ -338,7 +338,7 @@ function LiveBars({ levels }: { levels: number[] }) {
   );
 }
 
-/** ① View once: the round "1" that's filled in when on. */
+/** ① View once: WhatsApp's mark, a filled green "1" when on. */
 export function OnceToggle({ on, onChange, light }: { on: boolean; onChange: (on: boolean) => void; light?: boolean }) {
   const t = useT();
   const { theme } = useLook();
@@ -354,22 +354,15 @@ export function OnceToggle({ on, onChange, light }: { on: boolean; onChange: (on
       scale={0.88}
       testID="view-once"
     >
-      <View
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 15,
-          borderWidth: 1.6,
-          borderColor: on ? theme.acc : ink,
-          backgroundColor: on ? theme.acc : 'transparent',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginHorizontal: 4,
-        }}
-      >
-        <Txt size={14} weight="800" color={on ? '#FFFFFF' : ink}>
-          1
-        </Txt>
+      {/* Off: WhatsApp's view once mark. On: a filled green circle with the 1. */}
+      <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: on ? theme.acc : 'transparent', alignItems: 'center', justifyContent: 'center', marginHorizontal: 4 }}>
+        {on ? (
+          <Txt size={14} weight="800" color="#FFFFFF">
+            1
+          </Txt>
+        ) : (
+          <Icon name="once" size={28} color={ink} stroke={1.8} />
+        )}
       </View>
     </Pressy>
   );

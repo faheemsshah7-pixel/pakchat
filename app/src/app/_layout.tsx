@@ -170,6 +170,7 @@ function App() {
           <Stack.Screen name="settings/storage" />
           <Stack.Screen name="settings/manage-storage" />
           <Stack.Screen name="qr" />
+          <Stack.Screen name="album" />
           <Stack.Screen name="settings/chats" />
           <Stack.Screen name="settings/profile" />
           <Stack.Screen name="settings/lists" />

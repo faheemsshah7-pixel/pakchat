@@ -19,7 +19,7 @@ import { core, isOffline } from '../core/core';
 import { download, FileBroken, FileGone, forgetFile, haveFile } from '../core/files';
 import { stopAll } from '../core/player';
 import { useT } from '../i18n';
-import { duration } from '../ui/format';
+import { duration, whenLabel } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
@@ -98,10 +98,16 @@ export default function Once() {
       )}
       <View style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <IconButton icon="close" label={t.close} look="onAccent" size={42} onPress={() => router.back()} testID="once-close" />
+        {/* Who sent it and when, like WhatsApp's. */}
         <View style={{ flex: 1 }}>
           <Txt size={16} weight="700" color="#FFFFFF" lines={1}>
             {m ? core.name(m.author) || '…' : ''}
           </Txt>
+          {!!m && (
+            <Txt size={12.5} color="rgba(255,255,255,0.75)" lines={1}>
+              {whenLabel(m.sentAt, t)}
+            </Txt>
+          )}
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.14)' }}>
           <Icon name="once" size={15} color="#FFFFFF" />

@@ -1065,11 +1065,11 @@ class Calls {
     for (const p of c.peers.values()) {
       if (!p.pc) continue;
       const sender = camera && p.pc.getSenders().find((x) => x.track?.id === camera.id);
-      if (sender) void sender.replaceTrack(screen).catch(() => {});
+      if (sender) void sender.replaceTrack(screen).then(() => this.saveData(p)).catch(() => {});
       else {
         // A voice call (or no camera): the screen is added, and each connection set up again with it.
         p.pc.addTrack(screen, local);
-        void this.offer(c, p);
+        void this.offer(c, p).then(() => this.saveData(p));
       }
     }
     if (camera) camera.enabled = false;
@@ -1094,7 +1094,7 @@ class Calls {
       for (const p of c.peers.values()) {
         const sender = p.pc?.getSenders().find((x) => x.track?.id === screen?.id);
         if (!p.pc || !sender) continue;
-        if (camera) swaps.push(sender.replaceTrack(camera).catch(() => {}));
+        if (camera) swaps.push(sender.replaceTrack(camera).then(() => this.saveData(p)).catch(() => {}));
         else {
           p.pc.removeTrack(sender);
           void this.offer(c, p);
@@ -1117,19 +1117,32 @@ class Calls {
    * "Use less data for calls" (Settings › Storage and data), like WhatsApp's:
    * thinner sound and a smaller, slower picture, for little mobile data. Off:
    * the phones choose as usual.
+   *
+   * A shared screen gets its own steady pace whichever it is: at most 20 frames
+   * a second and 1.5 Mbit/s (10 and 400 kbit/s with less data), easing off both
+   * size and speed a little when the network is slow, so a mid-range phone
+   * keeps up and the other side sees it move smoothly instead of in jumps.
    */
   private async saveData(p: Peer) {
     const less = !!core.settings.lessDataCalls;
+    const screenId = this.call?.screenStream?.getVideoTracks()[0]?.id;
     for (const sender of p.pc?.getSenders() ?? []) {
       const kind = sender.track?.kind;
       if (!kind) continue;
+      const screen = !!screenId && sender.track?.id === screenId;
       try {
         const params = sender.getParameters();
         if (!params.encodings.length) continue;
         for (const e of params.encodings) {
+          if (screen) {
+            e.maxBitrate = less ? 400_000 : 1_500_000;
+            e.maxFramerate = less ? 10 : 20;
+            continue;
+          }
           e.maxBitrate = less ? (kind === 'audio' ? 20_000 : 180_000) : null;
           if (kind === 'video') e.maxFramerate = less ? 15 : null;
         }
+        if (screen) params.degradationPreference = 'balanced';
         await sender.setParameters(params);
       } catch (err) {
         console.log(`[pakchat] call data saver: ${String(err)}`);

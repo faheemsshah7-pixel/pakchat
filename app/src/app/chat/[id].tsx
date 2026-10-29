@@ -35,6 +35,7 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
 import { startCall } from '../../ui/CallBar';
+import { albumsIn } from '../../ui/chat/albums';
 import { AttachMenu, type AttachKind } from '../../ui/chat/AttachMenu';
 import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { EmojiPicker } from '../../ui/chat/EmojiPicker';
@@ -58,7 +59,7 @@ import { Marquee } from '../../ui/Marquee';
 import { arrive, pop, rise, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
-type Item = { key: string; kind: 'msg'; m: Message; first: boolean } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
+type Item = { key: string; kind: 'msg'; m: Message; first: boolean; album?: Message[] } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
 
 const keyOf = (m: Pick<Message, 'author' | 'id'>) => `${m.author}/${m.id}`;
 const quoteKind = (m: Message): ChatQuote['kind'] =>
@@ -253,20 +254,30 @@ function ChatScreen() {
   const unreadN = unreadMark?.n ?? 0;
 
   // Newest first (the list is upside down, so the newest sits at the bottom), with day labels between days.
+  // Photos and videos sent together: one album each (albums.ts), shown where its newest is.
+  const albums = useMemo(() => albumsIn(list ?? []), [list]);
   const items = useMemo<Item[]>(() => {
     const ms = list ?? [];
     const out: Item[] = [];
+    const firstOf = (i: number) => {
+      const m = ms[i];
+      const prev = ms[i - 1];
+      return !prev || prev.author !== m.author || prev.kind === 'system' || !sameDay(prev.sentAt, m.sentAt) || m.sentAt - prev.sentAt > 5 * 60_000;
+    };
     if (typing.length) out.push({ key: 'typing', kind: 'typing' });
     for (let i = ms.length - 1; i >= 0; i--) {
       const m = ms[i];
       const prev = ms[i - 1];
-      const first = !prev || prev.author !== m.author || prev.kind === 'system' || !sameDay(prev.sentAt, m.sentAt) || m.sentAt - prev.sentAt > 5 * 60_000;
-      out.push({ key: keyOf(m), kind: 'msg', m, first });
+      const album = albums.get(keyOf(m));
+      if (album) {
+        // The album goes in once, at its newest; its oldest decides the name and corner.
+        if (album.at(-1) === m) out.push({ key: keyOf(m), kind: 'msg', m, first: firstOf(i - album.length + 1), album });
+      } else out.push({ key: keyOf(m), kind: 'msg', m, first: firstOf(i) });
       if (unreadKey === keyOf(m)) out.push({ key: 'unread', kind: 'unread', text: unreadN === 1 ? t.oneUnread : fill(t.nUnread, { n: unreadN }) });
       if (!prev || !sameDay(prev.sentAt, m.sentAt)) out.push({ key: `day-${m.sentAt}`, kind: 'day', text: dayLabel(m.sentAt, t) });
     }
     return out;
-  }, [list, typing.length, t, unreadKey, unreadN]);
+  }, [list, albums, typing.length, t, unreadKey, unreadN]);
 
   const unseen = atBottom ? 0 : (list ?? []).filter((m) => m.kind !== 'system' && m.author !== core.myId && m.sentAt > bottomAt).length;
 
@@ -314,7 +325,7 @@ function ChatScreen() {
   const jumpTo = useCallback((m: Pick<Message, 'author' | 'id'>) => setJumping(keyOf(m)), []);
   useEffect(() => {
     if (!jumping || !list) return;
-    const index = items.findIndex((it) => it.key === jumping);
+    const index = items.findIndex((it) => it.key === jumping || (it.kind === 'msg' && !!it.album?.some((x) => keyOf(x) === jumping)));
     if (index < 0 && hasMore) {
       more();
       return;
@@ -389,15 +400,23 @@ function ChatScreen() {
 
   // ---- Picking messages ----
 
-  const toggle = useCallback((m: Message) => {
-    tick();
-    setPicked((old) => {
-      const next = new Map(old);
-      if (next.has(keyOf(m))) next.delete(keyOf(m));
-      else next.set(keyOf(m), m);
-      return next;
-    });
-  }, []);
+  // An album is picked (or let go) as a whole, like WhatsApp.
+  const toggle = useCallback(
+    (m: Message) => {
+      tick();
+      const all = albums.get(keyOf(m)) ?? [m];
+      setPicked((old) => {
+        const next = new Map(old);
+        const on = all.every((x) => next.has(keyOf(x)));
+        for (const x of all) {
+          if (on) next.delete(keyOf(x));
+          else next.set(keyOf(x), x);
+        }
+        return next;
+      });
+    },
+    [albums],
+  );
 
   // A tap picks while picking. Otherwise a tap on a sticker shows it big, with Save, like WhatsApp.
   const [stickerShown, setStickerShown] = useState<Message | null>(null);
@@ -759,7 +778,7 @@ function ChatScreen() {
   ) : (
     <Animated.View key="title" entering={FadeIn.duration(150)} exiting={FadeOut.duration(110)} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: BAR, paddingHorizontal: 4 }}>
         <IconButton icon="back" label={t.back} onPress={() => router.back()} flip size={42} iconSize={23} testID="back" />
-        <Pressy onPress={() => router.push({ pathname: '/info/[id]', params: { id } })} label={title} scale={0.98} style={{ flex: 1 }} testID="chat-header">
+        <Pressy onPress={() => router.push({ pathname: '/info/[id]', params: { id } })} label={title} scale={0.98} style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center' }} testID="chat-header">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Avatar id={id} name={title} size={38} online={!!presence?.online} group={group} />
             <View style={{ flex: 1 }}>
@@ -888,8 +907,9 @@ function ChatScreen() {
                     now={m.pinnedUntil ? now : 0}
                     starred={!!starred[`${m.chatId}/${m.author}/${m.id}`]}
                     selecting={selecting}
-                    selected={picked.has(k)}
-                    flash={flash === k}
+                    selected={item.album ? item.album.every((x) => picked.has(keyOf(x))) : picked.has(k)}
+                    flash={flash === k || (!!flash && !!item.album?.some((x) => keyOf(x) === flash))}
+                    album={item.album}
                     onPress={onPress}
                     onLongPress={onLongPress}
                     onReply={reply}
@@ -1173,6 +1193,10 @@ function ChatScreen() {
         onGallery={() => {
           setCameraOpen(false);
           void pick(fromGallery);
+        }}
+        onRound={(v) => {
+          setCameraOpen(false);
+          sendRound(v);
         }}
       />
 

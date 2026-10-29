@@ -54,8 +54,6 @@ function Folder() {
                   router.push({ pathname: '/chat/[id]', params: { id: item.chat.id } });
                 }}
                 onLongPress={() => {}}
-                onPin={() => core.setPrefs(item.chat.id, { pinnedAt: item.prefs.pinnedAt ? undefined : Date.now() })}
-                onArchive={() => {}}
               />
             </View>
           </Animated.View>

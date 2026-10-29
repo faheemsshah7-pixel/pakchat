@@ -55,37 +55,16 @@ export function OnceBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
     router.push({ pathname: '/once', params: { chat: m.chatId, author: m.author, id: m.id } });
   }
 
+  // Like WhatsApp: the view once mark and "Photo" on one line; once it's been
+  // opened, a plain dotted ring and "Opened", faded.
+  const ink = opened ? metaOf(mine, theme) : mine ? theme.bubbleMineText : theme.accInk;
   return (
-    <Pressy onPress={tap} onLongPress={onPick} label={`${t.viewOnce}, ${what}`} scale={0.97} testID="file-once">
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, paddingEnd: 8, minWidth: 180, marginBottom: 2 }}>
-        <View
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 19,
-            borderWidth: 2,
-            borderStyle: opened ? 'dashed' : 'solid',
-            borderColor: opened ? metaOf(mine, theme) : mine ? theme.bubbleMineText : theme.acc,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {progress !== undefined ? (
-            <ActivityIndicator size="small" color={theme.acc} />
-          ) : (
-            <Txt size={16} weight="800" color={opened ? metaOf(mine, theme) : mine ? theme.bubbleMineText : theme.accInk}>
-              1
-            </Txt>
-          )}
-        </View>
-        <View style={{ flexShrink: 1 }}>
-          <Txt size={15} weight="700" color={opened ? metaOf(mine, theme) : inkOf(mine, theme)}>
-            {what}
-          </Txt>
-          <Txt size={12} color={metaOf(mine, theme)}>
-            {opened ? t.openedWord : t.viewOnce}
-          </Txt>
-        </View>
+    <Pressy onPress={tap} onLongPress={onPick} label={`${t.viewOnce}, ${opened ? t.openedWord : what}`} scale={0.97} testID="file-once">
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingEnd: 10, minWidth: 140, marginBottom: 2 }}>
+        {progress !== undefined ? <ActivityIndicator size="small" color={theme.acc} style={{ width: 26, height: 26 }} /> : <Icon name={opened ? 'onceOpened' : 'once'} size={26} color={ink} stroke={2} />}
+        <Txt size={15.5} weight={opened ? '500' : '600'} color={opened ? metaOf(mine, theme) : inkOf(mine, theme)} style={{ flexShrink: 1 }}>
+          {opened ? t.openedWord : what}
+        </Txt>
       </View>
       {progress !== undefined && (
         <Pressy onPress={() => cancelDownload(m)} label={t.cancel} scale={0.9}>

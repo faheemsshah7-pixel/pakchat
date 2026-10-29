@@ -1,13 +1,8 @@
-// ChatRow.tsx: one chat in the list, and the swipes on it.
-//
-// Swipe right to pin (or unpin), left to archive. The icon underneath grows as
-// you pull, you feel a tick when you've pulled far enough, and the row springs
-// back when you let go. Your finger's speed carries into the spring.
+// ChatRow.tsx: one chat in the list. Swiping sideways moves between the tabs,
+// like WhatsApp, so pin and archive are in the hold menu (not a swipe on the row).
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { plainText } from '../core/richText';
@@ -17,9 +12,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { listTime, preview } from './format';
 import { Icon } from './icons';
 import { Avatar, Pressy, Txt } from './kit';
-import { fade, smooth, tick } from './motion';
-
-const PULL = 76;
+import { fade } from './motion';
 
 export function ChatRow({
   row,
@@ -29,8 +22,6 @@ export function ChatRow({
   selected,
   onPress,
   onLongPress,
-  onPin,
-  onArchive,
   onAvatar,
 }: {
   row: Row;
@@ -40,48 +31,12 @@ export function ChatRow({
   selected: boolean;
   onPress: () => void;
   onLongPress: () => void;
-  onPin: () => void;
-  onArchive: () => void;
   /** Tapping the picture (not while picking): it pops up bigger, like WhatsApp. */
   onAvatar?: () => void;
 }) {
   const t = useT();
   const theme = useTheme();
   const { chat, last, prefs, title } = row;
-  const x = useSharedValue(0);
-  const over = useSharedValue(0);
-
-  const pan = usePanGesture({
-    enabled: !selecting,
-    activeOffsetX: [-14, 14],
-    failOffsetY: [-10, 10],
-    onUpdate: (e) => {
-      'worklet';
-      x.value = e.translationX;
-      const now = Math.abs(e.translationX) > PULL ? 1 : 0;
-      if (now !== over.value) {
-        over.value = now;
-        scheduleOnRN(tick);
-      }
-    },
-    onDeactivate: (e) => {
-      'worklet';
-      if (e.translationX > PULL) scheduleOnRN(onPin);
-      else if (e.translationX < -PULL) scheduleOnRN(onArchive);
-      over.value = 0;
-      x.value = withSpring(0, { ...smooth, velocity: e.velocityX });
-    },
-  });
-
-  const front = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
-  const pinSide = useAnimatedStyle(() => ({
-    opacity: interpolate(x.value, [0, 24], [0, 1], 'clamp'),
-    transform: [{ scale: interpolate(x.value, [0, PULL], [0.6, 1.08], 'clamp') }],
-  }));
-  const archiveSide = useAnimatedStyle(() => ({
-    opacity: interpolate(x.value, [-24, 0], [1, 0], 'clamp'),
-    transform: [{ scale: interpolate(x.value, [-PULL, 0], [1.08, 0.6], 'clamp') }],
-  }));
   const pickedStyle = useAnimatedStyle(() => ({ opacity: withTiming(selected ? 1 : 0, fade) }), [selected]);
 
   // What the second line says: someone typing, a draft, or the newest message.
@@ -108,23 +63,6 @@ export function ChatRow({
 
   return (
     <View style={{ borderRadius: 18, overflow: 'hidden' }}>
-      {/* Underneath: pin on the left, archive on the right (the same in Urdu, as the hint says). */}
-      <View style={[StyleSheet.absoluteFill, { flexDirection: 'row', direction: 'ltr', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22 }]}>
-        <Animated.View style={[{ alignItems: 'center', gap: 2 }, pinSide]}>
-          <Icon name="pin" size={22} color={theme.accInk} />
-          <Txt size={11} weight="600" color={theme.accInk}>
-            {prefs.pinnedAt ? t.unpin : t.pin}
-          </Txt>
-        </Animated.View>
-        <Animated.View style={[{ alignItems: 'center', gap: 2 }, archiveSide]}>
-          <Icon name="archive" size={22} color={theme.accInk} />
-          <Txt size={11} weight="600" color={theme.accInk}>
-            {prefs.archived ? t.unarchive : t.archive}
-          </Txt>
-        </Animated.View>
-      </View>
-      <GestureDetector gesture={pan}>
-        <Animated.View style={front}>
           <Pressy onPress={onPress} onLongPress={onLongPress} scale={0.985} label={title} testID={`chat-${title}`}>
             <View
               style={{
@@ -218,8 +156,6 @@ export function ChatRow({
               </View>
             </View>
           </Pressy>
-        </Animated.View>
-      </GestureDetector>
     </View>
   );
 }

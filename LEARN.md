@@ -1915,3 +1915,36 @@ each chat's files biggest first. Pick some and delete them to free space.
 - Make an event and answer Going from the other phone.
 - Scan the Pixel's QR code with the Realme.
 - Pick 40 photos from the gallery and send them.
+
+## Step 35: build 7, your notes on build 6
+
+### Photo albums
+Four or more photos and videos sent together (same person, within two minutes, no captions or
+replies) show as one square of four in the chat, with "+N" on the last (`ui/chat/albums.ts`,
+`ui/chat/Album.tsx`). Tap "+N" for the album page with all of them (`app/album.tsx`), where
+"Download all" fetches the rest. Picking the album in a chat picks all of it.
+
+### Swipe between tabs
+Swipe sideways anywhere on Chats, Status, Calls or Communities to move to the next tab, like
+WhatsApp. The tabs sit in a pager (`expo-router/js-top-tabs`, with react-native-tab-view and
+react-native-pager-view). So a chat row no longer swipes: pin and archive are in the hold menu.
+
+### Camera like WhatsApp
+`ui/chat/CameraSheet.tsx`: round ✕ and flash, a row of square recent photos (tap to pick, then
+Send takes them to the editor; swipe up or tap the — for the gallery), the gallery, white button
+and flip on a see-through bar, and Video · Photo · Video note underneath (tap, or swipe the
+picture). Video: tap to start and stop. Video note: a round video with the front camera.
+
+### Small fixes
+- The chat header's photo, name and status sit level with the back arrow and call buttons. A
+  `flex: 1` Pressy in a row grows to the bar's full height, so its content needs centring.
+- Screen sharing: sizes rounded to a multiple of 16 and 20 frames a second
+  (`scripts/fix-webrtc.js`), capped at 1.5 Mbit/s while sharing (`core/calls.ts`).
+- View once in WhatsApp's look: the dotted ring with a 1, "Photo" or "Opened"; the viewer shows
+  who sent it and when.
+
+### Try it
+- Send 6 photos at once; tap "+3"; Download all.
+- Swipe from Chats to Status to Calls and back.
+- Open the camera, pick two recent photos, Send; swipe to Video and record; try Video note.
+- Share your screen Pixel to Realme and scroll.

@@ -119,8 +119,6 @@ export default function Archived() {
               selected={picked.has(item.chat.id)}
               onPress={() => (selecting ? togglePick(item.chat.id) : router.push({ pathname: '/chat/[id]', params: { id: item.chat.id } }))}
               onLongPress={() => togglePick(item.chat.id)}
-              onPin={() => unarchive(item, t)}
-              onArchive={() => unarchive(item, t)}
               onAvatar={item.prefs.lock ? undefined : () => setPeek(item)}
             />
           </Animated.View>

@@ -1,8 +1,8 @@
 // (tabs)/index.tsx: the chat list, PakChat's home.
 //
 // Everything here comes from the phone's database first (useChatList), so it
-// shows instantly, even with no internet. Hold a chat to pick several; swipe
-// one to pin or archive it.
+// shows instantly, even with no internet. Hold a chat to pick several (then pin,
+// archive, …); swiping sideways goes to the next tab, like WhatsApp.
 import KV from 'expo-sqlite/kv-store';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -401,8 +401,6 @@ export default function Chats() {
                     thud();
                     togglePick(it.row.chat.id);
                   }}
-                  onPin={() => pin(it.row)}
-                  onArchive={() => archive(it.row, t)}
                   onAvatar={it.row.prefs.lock ? undefined : () => setPeek(it.row)}
                 />
               </Animated.View>
@@ -570,10 +568,6 @@ export default function Chats() {
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => forPicked((r) => core.mute(r.chat.id, ms))} />
     </Screen>
   );
-}
-
-function pin(r: Row) {
-  core.setPrefs(r.chat.id, { pinnedAt: r.prefs.pinnedAt ? undefined : Date.now() });
 }
 
 function pinAll(r: Row, on: boolean) {

@@ -22,6 +22,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Ticks } from '../ChatRow';
 import { FileBody } from './FileBody';
 import { ChatQuoteView, ContactBody, EventBody, LinkBody, LocationBody, OnceBody, RoundBody } from './MoreBodies';
+import { AlbumBody } from './Album';
 import { BigEmoji, RichWords } from './RichText';
 import { VoiceBody } from './VoiceBody';
 import { bodyLine, clock, systemText } from '../format';
@@ -54,6 +55,8 @@ type Props = {
   onRetry: (m: Message) => void;
   /** Shown just above the bubble (the reactions bar when it's held). */
   above?: ReactNode;
+  /** Photos and videos sent together (oldest first, `m` the newest): one album (Album.tsx). */
+  album?: Message[];
 };
 
 export const Bubble = memo(function Bubble(p: Props) {
@@ -76,7 +79,7 @@ function SystemNote({ m }: { m: Message }) {
   );
 }
 
-function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above }: Props) {
+function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above, album }: Props) {
   const t = useT();
   const { theme, rtl, lang } = useLook();
   const mine = m.author === core.myId;
@@ -180,6 +183,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         <ContactBody m={m} mine={mine} />
       ) : m.kind === 'event' && m.plan ? (
         <EventBody m={m} mine={mine} />
+      ) : album ? (
+        <AlbumBody ms={album} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
       ) : m.kind === 'file' && m.file ? (
         <>
           {m.file.once ? (

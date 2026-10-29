@@ -3,7 +3,11 @@
 //
 // The bar is our own: a soft pill sits behind the open tab and springs across
 // when you pick another one (the other way in Urdu).
-import { Tabs, type BottomTabBarProps } from 'expo-router/tabs';
+//
+// Like WhatsApp, swipe sideways anywhere on a tab to go to the next one: the
+// tabs sit side by side in a pager (react-native-tab-view) and slide with your
+// finger.
+import { TopTabs, type MaterialTopTabBarProps } from 'expo-router/js-top-tabs';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
@@ -23,7 +27,7 @@ const TABS: { name: string; icon: IconName; label: 'chats' | 'status' | 'calls' 
   { name: 'communities', icon: 'community', label: 'communities' },
 ];
 
-function TabBar({ state, navigateToTab }: BottomTabBarProps) {
+function TabBar({ state, navigateToTab }: MaterialTopTabBarProps) {
   const t = useT();
   const { theme, rtl } = useLook();
   const insets = useSafeAreaInsets();
@@ -115,15 +119,14 @@ function TabBar({ state, navigateToTab }: BottomTabBarProps) {
 export default function TabsLayout() {
   const { theme } = useLook();
   return (
-    <Tabs
+    <TopTabs
+      tabBarPosition="bottom"
       tabBar={(props) => <TabBar {...props} />}
-      // No fade between tabs: the fade could get stuck half way when a settings
-      // page opened on top, leaving a tab blank (dark) until you switched away and back.
-      screenOptions={{ headerShown: false, animation: 'none', sceneStyle: { backgroundColor: theme.bg } }}
+      screenOptions={{ swipeEnabled: true, animationEnabled: true, lazy: true, lazyPreloadDistance: 1, sceneStyle: { backgroundColor: theme.bg } }}
     >
       {TABS.map((tab) => (
-        <Tabs.Screen key={tab.name} name={tab.name} />
+        <TopTabs.Screen key={tab.name} name={tab.name} />
       ))}
-    </Tabs>
+    </TopTabs>
   );
 }
