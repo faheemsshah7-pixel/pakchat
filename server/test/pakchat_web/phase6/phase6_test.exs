@@ -324,6 +324,23 @@ defmodule PakchatWeb.Phase6Test do
       # No calls in a status.
       assert {:error, %{reason: :bad_request}} = call(a, status.id, [sealed(sara)])
     end
+
+    test "a like wakes the owner's closed phone (so it can say who liked it)", ctx do
+      %{ali: ali, sara: sara} = ctx
+      {:ok, status} = Chats.set_status_audience(ali.user, [sara.user.id])
+      Accounts.set_push_token(ali.device, %{push_token: "t", push_platform: "fcm"})
+      s = online(sara.token, sara.device)
+
+      assert {:ok, _} = send_msg(s, status.id, [sealed(ali, "like")], %{"kind" => "reaction"})
+      assert [job] = all_enqueued(worker: Notify)
+      assert job.args == %{"device_id" => ali.device.id, "call" => false}
+
+      # A connected phone is only pushed if it hasn't collected the like.
+      assert Relay.waiting?(ali.device.id, DateTime.add(DateTime.utc_now(), -60), [
+               "message",
+               "reaction"
+             ])
+    end
   end
 
   ## GIFs

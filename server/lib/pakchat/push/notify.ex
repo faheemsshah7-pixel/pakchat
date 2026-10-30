@@ -29,7 +29,8 @@ defmodule Pakchat.Push.Notify do
         # Only messages from about when this was queued: an old one that's
         # stuck shouldn't wake the phone again and again.
         since = DateTime.add(job.inserted_at || DateTime.utc_now(), -5, :second)
-        kind = if args["call"], do: "call", else: "message"
+        # (A like on a status wakes the phone too, see `Relay.send_message/3`.)
+        kind = if args["call"], do: "call", else: ["message", "reaction"]
 
         if Relay.waiting?(device_id, since, kind),
           do: perform(%Oban.Job{args: Map.delete(args, "if_waiting")}),
