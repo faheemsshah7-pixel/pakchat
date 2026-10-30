@@ -265,6 +265,7 @@ class WebCore {
   private afterSignIn() {
     this.client.start();
     void this.loadPeople();
+    this.watchSession();
     // Once, however many times this runs (signing out and in again in the same tab).
     if (this.watchingVisibility) return;
     this.watchingVisibility = true;
@@ -468,7 +469,31 @@ class WebCore {
     void this.loadPeople();
   }
 
+  private sessionTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Logged out from the phone (Linked devices › Log out): the server refuses
+   * this browser's connection, which looks just like being offline. So while
+   * it can't connect, it asks the server now and then if it's still logged in,
+   * and if not, it forgets everything and shows the QR page, like WhatsApp Web.
+   */
+  private watchSession() {
+    if (this.sessionTimer) return;
+    let asking = false;
+    this.sessionTimer = setInterval(() => {
+      if (this.connected || asking || !this.client?.me || !navigator.onLine) return;
+      asking = true;
+      this.api('GET', '/me')
+        .then(() => {}, (err: unknown) => {
+          if (err instanceof Error && err.message === 'signed_out') return this.signOut();
+        })
+        .finally(() => (asking = false));
+    }, 8_000);
+  }
+
   async signOut() {
+    if (this.sessionTimer) clearInterval(this.sessionTimer);
+    this.sessionTimer = null;
     this.linking?.abort();
     await calls.hangUp().catch(() => {});
     await this.client.signOut().catch(() => {});

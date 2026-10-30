@@ -530,5 +530,14 @@ test('everyday actions: reply, edit, delete for everyone, forward, star, search,
   );
   expect(left).toBe(0);
 
-  expect(errors.filter((e) => !e.includes('favicon'))).toEqual([]);
-}, 120_000);
+  // Logged out from the phone (Linked devices › Log out): the website notices and shows the QR again.
+  const again = (await page.locator('[data-qr^="PAKCHAT1,"]').getAttribute('data-qr'))!;
+  const identityKey = (await ali.signal.deviceKeys(ali.client.me!.handle)).identityKey;
+  const linked = await approveQr(ali.server, again, { v: 1, userId: ali.id, identityKey, phoneName: 'Pixel 7' }, lockProvision);
+  await page.locator('[data-qr^="PAKCHAT1,"]').waitFor({ state: 'detached', timeout: 15_000 });
+  await ali.server.removeDevice(linked!.deviceId);
+  await page.locator('[data-qr^="PAKCHAT1,"]').waitFor({ timeout: 40_000 });
+
+  // The refused connection and the "still logged in?" check show as 403 and 401 in the console.
+  expect(errors.filter((e) => !e.includes('favicon') && !e.includes('401') && !e.includes('403'))).toEqual([]);
+}, 180_000);
