@@ -1,0 +1,30 @@
+# Caddyfile: PakChat's front door. Caddy gets the HTTPS certificate by itself.
+{$PAKCHAT_DOMAIN} {
+	encode zstd gzip
+
+	# The server: the app's and website's API, live connections, and the invite and
+	# call-link pages (with their own small styles and pictures).
+	@server path /api/* /socket/* /link/* /live/* /join/* /calllink/* /assets/default.css /assets/css/* /assets/js/* /images/*
+	handle @server {
+		reverse_proxy app:4000
+	}
+
+	# Everything else is the website (and the APK).
+	handle {
+		root * /srv/site
+		# Built files have a fingerprint in their name, so they're kept for a year.
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		# These must always be fresh: the page itself, its helper, and what the newest APK is.
+		header /index.html Cache-Control "no-cache"
+		header /sw.js Cache-Control "no-cache"
+		header /pakchat-apk.json Cache-Control "no-store"
+		header /pakchat.apk Content-Type "application/vnd.android.package-archive"
+		header {
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "same-origin"
+			X-Frame-Options "DENY"
+		}
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -4,18 +4,20 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.8.0') },
+  // The shared core lives next door (../shared), outside this folder.
+  server: { fs: { allow: ['..'] } },
+  worker: { format: 'es' },
   build: {
+    target: 'es2022',
     rolldownOptions: {
       output: {
-        // Firebase and React go in files of their own. They only change when we update them,
-        // so after a new PakChat version, browsers keep them and download just our own code.
-        // (Screens that load later get their own small files too: see src/screens/lazy.ts.)
+        // React and the shared core go in files of their own. They change less often than
+        // the screens, so after an update browsers keep them and download only what changed.
         codeSplitting: {
           groups: [
-            // (Firebase's database part is big, so it gets a file of its own: smaller files arrive side by side.)
-            { name: 'firestore', test: /node_modules[\\/]@firebase[\\/]firestore[\\/]/ },
-            { name: 'firebase', test: /node_modules[\\/](@firebase|firebase)[\\/]/ },
             { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: 'core', test: /[\\/]shared[\\/]src[\\/]|node_modules[\\/]phoenix[\\/]/ },
           ],
         },
       },

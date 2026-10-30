@@ -21,6 +21,12 @@ defmodule PakchatWeb.Endpoint do
     websocket: [check_origin: false],
     longpoll: false
 
+  # A website waiting to be linked by QR code (see channels/link_socket.ex).
+  # It holds a private id and secret, so the same reasoning applies.
+  socket "/link", PakchatWeb.LinkSocket,
+    websocket: [check_origin: false],
+    longpoll: false
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]

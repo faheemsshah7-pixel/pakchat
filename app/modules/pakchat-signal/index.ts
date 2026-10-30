@@ -23,6 +23,8 @@ export type FileModule = {
   /** Stops an upload or download by its tag; it then fails with code ERR_CANCELLED. */
   cancelTransfer(tag: string): void;
   backupKey(password: string, userId: string): Promise<string>;
+  /** Locks a linking provision (JSON) to a QR's one-off key (base64, 32 bytes). Answers base64. */
+  lockProvision(json: string, websiteKey: string): Promise<string>;
   /** Where a contact can be saved on this phone (WhatsApp's "Save to"). */
   contactAccounts(): Promise<PhoneBookAccount[]>;
   /** Saves a contact in the phone's address book. Null type and account: the phone itself. */
@@ -65,6 +67,8 @@ export type FileModule = {
   shrinkVideo(input: string, output: string, startMs: number, endMs: number, hd: boolean): Promise<{ uri: string; size: number; width: number; height: number }>;
   /** What made PakChat close by mistake since last asked (a crash's details), or null. Each is told once. */
   lastCrash(): string | null;
+  /** This copy of PakChat: build number, version, and the app that installed it (Play: "com.android.vending"). */
+  appInstall(): { versionCode: number; versionName: string; installer: string | null };
   /** Picture-in-picture is wanted now: leaving PakChat shrinks it to a small window (Android 8+). */
   callPip(on: boolean): void;
   callAudioState(): CallAudioState;

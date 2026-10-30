@@ -94,6 +94,10 @@ export type AppSettings = {
   groupTone?: string;
   /** Cards for web addresses in what I write. */
   linkPreviews: boolean;
+  /** Enter is send (Settings › Chats): the keyboard's Enter key sends instead of starting a new line. */
+  enterSends?: boolean;
+  /** Media visibility (Settings › Chats): photos and videos I'm sent go into the phone's gallery too. */
+  mediaVisible?: boolean;
   /** App lock (fingerprint or face only), and when: 0 at once, 30 or 60 seconds, -1 when the phone locks. */
   appLock: boolean;
   appLockAfter: 0 | 30 | 60 | -1;
@@ -168,6 +172,8 @@ type Topic =
   | 'broadcasts'
   | 'lock'
   | 'photos'
+  // Linked devices: one was added, removed, or finished getting its chats.
+  | 'devices'
   | `messages:${string}`
   // Someone asked to join a group, or suggested a group for a community (admins' lists).
   | `notice:${string}`;
@@ -230,6 +236,9 @@ class Core {
   lists: ChatList[] = [];
   /** chatId → userId → when they started typing. */
   typing: Record<string, Record<string, number>> = {};
+  /** Who's recording a voice note rather than typing ("chatId:userId"). */
+  recordingAudio = new Set<string>();
+  isRecordingAudio = (chatId: string, userId: string) => this.recordingAudio.has(`${chatId}:${userId}`);
   presence: Record<string, Presence> = {};
   /** The chat open on screen, if any: its messages don't alert while you're looking. */
   viewing: string | null = null;
@@ -354,10 +363,13 @@ class Core {
       this.emit('connection');
       if (c) this.rewatch();
     });
-    this.client.on('typing', ({ chatId, userId, typing }) => {
+    this.client.on('typing', ({ chatId, userId, typing, audio }) => {
       const now = { ...(this.typing[chatId] ?? {}) };
       if (typing) now[userId] = Date.now();
       else delete now[userId];
+      // "recording audio…" instead of "typing…".
+      if (typing && audio) this.recordingAudio.add(`${chatId}:${userId}`);
+      else this.recordingAudio.delete(`${chatId}:${userId}`);
       this.typing = { ...this.typing, [chatId]: now };
       this.emit('typing');
       // "typing…" goes away by itself if the "stopped" note never comes.
@@ -390,6 +402,7 @@ class Core {
     if (at && Date.now() - at >= 5_500) {
       const now = { ...this.typing[chatId] };
       delete now[userId];
+      this.recordingAudio.delete(`${chatId}:${userId}`);
       this.typing = { ...this.typing, [chatId]: now };
       this.emit('typing');
     }
@@ -408,6 +421,7 @@ class Core {
     }
     // The daily backup, a little after starting so it doesn't slow the start.
     setTimeout(() => void backUpIfDue(), 30_000);
+    setTimeout(() => void import('./linking').then((m) => m.resumeHistory()).catch(() => {}), 10_000);
     // Fill in anything missed while signed out, and everyone's names.
     void this.client
       .syncChats()
@@ -441,7 +455,10 @@ class Core {
       this.client.setActive(true);
       // Anything scheduled that should have gone while PakChat was away.
       void import('./scheduled').then((m) => m.sendDue()).catch(() => {});
+      // A copy of the chats to a website that stopped part way goes on.
+      void import('./linking').then((m) => m.resumeHistory()).catch(() => {});
       this.unmuteDue();
+      void this.refreshMe();
       return;
     }
     if (s !== 'background') return;
@@ -519,6 +536,16 @@ class Core {
       this.awake--;
       this.letGoIfAway();
     }
+  }
+
+  /** Keeps the connection while a long job runs (copying chats to a website); `release` when done. */
+  hold() {
+    this.awake++;
+    this.client.start();
+  }
+  release() {
+    this.awake = Math.max(0, this.awake - 1);
+    this.letGoIfAway();
   }
 
   /** Out of PakChat with nothing to do (no call, no background job): let go of the connection. */
@@ -655,6 +682,21 @@ class Core {
   /** Changes my name, about, or privacy. The server answers with the new me. */
   async updateMe(change: { name?: string; about?: string; photo?: string; privacy?: { last_seen?: string; online?: string; photo?: string; about?: string; groups?: string; read_receipts?: boolean } }) {
     await this.saveMe(meFromWire(await this.call<Parameters<typeof meFromWire>[0]>('PATCH', '/me', change)));
+  }
+
+  private meCheckedAt = 0;
+
+  /** Picks up a name, about or photo changed on a linked computer (at most once a minute). */
+  async refreshMe() {
+    const was = this.client.me?.me;
+    if (!was || Date.now() - this.meCheckedAt < 60_000) return;
+    this.meCheckedAt = Date.now();
+    try {
+      const me = await this.server.me();
+      if (me.name !== was.name || me.about !== was.about || me.photo !== was.photo || me.phone !== was.phone || me.email !== was.email) await this.saveMe(me);
+    } catch {
+      // Offline: next time.
+    }
   }
 
   private async saveMe(me: Me) {

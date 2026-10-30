@@ -56,6 +56,8 @@ function entries(t: Strings): Entry[] {
     { title: t.accentColour, icon: 'palette', ...chats },
     { title: t.wallpaper, icon: 'wallpaper', ...chats },
     { title: t.linkPreviews, icon: 'link', ...chats },
+    { title: t.enterSends, icon: 'send', ...chats },
+    { title: t.mediaVisibility, icon: 'photo', ...chats },
     { title: t.keepArchived, icon: 'archive', ...chats },
     { title: t.archiveAll, icon: 'archive', ...chats },
   ];

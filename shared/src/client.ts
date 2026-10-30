@@ -15,8 +15,10 @@
 // the person who left can't read what comes next.
 
 import type { Connection, ConnectionFactory, WireEnvelope } from './connection';
-import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content, LinkPreview, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
+import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content, HistoryFile, LinkPreview, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
 import { isBody, isChange, LIVE_MAX_MS, parseContent, writeContent } from './content';
+import type { HistoryBundle } from './history';
+import { importHistory } from './history';
 import { randomId } from './ids';
 import { changeAllowed, maySend, statusOwner } from './rules';
 import type { GroupChanges, GroupSettings, Me, ServerApi, ServerChat, SignedIn } from './server';
@@ -73,7 +75,7 @@ export type Events = {
   /** Someone reacted to one of my messages (or liked my status): for alerts. `at` is when they did. */
   reacted: (e: { message: Message; from: string; emoji: string; at: number }) => void;
   chat: (c: Chat) => void;
-  typing: (e: { chatId: string; userId: string; typing: boolean }) => void;
+  typing: (e: { chatId: string; userId: string; typing: boolean; audio?: boolean }) => void;
   presence: (p: Record<string, unknown>) => void;
   connection: (connected: boolean) => void;
   /** Someone's security code changed (they reinstalled, or a new device). */
@@ -82,6 +84,8 @@ export type Events = {
   call: (e: CallEvent) => void;
   /** A group note with nothing to show in the chat: someone asked to join, a group was suggested for a community, or one of those was answered. */
   notice: (e: { chatId: string; event: string }) => void;
+  /** A website: my phone sent a part of its history. The app downloads it and calls `importHistory`. */
+  history: (e: { part: number; last: boolean; file: HistoryFile }) => void;
   /** Something went wrong that the app might want to log. */
   error: (err: Error) => void;
 };
@@ -95,7 +99,7 @@ export type Device = { userId: string; deviceId: number };
 export type CallEvent = { chatId: string; from: string; fromDevice: number; signal: CallSignal & { id: string }; at: number };
 
 /** What any message may carry. `hold`: wait this long (ms) before it goes, for "Undo". */
-export type SendExtra = { replyTo?: Ref; mentions?: string[]; forwarded?: boolean; status?: StatusQuote; quote?: ChatQuote; hold?: number };
+export type SendExtra = { replyTo?: Ref; mentions?: string[]; forwarded?: boolean; hops?: number; status?: StatusQuote; quote?: ChatQuote; hold?: number };
 
 /** A status lasts a day. */
 export const STATUS_MS = 24 * 3600_000;
@@ -257,7 +261,7 @@ export class PakChat {
     this.conn = this.o.connect({ token: this.s.token, deviceUuid: this.s.deviceUuid, active: this.o.active });
     this.conn.open({
       envelopes: (list) => this.receive(list),
-      typing: (e) => this.emit('typing', { chatId: e.chat_id, userId: e.user_id, typing: e.typing }),
+      typing: (e) => this.emit('typing', { chatId: e.chat_id, userId: e.user_id, typing: e.typing, audio: e.audio === true }),
       presence: (p) => this.emit('presence', p),
       status: (connected) => {
         this.connected = connected;
@@ -536,6 +540,7 @@ export class PakChat {
     if (extra.mentions?.length) body.mentions = extra.mentions;
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
+    if (extra.forwarded && extra.hops && extra.hops > 1) body.hops = extra.hops;
     if (extra.bg !== undefined) body.bg = extra.bg;
     if (extra.status) body.status = extra.status;
     if (extra.quote) body.quote = extra.quote;
@@ -556,6 +561,7 @@ export class PakChat {
     if (extra.mentions?.length) body.mentions = extra.mentions;
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
+    if (extra.forwarded && extra.hops && extra.hops > 1) body.hops = extra.hops;
     if (extra.status) body.status = extra.status;
     if (extra.quote) body.quote = extra.quote;
     return this.sendBody(chatId, body, local, extra.hold, poster);
@@ -566,27 +572,30 @@ export class PakChat {
   }
 
   /** A place, or (with `live`, the time it ends) my live location; send the moves with `moveLive`. */
-  sendLocation(chatId: string, place: Place, extra: { replyTo?: Ref; forwarded?: boolean; hold?: number } = {}) {
+  sendLocation(chatId: string, place: Place, extra: { replyTo?: Ref; forwarded?: boolean; hops?: number; hold?: number } = {}) {
     const body: Body = { t: 'location', lat: place.lat, lng: place.lng };
     if (place.name) body.name = place.name;
     if (place.address) body.address = place.address;
     if (place.live) body.live = place.live;
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
+    if (extra.forwarded && extra.hops && extra.hops > 1) body.hops = extra.hops;
     return this.sendBody(chatId, body, undefined, extra.hold);
   }
 
   /** One or more contact cards. */
-  sendContacts(chatId: string, cards: SharedContact[], extra: { replyTo?: Ref; forwarded?: boolean; hold?: number } = {}) {
+  sendContacts(chatId: string, cards: SharedContact[], extra: { replyTo?: Ref; forwarded?: boolean; hops?: number; hold?: number } = {}) {
     const body: Body = { t: 'contact', cards };
     if (extra.replyTo) body.replyTo = extra.replyTo;
     if (extra.forwarded) body.forwarded = true;
+    if (extra.forwarded && extra.hops && extra.hops > 1) body.hops = extra.hops;
     return this.sendBody(chatId, body, undefined, extra.hold);
   }
 
   /** A call planned for later. */
   sendPlan(chatId: string, plan: CallPlan) {
-    return this.sendBody(chatId, { t: 'event', ...plan });
+    const { at, ...rest } = plan;
+    return this.sendBody(chatId, { t: 'event', ...rest, when: at });
   }
 
   /** I opened someone's view once message. */
@@ -643,6 +652,11 @@ export class PakChat {
     return this.sendChange(chatId, { t: 'pin', target, until });
   }
 
+  /** Keep in chat (or let go again) a disappearing message. */
+  keep(chatId: string, target: Ref, keep: boolean) {
+    return this.sendChange(chatId, { t: 'keep', target, keep });
+  }
+
   /** Disappearing messages, in seconds (0 turns them off). */
   setTimer(chatId: string, seconds: number) {
     return this.sendChange(chatId, { t: 'timer', seconds });
@@ -690,6 +704,33 @@ export class PakChat {
     });
     if (!envelopes.length) return;
     await this.push('call', { chat_id: chatId, envelopes, ring: options.ring === true });
+  }
+
+  /**
+   * The phone: sends one part of its history to a device it just linked,
+   * through the outbox (so it still goes if the phone is offline for a bit).
+   * `chatId` is my "Message yourself" chat, where the part was uploaded.
+   */
+  async sendHistory(chatId: string, deviceId: number, part: { part: number; last: boolean; file: HistoryFile }) {
+    const content = this.content(chatId, { t: 'history', ...part });
+    if (!parseContent(writeContent(content))) throw new Error('Bad history part');
+    await this.inLane(() => this.queue(content, 'control', undefined, [{ userId: this.s.userId, deviceId }]));
+    void this.flush();
+  }
+
+  /** This device's Signal identity key (base64), as others see it. */
+  async myIdentityKey(): Promise<string> {
+    return (await this.inLane(() => this.o.signal.deviceKeys(this.s.handle))).identityKey;
+  }
+
+  /** A website: adds a downloaded history part. Returns the chats it touched. */
+  async importHistory(bundle: HistoryBundle): Promise<string[]> {
+    const touched = await this.inLane(() => this.o.storage.transaction(() => importHistory(this.o.storage, bundle)));
+    for (const id of touched) {
+      const chat = await this.o.storage.getChat(id);
+      if (chat) this.emit('chat', chat);
+    }
+    return touched;
   }
 
   /**
@@ -1216,6 +1257,13 @@ export class PakChat {
       return;
     }
     if (c.t === 'retry') return;
+    if (c.t === 'history') {
+      // Only from my own phone, to a linked device.
+      if (e.from === this.s.userId && e.from_device === 1 && this.s.deviceId !== 1 && e.kind === 'control') {
+        this.emit('history', { part: c.part, last: c.last, file: c.file });
+      }
+      return;
+    }
 
     let chat = await this.chatFor(e.chat_id);
     if (!chat) return;
@@ -1276,6 +1324,7 @@ export class PakChat {
       if (c.mentions) m.mentions = c.mentions;
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
+      if (c.hops) m.forwardHops = c.hops;
       if (c.bg !== undefined) m.bg = c.bg;
       if (c.status) m.statusReply = c.status;
       if (c.quote) m.quote = c.quote;
@@ -1286,6 +1335,7 @@ export class PakChat {
       if (c.mentions) m.mentions = c.mentions;
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
+      if (c.hops) m.forwardHops = c.hops;
       if (c.status) m.statusReply = c.status;
       if (c.quote) m.quote = c.quote;
     } else if (c.t === 'location') {
@@ -1296,12 +1346,14 @@ export class PakChat {
       if (c.live) m.location.live = Math.min(c.live, at + LIVE_MAX_MS);
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
+      if (c.hops) m.forwardHops = c.hops;
     } else if (c.t === 'contact') {
       m.contacts = c.cards;
       if (c.replyTo) m.replyTo = c.replyTo;
       if (c.forwarded) m.forwarded = true;
+      if (c.hops) m.forwardHops = c.hops;
     } else if (c.t === 'event') {
-      m.plan = { title: c.title, at: c.at, video: c.video };
+      m.plan = { title: c.title, at: c.when, video: c.video };
       if (c.link) m.plan.link = c.link;
       if (c.about) m.plan.about = c.about;
       if (c.end) m.plan.end = c.end;
@@ -1380,6 +1432,18 @@ export class PakChat {
       case 'pin':
         if (c.until) m.pinnedUntil = c.until;
         else delete m.pinnedUntil;
+        break;
+      case 'keep':
+        if (c.keep) {
+          m.keptBy = from;
+          if (m.expiresAt) m.keptExpiresAt = m.expiresAt;
+          delete m.expiresAt;
+        } else {
+          // Let go: it disappears when it would have (straight away if that's passed).
+          if (m.keptExpiresAt) m.expiresAt = m.keptExpiresAt;
+          delete m.keptBy;
+          delete m.keptExpiresAt;
+        }
         break;
     }
     await storage.putMessage(m);
@@ -1595,9 +1659,9 @@ export class PakChat {
 
   // ---- Small things ----
 
-  /** "Typing…" (never saved). */
-  typing(chatId: string, typing: boolean) {
-    void this.push('typing', { chat_id: chatId, typing }, 2_000).catch(() => {});
+  /** "Typing…", or with `audio` "recording audio…" (never saved). */
+  typing(chatId: string, typing: boolean, audio = false) {
+    void this.push('typing', { chat_id: chatId, typing, ...(audio ? { audio } : {}) }, 2_000).catch(() => {});
   }
 
   /**

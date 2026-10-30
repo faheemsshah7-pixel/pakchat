@@ -32,6 +32,8 @@ test('anything odd is dropped', () => {
 
 test('"ringing" comes back from a phone that is ringing, so the caller can show it', () => {
   expect(parse({ t: 'call', call: 'c1', op: 'ringing' })).toEqual({ ...base, t: 'call', call: 'c1', op: 'ringing' });
+  expect(parse({ t: 'call', call: 'c1', op: 'ringing', early: true })).toEqual({ ...base, t: 'call', call: 'c1', op: 'ringing', early: true });
+  expect(parse({ t: 'call', call: 'c1', op: 'ringing', early: 'yes' })).toEqual({ ...base, t: 'call', call: 'c1', op: 'ringing' });
   expect(parse({ t: 'call', call: 'c1', op: 'ringing-ish' })).toBeNull();
 });
 
@@ -45,4 +47,13 @@ test('a ring to someone added to a call says who else is in it', () => {
   expect(parse({ ...ring, people: ['a', 'b', 'a'] })).toMatchObject({ people: ['a', 'b'] });
   expect(parse({ ...ring, people: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] })).toBeNull();
   expect(parse({ ...ring, people: [7] })).toBeNull();
+});
+
+test('a forward says how many times it was forwarded, for "Forwarded many times"', () => {
+  expect(parse({ t: 'text', text: 'Hi', forwarded: true, hops: 6 })).toEqual({ ...base, t: 'text', text: 'Hi', forwarded: true, hops: 6 });
+  // Once is just "forwarded"; nonsense and a count without "forwarded" are dropped.
+  expect(parse({ t: 'text', text: 'Hi', forwarded: true, hops: 1 })).toEqual({ ...base, t: 'text', text: 'Hi', forwarded: true });
+  expect(parse({ t: 'text', text: 'Hi', forwarded: true, hops: -3 })).toEqual({ ...base, t: 'text', text: 'Hi', forwarded: true });
+  expect(parse({ t: 'text', text: 'Hi', hops: 9 })).toEqual({ ...base, t: 'text', text: 'Hi' });
+  expect(parse({ t: 'text', text: 'Hi', forwarded: true, hops: 1e9 })).toMatchObject({ hops: 1000 });
 });

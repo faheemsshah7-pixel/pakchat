@@ -14,7 +14,7 @@ defmodule PakchatWeb.DeviceChannel do
     * `"ack"`     `{ids}`: "I have these", so the server deletes them
     * `"sync"`    `{after: {chat_id: N}}`: "I have everything up to N", send the rest
     * `"receipt"` `{chat_id, to, status: "delivered" | "read", seqs}`: the ticks
-    * `"typing"`  `{chat_id, typing}`: never saved
+    * `"typing"`  `{chat_id, typing, audio}`: never saved (`audio`: recording a voice note)
     * `"watch"` / `"unwatch"` `{user_id}`: follow someone's online / last seen
     * `"active"`  `{active}`: the app came on screen (true) or went away (false)
 
@@ -59,7 +59,13 @@ defmodule PakchatWeb.DeviceChannel do
     # an envelope id it has already seen.)
     Phoenix.PubSub.subscribe(Pakchat.PubSub, "relay:" <> device.id)
     Phoenix.PubSub.subscribe(Pakchat.PubSub, "user:" <> device.user_id)
-    {:ok, _} = Presence.track(self(), Presence.topic(device.user_id), device.id, %{active: socket.assigns.active})
+
+    {:ok, _} =
+      Presence.track(self(), Presence.topic(device.user_id), device.id, %{
+        active: socket.assigns.active
+      })
+
+    Accounts.touch_device(device.id)
     push_pending(socket)
     {:noreply, socket}
   end
@@ -131,7 +137,7 @@ defmodule PakchatWeb.DeviceChannel do
   end
 
   def handle_in("typing", %{"chat_id" => chat_id} = p, socket) do
-    Relay.typing(socket.assigns.device, chat_id, p["typing"] == true)
+    Relay.typing(socket.assigns.device, chat_id, p["typing"] == true, p["audio"] == true)
     {:noreply, socket}
   end
 
@@ -166,7 +172,10 @@ defmodule PakchatWeb.DeviceChannel do
       {:reply, :ok, socket}
     else
       device = socket.assigns.device
-      {:ok, _} = Presence.update(self(), Presence.topic(device.user_id), device.id, %{active: active})
+
+      {:ok, _} =
+        Presence.update(self(), Presence.topic(device.user_id), device.id, %{active: active})
+
       # Leaving the screen is when they were last seen.
       unless active, do: Accounts.touch_last_seen(device.user_id)
       {:reply, :ok, assign(socket, :active, active)}
@@ -181,7 +190,10 @@ defmodule PakchatWeb.DeviceChannel do
   # phone that only woke in the background: nobody saw them then.
   @impl true
   def terminate(_reason, socket) do
-    if socket.assigns[:active] != false, do: Accounts.touch_last_seen(socket.assigns.device.user_id)
+    if socket.assigns[:active] != false,
+      do: Accounts.touch_last_seen(socket.assigns.device.user_id)
+
+    Accounts.touch_device(socket.assigns.device.id)
     :ok
   end
 

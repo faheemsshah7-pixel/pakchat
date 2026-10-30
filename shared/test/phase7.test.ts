@@ -103,11 +103,12 @@ describe('in a chat', () => {
   test('contact cards and planned calls arrive', async () => {
     const { ali, sara, chat } = await two();
     await ali.client.sendContacts(chat.id, [{ name: 'Ammi', phones: ['+923001234567'] }]);
-    await ali.client.sendPlan(chat.id, { title: 'Revision', at: w.now() + 86_400_000, video: true });
+    const at = w.now() + 86_400_000;
+    await ali.client.sendPlan(chat.id, { title: 'Revision', at, video: true });
     await w.settle();
     const [card, plan] = await sara.client.messages(chat.id);
     expect(card).toMatchObject({ kind: 'contact', contacts: [{ name: 'Ammi', phones: ['+923001234567'] }] });
-    expect(plan).toMatchObject({ kind: 'event', plan: { title: 'Revision', video: true } });
+    expect(plan).toMatchObject({ kind: 'event', plan: { title: 'Revision', at, video: true } });
   });
 
   test('an event: when it ends, where, and who is going', async () => {
@@ -116,13 +117,18 @@ describe('in a chat', () => {
     const m = await ali.client.sendPlan(chat.id, { title: 'Dinner', at, end: at + 7_200_000, place: 'Clifton', video: false, general: true });
     await w.settle();
     const [got] = await sara.client.messages(chat.id);
-    expect(got).toMatchObject({ kind: 'event', plan: { title: 'Dinner', end: at + 7_200_000, place: 'Clifton', general: true } });
+    // The event's own time, not the time the message was sent.
+    expect(got).toMatchObject({ kind: 'event', plan: { title: 'Dinner', at, end: at + 7_200_000, place: 'Clifton', general: true } });
+    expect((await ali.client.messages(chat.id))[0].plan?.at).toBe(at);
     expect(got.plan?.call).toBeUndefined();
     await sara.client.vote(chat.id, { author: ali.id, id: m.id }, [0]);
     await w.settle();
     const [mine] = await ali.client.messages(chat.id);
     expect(mine.votes).toEqual({ [sara.id]: [0] });
     expect(parseContent(wrap({ t: 'event', title: 'x', at: 10, end: 5, video: false }))).toBeNull();
+    expect(parseContent(wrap({ t: 'event', title: 'x', when: 50, end: 40, video: false }))).toBeNull();
+    // An old event (no `when`) still reads, with `at` as its time.
+    expect(parseContent(wrap({ t: 'event', title: 'x', at: 10, video: false }))).toMatchObject({ t: 'event', at: 10 });
   });
 
   test('Undo: a held message can be taken back before it goes, and nothing reaches them', async () => {

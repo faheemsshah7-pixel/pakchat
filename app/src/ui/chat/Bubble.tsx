@@ -4,7 +4,7 @@
 // white (or charcoal). Swipe a bubble towards the middle to reply to it: the
 // reply arrow fades in as you pull, ticks when you've pulled enough, and the
 // bubble springs back.
-import type { Message } from '@pakchat/shared';
+import { forwardedMany, type Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -145,8 +145,14 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
       {m.forwarded && !m.deleted && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
           <Icon name="forward" size={13} color={meta} />
+          {/* Forwarded many times: WhatsApp's double arrow. */}
+          {forwardedMany(m) && (
+            <View style={{ marginLeft: -11 }}>
+              <Icon name="forward" size={13} color={meta} />
+            </View>
+          )}
           <Txt size={12} color={meta} style={{ fontStyle: 'italic' }}>
-            {t.forwarded}
+            {forwardedMany(m) ? t.forwardedManyTimes : t.forwarded}
           </Txt>
         </View>
       )}
@@ -213,6 +219,11 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         {starred && <Icon name="starFilled" size={11} color={meta} />}
         {!!m.pinnedUntil && m.pinnedUntil > now && <Icon name="pin" size={11} color={meta} />}
         {!!m.expiresAt && <Icon name="timer" size={11} color={meta} />}
+        {!!m.keptBy && !m.deleted && (
+          <Txt size={11} color={meta}>
+            {t.keptWord}
+          </Txt>
+        )}
         {!!m.editedAt && !m.deleted && (
           <Txt size={11} color={meta}>
             {t.edited}

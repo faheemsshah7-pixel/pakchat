@@ -153,9 +153,47 @@ export default function CallScreen() {
         )}
         {/* A group call shows everyone in tiles, in the space between the name and the buttons. */}
         {call.group && call.state === 'active' ? <Tiles call={call} /> : <View style={{ flex: 1 }} pointerEvents="none" />}
+        {call.waiting && call.state !== 'ended' && <Waiting w={call.waiting} t={t} />}
         {call.state === 'incoming' ? <Ringing call={call} t={t} /> : <Controls call={call} t={t} />}
       </View>
       <AddPeople call={call} visible={adding} onClose={() => setAdding(false)} />
+    </View>
+  );
+}
+
+/** Call waiting, like WhatsApp: someone else is calling. End this call and answer, or decline theirs. */
+function Waiting({ w, t }: { w: NonNullable<CallView['waiting']>; t: Strings }) {
+  const chat = useChat(w.chatId);
+  const name = w.group && chat ? core.chatTitle(chat) : core.name(w.from) || t.unknownCaller;
+  return (
+    <View style={{ marginHorizontal: 16, marginBottom: 18, padding: 14, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.12)', gap: 12 }} testID="call-waiting">
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Avatar id={w.group ? w.chatId : w.from} name={name} size={44} group={w.group} />
+        <View style={{ flex: 1 }}>
+          <Txt size={16} weight="700" color={INK} lines={1}>
+            {name}
+          </Txt>
+          <Txt size={13.5} color={SOFT} lines={1}>
+            {w.video ? t.incomingVideo : t.incomingVoice}
+          </Txt>
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Pressy onPress={() => void calls.declineWaiting()} label={t.decline} scale={0.96} style={{ flex: 1 }} testID="waiting-decline">
+          <View style={{ height: 44, borderRadius: 22, backgroundColor: RED, alignItems: 'center', justifyContent: 'center' }}>
+            <Txt size={15} weight="700" color={INK}>
+              {t.decline}
+            </Txt>
+          </View>
+        </Pressy>
+        <Pressy onPress={() => void calls.acceptWaiting()} label={t.endAndAccept} scale={0.96} style={{ flex: 1 }} testID="waiting-accept">
+          <View style={{ height: 44, borderRadius: 22, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' }}>
+            <Txt size={15} weight="700" color={INK}>
+              {t.endAndAccept}
+            </Txt>
+          </View>
+        </Pressy>
+      </View>
     </View>
   );
 }

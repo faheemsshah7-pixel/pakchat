@@ -1,52 +1,76 @@
-// App.tsx: the "traffic controller". It decides which screen to show:
-//   not logged in      -> Login
-//   logged in, no name -> ProfileSetup
-//   logged in + name   -> Home (your chats)
-import { useEffect, useState } from 'react'
-import { onAuthStateChanged, type User } from 'firebase/auth'
-import { doc, onSnapshot } from 'firebase/firestore'
-import { myPrivacy } from './chats'
-import { auth, db } from './firebase'
-import { useT } from './lang'
-import { rememberProfile, type Profile } from './profiles'
-import Login from './screens/Login'
-import Logo from './screens/Logo'
-import ProfileSetup from './screens/ProfileSetup'
-import Home from './screens/Home'
+// App.tsx: which page to show. Phones get "Get the PakChat app"; computers
+// get the QR page, then "Loading your chats", then the app itself.
 
-export default function App() {
-  const { t } = useT()
-  // undefined = still checking, null = nobody logged in
-  const [user, setUser] = useState<User | null | undefined>(undefined)
-  // The profile we loaded, and whose it is (so we never show the last user's profile).
-  const [loaded, setLoaded] = useState<{ uid: string; profile: Profile | null } | null>(null)
+import { lazy, Suspense, useEffect } from 'react';
 
-  // 1. Firebase tells us whenever someone logs in or out.
-  useEffect(() => onAuthStateChanged(auth, setUser), [])
+import { WALLPAPERS } from './core/core';
+import { usePhase, useSettings } from './core/hooks';
+import { onPhone } from './device';
+import { LinkPage } from './screens/LinkPage';
+import { Loading } from './screens/Loading';
+import { PhonePage } from './screens/PhonePage';
+import { Overlays } from './ui/overlay';
 
-  // 2. Once logged in, we listen LIVE to this user's profile in the database.
-  //    When ProfileSetup saves a name, this fires again and we switch to Home.
+// The app itself loads while the QR shows, so it's ready by the time the phone has scanned.
+const loadShell = () => import('./screens/Shell');
+const Shell = lazy(() => loadShell().then((m) => ({ default: m.Shell })));
+
+export function App() {
+  const phase = usePhase();
+  useTheme();
+
   useEffect(() => {
-    if (!user) return
-    return onSnapshot(doc(db, 'users', user.uid), (snap) => {
-      const profile = snap.exists() ? (snap.data() as Profile) : null
-      if (profile) rememberProfile(user.uid, profile) // so your own photo shows everywhere
-      myPrivacy.readReceipts = profile?.readReceipts !== false // chats.ts uses it for blue ticks
-      setLoaded({ uid: user.uid, profile })
-    })
-  }, [user])
+    if (phase === 'signedOut' || phase === 'syncing') {
+      const id = setTimeout(() => void loadShell(), 300);
+      return () => clearTimeout(id);
+    }
+  }, [phase]);
 
-  // undefined = still loading this user's profile
-  const profile = user && loaded?.uid === user.uid ? loaded.profile : undefined
+  useEffect(() => {
+    document.body.classList.toggle('page', onPhone || phase === 'signedOut');
+  }, [phase]);
 
-  if (user === undefined || (user && profile === undefined)) {
-    return (
-      <div className="splash" aria-label={t.loading}>
-        <Logo size={72} />
-      </div>
-    )
-  }
-  if (!user) return <Login />
-  if (!profile) return <ProfileSetup user={user} />
-  return <Home user={user} profile={profile} />
+  if (onPhone) return <PhonePage />;
+  return (
+    <div className="app">
+      {phase === 'loading' ? (
+        <Loading quiet />
+      ) : phase === 'signedOut' ? (
+        <LinkPage />
+      ) : phase === 'syncing' ? (
+        <Loading />
+      ) : (
+        <Suspense fallback={<Loading quiet />}>
+          <Shell />
+        </Suspense>
+      )}
+      <Overlays />
+    </div>
+  );
+}
+
+/** Light, dark, or the computer's own setting. The QR page is always light, like WhatsApp's. */
+function useTheme() {
+  const { theme, wallpaper } = useSettings();
+  useEffect(() => {
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && media.matches);
+      document.documentElement.classList.toggle('dark', dark);
+      // A chat wallpaper colour, in place of the theme's own.
+      const wall = wallpaper != null ? WALLPAPERS[wallpaper] : undefined;
+      const root = document.documentElement.style;
+      if (wall) {
+        root.setProperty('--wall', dark ? wall.dark : wall.light);
+        root.setProperty('--wallSolid', dark ? wall.dark : wall.light);
+      } else {
+        root.removeProperty('--wall');
+        root.removeProperty('--wallSolid');
+      }
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#161717' : '#F7F5F3');
+    };
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [theme, wallpaper]);
 }

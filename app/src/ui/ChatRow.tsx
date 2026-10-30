@@ -61,7 +61,13 @@ function ChatRowView({
   const line = useMemo(() => {
     if (typing.length) {
       return {
-        text: chat.kind === 'group' ? fill(t.nameTyping, { name: core.name(typing[0]) || '…' }) : t.typing,
+        text: core.isRecordingAudio(chat.id, typing[0])
+          ? chat.kind === 'group'
+            ? fill(t.nameRecording, { name: core.name(typing[0]) || '…' })
+            : t.recordingAudio
+          : chat.kind === 'group'
+            ? fill(t.nameTyping, { name: core.name(typing[0]) || '…' })
+            : t.typing,
         color: theme.acc,
         weight: '600' as const,
       };

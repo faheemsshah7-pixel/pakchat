@@ -27,6 +27,8 @@ config :pakchat, Oban,
 config :pakchat, :rate_limits,
   # Sign-ins, per internet address.
   sign_in: {10, 60_000},
+  # New QR codes for linking a website, per internet address.
+  link: {20, 60_000},
   # Finding people by Gmail, per person.
   lookup: {30, 60_000},
   # Taking someone's keys to start a chat, per person.

@@ -46,7 +46,10 @@ config :pakchat, :google_client_ids, ["pakchat-test.apps.googleusercontent.com"]
 config :pakchat, :allowed_origins, ["http://localhost:5173"]
 
 # Every test signs in from the same address, so allow more sign-ins here.
-config :pakchat, :rate_limits, sign_in: {1000, 60_000}, sms: {1000, 60_000}
+config :pakchat, :rate_limits,
+  sign_in: {1000, 60_000},
+  sms: {1000, 60_000},
+  link: {1000, 60_000}
 
 # Files from the tests go in a folder of their own.
 config :pakchat, :files_dir, Path.join(System.tmp_dir!(), "pakchat-test-files")

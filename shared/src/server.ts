@@ -166,6 +166,16 @@ type WireBundle = {
 
 type WireSignedIn = { token: string; user: WireMe; device_id: number; device_uuid: string; new_account?: boolean };
 
+/** A website waiting to be linked: its private id and secret, and the code for its QR. */
+export type LinkStart = { id: string; secret: string; code: string; expiresIn: number };
+/** `online`: connected right now. `lastActive`: when it was last connected (null: never yet). */
+export type LinkedDevice = { deviceId: number; name: string; linkedAt: number; lastActive: number | null; online: boolean };
+
+/** What the website gets on "link:<id>" once the phone says yes. `provision` is still locked. */
+export function linkedFromWire(r: WireSignedIn & { provision: string }): { signedIn: SignedIn; provision: string } {
+  return { signedIn: signedIn(r), provision: r.provision };
+}
+
 function signedIn(r: WireSignedIn): SignedIn {
   const out: SignedIn = { token: r.token, user: meFromWire(r.user), deviceId: r.device_id, deviceUuid: r.device_uuid };
   if (r.new_account) out.newAccount = true;
@@ -311,6 +321,16 @@ export class HttpServer implements ServerApi {
     return (await this.call<{ code: string }>('GET', `/auth/test/code?phone=${encodeURIComponent(phone)}`)).code;
   }
 
+  /** My profile as the server has it (changed on another of my devices, say). */
+  async me() {
+    return meFromWire(await this.call<WireMe>('GET', '/me'));
+  }
+
+  /** Changes my name, about or photo (`photo: null` takes it off). Answers the new me. */
+  async updateMe(change: { name?: string; about?: string; photo?: string | null }) {
+    return meFromWire(await this.call<WireMe>('PATCH', '/me', change));
+  }
+
   /** Adds a Gmail to my account. Google's token proves it's mine. */
   async linkGoogle(idToken: string) {
     return meFromWire(await this.call<WireMe>('PUT', '/me/google', { id_token: idToken }));
@@ -435,6 +455,49 @@ export class HttpServer implements ServerApi {
 
   async signOut() {
     await this.call('DELETE', '/auth/session');
+  }
+
+  // ---- Linking a website by QR code (see link.ts) ----
+
+  /** The website, not signed in: puts its keys up and gets a code for its QR. */
+  async startLink(device: DeviceKeys & { name: string }, keys: PreKeys): Promise<LinkStart> {
+    const r = await this.call<{ id: string; secret: string; code: string; expires_in: number }>('POST', '/link', { device: deviceToWire(device), ...keysToWire(keys) });
+    return { id: r.id, secret: r.secret, code: r.code, expiresIn: r.expires_in };
+  }
+
+  /** A fresh code when the QR's runs out. Throws ServerError "expired" after the sixth. */
+  async newLinkCode(id: string, secret: string) {
+    const r = await this.call<{ code: string; expires_in: number }>('POST', `/link/${encodeURIComponent(id)}/code`, { secret });
+    return { code: r.code, expiresIn: r.expires_in };
+  }
+
+  /** The phone: which website a scanned code belongs to, to check against the QR. */
+  async linkInfo(code: string) {
+    const r = await this.call<{ name: string; identity_key: string }>('GET', `/link/${encodeURIComponent(code)}`);
+    return { name: r.name, identityKey: r.identity_key };
+  }
+
+  /** The phone: says yes, with the provision locked to the QR's key. */
+  async approveLink(code: string, provision: string) {
+    const r = await this.call<{ device_id: number; device_uuid: string }>('POST', `/link/${encodeURIComponent(code)}`, { provision });
+    return { deviceId: r.device_id, deviceUuid: r.device_uuid };
+  }
+
+  /** My phone and its linked devices. */
+  async linkedDevices(): Promise<LinkedDevice[]> {
+    const r = await this.call<{ device_id: number; name: string; linked_at: string; last_active?: string | null; online?: boolean }[]>('GET', '/me/devices');
+    return r.map((d) => ({
+      deviceId: d.device_id,
+      name: d.name,
+      linkedAt: Date.parse(d.linked_at),
+      lastActive: d.last_active ? Date.parse(d.last_active) : null,
+      online: d.online === true,
+    }));
+  }
+
+  /** The phone: logs a linked device out. */
+  async removeDevice(deviceId: number) {
+    await this.call('DELETE', `/me/devices/${deviceId}`);
   }
 
   keyCounts() {
@@ -610,6 +673,16 @@ export class HttpServer implements ServerApi {
     const body: Record<string, unknown> = { chat_id: chatId, reason, messages: messages.slice(-5) };
     if (userId) body.user_id = userId;
     await this.call('POST', '/reports', body);
+  }
+
+  /** Someone's name, about and photo, as far as their privacy lets me see. */
+  person(userId: string) {
+    return this.call<{ id: string; name: string; about?: string | null; photo?: string | null; phone?: string | null; email?: string | null }>('GET', `/users/${encodeURIComponent(userId)}`);
+  }
+
+  /** Online and last seen, as far as their privacy lets me see. */
+  presence(userId: string) {
+    return this.call<{ online: boolean; last_seen: string | null }>('GET', `/users/${encodeURIComponent(userId)}/presence`);
   }
 
   /** Finds someone by Gmail, or by phone number with `{ phone }`. */

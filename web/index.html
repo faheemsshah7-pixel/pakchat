@@ -2,22 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <!-- For installing PakChat as an app (see src/pwa.ts) -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="PakChat" />
-    <!-- interactive-widget: on Android, the keyboard shrinks the page instead of covering it -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <!-- Colours the phone's address bar. theme.ts changes it to match your look. -->
-    <meta name="theme-color" content="#1a1033" />
-    <title>PakChat</title>
-    <!-- Fonts: Inter for English, Noto Nastaliq for Urdu (only downloaded when Urdu is on the page) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Start connecting to the database while the app loads, so the first messages come sooner -->
-    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Nastaliq+Urdu:wght@400;600&display=swap" rel="stylesheet" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F7F5F3" />
+    <meta name="description" content="PakChat Web: your phone's chats on your computer, locked end to end." />
+    <title>PakChat Web</title>
+    <!-- The font is ours (no third party sees who opens PakChat). -->
+    <link rel="preload" href="/fonts/roboto-flex.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
     <div id="root"></div>

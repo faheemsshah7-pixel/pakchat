@@ -103,6 +103,22 @@ describe.each([['node'], ['wasm']] as [Kind][])('changes (%s)', (kind) => {
     }
   });
 
+  test('the author hears about a new reaction (for "Sara reacted"), once, and not about their own', async () => {
+    const { ali, sara, bilal, g } = await group();
+    const heard: string[] = [];
+    ali.client.on('reacted', (e) => heard.push(`${e.from === sara.id ? 'Sara' : 'Bilal'} ${e.emoji}`));
+    const m = await ali.client.sendText(g.id, 'Chai?');
+    await w.settle();
+    const ref = { author: ali.id, id: m.id };
+    await sara.client.react(g.id, ref, '❤️');
+    await sara.client.react(g.id, ref, '❤️');
+    await bilal.client.react(g.id, ref, '👍');
+    await bilal.client.react(g.id, ref, null);
+    await ali.client.react(g.id, ref, '😂');
+    await w.settle();
+    expect(heard).toEqual(['Sara ❤️', 'Bilal 👍']);
+  });
+
   test('changes that arrive before their message wait for it', async () => {
     const { ali, sara, bilal, g } = await group();
     sara.client.stop();
@@ -128,6 +144,34 @@ describe.each([['node'], ['wasm']] as [Kind][])('changes (%s)', (kind) => {
     await w.settle();
     const seen = (await sara.storage.getMessage(g.id, ali.id, m.id))!;
     expect(seen.expiresAt! - seen.sentAt).toBe(7 * 24 * 3600 * 1000);
+  });
+
+  test('keep in chat: a disappearing message stays for everyone, until whoever kept it lets go', async () => {
+    const { ali, sara, bilal, g } = await group();
+    await sara.client.setTimer(g.id, 24 * 3600);
+    await w.settle();
+    const m = await ali.client.sendText(g.id, 'The address is 12 Mall Road');
+    await w.settle();
+    const ref = { author: ali.id, id: m.id };
+    await sara.client.keep(g.id, ref, true);
+    await w.settle();
+    for (const p of [ali, sara, bilal]) {
+      const kept = (await p.storage.getMessage(g.id, ali.id, m.id))!;
+      expect(kept.expiresAt).toBeUndefined();
+      expect(kept.keptBy).toBe(sara.id);
+    }
+    // Bilal didn't keep it and didn't write it: he can't let it go.
+    await expect(bilal.client.keep(g.id, ref, false)).rejects.toThrow();
+    await w.settle();
+    expect((await ali.storage.getMessage(g.id, ali.id, m.id))!.keptBy).toBe(sara.id);
+    // Ali wrote it, so he can.
+    await ali.client.keep(g.id, ref, false);
+    await w.settle();
+    for (const p of [ali, sara, bilal]) {
+      const back = (await p.storage.getMessage(g.id, ali.id, m.id))!;
+      expect(back.keptBy).toBeUndefined();
+      expect(back.expiresAt! - back.sentAt).toBe(24 * 3600 * 1000);
+    }
   });
 
   test('replies and mentions travel with the message', async () => {

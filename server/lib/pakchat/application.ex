@@ -18,6 +18,8 @@ defmodule Pakchat.Application do
       {Oban, Application.fetch_env!(:pakchat, Oban)},
       # Counts for the rate limits.
       Pakchat.RateLimit,
+      # Websites waiting to be linked to a phone by QR code.
+      Pakchat.Linking,
       # Start to serve requests, typically the last entry
       PakchatWeb.Endpoint
     ]

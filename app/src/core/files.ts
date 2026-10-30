@@ -9,9 +9,10 @@
 // the server for a download link, fetches the locked bytes, checks the
 // fingerprint, and unlocks them into PakChat's folder. Photos (and whatever you
 // switched on in Settings › Storage) download by themselves.
-import { OfflineError, type ChatQuote, type FileKind, type FileUploader, type Message, type Ref } from '@pakchat/shared';
+import { nextHops, OfflineError, type ChatQuote, type FileKind, type FileUploader, type Message, type Ref } from '@pakchat/shared';
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Network from 'expo-network';
 import KV from 'expo-sqlite/kv-store';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -285,18 +286,18 @@ export async function sendPicked(chatId: string, picked: Picked, caption?: strin
 
 /** Sends a file I already have to another chat (forwarding). It's locked again with a new key. */
 export async function forwardFile(chatId: string, m: Message) {
-  await copyFileTo(chatId, m, { caption: m.text || undefined, forwarded: true });
+  await copyFileTo(chatId, m, { caption: m.text || undefined, forwarded: true, hops: nextHops(m) });
 }
 
 /** A copy of a file I have, sent to another chat (forwarding, and broadcast lists). */
-export async function copyFileTo(chatId: string, m: Message, extra: { caption?: string; forwarded?: boolean } = {}) {
+export async function copyFileTo(chatId: string, m: Message, extra: { caption?: string; forwarded?: boolean; hops?: number } = {}) {
   if (!m.file?.local) return null;
   const { local, id: _id, key: _key, digest: _digest, poster, transcript: _words, once: _once, ...meta } = m.file;
   const copy = new File(folder(), `${core.newId()}.${extOf(meta.name, meta.mime)}`);
   await new File(local).copy(copy);
   // Forwarding: the first frame is made again only for a broadcast (a forward shows the blurred one).
   const keep = !extra.forwarded && poster ? { poster } : {};
-  return core.client.sendFile(chatId, { ...meta, ...keep, local: copy.uri }, { caption: extra.caption, forwarded: extra.forwarded });
+  return core.client.sendFile(chatId, { ...meta, ...keep, local: copy.uri }, { caption: extra.caption, forwarded: extra.forwarded, hops: extra.hops });
 }
 
 /**
@@ -365,10 +366,32 @@ export async function download(m: Message) {
       if (x.file) x.file = { ...x.file, local: out.uri };
     });
     core.emit(`messages:${m.chatId}`);
+    void toGallery(m, out.uri);
   } finally {
     fetching.delete(tag);
     stopped(tag);
   }
+}
+
+/**
+ * Media visibility (Settings › Chats), like WhatsApp: photos and videos I'm sent also go
+ * into the phone's gallery once downloaded. Never view once, stickers or GIFs, nor my own.
+ */
+async function toGallery(m: Message, uri: string) {
+  const f = m.file;
+  if (!core.settings.mediaVisible || !f || f.once || f.gif || m.author === core.myId || (f.kind !== 'image' && f.kind !== 'video')) return;
+  try {
+    const ok = await MediaLibrary.getPermissionsAsync(true);
+    if (ok.granted) await MediaLibrary.saveToLibraryAsync(uri);
+  } catch {
+    // Not saved: it's still in the chat.
+  }
+}
+
+/** Turns Media visibility on, asking for the gallery first. */
+export async function allowGallery() {
+  const now = await MediaLibrary.getPermissionsAsync(true);
+  return now.granted || (now.canAskAgain && (await MediaLibrary.requestPermissionsAsync(true)).granted);
 }
 
 /** Deletes a message's file from the phone (deleting the message here). */

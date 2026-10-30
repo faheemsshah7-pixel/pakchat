@@ -1,0 +1,9 @@
+_build
+deps
+.env
+.env.*
+!.env.example
+priv/files
+test
+tmp
+erl_crash.dump

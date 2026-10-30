@@ -17,6 +17,7 @@ import { usePanGesture } from 'react-native-gesture-handler';
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
+import { core } from '../../core/core';
 import { stopAll } from '../../core/player';
 import { barsOf, MAX_VOICE_MS, MIN_VOICE_MS, VOICE_OPTIONS, VoiceSession, type Recorded } from '../../core/voice';
 import { useT } from '../../i18n';
@@ -35,7 +36,7 @@ const TAP_MS = 300;
 
 export type VoiceMode = 'idle' | 'holding' | 'locked' | 'paused';
 
-export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend: (v: Recorded) => void }) {
+export function useVoiceRecorder({ chatId, enabled, onSend }: { chatId: string; enabled: boolean; onSend: (v: Recorded) => void }) {
   const t = useT();
   const { rtl } = useLook();
   const rec = useAudioRecorder(VOICE_OPTIONS);
@@ -84,6 +85,17 @@ export function useVoiceRecorder({ enabled, onSend }: { enabled: boolean; onSend
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, mode]);
+
+  // While recording, they see "recording audio…" (said again every few seconds, as typing is).
+  useEffect(() => {
+    if (!recording) return;
+    core.client.typing(chatId, true, true);
+    const id = setInterval(() => core.client.typing(chatId, true, true), 4_000);
+    return () => {
+      clearInterval(id);
+      core.client.typing(chatId, false);
+    };
+  }, [recording, chatId]);
 
   // Leaving the chat throws an unsent recording away.
   useEffect(

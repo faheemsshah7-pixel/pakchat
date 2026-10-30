@@ -1,0 +1,100 @@
+# compose.yaml: everything PakChat runs on our Oracle server (see README.md here).
+#   db    Postgres, PakChat's database (accounts, chats, messages waiting to be delivered)
+#   app   the PakChat server (../server), only reachable through web
+#   web   Caddy: the website, the APK, HTTPS certificates (free, from Let's Encrypt),
+#         and the doors to the server (/api, /socket, ...)
+#   turn  coturn: the call relay, for networks where phones can't reach each other
+# Settings and secrets come from .env next to this file (copy .env.example).
+name: pakchat
+
+services:
+  db:
+    image: postgres:16.4-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pakchat
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?put DB_PASSWORD in deploy/.env}
+      POSTGRES_DB: pakchat
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pakchat"]
+      interval: 5s
+      retries: 20
+
+  app:
+    build: ../server
+    image: pakchat-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: ecto://pakchat:${DB_PASSWORD}@db/pakchat
+      PHX_HOST: ${PAKCHAT_DOMAIN:?put PAKCHAT_DOMAIN in deploy/.env}
+      PORT: "4000"
+      FILES_DIR: /data/files
+      # The call relay (turn, below), handed to phones with a password that lasts a day.
+      TURN_URLS: turn:${PAKCHAT_DOMAIN}:3478?transport=udp,turn:${PAKCHAT_DOMAIN}:3478?transport=tcp
+    volumes:
+      - files:/data
+      # Firebase's key for push alerts (FCM_SERVICE_ACCOUNT=/secrets/firebase.json). Never in git.
+      - ./secrets:/secrets:ro
+
+  web:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PAKCHAT_DOMAIN: ${PAKCHAT_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The website (web/dist) plus pakchat.apk and pakchat-apk.json: see build-site.sh.
+      - ./site:/srv/site:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  turn:
+    image: coturn/coturn:4.6.3
+    restart: unless-stopped
+    # The relay needs the server's own ports for the calls it passes on.
+    network_mode: host
+    command:
+      - -n
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?put TURN_SECRET in deploy/.env}
+      - --realm=${PAKCHAT_DOMAIN}
+      # Oracle gives the server a private address, with the public one in front of it.
+      - --external-ip=${PUBLIC_IP:?put PUBLIC_IP in deploy/.env}/${PRIVATE_IP:?put PRIVATE_IP in deploy/.env}
+      - --fingerprint
+      - --no-tls
+      - --no-dtls
+      - --no-cli
+      - --no-multicast-peers
+      # Only to phones on the internet: never into the server's own network.
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --user-quota=12
+      - --total-quota=200
+      - --log-file=stdout
+      - --simple-log
+
+volumes:
+  db:
+  files:
+  caddy_data:
+  caddy_config:

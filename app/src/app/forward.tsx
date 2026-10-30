@@ -3,6 +3,7 @@
 //
 // Like WhatsApp: up to 5 chats at once, with the chats you write to most
 // ("Frequently contacted") at the top, then the rest, newest first.
+import { MANY_HOPS, nextHops, type Message } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
@@ -26,7 +27,7 @@ const LATELY = 28 * 86_400_000;
 type Item = { kind: 'head'; key: string; title: string } | { kind: 'row'; key: string; row: ChatRow };
 
 export default function Forward() {
-  const { texts, files } = useLocalSearchParams<{ texts?: string; files?: string }>();
+  const { texts, files, hops: hopsParam } = useLocalSearchParams<{ texts?: string; files?: string; hops?: string }>();
   const t = useT();
   const { theme } = useLook();
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left);
@@ -50,15 +51,25 @@ export default function Forward() {
       ]
     : rows.map((row) => ({ kind: 'row' as const, key: row.chat.id, row }));
   const words: string[] = parse(texts);
+  // How many times each of `words` will have been forwarded (1 when not given).
+  const hops: number[] = parse(hopsParam);
   // Photos, videos and documents that are on this phone: [chatId, author, id] each.
   const refs: [string, string, string][] = parse(files);
+  const [fileMsgs, setFileMsgs] = useState<Message[]>([]);
+  useEffect(() => {
+    void Promise.all(refs.map(([c, a, i]) => core.storage.getMessage(c, a, i))).then((l) => setFileMsgs(l.filter((m): m is Message => !!m?.file?.local)));
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
+  // Forwarded many times: one chat at a time, like WhatsApp.
+  const many = hops.some((h) => h > MANY_HOPS) || fileMsgs.some((m) => nextHops(m) > MANY_HOPS);
+  const max = many ? 1 : MAX;
 
   function toggle(id: string) {
-    if (!picked.has(id) && picked.size >= MAX) return toast(t.forwardMax);
+    if (!picked.has(id) && picked.size >= max) return toast(many ? t.forwardManyOne : t.forwardMax);
     setPicked((old) => {
       const next = new Set(old);
       if (next.has(id)) next.delete(id);
-      else if (next.size < MAX) next.add(id);
+      else if (next.size < max) next.add(id);
       return next;
     });
   }
@@ -69,10 +80,9 @@ export default function Forward() {
     if (busy) return;
     setBusy(true);
     try {
-      const toSend = (await Promise.all(refs.map(([c, a, i]) => core.storage.getMessage(c, a, i)))).filter((m) => !!m?.file?.local);
       for (const chatId of picked) {
-        for (const w of words) await core.client.sendText(chatId, w, { forwarded: true });
-        for (const m of toSend) await forwardFile(chatId, m!);
+        for (const [i, w] of words.entries()) await core.client.sendText(chatId, w, { forwarded: true, hops: hops[i] ?? 1 });
+        for (const m of fileMsgs) await forwardFile(chatId, m);
       }
       toast(t.forwardedNote);
       if (picked.size === 1) router.replace({ pathname: '/chat/[id]', params: { id: [...picked][0] } });

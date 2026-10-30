@@ -107,6 +107,12 @@ export type CallSignal = {
    * is in it (user ids), so the new person's phone can connect to them too.
    */
   people?: string[];
+  /**
+   * ringing: this phone can connect while it rings (owner, 25 Oct), so the
+   * caller's phone may start connecting now. Nothing is sent either way
+   * (no sound, no picture) until the call is answered. Older phones leave it out.
+   */
+  early?: boolean;
   sdp?: string;
   cand?: IceCandidate;
 };
@@ -116,12 +122,13 @@ export const MAX_CALL_PEOPLE = 8;
 /** Things that show up as a message bubble. */
 export type Body =
   /** `bg`: a status in words, on one of the app's colours. `status`: a reply to someone's status. */
-  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; bg?: number; status?: StatusQuote; quote?: ChatQuote; link?: LinkPreview }
+  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; hops?: number; bg?: number; status?: StatusQuote; quote?: ChatQuote; link?: LinkPreview }
   | { t: 'poll'; question: string; options: string[]; multi: boolean }
-  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; status?: StatusQuote; quote?: ChatQuote }
-  | ({ t: 'location'; replyTo?: Ref; forwarded?: boolean } & Place)
-  | { t: 'contact'; cards: SharedContact[]; replyTo?: Ref; forwarded?: boolean }
-  | ({ t: 'event' } & CallPlan);
+  | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; hops?: number; status?: StatusQuote; quote?: ChatQuote }
+  | ({ t: 'location'; replyTo?: Ref; forwarded?: boolean; hops?: number } & Place)
+  | { t: 'contact'; cards: SharedContact[]; replyTo?: Ref; forwarded?: boolean; hops?: number }
+  // The event's time is `when` here: `at` is the message's own time.
+  | ({ t: 'event'; when: number } & Omit<CallPlan, 'at'>);
 
 /** Changes to messages that are already there. */
 export type Change =
@@ -137,6 +144,8 @@ export type Change =
   | { t: 'pin'; target: Ref; until: number | null }
   /** Disappearing messages: how long messages last, in seconds. 0 turns it off. */
   | { t: 'timer'; seconds: number }
+  /** Keep in chat: a disappearing message stays (or, `keep: false`, goes again), like WhatsApp's. */
+  | { t: 'keep'; target: Ref; keep: boolean }
   /** I opened a view once message (so it's gone on my other devices, and the sender sees "Opened"). */
   | { t: 'opened'; target: Ref }
   /** My live location moved, or (`stop`) I stopped sharing it. */
@@ -148,7 +157,12 @@ export type Control =
   | { t: 'key'; distributionId: string; key: string }
   /** "I couldn't open your message number `seq`, please send it again." Sent unlocked. */
   | { t: 'retry'; seq: number; why: 'session' | 'groupKey' }
+  /** My phone to a website it just linked: one part of its chat history (see history.ts). */
+  | { t: 'history'; part: number; last: boolean; file: HistoryFile }
   | CallSignal;
+
+/** A locked history part on the server: where it is, its key and digest, and its size before locking. */
+export type HistoryFile = { id: string; key: string; digest: string; size: number };
 
 export type Payload = Body | Change | Control;
 
@@ -162,12 +176,14 @@ export type Payload = Body | Change | Control;
 export type Content = Payload & { v: 1; id: string; chat: string; at: number };
 
 export const BODY_TYPES = ['text', 'poll', 'file', 'location', 'contact', 'event'] as const;
-export const CHANGE_TYPES = ['edit', 'delete', 'react', 'vote', 'pin', 'timer', 'opened', 'live'] as const;
+export const CHANGE_TYPES = ['edit', 'delete', 'react', 'vote', 'pin', 'keep', 'timer', 'opened', 'live'] as const;
 /** Live location: for 15 minutes, 1 hour or 8 hours, as on WhatsApp. */
 export const LIVE_MAX_MS = 8 * 3600_000;
 
 // Limits, so nobody can send something huge or odd.
 const MAX_TEXT = 20_000;
+/** How many times a message was forwarded, counted up to this. */
+const MAX_HOPS = 1000;
 const MAX_OPTIONS = 12;
 const MAX_MENTIONS = 256;
 const MAX_ID = 64;
@@ -286,7 +302,7 @@ function checkQuote(x: unknown): StatusQuote | null {
 function checkCall(x: Record<string, unknown>): CallSignal | null {
   if (!isId(x.call) || !CALL_OPS.includes(x.op as CallOp)) return null;
   const out: CallSignal = { t: 'call', call: x.call, op: x.op as CallOp };
-  for (const k of ['video', 'audio', 'group', 'screen'] as const) if (typeof x[k] === 'boolean') out[k] = x[k];
+  for (const k of ['video', 'audio', 'group', 'screen', 'early'] as const) if (typeof x[k] === 'boolean') out[k] = x[k];
   if (x.people !== undefined) {
     if (!isIdList(x.people, MAX_CALL_PEOPLE)) return null;
     out.people = [...new Set(x.people)];
@@ -316,6 +332,7 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (x.mentions) out.mentions = x.mentions as string[];
       if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
       if (x.forwarded === true) out.forwarded = true;
+      if (x.forwarded === true && isCount(x.hops) && x.hops > 1) out.hops = Math.min(x.hops, MAX_HOPS);
       if (x.bg !== undefined) {
         if (!isCount(x.bg) || x.bg >= STATUS_COLOURS) return null;
         out.bg = x.bg;
@@ -355,6 +372,7 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (x.mentions) out.mentions = x.mentions as string[];
       if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
       if (x.forwarded === true) out.forwarded = true;
+      if (x.forwarded === true && isCount(x.hops) && x.hops > 1) out.hops = Math.min(x.hops, MAX_HOPS);
       if (x.status !== undefined) {
         const quote = checkQuote(x.status);
         if (!quote) return null;
@@ -385,6 +403,7 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       }
       if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
       if (x.forwarded === true) out.forwarded = true;
+      if (x.forwarded === true && isCount(x.hops) && x.hops > 1) out.hops = Math.min(x.hops, MAX_HOPS);
       return out;
     }
     case 'contact': {
@@ -395,11 +414,15 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       const out: Body = { t: 'contact', cards: cards as SharedContact[] };
       if (x.replyTo) out.replyTo = { author: (x.replyTo as Ref).author, id: (x.replyTo as Ref).id };
       if (x.forwarded === true) out.forwarded = true;
+      if (x.forwarded === true && isCount(x.hops) && x.hops > 1) out.hops = Math.min(x.hops, MAX_HOPS);
       return out;
     }
     case 'event': {
-      if (!isText(x.title, 200) || x.title.trim() === '' || !isCount(x.at)) return null;
-      const out: Body = { t: 'event', title: x.title, at: x.at, video: x.video === true };
+      // The event's time is `when`. (Before 29 Oct it was only `at`, which the message's own time
+      // overwrote; those old events show their send time, as they always did.)
+      const when = x.when ?? x.at;
+      if (!isText(x.title, 200) || x.title.trim() === '' || !isCount(when)) return null;
+      const out: Body = { t: 'event', title: x.title, when, video: x.video === true };
       if (x.link !== undefined) {
         if (!isText(x.link, 64) || !/^[A-Za-z0-9_-]+$/.test(x.link)) return null;
         out.link = x.link;
@@ -409,7 +432,7 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
         out.about = x.about;
       }
       if (x.end !== undefined) {
-        if (!isCount(x.end) || x.end < x.at) return null;
+        if (!isCount(x.end) || x.end < when) return null;
         out.end = x.end;
       }
       if (x.place !== undefined) {
@@ -437,6 +460,9 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
     case 'pin':
       if (!isRef(x.target) || !(x.until === null || isCount(x.until))) return null;
       return { t: 'pin', target: { author: x.target.author, id: x.target.id }, until: x.until as number | null };
+    case 'keep':
+      if (!isRef(x.target) || typeof x.keep !== 'boolean') return null;
+      return { t: 'keep', target: { author: x.target.author, id: x.target.id }, keep: x.keep };
     case 'timer':
       return isCount(x.seconds) && x.seconds <= 366 * 24 * 3600 ? { t: 'timer', seconds: x.seconds } : null;
     case 'opened':
@@ -451,6 +477,12 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       return isId(x.distributionId) && isText(x.key, 4096) ? { t: 'key', distributionId: x.distributionId, key: x.key } : null;
     case 'retry':
       return isCount(x.seq) && (x.why === 'session' || x.why === 'groupKey') ? { t: 'retry', seq: x.seq, why: x.why } : null;
+    case 'history': {
+      const f = x.file;
+      if (!isCount(x.part) || x.part < 1 || x.part > 100 || typeof x.last !== 'boolean' || !isObject(f)) return null;
+      if (!isId(f.id) || !isText(f.key, 200) || !isText(f.digest, 200) || !isCount(f.size)) return null;
+      return { t: 'history', part: x.part, last: x.last, file: { id: f.id, key: f.key, digest: f.digest, size: f.size } };
+    }
     case 'call':
       return checkCall(x);
     default:

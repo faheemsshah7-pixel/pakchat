@@ -37,6 +37,7 @@ defmodule Pakchat.Accounts.Device do
     field :kyber_last_resort_signature, :binary
     field :push_token, :string, redact: true
     field :push_platform, :string
+    field :last_active_at, :utc_datetime_usec
     timestamps(type: :utc_datetime_usec)
   end
 

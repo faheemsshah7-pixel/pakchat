@@ -370,6 +370,18 @@ defmodule PakchatWeb.Phase5Test do
       assert upload(url, "eleven byte") |> json_response(422)
     end
 
+    test "refused while the disk is nearly full, so messages keep working", %{
+      ali: ali,
+      chat: chat
+    } do
+      Application.put_env(:pakchat, :min_free_mb, 1_000_000_000)
+      on_exit(fn -> Application.delete_env(:pakchat, :min_free_mb) end)
+
+      assert as(ali)
+             |> post(~p"/api/files", %{"chat_id" => chat.id, "size" => 10})
+             |> json_response(507) == %{"error" => "storage_full"}
+    end
+
     test "only into my own chats", %{bilal: bilal, chat: chat} do
       assert as(bilal)
              |> post(~p"/api/files", %{"chat_id" => chat.id, "size" => 10})

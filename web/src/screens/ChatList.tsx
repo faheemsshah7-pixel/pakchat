@@ -1,422 +1,568 @@
-// ChatList.tsx: your chats, pinned ones on top, then newest first.
-// The search box finds a chat by name or message, or starts a new chat with a number or Gmail.
-// All / Unread / Groups filter the list. Archived chats wait in their own list (on a phone the
-// "Archived" row at the top opens it; on a computer it's on the left bar, Rail.tsx).
-// Right-click a chat (or use its little arrow) for WhatsApp's menu: open it in a new window, mark it unread,
-// archive, pin or mute it, see its info, export or clear it, leave the group or delete the chat.
-// The menu at the top makes a new group or broadcast list (broadcasts.ts).
-// The chats themselves come from Home.tsx, which listens to the database.
-// Each row is drawn again only when something in it changed (memo, at the bottom).
-// When a new message moves a chat up, the rows slide to their new places, like WhatsApp (slideRows).
-import { memo, useLayoutEffect, useRef, useState } from 'react'
-import { signOut } from 'firebase/auth'
-import { auth } from '../firebase'
-import { alertsState, turnOnAlerts } from '../alerts'
-import { deleteList } from '../broadcasts'
-import {
-  chatIdFor,
-  chatTitle,
-  findUser,
-  isBroadcast,
-  isDirect,
-  isGroup,
-  isUnread,
-  markRead,
-  otherPerson,
-  previewText,
-  tickFor,
-  type Chat,
-  type Person,
-} from '../chats'
-import { isExpired } from '../disappearing'
-import { getDraft, useDraftsVersion } from '../drafts'
-import { exportChat } from '../exportChat'
-import { leaveGroup } from '../groups'
-import { useT } from '../lang'
-import { contactKey } from '../phone'
-import { clearChat, deleteChat, HOUR, isHidden, isMuted, MAX_PINNED, MUTE_ALWAYS, setPrefs, type ChatPrefs } from '../prefs'
-import type { Profile } from '../profiles'
-import { install, useCanInstall } from '../pwa'
-import { useStable } from '../stable'
-import { formatTime, useNow } from '../time'
-import { typingText, useTypingVersion } from '../typing'
-import { ChatAvatar } from './Avatar'
-import type { Open } from './Home'
-import Icon from './Icon'
-import Logo from './Logo'
-import Menu, { type MenuItem } from './Menu'
-import Popover, { type PopoverItem } from './Popover'
-import ThemePicker from './ThemePicker'
-import Ticks from './Ticks'
+// ChatList.tsx: the chat list panel, like WhatsApp Web's: header, search,
+// filter chips, Archived, and the chats in fixed 76px slots. Only the rows
+// on screen are drawn, so 500 chats scroll as smoothly as 5.
 
-type Filter = 'all' | 'unread' | 'groups'
+import type { Message } from '@pakchat/shared';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
-type Props = {
-  me: Person
-  profile: Profile
-  chats: Chat[]
-  prefs: Map<string, ChatPrefs>
-  counts: Map<string, number> // how many unread messages in each chat
-  activeId?: string // the chat open on the right (on a computer)
-  archived: boolean // showing the "Archived" list
-  onArchived: (show: boolean) => void
-  onOpen: (open: Open) => void
-  onClose: () => void // close the open chat
-  onNewChat: () => void
-  onNewGroup: () => void
-  onNewBroadcast: () => void
-  onSettings: () => void
-  onStarred: () => void
+import { core, openChat } from '../core/core';
+import { type ChatRow, useTopic, useTyping, useViewing } from '../core/hooks';
+import { Avatar, photoOf } from '../ui/Avatar';
+import { listTime, memberName, phoneOf, preview } from '../ui/format';
+import { Icon } from '../ui/Icon';
+import { askText, type MenuItem, openMenu } from '../ui/overlay';
+import { Ticks } from '../ui/Ticks';
+import { msgKey, setView, toggleChatPick, useView } from '../ui/view';
+import { archiveMany, chatMenu, deleteMany, favouriteMany, isMuted, markManyRead, muteMany, pinMany } from './chatActions';
+import { NewChat, NewGroup } from './NewChat';
+import { Starred } from './Starred';
+
+const SLOT = 76;
+type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
+
+/** The small icon before a file's preview line, like WhatsApp's. */
+const FILE_ICON = { image: 'photo', video: 'video', audio: 'music', voice: 'mic', doc: 'doc', sticker: 'sticker' } as const;
+
+export function ChatList({ rows }: { rows: ChatRow[] | null }) {
+  const view = useView();
+  if (view.side === 'newChat') return <NewChat />;
+  if (view.side === 'newGroup') return <NewGroup />;
+  if (view.side === 'starred') return <Starred />;
+  return <Chats rows={rows} archived={view.side === 'archived'} />;
 }
 
-export default function ChatList(props: Props) {
-  const { me, profile, chats, prefs, counts, activeId, archived, onArchived, onOpen, onClose, onNewChat, onNewGroup, onNewBroadcast, onSettings, onStarred } = props
-  const { t, lang, setLang } = useT()
-  const [search, setSearch] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [alerts, setAlerts] = useState(alertsState)
-  const [filter, setFilter] = useState<Filter>('all')
-  const [picking, setPicking] = useState(false) // the "Choose a look" window
-  const [rowMenu, setRowMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
-  const canInstall = useCanInstall()
-  useDraftsVersion() // re-draw when a draft appears or goes
-  useTypingVersion() // re-draw when someone starts typing
-  const now = useNow(2000) // re-check "typing…" every 2 seconds
-  const list = useRef<HTMLDivElement>(null)
-  const places = useRef<{ view: string; tops: Map<string, number> }>({ view: '', tops: new Map() })
+function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }) {
+  const [filter, setFilter] = useState<Filter>('all');
+  const [q, setQ] = useState('');
+  const lists = useTopic(['prefs'], () => core.lists);
+  const search = useRef<HTMLInputElement>(null);
+  const picks = useView().chatPicks;
 
-  const q = search.trim().toLowerCase()
-  // Does the search look like a phone number or a Gmail? Then offer to start a chat with it.
-  const looksLikeContact = q.includes('@') ? q.includes('.') : q.replace(/\D/g, '').length >= 10
+  // Selecting ends when leaving this page.
+  useEffect(() => () => setView({ chatPicks: null }), [archived]);
 
-  async function startChat(e?: React.FormEvent) {
-    e?.preventDefault()
-    if (!looksLikeContact) return
-    setError('')
-    const { field, value } = contactKey(search)
-    if (profile[field] === value) {
-      // Your own number: "Message yourself"
-      onOpen({ chatId: chatIdFor(me.uid, me.uid), other: me })
-      return setSearch('')
+  useEffect(() => {
+    const focus = () => search.current?.focus();
+    addEventListener('pakchat:search', focus);
+    return () => removeEventListener('pakchat:search', focus);
+  }, []);
+
+  const all = rows ?? [];
+  const archivedCount = all.filter((r) => r.prefs.archived).length;
+  const shown = useMemo(() => {
+    let list = all.filter((r) => !!r.prefs.archived === archived);
+    if (!archived) {
+      if (filter === 'unread') list = list.filter((r) => r.chat.unread > 0 || r.prefs.markedUnread || r.chat.id === core.viewing);
+      else if (filter === 'favourites') list = list.filter((r) => r.prefs.favourite);
+      else if (filter === 'groups') list = list.filter((r) => r.chat.kind === 'group');
+      else if (filter.startsWith('list:')) {
+        const l = lists.find((x) => x.id === filter.slice(5));
+        list = list.filter((r) => l?.chatIds.includes(r.chat.id));
+      }
     }
-    setBusy(true)
-    try {
-      const person = await findUser(search)
-      if (person) {
-        onOpen({ chatId: chatIdFor(me.uid, person.uid), other: person })
-        setSearch('')
-      } else setError(t.notOnPakChat)
-    } catch (err) {
-      setError(t.somethingWrong)
-      console.error(err)
-    } finally {
-      setBusy(false)
-    }
-  }
+    const words = q.trim().toLowerCase();
+    if (words) list = all.filter((r) => r.title.toLowerCase().includes(words) || (r.other && phoneOf(r.other).replace(/\s/g, '').includes(words.replace(/\s/g, ''))));
+    return list;
+  }, [all, archived, filter, q, lists]);
 
-  const menu: MenuItem[] = [
-    { label: t.newGroup, icon: 'users', onClick: onNewGroup },
-    { label: t.newBroadcast, icon: 'megaphone', onClick: onNewBroadcast },
-    { label: t.starredMessages, icon: 'star', onClick: onStarred },
-    { label: t.settings, icon: 'settings', onClick: onSettings },
-    { label: t.theme, icon: 'palette', onClick: () => setPicking(true) },
-    { label: t.switchLanguage, icon: 'language', onClick: () => setLang(lang === 'en' ? 'ur' : 'en') },
-  ]
-  if (alerts === 'off') {
-    menu.push({ label: t.alertsOn, icon: 'bell', onClick: () => turnOnAlerts().then(() => setAlerts(alertsState())) })
-  }
-  if (canInstall) menu.push({ label: t.installApp, icon: 'install', onClick: install })
-  menu.push({ label: t.logOut, icon: 'logout', onClick: () => signOut(auth), danger: true })
+  // Search also finds saved contacts I have no chat with yet.
+  const contacts = useMemo(() => {
+    const words = q.trim().toLowerCase();
+    if (!words) return [];
+    const inChats = new Set(all.map((r) => r.other));
+    return Object.entries(core.contacts)
+      .filter(([id, c]) => !inChats.has(id) && (c.name.toLowerCase().includes(words) || (c.phone ?? '').replace(/\s/g, '').includes(words.replace(/\s/g, ''))))
+      .slice(0, 30);
+  }, [q, all]);
 
-  // The chats for this list, pinned first, then newest first.
-  const inList = chats.filter((c) => !isHidden(c, prefs.get(c.id)) && !!prefs.get(c.id)?.archived === archived)
-  const pinnedAt = (c: Chat) => (archived ? 0 : (prefs.get(c.id)?.pinnedAt ?? 0))
-  inList.sort((a, b) => pinnedAt(b) - pinnedAt(a) || (b.updatedAt?.toMillis() ?? 0) - (a.updatedAt?.toMillis() ?? 0))
-  const shown = inList.filter((chat) => {
-    if (filter === 'unread' && !isUnread(chat, me.uid, prefs.get(chat.id))) return false
-    if (filter === 'groups' && !isGroup(chat)) return false
-    if (!q) return true
-    return chatTitle(chat, me.uid, t).toLowerCase().includes(q) || previewText(chat, me.uid, t).toLowerCase().includes(q)
-  })
-  const archivedChats = chats.filter((c) => prefs.get(c.id)?.archived && !isHidden(c, prefs.get(c.id)))
-  const archivedUnread = archivedChats.filter((c) => isUnread(c, me.uid, prefs.get(c.id))).length
-  const pinnedCount = chats.filter((c) => prefs.get(c.id)?.pinnedAt).length
-
-  const filters: [Filter, string][] = [
-    ['all', t.filterAll],
-    ['unread', t.filterUnread],
-    ['groups', t.filterGroups],
-  ]
-
-  // After each change: rows that moved slide from where they were to where they are now.
-  // (Not when you change the filter or search: then it's a different list, not a move.)
-  const view = `${archived}|${filter}|${q}`
-  useLayoutEffect(() => {
-    if (list.current) places.current = slideRows(list.current, places.current, view)
-  })
-
-  // The same two functions for every row, every time (see stable.ts), so memo() works.
-  const openFor = (chat: Chat): Open => (isDirect(chat) ? { chatId: chat.id, other: otherPerson(chat, me.uid) } : { chatId: chat.id })
-  const openRow = useStable((chat: Chat) => onOpen(openFor(chat)))
-  const rowMenuAt = useStable((chat: Chat, x: number, y: number) => setRowMenu({ chat, x, y }))
-
-  // The menu on one chat, in WhatsApp's order.
-  function rowItems(chat: Chat): PopoverItem[] {
-    const p = prefs.get(chat.id)
-    const unread = isUnread(chat, me.uid, p)
-    const set = (fields: Record<string, unknown>) => setPrefs(me.uid, chat.id, fields).catch(console.error)
-    const muteFor = (until: number) => set({ mutedUntil: until })
-    const items: PopoverItem[] = [
-      // Open in new window: PakChat again, in a small window with just this chat (Home.tsx reads ?chat=).
-      { label: t.openInNewWindow, icon: 'window', onClick: () => window.open(`/?chat=${encodeURIComponent(chat.id)}`, '_blank', 'popup,width=560,height=820') },
-      unread
-        ? { label: t.markRead, icon: 'checks', onClick: () => markRead(chat.id, me.uid, true) }
-        : {
-            label: t.markUnread,
-            icon: 'unread',
-            onClick: () => {
-              if (chat.id === activeId) onClose() // (like WhatsApp: the open chat closes, or it would be read again at once)
-              set({ unread: true })
-            },
-          },
-      p?.archived
-        ? { label: t.unarchive, icon: 'archive', onClick: () => set({ archived: false }) }
-        : { label: t.archive, icon: 'archive', onClick: () => set({ archived: true, pinnedAt: null }) },
-    ]
-    if (!p?.archived) {
-      items.push(
-        p?.pinnedAt
-          ? { label: t.unpin, icon: 'pin', onClick: () => set({ pinnedAt: null }) }
-          : { label: t.pin, icon: 'pin', onClick: () => (pinnedCount >= MAX_PINNED ? alert(t.pinLimit) : set({ pinnedAt: Date.now() })) },
-      )
-    }
-    items.push(
-      isMuted(p)
-        ? { label: t.unmute, icon: 'bell', onClick: () => set({ mutedUntil: null }) }
-        : {
-            label: t.mute,
-            icon: 'bellOff',
-            sub: [
-              { label: t.mute8Hours, onClick: () => muteFor(Date.now() + 8 * HOUR) },
-              { label: t.mute1Week, onClick: () => muteFor(Date.now() + 7 * 24 * HOUR) },
-              { label: t.muteAlways, onClick: () => muteFor(MUTE_ALWAYS) },
-            ],
-          },
-    )
-    // (a line above these)
-    const info = isGroup(chat) ? t.groupInfo : isBroadcast(chat) ? t.listInfo : t.contactInfo
-    items.push(
-      { label: info, icon: 'info', divider: true, onClick: () => onOpen({ ...openFor(chat), info: Date.now() }) },
-      { label: t.exportChat, icon: 'share', onClick: () => exportChat(chat, me.uid, p, t).catch(() => alert(t.somethingWrong)) },
-      { label: t.clearChat, icon: 'circleX', onClick: () => confirm(t.confirmClear) && clearChat(me.uid, chat.id).catch(console.error) },
-    )
-    if (isGroup(chat)) {
-      // (A community's announcements: you leave the community instead, in the Communities tab.)
-      if (!chat.announcements) items.push({ label: t.leaveGroup, icon: 'logout', onClick: () => confirm(t.confirmLeave) && leaveGroup(me, chat) })
-    } else if (isBroadcast(chat)) {
-      items.push({ label: t.deleteList, icon: 'trash', onClick: () => confirm(t.confirmDeleteList) && deleteList(chat).catch(console.error) })
-    } else {
-      items.push({ label: t.deleteChat, icon: 'trash', onClick: () => confirm(t.confirmDeleteChat) && deleteChat(me.uid, chat.id) })
-    }
-    return items
-  }
+  // And messages with those words, in any chat (WhatsApp's "Messages" part), after a short pause in typing.
+  const [found, setFound] = useState<Message[]>([]);
+  useEffect(() => {
+    const words = q.trim();
+    if (words.length < 2) return setFound([]);
+    let live = true;
+    const t = setTimeout(() => void core.storage.searchText(words, 60).then((l) => live && setFound(l)), 200);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+  const titles = useMemo(() => new Map(all.map((r) => [r.chat.id, r] as const)), [all]);
+  // A locked chat's words stay out of search (the phone's chat lock).
+  const hits = found.filter((m) => titles.has(m.chatId) && !titles.get(m.chatId)!.prefs.lock);
 
   return (
-    <div className="pane">
-      {archived ? (
-        <header className="bar">
-          <button className="icon back-always" onClick={() => onArchived(false)} aria-label={t.back}>
-            <Icon name="back" />
+    <>
+      {picks ? (
+        <PickBar picks={picks} rows={all} shown={shown} />
+      ) : archived ? (
+        <header className="sh">
+          <button className="ib" onClick={() => setView({ side: null })} aria-label="Back">
+            <Icon name="back" size={22} />
           </button>
-          <h2>{t.archived}</h2>
+          <span>Archived</span>
         </header>
       ) : (
-        <header className="bar">
-          <span className="brand">
-            <Logo size={34} />
-          </span>
-          <h2>
-            PakChat
-            <small>
-              {profile.name} · <span dir="ltr">{profile.phone ?? profile.email}</span>
-            </small>
-          </h2>
-          <button className="icon" aria-label={t.newChat} title={t.newChat} onClick={onNewChat}>
-            <Icon name="chatPlus" />
+        <header className="lh">
+          <div className="brand">PakChat</div>
+          <div className="grow" />
+          <button className="ib" aria-label="Menu" onClick={(e) => openMenu(listMenu(), e.currentTarget.getBoundingClientRect().left, e.currentTarget.getBoundingClientRect().bottom + 4)}>
+            <Icon name="more" size={24} />
           </button>
-          <Menu label={t.menu} items={menu} />
+          <button className="ib fab" aria-label="New chat" data-tip="New chat" onClick={() => setView({ side: 'newChat' })}>
+            <Icon name="newChat" size={22} />
+          </button>
         </header>
       )}
-
       {!archived && (
         <>
-          <form className="newchat" onSubmit={startChat}>
-            <div className="field">
-              <Icon name="search" size={20} />
-              <input placeholder={t.searchOrStart} aria-label={t.searchOrStart} value={search} onChange={(e) => (setSearch(e.target.value), setError(''))} />
-              {search && (
-                <button type="button" className="icon small" aria-label={t.close} onClick={() => setSearch('')}>
-                  <Icon name="close" size={16} />
-                </button>
-              )}
-            </div>
-          </form>
-          {error && <p className="error pad">{error}</p>}
-
-          <div className="chips" role="tablist">
-            {filters.map(([key, label]) => (
-              <button key={key} role="tab" aria-selected={filter === key} className={filter === key ? 'chip on' : 'chip'} onClick={() => setFilter(key)}>
-                {label}
+          <label className="search">
+            {q ? (
+              <button className="sback" onClick={() => setQ('')} aria-label="Clear search">
+                <Icon name="back" size={20} />
               </button>
-            ))}
-          </div>
+            ) : (
+              <Icon name="search" size={20} />
+            )}
+            <input
+              ref={search}
+              value={q}
+              placeholder="Search or start a new chat"
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setQ('');
+                if (e.key === 'Enter' && shown[0]) openChat(shown[0].chat.id);
+              }}
+            />
+          </label>
+          {!q && (
+            <div className="chips">
+              <Chip on={filter === 'all'} onClick={() => setFilter('all')}>
+                All
+              </Chip>
+              <Chip on={filter === 'unread'} onClick={() => setFilter('unread')}>
+                Unread
+              </Chip>
+              <Chip on={filter === 'favourites'} onClick={() => setFilter('favourites')}>
+                Favourites
+              </Chip>
+              <Chip on={filter === 'groups'} onClick={() => setFilter('groups')}>
+                Groups
+              </Chip>
+              {lists.map((l) => (
+                <Chip key={l.id} on={filter === `list:${l.id}`} onClick={() => setFilter(`list:${l.id}`)}>
+                  {l.name}
+                </Chip>
+              ))}
+              {/* "+": a new list, like WhatsApp Web. Chats go in from their menu (Add to list). */}
+              <button
+                className="chip add"
+                aria-label="New list"
+                data-tip="New list"
+                onClick={() =>
+                  void askText('New list', 'Name, like Family or Work').then((name) => {
+                    if (!name) return;
+                    const id = crypto.randomUUID();
+                    void core.setLists([...core.lists, { id, name, chatIds: [] }]).then(() => setFilter(`list:${id}`));
+                  })
+                }
+              >
+                <Icon name="plus" size={16} />
+              </button>
+            </div>
+          )}
+          {!q && <NotifyBanner />}
         </>
       )}
+      <Rows
+        rows={shown}
+        picks={picks}
+        topHeight={q.trim() ? 44 : 49}
+        top={
+          q.trim() && shown.length > 0 ? (
+            <div className="grp">Chats</div>
+          ) : !archived && !q && filter === 'all' && archivedCount > 0 ? (
+            <button className="arch" onClick={() => setView({ side: 'archived' })}>
+              <Icon name="archive" size={22} />
+              <span>Archived</span>
+              <em>{archivedCount}</em>
+            </button>
+          ) : null
+        }
+        empty={
+          rows === null ? null : q ? (
+            contacts.length || hits.length ? null : (
+              <p className="none">No chats, contacts or messages found</p>
+            )
+          ) : archived ? (
+            <p className="none">No archived chats</p>
+          ) : filter === 'unread' ? (
+            <p className="none">No unread chats</p>
+          ) : filter === 'favourites' ? (
+            <p className="none">Add people or groups to Favourites from their chat's menu</p>
+          ) : filter === 'groups' ? (
+            <p className="none">No groups yet</p>
+          ) : filter.startsWith('list:') ? (
+            <p className="none">Add chats to this list from their menu (Add to list)</p>
+          ) : (
+            <p className="none">Your chats from your phone show here</p>
+          )
+        }
+        after={
+          contacts.length > 0 || hits.length > 0 ? (
+            <>
+              {contacts.length > 0 && <div className="grp">Contacts</div>}
+              {contacts.map(([id, c]) => (
+                <button key={id} className="row" onClick={() => void core.client.openDirect(id).then((chat) => openChat(chat.id))}>
+                  <Avatar id={id} name={c.name} photo={photoOf(id)} />
+                  <div className="rt">
+                    <div className="l1">
+                      <span className="nm">{c.name}</span>
+                    </div>
+                    <div className="l2">
+                      <span className="pv">{core.people[id]?.about ?? c.phone ?? ''}</span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {hits.length > 0 && <div className="grp">Messages</div>}
+              {hits.map((m) => (
+                <button
+                  key={msgKey(m)}
+                  className="row msr"
+                  onClick={() => {
+                    openChat(m.chatId);
+                    setView({ jumpTo: msgKey(m) });
+                  }}
+                >
+                  <div className="rt">
+                    <div className="l1">
+                      <span className="nm">{titles.get(m.chatId)!.title}</span>
+                      <span className="tm">{listTime(m.sentAt)}</span>
+                    </div>
+                    <div className="l2">
+                      {m.author === core.myId && <Ticks status={m.status} />}
+                      <span className="pv">
+                        <Marked text={preview(m, titles.get(m.chatId)!.chat.kind === 'group')} words={q.trim()} />
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </>
+          ) : null
+        }
+      />
+    </>
+  );
+}
 
-      <div className="list" ref={list}>
-        {looksLikeContact && !archived && (
-          <button className="row new-group" onClick={() => startChat()} disabled={busy}>
-            <span className="avatar accent">
-              <Icon name="chatPlus" />
-            </span>
-            <span className="row-main">
-              <strong>{t.startChatWith}</strong>
-              <small className="muted" dir="ltr">
-                {search.trim()}
-              </small>
-            </span>
-          </button>
-        )}
-        {!archived && !q && filter === 'all' && archivedChats.length > 0 && (
-          <button className="row archived-row" onClick={() => onArchived(true)}>
-            <span className="row-icon">
-              <Icon name="archive" />
-            </span>
-            <strong className="row-main">{t.archived}</strong>
-            {archivedUnread > 0 && <span className="badge">{archivedUnread}</span>}
-          </button>
-        )}
-        {chats.length === 0 && <p className="empty">{t.noChats}</p>}
-        {chats.length > 0 && shown.length === 0 && !looksLikeContact && <p className="empty">{archived ? t.noArchived : t.nothingHere}</p>}
-        {shown.map((chat) => (
-          <ChatRow
-            key={chat.id}
-            chat={chat}
-            me={me}
-            prefs={prefs.get(chat.id)}
-            count={counts.get(chat.id) ?? 0}
-            active={chat.id === activeId}
-            typing={typingText(chat, me.uid, now, t)}
-            draft={chat.id === activeId ? '' : getDraft(chat.id)} // (no "Draft:" for the chat you're typing in)
-            muted={isMuted(prefs.get(chat.id), now)}
-            gone={!!chat.lastMessage && isExpired(chat.lastMessage, now)}
-            onOpen={openRow}
-            onMenu={rowMenuAt}
-          />
-        ))}
-        {archived && <p className="hint center">{t.archivedHint}</p>}
-      </div>
+/** "Select chats": the bar that takes the header's place, with what to do to the ticked chats. */
+function PickBar({ picks, rows, shown }: { picks: string[]; rows: ChatRow[]; shown: ChatRow[] }) {
+  const chats = rows.filter((r) => picks.includes(r.chat.id)).map((r) => r.chat);
+  const none = chats.length === 0;
+  const done = (p: Promise<unknown>) => void p.then(() => setView({ chatPicks: null }));
+  const allRead = chats.every((c) => c.unread === 0 && !core.prefs[c.id]?.markedUnread);
+  const allArchived = chats.length > 0 && chats.every((c) => core.prefs[c.id]?.archived);
+  const allMuted = chats.length > 0 && chats.every((c) => isMuted(core.prefs[c.id]));
+  const more = (): MenuItem[] => [
+    { label: chats.length > 0 && chats.every((c) => core.prefs[c.id]?.pinnedAt) ? 'Unpin chats' : 'Pin chats', icon: 'pin', run: () => done(pinMany(chats)) },
+    { label: chats.length > 0 && chats.every((c) => core.prefs[c.id]?.favourite) ? 'Remove from Favourites' : 'Add to Favourites', icon: 'heart', run: () => done(favouriteMany(chats)) },
+    { label: 'Mark as unread', icon: 'unread', run: () => done(markManyRead(chats, false)) },
+    '-',
+    { label: 'Select all', icon: 'select', run: () => setView({ chatPicks: shown.map((r) => r.chat.id) }) },
+  ];
+  return (
+    <header className="lh pickh">
+      <button className="ib" aria-label="Cancel" onClick={() => setView({ chatPicks: null })}>
+        <Icon name="close" size={22} />
+      </button>
+      <span className="selcount">{chats.length} selected</span>
+      <button className="ib" disabled={none} aria-label={allArchived ? 'Unarchive' : 'Archive'} data-tip={allArchived ? 'Unarchive' : 'Archive'} onClick={() => done(archiveMany(chats, !allArchived))}>
+        <Icon name="archive" size={22} />
+      </button>
+      <button className="ib" disabled={none} aria-label={allMuted ? 'Unmute' : 'Mute'} data-tip={allMuted ? 'Unmute' : 'Mute'} onClick={() => void muteMany(chats).then(() => setView({ chatPicks: null }))}>
+        <Icon name={allMuted ? 'bell' : 'muted'} size={22} />
+      </button>
+      <button className="ib" disabled={none || allRead} aria-label="Mark as read" data-tip="Mark as read" onClick={() => done(markManyRead(chats, true))}>
+        <Icon name="unread" size={22} />
+      </button>
+      <button className="ib" disabled={none} aria-label="Delete" data-tip="Delete" onClick={() => void deleteMany(chats).then((ok) => ok && setView({ chatPicks: null }))}>
+        <Icon name="trash" size={22} />
+      </button>
+      <button className="ib" disabled={none} aria-label="More" onClick={(e) => openMenu(more(), e.currentTarget.getBoundingClientRect().right - 220, e.currentTarget.getBoundingClientRect().bottom + 4)}>
+        <Icon name="more" size={22} />
+      </button>
+    </header>
+  );
+}
 
-      {picking && <ThemePicker onClose={() => setPicking(false)} />}
-      {rowMenu && <Popover x={rowMenu.x} y={rowMenu.y} onClose={() => setRowMenu(null)} items={rowItems(rowMenu.chat)} />}
+const BANNER_KEY = 'pakchat-notify-banner';
+
+/** WhatsApp Web's "Get notified of new messages" box, until notifications are on or it's closed. */
+function NotifyBanner() {
+  const ask = () => (typeof Notification !== 'undefined' && Notification.permission === 'default' ? !readFlag(BANNER_KEY) : false);
+  const [show, setShow] = useState(ask);
+  if (!show) return null;
+  return (
+    <div className="nbanner">
+      <span className="nbi">
+        <Icon name="bell" size={22} />
+      </span>
+      <button
+        className="nbt"
+        onClick={() =>
+          void Notification.requestPermission().then((p) => {
+            if (p === 'granted') void core.setSettings({ notifications: true });
+            setShow(ask());
+          })
+        }
+      >
+        <b>Get notified of new messages</b>
+        <span>
+          Turn on desktop notifications <Icon name="chevron" size={14} />
+        </span>
+      </button>
+      <button
+        className="ib nbx"
+        aria-label="Close"
+        onClick={() => {
+          writeFlag(BANNER_KEY);
+          setShow(false);
+        }}
+      >
+        <Icon name="close" size={18} />
+      </button>
     </div>
-  )
+  );
 }
 
-type RowProps = {
-  chat: Chat
-  me: Person
-  prefs: ChatPrefs | undefined
-  count: number
-  active: boolean
-  typing: string // "typing…", or ''
-  draft: string
-  muted: boolean
-  gone: boolean // the last message disappeared (disappearing messages), so the preview is empty
-  onOpen: (chat: Chat) => void
-  onMenu: (chat: Chat, x: number, y: number) => void
+function readFlag(key: string) {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
 }
 
-// memo: only drawn again when one of its props changed (a new message in THIS chat, say).
-const ChatRow = memo(function ChatRow({ chat, me, prefs, count, active, typing, draft, muted, gone, onOpen, onMenu }: RowProps) {
-  const { t } = useT()
-  const title = chatTitle(chat, me.uid, t)
-  const last = chat.lastMessage
-  const mine = last?.senderId === me.uid && last.kind !== 'system' && !last.deleted && !gone
-  const unread = isUnread(chat, me.uid, prefs)
-  const classes = ['row', 'chat-row', unread && 'unread', active && 'active', muted && 'muted'].filter(Boolean).join(' ')
+function writeFlag(key: string) {
+  try {
+    localStorage.setItem(key, '1');
+  } catch {
+    // Private windows can refuse; the box just comes back next time.
+  }
+}
+
+/** The searched words in bold, like WhatsApp's search results. */
+function Marked({ text, words }: { text: string; words: string }) {
+  const at = text.toLowerCase().indexOf(words.toLowerCase());
+  if (at < 0 || !words) return <>{text}</>;
+  // Long lines start a little before the match, so it shows.
+  const from = at > 40 ? at - 20 : 0;
+  return (
+    <>
+      {from ? '…' : ''}
+      {text.slice(from, at)}
+      <b>{text.slice(at, at + words.length)}</b>
+      {text.slice(at + words.length)}
+    </>
+  );
+}
+
+function listMenu() {
+  return [
+    { label: 'New group', icon: 'group' as const, run: () => setView({ side: 'newGroup' }) },
+    { label: 'Starred messages', icon: 'star' as const, run: () => setView({ side: 'starred' }) },
+    { label: 'Select chats', icon: 'select' as const, run: () => setView({ chatPicks: [] }) },
+    {
+      label: 'Mark all as read',
+      icon: 'unread' as const,
+      run: () =>
+        void (async () => {
+          for (const c of await core.storage.listChats()) {
+            if (c.unread > 0) await core.client.markRead(c.id);
+            if (core.prefs[c.id]?.markedUnread) await core.setPrefs(c.id, { markedUnread: false });
+          }
+        })(),
+    },
+    '-' as const,
+    { label: 'Settings', icon: 'settings' as const, run: () => setView({ tab: 'settings' }) },
+    { label: 'Log out', icon: 'logout' as const, run: () => dispatchEvent(new Event('pakchat:logout')) },
+  ];
+}
+
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button className={`chip ${on ? 'on' : ''}`} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
+/** The rows, drawn only where they're on screen. */
+/** `top`: what's above the rows (the Archived row, 49px, or the search's "Chats" heading, 44px), `topHeight` tall. */
+function Rows({ rows, picks, top, topHeight, empty, after }: { rows: ChatRow[]; picks: string[] | null; top: React.ReactNode; topHeight: number; empty: React.ReactNode; after: React.ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [scroll, setScroll] = useState(0);
+  const [height, setHeight] = useState(800);
+  const viewing = useViewing();
+  const [dropOn, setDropOn] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const head = top ? topHeight : 0;
+  const first = Math.max(0, Math.floor((scroll - head) / SLOT) - 4);
+  const last = Math.min(rows.length, Math.ceil((scroll - head + height) / SLOT) + 4);
+
+  const move = (step: number) => {
+    const i = rows.findIndex((r) => r.chat.id === viewing);
+    const next = rows[Math.max(0, Math.min(rows.length - 1, i + step))];
+    if (next) {
+      openChat(next.chat.id);
+      const el = box.current!;
+      const y = head + rows.indexOf(next) * SLOT;
+      if (y < el.scrollTop) el.scrollTop = y;
+      else if (y + SLOT > el.scrollTop + el.clientHeight) el.scrollTop = y + SLOT - el.clientHeight;
+    }
+  };
 
   return (
     <div
-      className={classes}
-      data-id={chat.id}
-      role="button"
+      ref={box}
+      className="rows scroll"
       tabIndex={0}
-      onClick={() => onOpen(chat)}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen(chat))}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        onMenu(chat, e.clientX, e.clientY)
+      onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        e.preventDefault();
+        move(e.key === 'ArrowDown' ? 1 : -1);
       }}
     >
-      <ChatAvatar chat={chat} myUid={me.uid} />
-      <span className="row-main">
-        <span className="row-top">
-          <strong dir="auto">{title}</strong>
-          <time>{formatTime(chat.updatedAt?.toDate(), t.locale)}</time>
-        </span>
-        <span className="row-bottom">
-          {typing ? (
-            <span className="typing">{typing}</span>
-          ) : draft ? (
-            <span className="preview-text" dir="auto">
-              <span className="draft">{t.draft}</span> {draft}
-            </span>
-          ) : (
-            <span className="preview-text" dir="auto">
-              {mine && <Ticks tick={tickFor(chat, me.uid, chat.updatedAt)} />}
-              {previewText(chat, me.uid, t)}
-            </span>
-          )}
-          {muted && <Icon name="bellOff" size={16} />}
-          {prefs?.pinnedAt && !prefs.archived && <Icon name="pin" size={16} />}
-          {/* "@": the newest message mentions you, and you haven't read it yet */}
-          {unread && last?.mentions?.includes(me.uid) && (
-            <span className="at-badge" title={t.mentionedYou} aria-label={t.mentionedYou}>
-              @
-            </span>
-          )}
-          {unread && (count > 0 && !prefs?.unread ? <span className="badge">{count > 99 ? '99+' : count}</span> : <span className="dot" />)}
-          <button
-            className="row-menu"
-            aria-label={t.chatMenu}
-            onClick={(e) => {
-              e.stopPropagation()
-              const r = e.currentTarget.getBoundingClientRect()
-              onMenu(chat, r.left, r.bottom + 4)
-            }}
-          >
-            <Icon name="chevronDown" size={18} />
-          </button>
-        </span>
-      </span>
+      {top}
+      {rows.length === 0 && empty}
+      <div style={{ height: rows.length * SLOT, position: 'relative', flex: 'none' }}>
+        {rows.slice(first, last).map((r, j) => (
+          <Row
+            key={r.chat.id}
+            row={r}
+            top={(first + j) * SLOT}
+            selected={r.chat.id === viewing}
+            picked={picks ? picks.includes(r.chat.id) : null}
+            dropping={dropOn === r.chat.id}
+            onDrop={(over) => setDropOn(over ? r.chat.id : null)}
+          />
+        ))}
+      </div>
+      {after}
     </div>
-  )
-})
-
-// Slide the rows that moved (FLIP: see where each row was, where it is now, and animate the difference).
-// Only transform is animated, which the graphics chip does on its own, so it stays smooth.
-const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches
-function slideRows(box: HTMLElement, before: { view: string; tops: Map<string, number> }, view: string) {
-  const tops = new Map<string, number>()
-  for (const row of box.querySelectorAll<HTMLElement>('.chat-row[data-id]')) {
-    const top = row.offsetTop
-    tops.set(row.dataset.id!, top)
-    const was = before.tops.get(row.dataset.id!)
-    if (before.view === view && was !== undefined && was !== top && !still()) {
-      row.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' })
-    }
-  }
-  return { view, tops }
+  );
 }
+
+/** `picked`: null when not selecting chats, else whether this one is ticked. */
+const Row = memo(function Row({ row, top, selected, picked, dropping, onDrop }: { row: ChatRow; top: number; selected: boolean; picked: boolean | null; dropping: boolean; onDrop: (over: boolean) => void }) {
+  const { chat, prefs, last } = row;
+  const typing = useTyping(chat.id);
+  useTopic(['people', 'photos'], () => core.photosVersion + Object.keys(core.people).length);
+  const group = chat.kind === 'group';
+  const unread = chat.unread > 0 || !!prefs.markedUnread;
+  const muted = isMuted(prefs);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const whoTypes = Object.entries(typing ?? {}).filter(([, at]) => Date.now() - at < 6000);
+  const draft = prefs.draft && !selected ? prefs.draft : null;
+  let line: React.ReactNode;
+  if (prefs.lock === 'list') line = <span className="pv">🔒 Locked chat</span>;
+  else if (whoTypes.length) {
+    const doing = core.isRecordingAudio(chat.id, whoTypes[0][0]) ? 'recording audio…' : 'typing…';
+    line = <span className="pv typ">{group ? `${memberName(whoTypes[0][0])} is ${doing}` : doing}</span>;
+  }
+  else if (draft)
+    line = (
+      <span className="pv">
+        <span className="dr">Draft:</span> {draft}
+      </span>
+    );
+  else
+    line = (
+      <>
+        {last && last.author === core.myId && last.kind !== 'system' && !last.deleted && <Ticks status={last.status} />}
+        {last?.kind === 'file' && last.file && !last.deleted && !last.file.once && (!group || last.author === core.myId) && (
+          <span className="pvi">
+            <Icon name={FILE_ICON[last.file.kind]} size={16} />
+          </span>
+        )}
+        <span className="pv">{preview(last, group)}</span>
+      </>
+    );
+
+  const menu = (x: number, y: number) => {
+    // The chevron stays while its menu is open, and goes with it.
+    setMenuOpen(true);
+    openMenu(chatMenu(chat, { open: selected }), x, y, { gone: () => setMenuOpen(false) });
+  };
+
+  return (
+    <div
+      className={`row ${selected && picked === null ? 'sel' : ''} ${picked ? 'picked' : ''} ${picked !== null ? 'picking' : ''} ${menuOpen ? 'menuopen' : ''} ${dropping ? 'drop' : ''}`}
+      style={{ position: 'absolute', left: 0, right: 0, top }}
+      role="button"
+      aria-label={row.title}
+      aria-pressed={picked ?? undefined}
+      onClick={() => (picked !== null ? toggleChatPick(chat.id) : openChat(chat.id))}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (picked === null) menu(e.clientX, e.clientY);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        onDrop(true);
+      }}
+      onDragLeave={() => onDrop(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(false);
+        const files = [...e.dataTransfer.files];
+        if (!files.length) return;
+        openChat(chat.id);
+        setView({ files });
+      }}
+    >
+      {picked !== null && (
+        <span className={`chk ${picked ? '' : 'off'}`}>{picked && <Icon name="check" size={13} stroke={3} />}</span>
+      )}
+      <Avatar id={row.other ?? chat.id} name={row.title} photo={row.other ? photoOf(row.other) : chat.photo} group={group} />
+      <div className="rt">
+        <div className="l1">
+          <span className="nm">{row.title}</span>
+          <span className={`tm ${unread && !muted ? 'u' : ''}`}>{row.at ? listTime(last?.sentAt ?? row.at) : ''}</span>
+        </div>
+        <div className="l2">
+          {line}
+          <span className="ics">
+            {muted && <Icon name="muted" size={18} />}
+            {prefs.pinnedAt && <Icon name="pin" size={18} />}
+            {unread && <span className={`badge ${muted ? 'm' : ''}`}>{chat.unread > 0 ? (chat.unread > 999 ? '999+' : chat.unread) : ''}</span>}
+            <button
+              className="chev"
+              aria-label="Open chat menu"
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                menu(r.left, r.bottom + 2);
+              }}
+            >
+              <Icon name="down" size={20} stroke={2} />
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+});

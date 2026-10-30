@@ -78,6 +78,8 @@ export type Message = {
   mentions?: string[];
   replyTo?: Ref;
   forwarded?: boolean;
+  /** How many times it was forwarded in all ("Forwarded many times" from 5), when more than once. */
+  forwardHops?: number;
   poll?: { question: string; options: string[]; multi: boolean };
   /** Poll answers: user id to option numbers. */
   votes?: Record<string, number[]>;
@@ -88,6 +90,9 @@ export type Message = {
   pinnedUntil?: number;
   /** Disappearing messages, and statuses: when it goes (ms). */
   expiresAt?: number;
+  /** Keep in chat: who kept this disappearing message, and when it would have gone (back if it's un-kept). */
+  keptBy?: string;
+  keptExpiresAt?: number;
   /** A status in words: its colour (an index into the app's list). */
   bg?: number;
   /** A reply to someone's status: a little copy of it. */

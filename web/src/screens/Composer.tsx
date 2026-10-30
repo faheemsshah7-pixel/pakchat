@@ -1,455 +1,513 @@
-// Composer.tsx: the bar at the bottom of a chat.
-//   smiley: emojis, GIFs and stickers    paperclip: photos & videos, camera, document, location, contact, poll
-//   microphone: voice note (① makes it view once)    round camera: a round video message    paper plane: send
-// In a group, typing @ shows the people in it: pick one to mention them (mentions.ts).
-// Enter sends and Shift+Enter starts a new line (you can switch this in Settings).
-// What you type is kept as a draft if you leave the chat before sending (drafts.ts).
-// Above it, a strip shows the message you're replying to, or editing,
-// and a card for the web address you typed (links.ts), with an X to leave it out.
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { shortText, type Content, type Extras, type Message, type Person, type ReplyTo } from '../chats'
-import { getDraft, saveDraft } from '../drafts'
-import { useT } from '../lang'
-import { fetchPreview, firstLink, type LinkPreview } from '../links'
-import { isPhotoOrVideo, MAX_VOICE_SECONDS, startRecording, type Recording } from '../media'
-import { findMentions, mentionQuery } from '../mentions'
-import { useSettings } from '../settings'
-import { duration, useNow } from '../time'
-import { canTranscribe } from '../transcribe'
-import { PersonAvatar } from './Avatar'
-import { LinkCard } from './Gifs'
-import Icon from './Icon'
-import { EmojiPicker, VideoNoteRecorder } from './lazy' // (the emoji panel and the video recorder load the first time you open them)
-import Popover, { type PopoverItem } from './Popover'
+// Composer.tsx: the floating message box. Enter sends (Shift+Enter: a new
+// line), the 📎 menu, emoji, pasting or dropping files, replying, editing
+// and voice messages. What you type is kept per chat as a draft.
 
-type Props = {
-  chatId: string
-  myUid: string
-  onSend: (content: Content, extras?: Extras) => Promise<unknown>
-  onTyping: () => void
-  onPhotos: (files: File[]) => void // photos or videos picked or pasted: ChatRoom shows them before sending
-  onDocuments: (files: File[]) => void // documents picked or pasted
-  onLocation: () => void // "Location" in the paperclip menu
-  onContact: () => void // "Contact" in the paperclip menu
-  onPoll?: () => void // "Poll" in the paperclip menu (not in broadcast lists)
-  canOnce: boolean // "view once" voice notes are offered (not in "Message yourself")
-  people?: Person[] // a group's other members, to @mention (missing in chats with one person)
-  replyTo: ReplyTo | null
-  onCancelReply: () => void
-  editing: Message | null
-  onCancelEdit: () => void
-  onSaveEdit: (text: string) => Promise<void>
-}
+import type { Chat, ChatQuote, Message } from '@pakchat/shared';
+import { useEffect, useRef, useState } from 'react';
 
-// A few people at a time in the @ list.
-const MAX_SHOWN = 8
+import { core } from '../core/core';
+import { useSettings } from '../core/hooks';
+import { Avatar, photoOf } from '../ui/Avatar';
+import { bodyLine, duration, memberName } from '../ui/format';
+import { Icon } from '../ui/Icon';
+import { closeLayer, Dialog, openLayer, openMenu, toast } from '../ui/overlay';
+import { getView, setView, useView } from '../ui/view';
+import { EDIT_MS } from './messageActions';
 
-// Phones and tablets have no Shift key handy, so there Enter always makes a new line.
-const touchScreen = window.matchMedia('(pointer: coarse)').matches
+/** The longest message, the same as the app's (longer ones are refused by the other side's PakChat). */
+const MAX_TEXT = 4000;
 
-export default function Composer(props: Props) {
-  const { chatId, myUid, onSend, onTyping, onPhotos, onDocuments, onLocation, onContact, onPoll, canOnce, people, replyTo, onCancelReply, editing, onCancelEdit, onSaveEdit } = props
-  const { t } = useT()
-  const { enterSends, transcripts, transcriptLang, linkPreviews } = useSettings()
-  const [text, setText] = useState(() => getDraft(chatId))
-  const [error, setError] = useState('')
-  const [recording, setRecording] = useState<Recording | null>(null)
-  const [once, setOnce] = useState(false) // the voice note being recorded is "view once"
-  const [filming, setFilming] = useState(false) // recording a round video message
-  const [emojis, setEmojis] = useState(false)
-  const [attach, setAttach] = useState<{ x: number; y: number } | null>(null) // the paperclip menu
-  const [caret, setCaret] = useState(0) // where the cursor is (for @mentions)
-  const [tagIndex, setTagIndex] = useState(0) // which person in the @ list is picked
-  const [tagClosed, setTagClosed] = useState(-1) // Esc closed the @ list that starts here
-  const photoInput = useRef<HTMLInputElement>(null)
-  const cameraInput = useRef<HTMLInputElement>(null)
-  const docInput = useRef<HTMLInputElement>(null)
-  const box = useRef<HTMLTextAreaElement>(null)
-  const moveCaret = useRef<number | null>(null) // put the cursor here once the new words are in the box
+export function Composer({ chat }: { chat: Chat }) {
+  const view = useView();
+  const settings = useSettings();
+  const box = useRef<HTMLTextAreaElement>(null);
+  const [text, setText] = useState(() => core.prefs[chat.id]?.draft ?? '');
+  const [recording, setRecording] = useState(false);
+  const files = useRef<HTMLInputElement>(null);
+  const docs = useRef<HTMLInputElement>(null);
+  const audio = useRef<HTMLInputElement>(null);
+  const typingSent = useRef(0);
+  const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reply = view.replyTo?.chatId === chat.id ? view.replyTo : null;
+  const editing = view.editing?.chatId === chat.id ? view.editing : null;
+  // "Reply privately" to a group message: it's quoted here, in the chat with its author.
+  const quoted = !reply && !editing && view.privateReply?.to === chat.id ? view.privateReply : null;
+  // @mentions in groups: who was picked from the list (kept while their "@Name" stays in the words).
+  const mentioned = useRef<string[]>([]);
+  const [pickAt, setPickAt] = useState(0);
 
-  // Start editing: put the message's words in the box. Stop: bring the draft back.
-  // (React's way to change state when a prop changes: compare with the last one, during drawing.)
-  const [lastEditing, setLastEditing] = useState(editing)
-  if (editing !== lastEditing) {
-    setLastEditing(editing)
-    setText(editing ? (((editing.kind ?? 'text') === 'text' ? editing.text : editing.caption) ?? '') : getDraft(chatId))
-  }
+  // Editing: the message's words go in the box; done or cancelled, the draft comes back.
   useEffect(() => {
-    box.current?.focus()
-  }, [editing])
-
-  // A web address in the box: fetch its card a moment after you stop typing (links.ts).
-  const link = linkPreviews && !editing ? firstLink(text) : null
-  const [preview, setPreview] = useState<LinkPreview | null>(null)
-  const [noPreview, setNoPreview] = useState<string | null>(null) // the address you pressed X on
+    if (editing) setText(editing.text ?? '');
+    box.current?.focus();
+  }, [editing]);
   useEffect(() => {
-    if (!link || link === noPreview) return
-    let stale = false
-    const timer = setTimeout(() => fetchPreview(link).then((card) => !stale && setPreview(card)), 500)
+    if (reply || quoted) box.current?.focus();
+  }, [reply, quoted]);
+
+  // Typing goes straight into the box from anywhere in the chat, like WhatsApp Web.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || t.closest('input, textarea, [contenteditable], .layer')) return;
+      box.current?.focus();
+    };
+    addEventListener('keydown', key);
+    const insert = (e: Event) => insertAtCaret((e as CustomEvent<string>).detail);
+    const record = () => !editing && setRecording(true);
+    addEventListener('pakchat:insert', insert);
+    addEventListener('pakchat:record', record);
     return () => {
-      stale = true
-      clearTimeout(timer)
-    }
-  }, [link, noPreview])
-  const card = preview && preview.url === link && link !== noPreview ? preview : null
+      removeEventListener('keydown', key);
+      removeEventListener('pakchat:insert', insert);
+      removeEventListener('pakchat:record', record);
+    };
+  });
 
-  // Replying: put the cursor in the box.
+  // The draft, kept a moment after you stop typing (and when you leave the chat).
+  const latest = useRef(text);
+  latest.current = text;
   useEffect(() => {
-    if (replyTo) box.current?.focus()
-  }, [replyTo])
+    if (editing) return;
+    const id = setTimeout(() => saveDraft(chat.id, text), 600);
+    return () => clearTimeout(id);
+  }, [text, chat.id, editing]);
+  useEffect(() => () => void saveDraft(chat.id, getView().editing ? (core.prefs[chat.id]?.draft ?? '') : latest.current), [chat.id]);
 
-  // The box grows with what you type, up to about 6 lines.
-  // (And after picking someone to @mention, the cursor goes after their name, before you type on.)
-  useLayoutEffect(() => {
-    const el = box.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 150) + 'px'
-    if (moveCaret.current !== null) {
-      el.focus()
-      el.setSelectionRange(moveCaret.current, moveCaret.current)
-      moveCaret.current = null
-    }
-  }, [text])
+  // Leaving the chat ends "typing…" too.
+  useEffect(
+    () => () => {
+      if (stopTimer.current) clearTimeout(stopTimer.current);
+      if (typingSent.current) core.client.typing(chat.id, false);
+    },
+    [chat.id],
+  );
 
-  function change(value: string, cursor = value.length) {
-    setText(value)
-    setCaret(cursor)
-    setTagIndex(0)
-    if (!editing) saveDraft(chatId, value)
-    if (value) onTyping()
-  }
+  // The box grows with the words, up to 6 lines, then scrolls.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = '0';
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  }, [text]);
 
-  // ----- @mentions: the list of people while you type "@al…" -----
-  const tag = people?.length ? mentionQuery(text, caret) : null
-  const tagShown =
-    tag && tag.start !== tagClosed
-      ? people!.filter((p) => p.name.toLowerCase().includes(tag.query.toLowerCase())).slice(0, MAX_SHOWN)
-      : []
-  const tagPicked = Math.min(tagIndex, tagShown.length - 1)
-  // Put "@Name " in place of "@al", and the cursor after it.
-  function pickMention(person: Person) {
-    if (!tag) return
-    const before = text.slice(0, tag.start) + '@' + person.name + ' '
-    moveCaret.current = before.length
-    change(before + text.slice(caret), before.length)
-  }
-
-  async function send(content: Content, restore = '', mentions: string[] = []) {
-    setError('')
-    const extras: Extras = replyTo ? { replyTo } : {}
-    if (mentions.length) extras.mentions = mentions
-    onCancelReply()
-    try {
-      await onSend(content, extras)
-    } catch (err) {
-      setError(t.notSent)
-      if (restore) change(restore)
-      console.error(err)
-    }
-  }
-
-  async function submit(e?: React.FormEvent) {
-    e?.preventDefault()
-    const clean = text.trim()
-    if (editing) {
-      if (!clean && (editing.kind ?? 'text') === 'text') return // (a caption can be emptied)
-      try {
-        await onSaveEdit(clean)
-      } catch (err) {
-        setError(t.notEdited)
-        console.error(err)
-      }
-      return
-    }
-    if (!clean) return
-    change('') // clear the box straight away, like WhatsApp
-    send({ kind: 'text', text: clean, ...(card ? { preview: card } : {}) }, clean, people ? findMentions(clean, people) : [])
-  }
-
-  function keyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // The @ list is open: arrows move, Enter or Tab picks, Esc closes it.
-    if (tagShown.length > 0 && tag && !e.nativeEvent.isComposing) {
-      const keys: Record<string, () => void> = {
-        ArrowDown: () => setTagIndex((tagPicked + 1) % tagShown.length),
-        ArrowUp: () => setTagIndex((tagPicked - 1 + tagShown.length) % tagShown.length),
-        Enter: () => pickMention(tagShown[tagPicked]),
-        Tab: () => pickMention(tagShown[tagPicked]),
-        Escape: () => setTagClosed(tag.start),
-      }
-      const action = keys[e.key]
-      if (action && !(e.key === 'Enter' && e.shiftKey)) {
-        e.preventDefault()
-        e.stopPropagation()
-        return action()
-      }
-    }
-    // isComposing: typing in a language that builds letters in steps (Enter picks the letter).
-    if (e.key === 'Enter' && !e.shiftKey && enterSends && !touchScreen && !e.nativeEvent.isComposing) {
-      e.preventDefault()
-      submit()
-    }
-    if (e.key === 'Escape' && (editing || replyTo)) {
-      e.stopPropagation()
-      if (editing) onCancelEdit()
-      else onCancelReply()
-    }
-  }
-
-  // Pasting a photo, video or file (Ctrl+V) sends it like picking one.
-  function paste(e: React.ClipboardEvent) {
-    const files = [...e.clipboardData.files]
-    if (!files.length || editing) return
-    e.preventDefault()
-    const media = files.filter(isPhotoOrVideo)
-    if (media.length) onPhotos(media)
-    const docs = files.filter((f) => !isPhotoOrVideo(f))
-    if (docs.length) onDocuments(docs)
-  }
-
-  function pick(e: React.ChangeEvent<HTMLInputElement>, then: (files: File[]) => void) {
-    const files = [...(e.target.files ?? [])]
-    e.target.value = '' // so picking the same file again still works
-    if (files.length) then(files)
-  }
-
-  // The paperclip menu, like WhatsApp's. (Camera only on phones: computers open a file list instead.)
-  const attachItems: PopoverItem[] = [
-    { label: t.photosVideos, icon: 'image', onClick: () => photoInput.current?.click() },
-    ...(touchScreen ? [{ label: t.camera, icon: 'camera' as const, onClick: () => cameraInput.current?.click() }] : []),
-    { label: t.document, icon: 'file', onClick: () => docInput.current?.click() },
-    { label: t.location, icon: 'mapPin', onClick: onLocation },
-    { label: t.contact, icon: 'contact', onClick: onContact },
-    ...(onPoll ? [{ label: t.poll, icon: 'poll' as const, onClick: onPoll }] : []),
-  ]
-
-  // Put an emoji where the cursor is.
-  function addEmoji(emoji: string) {
-    const el = box.current
-    const start = el?.selectionStart ?? text.length
-    const end = el?.selectionEnd ?? text.length
-    change(text.slice(0, start) + emoji + text.slice(end))
+  function insertAtCaret(s: string) {
+    const el = box.current;
+    if (!el) return setText((t) => t + s);
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + s + text.slice(end);
+    setText(next);
     requestAnimationFrame(() => {
-      el?.focus()
-      el?.setSelectionRange(start + emoji.length, start + emoji.length)
-    })
+      el.focus();
+      el.selectionStart = el.selectionEnd = start + s.length;
+    });
   }
 
-  async function startVoice() {
-    setError('')
-    setOnce(false)
+  function typed(next: string) {
+    setText(next);
+    const now = Date.now();
+    if (next.trim() && now - typingSent.current > 3000) {
+      typingSent.current = now;
+      core.client.typing(chat.id, true);
+    }
+    // A pause in typing (or an emptied box) ends "typing…" for them, like the app.
+    if (stopTimer.current) clearTimeout(stopTimer.current);
+    stopTimer.current = setTimeout(stopTyping, next.trim() ? 4000 : 0);
+  }
+
+  function stopTyping() {
+    if (typingSent.current) core.client.typing(chat.id, false);
+    typingSent.current = 0;
+  }
+
+  async function send() {
+    const words = text.trim();
+    if (!words) return;
+    if ([...words].length > MAX_TEXT) return tooLong(words);
+    if (editing) {
+      if (Date.now() - editing.sentAt > EDIT_MS) toast('This message can no longer be edited');
+      else if (words !== editing.text) await core.client.edit(chat.id, editing.id, words).catch(() => toast("Couldn't edit. Try again."));
+      setView({ editing: null });
+      setText(core.prefs[chat.id]?.draft ?? '');
+      return;
+    }
+    setText('');
+    if (stopTimer.current) clearTimeout(stopTimer.current);
+    typingSent.current = 0;
+    core.client.typing(chat.id, false);
+    const replyTo = reply ? { author: reply.author, id: reply.id } : undefined;
+    const quote = quoted ? quoteOf(quoted.m) : undefined;
+    const mentions = chat.kind === 'group' ? mentioned.current.filter((id) => words.includes(`@${core.nameOf(id)}`)) : [];
+    mentioned.current = [];
+    setView({ replyTo: null, privateReply: null });
+    await saveDraft(chat.id, '');
     try {
-      // Settings > Chats > Voice message transcripts: write out the words while recording.
-      setRecording(await startRecording(transcripts && canTranscribe() ? transcriptLang : undefined))
-    } catch (err) {
-      setError(t.micBlocked) // the person said no, or there's no microphone
-      console.error(err)
+      await core.client.sendText(chat.id, words, { replyTo, quote, ...(mentions.length ? { mentions } : {}) });
+    } catch {
+      // Back as it was: the words, and what they answered.
+      setText(words);
+      setView({ replyTo: reply, privateReply: quoted });
+      toast("Couldn't send. Try again.");
     }
   }
 
-  async function finishVoice(keep: boolean) {
-    if (!recording) return
-    setRecording(null)
-    try {
-      if (!keep) return await recording.cancel()
-      const { transcript, ...voice } = await recording.stop()
-      // (View once voice notes have no transcript: the words would stay after it's been heard.)
-      await send(once ? { kind: 'voice', ...voice, once } : { kind: 'voice', ...voice, ...(transcript ? { transcript } : {}) })
-    } catch (err) {
-      setError(t.voiceTooLong)
-      console.error(err)
-    }
+  // Typing "@" in a group lists the members whose names start with what follows.
+  const at = chat.kind === 'group' ? /(^|\s)@([^\s@]*)$/.exec(text.slice(0, box.current?.selectionStart ?? text.length)) : null;
+  const suggestions = at
+    ? chat.members
+        .filter((mb) => mb.userId !== core.myId)
+        .map((mb) => ({ id: mb.userId, name: core.nameOf(mb.userId) }))
+        .filter((p) => p.name && p.name.toLowerCase().startsWith(at[2].toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, 6)
+    : [];
+  const chosen = Math.min(pickAt, Math.max(0, suggestions.length - 1));
+
+  function mention(p: { id: string; name: string }) {
+    const el = box.current;
+    const caret = el?.selectionStart ?? text.length;
+    const before = text.slice(0, caret).replace(/@([^\s@]*)$/, `@${p.name} `);
+    const next = before + text.slice(caret);
+    setText(next);
+    setPickAt(0);
+    mentioned.current = [...new Set([...mentioned.current, p.id])];
+    requestAnimationFrame(() => {
+      el?.focus();
+      if (el) el.selectionStart = el.selectionEnd = before.length;
+    });
   }
 
-  const strip = editing ?? replyTo
+  const attach = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openMenu(
+      [
+        { label: 'Document', icon: 'doc', color: '#7F66FF', run: () => docs.current?.click() },
+        { label: 'Photos & videos', icon: 'photo', color: '#007BFC', run: () => files.current?.click() },
+        { label: 'Camera', icon: 'camera', color: '#FF2E74', run: () => void import('./attach').then((a) => a.openCamera()) },
+        { label: 'Audio', icon: 'music', color: '#FA6533', run: () => audio.current?.click() },
+        { label: 'Contact', icon: 'user', color: '#009DE2', run: () => void import('./attach').then((a) => a.sendContact(chat)) },
+        { label: 'Poll', icon: 'poll', color: '#FFB938', run: () => void import('./attach').then((a) => a.sendPoll(chat)) },
+        { label: 'Event', icon: 'calendar', color: '#FF2E74', run: () => void import('./attach').then((a) => a.sendEvent(chat)) },
+      ],
+      r.left,
+      r.top - 10,
+      { cls: 'attach', above: true },
+    );
+  };
+
+  const emoji = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    void import('./EmojiPanel').then(({ openEmojiPicker }) => openEmojiPicker(r.left - 8, r.top - 12, (x) => insertAtCaret(x), true));
+  };
+
+  const pick = (list: FileList | null) => {
+    const picked = [...(list ?? [])];
+    if (picked.length) setView({ files: picked });
+  };
+
   return (
-    <div className="composer-area">
-      {error && <p className="error toast">{error}</p>}
-      {tagShown.length > 0 && (
-        <div className="mention-list" role="listbox" aria-label={t.mentionSomeone}>
-          {tagShown.map((p, i) => (
-            <button
-              key={p.uid}
-              type="button"
-              role="option"
-              aria-selected={i === tagPicked}
-              className={i === tagPicked ? 'row on' : 'row'}
-              onMouseDown={(e) => e.preventDefault()} // (keeps the cursor in the box)
-              onClick={() => pickMention(p)}
-            >
-              <PersonAvatar uid={p.uid} name={p.name} size={32} />
-              <strong className="row-main" dir="auto">
-                {p.name}
-              </strong>
+    <footer className="comp">
+      {suggestions.length > 0 && (
+        <div className="mentions" role="listbox">
+          {suggestions.map((p, i) => (
+            <button key={p.id} role="option" aria-selected={i === chosen} className={i === chosen ? 'on' : ''} onMouseDown={(e) => (e.preventDefault(), mention(p))}>
+              <Avatar id={p.id} name={p.name} photo={photoOf(p.id)} size={32} />
+              <span className="ellip">{p.name}</span>
             </button>
           ))}
         </div>
       )}
-      {strip && (
-        <div className={editing ? 'reply-bar editing' : 'reply-bar'}>
-          <Icon name={editing ? 'edit' : 'reply'} size={18} />
+      {(reply || editing || quoted) && (
+        <div className="replybar">
           <div className="quote">
-            <strong>
-              {editing ? t.editMessage : strip.senderId === myUid ? t.you : strip.senderName}
-              {!editing && replyTo?.from && <span className="quote-from"> · {replyTo.from}</span>}
-            </strong>
-            <span dir="auto">{shortText(strip, myUid, t)}</span>
+            <i />
+            <div>
+              <b>{editing ? 'Edit message' : quoted ? `${memberName(quoted.m.author)} · ${quoted.group}` : reply!.author === core.myId ? 'You' : memberName(reply!.author)}</b>
+              <span className="qt">{bodyLine((editing ?? reply ?? quoted!.m)!)}</span>
+            </div>
           </div>
-          <button className="icon" aria-label={t.cancel} onClick={editing ? onCancelEdit : onCancelReply}>
-            <Icon name="close" size={18} />
+          <button className="ib" aria-label="Cancel" onClick={() => (setView({ replyTo: null, editing: null, privateReply: null }), editing && setText(core.prefs[chat.id]?.draft ?? ''))}>
+            <Icon name="close" size={22} />
           </button>
         </div>
       )}
-      {card && !recording && <LinkCard preview={card} onRemove={() => setNoPreview(link)} />}
       {recording ? (
-        <RecordingBar recording={recording} onDone={finishVoice} once={canOnce ? once : null} onOnce={() => setOnce(!once)} />
+        <Recorder chat={chat} replyTo={reply} onDone={() => setRecording(false)} />
       ) : (
-        <form className="composer" onSubmit={submit}>
-          <div className="field">
-            <button type="button" className="icon" aria-label={t.emoji} title={t.emoji} onClick={() => setEmojis(!emojis)}>
-              <Icon name="smile" />
-            </button>
-            {!editing && (
-              <button
-                type="button"
-                className="icon"
-                aria-label={t.attach}
-                title={t.attach}
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect()
-                  setAttach({ x: r.left, y: r.top - 8 })
-                }}
-              >
-                <Icon name="paperclip" />
-              </button>
-            )}
-            <input ref={photoInput} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => pick(e, onPhotos)} />
-            <input ref={cameraInput} type="file" accept="image/*,video/*" capture="environment" hidden onChange={(e) => pick(e, onPhotos)} />
-            <input ref={docInput} type="file" multiple hidden onChange={(e) => pick(e, onDocuments)} />
-            <textarea
-              ref={box}
-              rows={1}
-              dir="auto"
-              placeholder={t.message}
-              aria-label={t.message}
-              value={text}
-              maxLength={4000}
-              onChange={(e) => change(e.target.value, e.target.selectionStart)}
-              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-              onKeyDown={keyDown}
-              onPaste={paste}
-              autoFocus
-            />
-          </div>
-          {/* With nothing typed: the round camera, for a video message. */}
-          {!text.trim() && !editing && (
-            <button type="button" className="icon note-btn" aria-label={t.recordVideoNote} title={t.recordVideoNote} onClick={() => (setError(''), setFilming(true))}>
-              <Icon name="videoNote" />
+        <div className="cpill">
+          {!editing && (
+            <button className="ib" aria-label="Attach" data-tip="Attach" onClick={attach}>
+              <Icon name="plus" size={24} />
             </button>
           )}
-          {/* One round button: Send (or Save) when there's text, the microphone when there isn't.
-              (key: the new icon pops in when it changes, index.css) */}
-          {text.trim() || editing ? (
-            <button className="round-btn" aria-label={editing ? t.save : t.send} title={editing ? t.save : t.send}>
-              <Icon key={editing ? 'check' : 'send'} name={editing ? 'check' : 'send'} />
+          <button className="ib" aria-label="Emojis" data-tip="Emojis" onClick={emoji}>
+            <Icon name="sticker" size={22} />
+          </button>
+          <textarea
+            ref={box}
+            className="ta"
+            rows={1}
+            value={text}
+            placeholder="Type a message"
+            spellCheck
+            dir="auto"
+            onChange={(e) => typed(e.target.value)}
+            onKeyDown={(e) => {
+              if (suggestions.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                e.preventDefault();
+                setPickAt((chosen + (e.key === 'ArrowDown' ? 1 : suggestions.length - 1)) % suggestions.length);
+              } else if (suggestions.length && (e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+                e.preventDefault();
+                mention(suggestions[chosen]);
+              } else if (e.key === 'Enter' && !e.shiftKey && settings.enterSends && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void send();
+              } else if (e.key === 'Escape' && (reply || editing || quoted)) {
+                setView({ replyTo: null, editing: null, privateReply: null });
+              } else if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey) && !text) {
+                e.preventDefault();
+                dispatchEvent(new Event('pakchat:edit-last'));
+              }
+            }}
+            onPaste={(e) => {
+              const pasted = [...e.clipboardData.files];
+              if (pasted.length) {
+                e.preventDefault();
+                setView({ files: pasted });
+              }
+            }}
+            onBlur={() => typingSent.current && core.client.typing(chat.id, false)}
+          />
+          {text.trim() ? (
+            <button className="send" aria-label="Send" onClick={() => void send()}>
+              <Icon name={editing ? 'check' : 'send'} size={22} />
             </button>
           ) : (
-            <button type="button" className="round-btn" aria-label={t.recordVoice} title={t.recordVoice} onClick={startVoice}>
-              <Icon key="mic" name="mic" />
+            <button className="ib" aria-label="Voice message" data-tip="Voice message" onClick={() => setRecording(true)}>
+              <Icon name="mic" size={22} />
             </button>
           )}
-          {emojis && (
-            <Suspense fallback={null}>
-              <EmojiPicker
-                className="above-composer"
-                onPick={addEmoji}
-                onClose={() => setEmojis(false)}
-                onSticker={
-                  editing
-                    ? undefined
-                    : (picked) => {
-                        setEmojis(false)
-                        send({ kind: 'sticker', ...picked })
-                      }
-                }
-                onGif={
-                  editing
-                    ? undefined
-                    : (gif) => {
-                        setEmojis(false)
-                        send({ kind: 'gif', gif })
-                      }
-                }
-              />
-            </Suspense>
-          )}
-        </form>
+        </div>
       )}
-      {attach && <Popover x={attach.x} y={attach.y} items={attachItems} onClose={() => setAttach(null)} />}
-      {filming && (
-        <Suspense fallback={null}>
-          <VideoNoteRecorder
-            onClose={() => setFilming(false)}
-            onSend={(note) => {
-              setFilming(false)
-              send(note)
-            }}
-          />
-        </Suspense>
-      )}
-    </div>
-  )
+      <input ref={files} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => (pick(e.target.files), (e.target.value = ''))} />
+      <input ref={docs} type="file" multiple hidden onChange={(e) => (pick(e.target.files), (e.target.value = ''))} />
+      <input ref={audio} type="file" accept="audio/*" multiple hidden onChange={(e) => (pick(e.target.files), (e.target.value = ''))} />
+    </footer>
+  );
 }
 
-// While recording: a bin to cancel, a red dot, the time so far, a moving sound wave, ① (view once), and Send.
-// once: null = view once isn't offered here.
-type BarProps = { recording: Recording; onDone: (keep: boolean) => void; once: boolean | null; onOnce: () => void }
-function RecordingBar({ recording, onDone, once, onOnce }: BarProps) {
-  const { t } = useT()
-  const now = useNow(250)
-  const seconds = (now - recording.started) / 1000
+/** A little copy of a group message, for "Reply privately". */
+function quoteOf(m: Message): ChatQuote {
+  const f = m.file;
+  const kind: ChatQuote['kind'] = m.kind === 'text' ? 'text' : m.kind === 'poll' ? 'poll' : f ? (f.kind === 'image' || f.kind === 'video' || f.kind === 'voice' ? f.kind : 'file') : 'other';
+  return { chat: m.chatId, author: m.author, id: m.id, kind, ...(m.text ? { text: m.text.slice(0, 500) } : {}), ...(f?.thumb ? { thumb: f.thumb } : {}) };
+}
 
-  // Stop by itself at the time limit, so the file never gets too big.
-  useEffect(() => {
-    const timer = setTimeout(() => onDone(true), MAX_VOICE_SECONDS * 1000 - (Date.now() - recording.started))
-    return () => clearTimeout(timer)
-  }, [recording, onDone])
+async function saveDraft(chatId: string, text: string) {
+  const now = core.prefs[chatId]?.draft ?? '';
+  if (now === text) return;
+  await core.setPrefs(chatId, text.trim() ? { draft: text, draftAt: Date.now() } : { draft: undefined, draftAt: undefined });
+}
 
-  // Enter sends it, like pressing Send. (Not while a window like the photo viewer is on top.)
+/** Recording a voice message: the red dot, the time, delete or send. */
+/** WhatsApp Web's "Message too long": says by how much, and keeps the words to shorten. */
+function tooLong(words: string) {
+  const over = [...words].length - MAX_TEXT;
+  const id: number = openLayer(
+    <Dialog title="Message too long" onClose={() => closeLayer(id)} buttons={[{ label: 'OK', fill: true }]}>
+      <p className="dtext">
+        Messages can be up to {MAX_TEXT.toLocaleString()} characters. This one is {over.toLocaleString()} too long. Shorten it, or send it in parts.
+      </p>
+    </Dialog>,
+    true,
+  );
+}
+
+function Recorder({ chat, replyTo, onDone }: { chat: Chat; replyTo: { author: string; id: string } | null; onDone: () => void }) {
+  const [ms, setMs] = useState(0);
+  const [level, setLevel] = useState<number[]>([]);
+  const [paused, setPaused] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const rec = useRef<{ stop: (send: boolean) => void; pause: () => void; resume: () => void; play: () => void } | null>(null);
+
+  // They see "recording audio…" while this records (said again every few seconds, like typing).
   useEffect(() => {
-    function key(e: KeyboardEvent) {
-      if (e.key !== 'Enter' || e.repeat || document.querySelector('.modal, .viewer, .photo-sender')) return
-      e.preventDefault() // so Enter doesn't also press the bin button, if it's selected
-      onDone(true)
-    }
-    document.addEventListener('keydown', key)
-    return () => document.removeEventListener('keydown', key)
-  }, [onDone])
+    if (paused) return;
+    core.client.typing(chat.id, true, true);
+    const id = setInterval(() => core.client.typing(chat.id, true, true), 4000);
+    return () => {
+      clearInterval(id);
+      core.client.typing(chat.id, false);
+    };
+  }, [chat.id, paused]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let stopFn: ((send: boolean) => void) | null = null;
+    let player: HTMLAudioElement | null = null;
+    void (async () => {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        toast('To record voice messages, allow PakChat to use your microphone in your browser.');
+        onDone();
+        return;
+      }
+      if (cancelled) return stream.getTracks().forEach((t) => t.stop());
+      const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32_000 } : undefined);
+      const chunks: Blob[] = [];
+      const bars: number[] = [];
+      const ctx = new AudioContext();
+      const an = ctx.createAnalyser();
+      an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      // The length counts only the time spent recording, not paused.
+      let recorded = 0;
+      let since = Date.now();
+      let running = true;
+      const length = () => recorded + (running ? Date.now() - since : 0);
+      const hold = () => {
+        if (running) recorded += Date.now() - since;
+        running = false;
+      };
+      const tick = setInterval(() => {
+        if (mr.state !== 'recording') return;
+        an.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+        bars.push(peak);
+        setLevel(bars.slice(-48));
+        setMs(length());
+      }, 100);
+      mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      let send = false;
+      mr.onstop = () => {
+        clearInterval(tick);
+        player?.pause();
+        if (player) URL.revokeObjectURL(player.src);
+        stream.getTracks().forEach((t) => t.stop());
+        void ctx.close();
+        const total = length();
+        if (send && total > 700) {
+          const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
+          const wave = btoa(String.fromCharCode(...loudness(squeeze(bars, 64))));
+          void core.sendVoice(chat.id, blob, total, wave, replyTo ?? undefined).catch(() => toast("Couldn't send the voice message."));
+          if (replyTo) setView({ replyTo: null });
+        }
+        onDone();
+      };
+      mr.start(250);
+      stopFn = (s) => {
+        send = s;
+        hold();
+        if (mr.state !== 'inactive') mr.stop();
+      };
+      rec.current = {
+        stop: stopFn,
+        pause: () => {
+          if (mr.state !== 'recording') return;
+          hold();
+          mr.pause();
+          mr.requestData();
+          setPaused(true);
+        },
+        resume: () => {
+          if (mr.state !== 'paused') return;
+          player?.pause();
+          setPlaying(false);
+          since = Date.now();
+          running = true;
+          mr.resume();
+          setPaused(false);
+        },
+        // While paused: listen to what's recorded so far.
+        play: () => {
+          if (player && !player.paused) {
+            player.pause();
+            return setPlaying(false);
+          }
+          if (player) URL.revokeObjectURL(player.src);
+          player = new Audio(URL.createObjectURL(new Blob(chunks, { type: mr.mimeType || 'audio/webm' })));
+          player.onended = () => setPlaying(false);
+          void player.play().then(() => setPlaying(true));
+        },
+      };
+    })();
+    // WhatsApp's keys while recording: Alt+P pauses or goes on, Ctrl+Enter sends, Escape deletes.
+    const key = (e: KeyboardEvent) => {
+      const r = rec.current;
+      if (!r) return;
+      if (e.altKey && (e.key.toLowerCase() === 'p' || e.code === 'KeyP')) {
+        e.preventDefault();
+        if (document.querySelector('.cpill.rec.paused')) r.resume();
+        else r.pause();
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        r.stop(true);
+      } else if (e.key === 'Escape') r.stop(false);
+    };
+    addEventListener('keydown', key);
+    return () => {
+      cancelled = true;
+      removeEventListener('keydown', key);
+      stopFn?.(false);
+    };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div className="composer recording">
-      <div className="field">
-        <button type="button" className="icon danger" aria-label={t.cancel} title={t.cancel} onClick={() => onDone(false)}>
-          <Icon name="trash" />
+    <div className={`cpill rec ${paused ? 'paused' : ''}`}>
+      <button className="ib" aria-label="Delete recording" onClick={() => rec.current?.stop(false)}>
+        <Icon name="trash" size={22} />
+      </button>
+      {paused ? (
+        <button className="ib" aria-label={playing ? 'Stop playing' : 'Play recording'} onClick={() => rec.current?.play()}>
+          <Icon name={playing ? 'pause' : 'play'} size={22} />
         </button>
-        <span className="rec-dot" />
-        <span className="rec-time">
-          {duration(seconds)} <small>/ {duration(MAX_VOICE_SECONDS)}</small>
-        </span>
-        <span className="wave" aria-label={t.recording}>
-          {Array.from({ length: 18 }, (_, i) => (
-            <i key={i} style={{ animationDelay: `${(i % 6) * 0.12}s` }} />
-          ))}
-        </span>
-        {once !== null && (
-          <button type="button" className={once ? 'icon once-toggle on' : 'icon once-toggle'} aria-pressed={once} aria-label={t.viewOnce} title={once ? t.viewOnceOn : t.viewOnce} onClick={onOnce}>
-            <Icon name="once" />
-          </button>
-        )}
-      </div>
-      <button type="button" className="round-btn" aria-label={t.send} title={t.send} onClick={() => onDone(true)}>
-        <Icon name="send" />
+      ) : (
+        <span className="rdot" />
+      )}
+      <span className="rtime">{duration(ms)}</span>
+      <span className="rwave">
+        {loudness(level).map((v, i) => (
+          <i key={i} style={{ height: 3 + (v / 255) * 24 }} />
+        ))}
+      </span>
+      {paused ? (
+        <button className="ib recgo" aria-label="Continue recording" data-tip="Continue recording" onClick={() => rec.current?.resume()}>
+          <Icon name="mic" size={22} />
+        </button>
+      ) : (
+        <button className="ib" aria-label="Pause recording" data-tip="Pause" onClick={() => rec.current?.pause()}>
+          <Icon name="pause" size={22} />
+        </button>
+      )}
+      <button className="send" aria-label="Send voice message" onClick={() => rec.current?.stop(true)}>
+        <Icon name="send" size={22} />
       </button>
     </div>
-  )
+  );
+}
+
+/** Peaks (0 to 128) as bar heights (0 to 255), the loudest moment full height, like WhatsApp. Quiet hiss stays low. */
+function loudness(peaks: number[]) {
+  const top = Math.max(QUIET, ...peaks);
+  return peaks.map((p) => Math.round((Math.min(p, top) / top) * 255));
+}
+const QUIET = 6;
+
+/** Fewer bars: the loudest of each stretch. */
+function squeeze(bars: number[], n: number) {
+  if (bars.length <= n) return bars;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const from = Math.floor((i * bars.length) / n);
+    const to = Math.floor(((i + 1) * bars.length) / n);
+    out.push(Math.max(...bars.slice(from, Math.max(to, from + 1))));
+  }
+  return out;
 }

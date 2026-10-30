@@ -307,6 +307,13 @@ defmodule Pakchat.Accounts do
     )
   end
 
+  @doc "Remembers when a device was last connected (Linked devices' \"Last active\")."
+  def touch_device(device_uuid) do
+    Repo.update_all(from(d in Device, where: d.id == ^device_uuid),
+      set: [last_active_at: DateTime.utc_now()]
+    )
+  end
+
   ## Blocking
 
   def block(%User{id: id}, %User{id: id}), do: {:error, :not_allowed}

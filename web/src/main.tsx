@@ -1,25 +1,37 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.tsx'
-import { startBack } from './back'
-import LangProvider from './LangProvider.tsx'
-import { registerServiceWorker } from './pwa'
-import { fitToScreen } from './screen'
-import { applySettings } from './settings'
-import { applyTheme, savedTheme } from './theme'
+// main.tsx: starts PakChat Web.
 
-// Put your saved look and text size on before anything is drawn, so the page doesn't flash.
-applyTheme(savedTheme(), false)
-applySettings()
-registerServiceWorker()
-fitToScreen() // phones: stay above the keyboard (screen.ts)
-startBack() // the Back button goes back inside PakChat, instead of leaving it (back.ts)
+import './styles/tokens.css';
+import './styles/app.css';
+import './styles/live.css';
+
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+
+import { App } from './App';
+import { core } from './core/core';
+import { onPhone } from './device';
+
+// Phones only see "Get the PakChat app", so they never load the chat engine.
+if (!onPhone) void core.init();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <LangProvider>
-      <App />
-    </LangProvider>
+    <App />
   </StrictMode>,
-)
+);
+
+// After a new version goes live, an open tab may ask for a screen's old file, which is gone.
+// Load the new version instead (once a minute at most, so a real outage can't loop).
+addEventListener('vite:preloadError', (e) => {
+  e.preventDefault();
+  const last = Number(sessionStorage.getItem('pakchat-reloaded') ?? 0);
+  if (Date.now() - last > 60_000) {
+    sessionStorage.setItem('pakchat-reloaded', String(Date.now()));
+    location.reload();
+  }
+});
+
+// The saved copy of the app's files, so a second visit opens at once (and offline).
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}

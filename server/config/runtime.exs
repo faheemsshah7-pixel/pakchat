@@ -68,6 +68,8 @@ if config_env() != :test do
     # The biggest file to send, and the biggest backup, in MB.
     file_max_mb: int.("FILE_MAX_MB", 100),
     backup_max_mb: int.("BACKUP_MAX_MB", 2048),
+    # New files and backups are refused once the disk would have less than this free (MB).
+    min_free_mb: int.("MIN_FREE_MB", 2048),
     # Where files and backups are kept (locked), until launch moves them to S3-style storage.
     files_dir: System.get_env("FILES_DIR", "priv/files"),
     # Firebase's service account key file, for push alerts. Never put it in git.
@@ -149,11 +151,9 @@ if config_env() == :prod do
   config :pakchat, PakchatWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
-      # See the documentation on https://bandit.hexdocs.pm/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      # All of the container's IPv4 addresses. Only Caddy reaches it (deploy/compose.yaml),
+      # and Docker's network has no IPv6, where {0, 0, 0, 0, 0, 0, 0, 0} fails to start.
+      ip: {0, 0, 0, 0}
     ],
     secret_key_base: secret_key_base
 

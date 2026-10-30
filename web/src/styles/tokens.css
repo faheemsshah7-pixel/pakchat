@@ -1,0 +1,38 @@
+/* tokens.css: design 1 ("Like WhatsApp Web"), WhatsApp Web's measured look with PakChat's blue.
+   Copied from the approved mockup (designs/web/screens/source/d1.css). WEB-RULEBOOK.md has the numbers. */
+:root {
+  --font: 'Roboto Flex', Roboto, 'Helvetica Neue', Helvetica, 'Noto Color Emoji', sans-serif;
+  --app: #F7F5F3; --panel: #FFFFFF; --rail: #F7F5F3; --wash: #F7F5F3;
+  --text: #0A0A0A; --muted: rgba(0,0,0,.6); --icon: rgba(0,0,0,.6); --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.2);
+  --acc: #2563EB; --accSoft: #DBEAFE; --accInk: #1E40AF; --link: #1D4ED8; --onAcc: #FFFFFF;
+  --hover: rgba(194,189,184,.15); --sel: rgba(194,189,184,.28); --searchBg: rgba(194,189,184,.15);
+  --badge: #2563EB; --badgeMuted: #C2BDB8; --draft: #2563EB; --online: #22C55E; --red: #D42A3C; --read: #0A84FF; --readOnOut: #0A84FF;
+  --av1: #DCE9FF; --avT1: #1E3A8A; --av2: #D9F0FF; --avT2: #0B4A75; --av3: #E3E2FF; --avT3: #3730A3;
+  --rowR: 12px; --nameW: 400; --metaW: 420;
+  --wall: #F5F1EB; --wallSolid: #F5F1EB; --doodle: #E2D6C6; --doodleOp: .6; --gutter: 9%;
+  --bubIn: #FFFFFF; --bubInSolid: #FFFFFF; --bubInText: #0A0A0A; --bubOut: #DBEAFE; --bubOutSolid: #DBEAFE; --bubOutText: #0A0A0A;
+  --bubR: 7.5px; --tailCorner: 0; --tailShow: block; --bubShadow: 0 1px .5px rgba(11,20,26,.13); --bubMax: 65%; --msgSize: 14.2px;
+  --bubHoverFilter: none; --metaC: rgba(0,0,0,.6); --metaOutC: rgba(0,0,0,.6);
+  --pill: rgba(255,255,255,.9); --pillR: 7.5px; --pillShadow: 0 1px .5px rgba(11,20,26,.13); --e2e: #FFF0D4; --e2eText: rgba(0,0,0,.6);
+  --quoteBg: rgba(0,0,0,.05); --quoteBar: #2563EB; --rxBg: #FFFFFF; --rbtnBg: rgba(255,255,255,.9);
+  --waveOff: #C2BDB8; --waveOn: #2563EB;
+  --menu: #FFFFFF; --menuR: 16px; --itemR: 12px; --itemHover: rgba(194,189,184,.15); --menuLine: rgba(0,0,0,.06); --menuShadow: 0 12px 16px -4px rgba(10,10,10,.1), 0 2px 6px rgba(10,10,10,.06);
+  --tipBg: #242626; --tipText: #FFFFFF; --composer: #FFFFFF; --chipOn: #DBEAFE; --chipOnText: #1E40AF;
+  --drawerW: 410px; --swOff: #C2BDB8; --scroll: rgba(0,0,0,.2); --dialogR: 24px;
+  --viewer: #FFFFFF; --viewerText: #0A0A0A; --viewerMuted: rgba(0,0,0,.6); --viewerIcon: rgba(0,0,0,.6); --viewerBtn: rgba(194,189,184,.2); --viewerSel: #C2BDB8;
+  --callBg: #FFFFFF; --callText: #0A0A0A; --callLive: #F7F5F3;
+}
+.dark {
+  --app: #161717; --panel: #161717; --rail: #1D1F1F; --wash: #0F1010;
+  --text: #FAFAFA; --muted: rgba(255,255,255,.6); --icon: rgba(255,255,255,.6); --line: rgba(255,255,255,.1); --line2: rgba(255,255,255,.2);
+  --acc: #3B82F6; --accSoft: #172554; --accInk: #DBEAFE; --link: #60A5FA;
+  --hover: rgba(255,255,255,.08); --sel: rgba(255,255,255,.12); --searchBg: rgba(255,255,255,.08);
+  --badge: #3B82F6; --badgeMuted: #5B5F60; --draft: #60A5FA; --red: #FB5061; --read: #53BDEB; --readOnOut: #7DD3FC;
+  --av1: #1E2A44; --avT1: #A9C6FF; --av2: #16303F; --avT2: #93D2F5; --av3: #262546; --avT3: #C4C2FF;
+  --wall: #161717; --wallSolid: #161717; --doodle: rgba(255,255,255,.07); --doodleOp: 1;
+  --bubIn: #242626; --bubInSolid: #242626; --bubInText: #FAFAFA; --bubOut: #1E3A8A; --bubOutSolid: #1E3A8A; --bubOutText: #FAFAFA;
+  --metaC: rgba(255,255,255,.6); --metaOutC: rgba(255,255,255,.65); --pill: #1D1F1F; --e2e: #1D1F1F; --e2eText: #FFD279;
+  --quoteBg: rgba(0,0,0,.2); --quoteBar: #60A5FA; --rxBg: #242626; --rbtnBg: #242626; --waveOff: #5B5F60; --waveOn: #7AA7FF;
+  --menu: #1D1F1F; --menuLine: rgba(255,255,255,.08); --itemHover: rgba(255,255,255,.08); --tipBg: #EEEEEE; --tipText: #0A0A0A;
+  --composer: #242626; --chipOn: #172554; --chipOnText: #DBEAFE; --swOff: #5B5F60; --scroll: rgba(255,255,255,.16);
+}

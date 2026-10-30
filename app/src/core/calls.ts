@@ -21,6 +21,15 @@
 //      the camera's picture is added to each connection, which is set up again
 //      with a fresh "offer" (by whichever phone turned it on). The others then
 //      see me, and can turn their own camera on the same way.
+//   2b. Connecting while it rings (owner, 25 Oct), one-to-one calls from a saved contact: Sara's
+//      "ringing" says she can ("early"). Ali's phone then offers a connection
+//      straight away and they trade "ice" while it rings, but neither sends
+//      anything yet: Ali's mic and camera are held back (empty senders), and
+//      Sara's aren't even on. When she answers, both put their mic (and camera)
+//      on the connection that's already there, so the call is live at once.
+//      Her "join" and Ali's "here" say whether each kept it ("early"); if
+//      either didn't (it never connected, a message got lost), both drop it
+//      and connect the usual way below. Older phones never say "early".
 //   6. Adding someone to a one-to-one call (like WhatsApp's "Add participant"):
 //      it becomes a group call. They aren't in the chat, so each pair of
 //      people talks through their own one-to-one chat instead (opened
@@ -33,8 +42,8 @@
 import { MAX_CALL_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device } from '@pakchat/shared';
 import { router } from 'expo-router';
 import KV from 'expo-sqlite/kv-store';
-import { AppState, Dimensions } from 'react-native';
-import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, type MediaStream } from 'react-native-webrtc';
+import { AppState, Dimensions, Vibration } from 'react-native';
+import { mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, type MediaStreamTrack } from 'react-native-webrtc';
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
 import { en, ur, type Strings } from '../i18n/strings';
@@ -106,6 +115,8 @@ export type CallView = {
   canAdd: boolean;
   /** I'm sharing my screen: everyone sees it instead of my camera. */
   sharing: boolean;
+  /** Call waiting: someone else calling while I'm on this call (End & accept, or Decline). */
+  waiting: { id: string; chatId: string; from: string; video: boolean; group: boolean } | null;
 };
 
 /** One call in the Calls tab. */
@@ -126,9 +137,13 @@ type Peer = {
   rev: number;
   /** Stops waiting for a dropped connection to come back. */
   giveUp: (() => void) | null;
+  /** Connected while it rang (see 2b at the top). */
+  early: boolean;
+  /** `stream` was put together here from their tracks (it's released with the connection). */
+  ownStream: boolean;
 };
 
-type Live = Omit<CallView, 'peers' | 'local'> & {
+type Live = Omit<CallView, 'peers' | 'local' | 'waiting'> & {
   fromDevice: number;
   peers: Map<string, Peer>;
   localStream: MediaStream | null;
@@ -147,6 +162,8 @@ type Live = Omit<CallView, 'peers' | 'local'> & {
   invite: string[];
   cancel: (() => void)[];
   done: boolean;
+  /** The connection made while it rings, until it's answered (one-to-one calls; see 2b at the top). */
+  early: Peer | null;
 };
 
 /** A ringing call, kept so it survives PakChat being started by the ringing alert. */
@@ -157,7 +174,7 @@ const RINGING = 'call:ringing';
 
 type PcEvents = {
   addEventListener(type: 'icecandidate', fn: (e: { candidate: RTCIceCandidate | null }) => void): void;
-  addEventListener(type: 'track', fn: (e: { streams: MediaStream[] }) => void): void;
+  addEventListener(type: 'track', fn: (e: { streams: MediaStream[]; track?: MediaStreamTrack }) => void): void;
   addEventListener(type: 'connectionstatechange', fn: () => void): void;
 };
 
@@ -233,6 +250,8 @@ class Calls {
   private linkCalls = new Map<string, LinkCall>();
   private linkChats = new Map<string, boolean>();
   private audioWatch: { remove: () => void } | null = null;
+  /** Call waiting, like WhatsApp: a second call ringing while I'm on one, until I pick or it stops. */
+  private waiting: (Ringing & { at: number; stop: () => void }) | null = null;
 
   /** A call is going on (or ringing): the connection to the server stays open. */
   get live() {
@@ -256,9 +275,11 @@ class Calls {
   view(): CallView | null {
     const c = this.call;
     if (!c) return null;
-    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, ...rest } = c;
+    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, early: _e, ...rest } = c;
+    const w = this.waiting;
     return {
       ...rest,
+      waiting: w && !c.done ? { id: w.id, chatId: w.chatId, from: w.from, video: w.video, group: w.group } : null,
       extra: [...c.extra],
       // While I share my screen, my own tile says so (like WhatsApp) instead of showing it back to me.
       local: localStream && c.camera && !c.sharing ? localStream.toURL() : null,
@@ -354,6 +375,7 @@ class Calls {
       declined: new Set(),
       cancel: [],
       done: false,
+      early: null,
     };
   }
 
@@ -445,11 +467,17 @@ class Calls {
     if (!(await this.media(c))) return this.end(c, 'permission');
     fileModule().callAudioStart(c.video);
     this.watchAudio(c);
+    // Connected while it rang: my mic (and camera) go on that connection now.
+    const early = this.keepEarly(c);
     if (!(await this.connected())) return this.end(c, 'offline');
     if (c.done) return;
     // Tell everyone (the caller, others in a group, and my other phones).
-    if (!(await this.send(c, { op: 'join', video: c.camera, audio: true }, undefined, true))) return this.end(c, 'offline');
+    if (!(await this.send(c, { op: 'join', video: c.camera, audio: true, ...(early ? { early: true } : {}) }, undefined, true))) return this.end(c, 'offline');
     this.ongoing(c);
+    if (early) {
+      await this.sendTracks(c, early);
+      if (early.pc?.connectionState === 'connected') this.connectionChanged(c, early);
+    }
     c.cancel.push(
       later(CONNECT_MS, () => {
         if (!c.done && !c.connectedOnce) this.end(c, 'failed');
@@ -538,6 +566,56 @@ class Calls {
     await this.whenConnected(() => this.send(c, { op: 'decline' }, undefined, true));
   }
 
+  // ---- Call waiting ----
+
+  private wait(r: Ringing, ms: number, at: number) {
+    const stop = later(ms, () => {
+      if (this.waiting?.id === r.id) this.dropWaiting(true);
+    });
+    this.waiting = { ...r, at, stop };
+    // The caller hears it ringing; I feel a buzz (the call's sound carries on).
+    void this.whenConnected(() => this.sendTo(r.chatId, r.id, { op: 'ringing' }, [{ userId: r.from, deviceId: r.fromDevice }])).catch(() => {});
+    Vibration.vibrate([0, 250, 200, 250]);
+    this.emit();
+    // Looking at my chats: the call screen comes up to show it.
+    if (AppState.currentState === 'active' && !this.screenOpen && this.call) router.push({ pathname: '/call', params: { id: this.call.id } });
+  }
+
+  /** The waiting call is over without me picking it up: `missed`, it's a missed call. */
+  private dropWaiting(missed: boolean) {
+    const w = this.waiting;
+    if (!w) return;
+    this.waiting = null;
+    w.stop();
+    Vibration.cancel();
+    this.remember(w.id);
+    if (missed) void this.logMissed(w.chatId, w.id, w.from, w.video, w.group, w.at);
+    this.emit();
+  }
+
+  /** "Decline" on the waiting call: the caller is told, and the call I'm on carries on. */
+  async declineWaiting() {
+    const w = this.waiting;
+    if (!w) return;
+    this.dropWaiting(false);
+    await addToLog({ id: w.id, chatId: w.chatId, with: [w.from], direction: 'in', video: w.video, group: w.group, at: w.at, seconds: 0, missed: true });
+    await core.client.noteCall(w.chatId, w.id, { by: w.from, video: w.video, group: w.group, missed: true, seconds: 0 }, w.at).catch(() => {});
+    await this.whenConnected(() => this.sendTo(w.chatId, w.id, { op: 'decline' }, undefined, true));
+  }
+
+  /** "End & accept": hangs up this call and answers the waiting one. */
+  async acceptWaiting() {
+    const w = this.waiting;
+    if (!w) return;
+    this.waiting = null;
+    w.stop();
+    Vibration.cancel();
+    const { at: _at, stop: _stop, ...r } = w;
+    await this.hangUp();
+    this.ring(r, Math.max(10_000, r.until - Date.now()), false);
+    await this.answer();
+  }
+
   /** Hangs up (or stops calling). */
   async hangUp() {
     const c = this.call;
@@ -581,8 +659,13 @@ class Calls {
     KV.setItemSync(RINGING, JSON.stringify(r));
     if (announce) {
       void this.showRing(c);
-      // Tell the caller's phone it's ringing here, so it shows "Ringing…".
-      void this.whenConnected(() => this.sendTo(c.chatId, c.id, { op: 'ringing' }, [{ userId: c.from, deviceId: c.fromDevice }])).catch(() => {});
+      // Tell the caller's phone it's ringing here, so it shows "Ringing…", and (one to one)
+      // that it can start connecting now.
+      const caller = { userId: c.from, deviceId: c.fromDevice };
+      // Only for my contacts: connecting tells the other phone my address (as answering does),
+      // so a stranger calling doesn't learn it unless I answer.
+      if (!r.group && core.isContact(c.from)) c.early = this.newPeer(c, caller, true);
+      void this.whenConnected(() => this.sendTo(c.chatId, c.id, { op: 'ringing', ...(c.early ? { early: true } : {}) }, [caller])).catch(() => {});
     }
     c.cancel.push(
       later(ms, () => {
@@ -645,13 +728,23 @@ class Calls {
       if (this.linkSignal(e, from)) return;
     }
 
+    // The call that's waiting: the caller gave up, or I picked it up or said no on another phone.
+    const w = this.waiting;
+    if (w && w.id === s.call && !c) {
+      if (s.op === 'leave' && e.from === w.from) this.dropWaiting(true);
+      else if (mine && (s.op === 'join' || s.op === 'decline')) this.dropWaiting(false);
+      return;
+    }
+
     switch (s.op) {
       case 'ring':
         if (mine || this.finished.includes(s.call) || c) return;
         return this.incoming(e, from);
       case 'ringing':
         // Their phone is ringing: "Calling…" becomes "Ringing…", with the ringing sound.
-        if (!c || mine || c.direction !== 'out' || c.state !== 'outgoing' || c.ringing) return;
+        if (!c || mine || c.direction !== 'out' || c.state !== 'outgoing') return;
+        if (s.early) this.startEarly(c, from);
+        if (c.ringing) return;
         c.ringing = true;
         fileModule().callTone('ringing');
         this.ongoing(c);
@@ -662,16 +755,23 @@ class Calls {
         if (mine && c.state === 'incoming') return this.end(c, 'elsewhere');
         if (!c.joined) return;
         return this.someoneJoined(c, from, s);
-      case 'here':
+      case 'here': {
         if (!c?.joined) return;
+        const p = c.peers.get(keyOf(from));
+        // I kept the connection made while it rang, but they didn't: start again the usual way.
+        if (p?.early && !s.early) this.dropEarly(p);
         return this.meet(c, from, s);
+      }
       case 'offer':
+        // Ringing here: the caller's phone connecting early (see 2b at the top).
+        if (c && !c.joined && s.sdp && c.early?.key === keyOf(from)) return this.gotOffer(c, from, s.sdp);
         if (!c?.joined || !s.sdp) return;
         return this.gotOffer(c, from, s.sdp);
       case 'answer':
         if (!c?.joined || !s.sdp) return;
         return this.gotAnswer(c, from, s.sdp);
       case 'ice':
+        if (c && !c.joined && s.cand && c.early?.key === keyOf(from)) return this.gotIce(c, from, s.cand);
         if (!c?.joined || !s.cand) return;
         return this.gotIce(c, from, s.cand);
       case 'media': {
@@ -740,6 +840,10 @@ class Calls {
         return this.answer();
       }
       if (now.direction === 'out' && now.state === 'outgoing' && now.chatId === e.chatId && !now.group && !s.group) return;
+      // Call waiting, like WhatsApp: on a call I'm in, a second call shows on the call screen
+      // (End & accept, or Decline) instead of "busy". Not a stranger's with "Silence unknown callers".
+      const silenced = core.settings.silenceUnknown && !s.group && !extra.length && !core.isContact(e.from);
+      if (fresh && !silenced && !this.waiting && now.joined && now.chatId !== e.chatId) return this.wait({ ...ringing, until: Date.now() + left }, left, e.at);
       // On another call: "busy", and it's a missed call here.
       await this.sendTo(e.chatId, s.call, { op: 'busy' }, [from]);
       this.remember(s.call);
@@ -766,9 +870,24 @@ class Calls {
       void this.send(c, { op: 'busy' }, [from]);
       return;
     }
+    // Connected while it rang: kept if that's the phone that answered, and it kept it too.
+    let early: Peer | null = null;
+    const e = c.early;
+    if (e && e.userId === from.userId) {
+      c.early = null;
+      if (e.key === key && s.early && e.pc?.remoteDescription) {
+        early = e;
+        c.peers.set(key, e);
+      } else this.closePeer(e);
+    }
     // "I'm here": they connect with me (and with everyone else who answers the same).
-    void this.send(c, { op: 'here', video: c.camera, audio: !c.muted }, [from]);
+    void this.send(c, { op: 'here', video: c.camera, audio: !c.muted, ...(early ? { early: true } : {}) }, [from]);
     this.meet(c, from, s);
+    if (early) {
+      void this.sendTracks(c, early).then(() => {
+        if (!c.done && early.pc?.connectionState === 'connected') this.connectionChanged(c, early);
+      });
+    }
   }
 
   /** Starts connecting to another phone in the call. */
@@ -795,10 +914,72 @@ class Calls {
     const key = keyOf(from);
     let p = c.peers.get(key);
     if (!p) {
-      p = { key, userId: from.userId, deviceId: from.deviceId, pc: null, stream: null, state: 'connecting', audio: true, video: c.video, screen: false, pending: [], giveUp: null, rev: 0 };
+      p = this.newPeer(c, from, false);
       c.peers.set(key, p);
     }
     return p;
+  }
+
+  private newPeer(c: Live, from: Device, early: boolean): Peer {
+    return { key: keyOf(from), userId: from.userId, deviceId: from.deviceId, pc: null, stream: null, state: 'connecting', audio: true, video: c.video, screen: false, pending: [], giveUp: null, rev: 0, early, ownStream: false };
+  }
+
+  /** In the call, or the connection made while it rings. */
+  private find(c: Live, from: Device): Peer | undefined {
+    const key = keyOf(from);
+    return c.peers.get(key) ?? (c.early?.key === key ? c.early : undefined);
+  }
+
+  // ---- Connecting while it rings (see 2b at the top) ----
+
+  /** Calling: their phone is ringing and can connect now. My phone offers; nothing is sent until they answer. */
+  private startEarly(c: Live, from: Device) {
+    const key = keyOf(from);
+    if (c.group || c.early || c.peers.has(key) || !c.localStream) return;
+    const p = this.newPeer(c, from, true);
+    c.early = p;
+    void this.offer(c, p);
+  }
+
+  /** Answering: keeps the connection made while it rang, if it got that far (else drops it). */
+  private keepEarly(c: Live): Peer | null {
+    const e = c.early;
+    if (!e) return null;
+    c.early = null;
+    if (e.pc?.remoteDescription && e.pc.localDescription) {
+      c.peers.set(e.key, e);
+      return e;
+    }
+    this.closePeer(e);
+    return null;
+  }
+
+  /** The other phone didn't keep the early connection: drop it, to connect the usual way. */
+  private dropEarly(p: Peer) {
+    this.closePeer(p);
+    p.early = false;
+    p.pending = [];
+    p.stream = null;
+    p.state = 'connecting';
+    p.rev++;
+  }
+
+  /** Puts my mic (and camera) on a connection made while it rang, whose senders were left empty. */
+  private async sendTracks(c: Live, p: Peer) {
+    const local = c.localStream;
+    if (!local || !p.pc) return;
+    for (const t of p.pc.getTransceivers()) {
+      if (t.sender.track) continue;
+      const kind = t.receiver.track?.kind;
+      const track = local.getTracks().find((x) => x.kind === kind);
+      if (!track) continue;
+      try {
+        await t.sender.replaceTrack(track);
+      } catch (err) {
+        console.log(`[pakchat] call early tracks: ${String(err)}`);
+      }
+    }
+    void this.saveData(p);
   }
 
   private someoneLeft(c: Live, from: Device) {
@@ -842,7 +1023,10 @@ class Calls {
     }
     p.pc = pc;
     const local = c.localStream;
-    if (local) for (const track of local.getTracks()) pc.addTrack(track, local);
+    // Connecting while it rings: room for my sound (and picture), sent only once it's answered (sendTracks).
+    if (p.early && c.early === p) {
+      if (local) for (const track of local.getTracks()) pc.addTransceiver(track.kind as 'audio' | 'video', { direction: 'sendrecv', streams: [local] });
+    } else if (local) for (const track of local.getTracks()) pc.addTrack(track, local);
     // Someone joining while I share my screen gets my screen, not my camera.
     const screen = c.screenStream?.getVideoTracks()[0];
     if (screen && local) {
@@ -858,7 +1042,16 @@ class Calls {
       void this.send(c, { op: 'ice', cand: { candidate: cand.candidate, sdpMid: cand.sdpMid ?? null, sdpMLineIndex: cand.sdpMLineIndex ?? null } }, [p]);
     });
     events.addEventListener('track', (ev) => {
-      const stream = ev.streams[0];
+      let stream = ev.streams[0];
+      // A track without a stream (theirs, from a connection made while it rang): kept in one of our own.
+      if (!stream && ev.track) {
+        if (!p.ownStream || !p.stream) {
+          p.stream = new MediaStream();
+          p.ownStream = true;
+        }
+        stream = p.stream;
+        stream.addTrack(ev.track);
+      }
       if (stream) {
         p.stream = stream;
         p.rev++;
@@ -884,7 +1077,7 @@ class Calls {
   }
 
   private async gotOffer(c: Live, from: Device, sdp: string) {
-    const p = this.peer(c, from);
+    const p = this.find(c, from) ?? this.peer(c, from);
     const pc = await this.connection(c, p);
     if (c.done) return;
     if (pc.signalingState === 'have-local-offer') {
@@ -899,6 +1092,8 @@ class Calls {
     }
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
     await this.flushIce(p);
+    // Ringing: say I'll send too (my mic isn't on yet; sendTracks puts it on when I answer).
+    if (p.early && c.early === p) for (const t of pc.getTransceivers()) if (t.direction === 'recvonly') t.direction = 'sendrecv';
     const made = (await pc.createAnswer()) as { sdp: string; type: 'answer' };
     const answer = { type: 'answer' as const, sdp: tuneSdp(made.sdp) };
     await pc.setLocalDescription(new RTCSessionDescription(answer));
@@ -909,14 +1104,14 @@ class Calls {
   }
 
   private async gotAnswer(c: Live, from: Device, sdp: string) {
-    const p = c.peers.get(keyOf(from));
+    const p = this.find(c, from);
     if (!p?.pc || p.pc.signalingState !== 'have-local-offer') return;
     await p.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
     await this.flushIce(p);
   }
 
   private async gotIce(c: Live, from: Device, cand: NonNullable<CallSignal['cand']>) {
-    const p = this.peer(c, from);
+    const p = this.find(c, from) ?? this.peer(c, from);
     const ice = new RTCIceCandidate({ candidate: cand.candidate, sdpMid: cand.sdpMid ?? null, sdpMLineIndex: cand.sdpMLineIndex ?? null });
     if (!p.pc?.remoteDescription) {
       p.pending.push(ice);
@@ -934,6 +1129,15 @@ class Calls {
   private connectionChanged(c: Live, p: Peer) {
     const state = p.pc?.connectionState;
     if (c.done || !state) return;
+    // Still ringing: it's ready (kept for the answer), or it's dropped quietly and the call connects the usual way.
+    if (c.early === p) {
+      if (state === 'connected') p.state = 'connected';
+      else if (state === 'failed' || state === 'closed') {
+        c.early = null;
+        this.closePeer(p);
+      }
+      return;
+    }
     if (state === 'connected') {
       p.state = 'connected';
       p.giveUp?.();
@@ -975,6 +1179,16 @@ class Calls {
       // Already closed.
     }
     p.pc = null;
+    if (p.ownStream && p.stream) {
+      const own = p.stream;
+      try {
+        own.release(false);
+      } catch {
+        // Already gone.
+      }
+      p.stream = null;
+      p.ownStream = false;
+    }
   }
 
   // ---- In the call ----
@@ -1209,6 +1423,9 @@ class Calls {
     for (const stop of c.cancel) step('timer', stop);
     c.cancel = [];
     for (const p of c.peers.values()) step('connection', () => this.closePeer(p));
+    const early = c.early;
+    if (early) step('early connection', () => this.closePeer(early));
+    c.early = null;
     if (c.screenStream) {
       const screen = c.screenStream;
       step('screen', () => screen.release());
@@ -1235,6 +1452,16 @@ class Calls {
     }
     this.remember(c.id);
     if (!quiet) void this.log(c);
+    // The call ended while another was waiting: that one now rings as usual.
+    if (this.waiting && this.call === c) {
+      const w = this.waiting;
+      if (w.until - Date.now() > 3_000) {
+        this.waiting = null;
+        w.stop();
+        const { at: _at, stop: _stop, ...r } = w;
+        later(300, () => this.ring(r, r.until - Date.now(), true));
+      } else this.dropWaiting(true);
+    }
     this.emit();
     // In the background, the connection to the server isn't needed any more.
     core.letGoIfAway();

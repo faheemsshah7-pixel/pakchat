@@ -18,6 +18,7 @@ import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useC
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
+import { UpdateCard } from '../../ui/UpdateCard';
 import { ChatRow } from '../../ui/ChatRow';
 import { fromGallery } from '../../ui/chat/attachments';
 import { MuteSheet } from '../../ui/MuteSheet';
@@ -369,6 +370,7 @@ export default function Chats() {
               )}
               {/* Realme, Xiaomi and the like: turn on Autostart, or alerts don't come. */}
               {filter === 'all' && !selecting && <AlertsCard />}
+              {filter === 'all' && !selecting && <UpdateCard />}
               {archivedCount > 0 && filter === 'all' ? (
                 <Pressy onPress={() => router.push('/archived')} label={t.archived} scale={0.98} testID="open-archived">
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, height: 52 }}>
@@ -439,6 +441,7 @@ export default function Chats() {
         <MenuItem icon="group" label={t.newGroup} onPress={() => (setMenu(false), router.push('/new-group'))} testID="menu-new-group" />
         <MenuItem icon="community" label={t.newCommunity} onPress={() => (setMenu(false), router.push('/new-community'))} testID="menu-new-community" />
         <MenuItem icon="broadcast" label={t.broadcastLists} onPress={() => (setMenu(false), router.push('/broadcasts'))} testID="menu-broadcasts" />
+        <MenuItem icon="laptop" label={t.linkedDevices} onPress={() => (setMenu(false), router.push('/linked-devices'))} testID="menu-linked-devices" />
         <MenuItem icon="archive" label={t.archived} onPress={() => (setMenu(false), router.push('/archived'))} />
         <MenuItem icon="star" label={t.starred} onPress={() => (setMenu(false), router.push('/starred'))} />
         <MenuItem icon="select" label={t.selectChats} onPress={() => (setMenu(false), visible[0] && togglePick(visible[0].chat.id))} />

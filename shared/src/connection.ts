@@ -23,7 +23,8 @@ export type WireEnvelope = {
   data?: Record<string, unknown>;
 };
 
-export type TypingEvent = { chat_id: string; user_id: string; typing: boolean };
+/** `audio`: recording a voice note ("recording audio…") rather than typing. */
+export type TypingEvent = { chat_id: string; user_id: string; typing: boolean; audio?: boolean };
 
 export type ConnectionHandlers = {
   envelopes(list: WireEnvelope[]): void;

@@ -8,7 +8,9 @@ import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
 import { core, type FontSize } from '../../core/core';
+import { allowGallery } from '../../core/files';
 import { useChatList, useSettings } from '../../core/hooks';
+import { outsideFor } from '../../core/lock';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { ACCENTS, accentGradient, makeTheme, type ModeChoice } from '../../theme/palette';
@@ -21,6 +23,12 @@ export default function ChatsSettings() {
   const t = useT();
   const { theme, mode, accent, setPrefs } = useLook();
   const settings = useSettings();
+
+  // Media visibility needs the gallery: asked when it's turned on.
+  async function mediaVisibility(on: boolean) {
+    if (on && !(await outsideFor(allowGallery).catch(() => false))) return toast(t.galleryDenied);
+    core.setSettings({ mediaVisible: on });
+  }
   const rows = useChatList();
   const [archivingAll, setArchivingAll] = useState(false);
   const [sizing, setSizing] = useState(false);
@@ -93,6 +101,29 @@ export default function ChatsSettings() {
             sub={t.linkPreviewsSub}
             chevron={false}
             right={<Toggle on={settings.linkPreviews} onChange={(on) => core.setSettings({ linkPreviews: on })} label={t.linkPreviews} testID="link-previews" />}
+          />
+          <Divider />
+          <SettingRow
+            icon="send"
+            title={t.enterSends}
+            sub={t.enterSendsSub}
+            chevron={false}
+            right={<Toggle on={!!settings.enterSends} onChange={(on) => core.setSettings({ enterSends: on })} label={t.enterSends} testID="enter-sends" />}
+          />
+          <Divider />
+          <SettingRow
+            icon="photo"
+            title={t.mediaVisibility}
+            sub={t.mediaVisibilitySub}
+            chevron={false}
+            right={
+              <Toggle
+                on={!!settings.mediaVisible}
+                onChange={(on) => void mediaVisibility(on)}
+                label={t.mediaVisibility}
+                testID="media-visibility"
+              />
+            }
           />
         </Glass>
 

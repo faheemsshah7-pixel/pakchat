@@ -166,12 +166,13 @@ function App() {
           <Stack.Screen name="settings/privacy" />
           <Stack.Screen name="settings/language" />
           <Stack.Screen name="settings/blocked" />
-          <Stack.Screen name="settings/soon" />
           <Stack.Screen name="settings/account" />
           <Stack.Screen name="settings/notifications" />
           <Stack.Screen name="settings/storage" />
           <Stack.Screen name="settings/manage-storage" />
           <Stack.Screen name="qr" />
+          <Stack.Screen name="linked-devices" />
+          <Stack.Screen name="link-device" options={{ animation: 'fade_from_bottom' }} />
           <Stack.Screen name="album" />
           <Stack.Screen name="settings/chats" />
           <Stack.Screen name="settings/profile" />

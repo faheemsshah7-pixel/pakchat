@@ -46,6 +46,9 @@ defmodule Pakchat.Files do
       Ecto.UUID.cast(chat_id) == :error or Chats.role(chat_id, me.id) == nil ->
         {:error, :not_found}
 
+      not room?(size) ->
+        {:error, :storage_full}
+
       true ->
         %Stored{
           owner_id: me.id,
@@ -94,14 +97,56 @@ defmodule Pakchat.Files do
 
   @doc "Makes room for my next backup."
   def start_backup(%User{} = me, size) when is_integer(size) and size > 0 do
-    if size > max_backup() + @overhead do
-      {:error, :too_big}
-    else
-      Repo.insert(%Stored{owner_id: me.id, kind: "backup", size: size})
+    cond do
+      size > max_backup() + @overhead -> {:error, :too_big}
+      not room?(size) -> {:error, :storage_full}
+      true -> Repo.insert(%Stored{owner_id: me.id, kind: "backup", size: size})
     end
   end
 
   def start_backup(_, _), do: {:error, :bad_request}
+
+  @doc """
+  Whether the disk has room for `size` more bytes and still keeps `MIN_FREE_MB` free
+  (2 GB by default), so a full disk never stops the database or messages.
+  The free space is checked at most once a minute.
+  """
+  def room?(size) do
+    case free_bytes() do
+      nil -> true
+      free -> free - size > Application.get_env(:pakchat, :min_free_mb, 2048) * 1024 * 1024
+    end
+  end
+
+  defp free_bytes do
+    now = System.monotonic_time(:second)
+
+    case :persistent_term.get({__MODULE__, :free}, nil) do
+      {at, free} when now - at < 60 ->
+        free
+
+      _ ->
+        free = measure_free(dir())
+        :persistent_term.put({__MODULE__, :free}, {now, free})
+        free
+    end
+  end
+
+  # `df` gives the free space of the disk the folder is on, in 1 KB blocks. Nil if it can't tell.
+  defp measure_free(folder) do
+    File.mkdir_p(folder)
+
+    with {out, 0} <- System.cmd("df", ["-Pk", folder], stderr_to_stdout: true),
+         [_, line | _] <- String.split(out, "\n", trim: true),
+         [_, _, _, avail | _] <- String.split(line),
+         {kb, ""} <- Integer.parse(avail) do
+      kb * 1024
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
 
   def get(id) do
     case Ecto.UUID.cast(id) do

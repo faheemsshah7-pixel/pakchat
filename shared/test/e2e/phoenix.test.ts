@@ -14,6 +14,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { PakChat, type FileUploader } from '../../src/client';
+import { exportHistory, parseHistory } from '../../src/history';
+import { approveQr, LinkRefused, lockProvision } from '../../src/link';
+import { linkThisBrowser } from '../../src/linkWebsite';
+import { lockFile, unlockFile } from '../../src/web/fileLock';
 import { phoenixConnection } from '../../src/connection';
 import { HttpServer, REQUESTED, ServerError, type ServerChat, type SignedIn } from '../../src/server';
 import type { SignalApi } from '../../src/signal';
@@ -426,5 +430,73 @@ describe('against the real server', () => {
     }
     await server.deleteBackup();
     expect(await server.backup()).toBeNull();
+  });
+});
+
+describe('linking a website by QR code (phase 8)', () => {
+  test('the phone scans the QR, sends its history, and the website works with the phone off', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'node');
+    const chat = await ali.client.openDirect(sara.id);
+    for (const t of ['Salam', 'Kya haal hai?']) await ali.client.sendText(chat.id, t);
+    await sara.client.sendText(chat.id, 'Theek, aap?');
+    await eventually(async () => expect(await texts(ali, chat.id)).toHaveLength(3));
+
+    // The website shows a QR.
+    const web = newClient('wasm');
+    let qr = '';
+    const linking = linkThisBrowser({ client: web.client, server: web.server, socketUrl: HTTP.replace(/^http/, 'ws') + '/link', onQr: (t) => (qr = t) });
+    await eventually(async () => expect(qr).toMatch(/^PAKCHAT1,/));
+
+    // Ali's phone scans it. A made-up QR is refused first.
+    await expect(approveQr(ali.server, 'PAKCHAT1,nope', {} as never, lockProvision)).rejects.toBeInstanceOf(LinkRefused);
+    const identityKey = (await ali.signal.deviceKeys(ali.client.me!.handle)).identityKey;
+    let shown = '';
+    const approved = await approveQr(ali.server, qr, { v: 1, userId: ali.id, identityKey, phoneName: 'Pixel 7' }, lockProvision, async (name) => {
+      shown = name;
+      return true;
+    });
+    expect(shown).toBe('Test');
+    expect(approved?.deviceId).toBe(2);
+
+    const { session, provision } = await linking;
+    expect(session.userId).toBe(ali.id);
+    expect(provision).toEqual({ v: 1, userId: ali.id, identityKey, phoneName: 'Pixel 7' });
+    // The same QR can't be used twice.
+    await expect(approveQr(ali.server, qr, provision, lockProvision)).rejects.toMatchObject({ reason: 'expired' });
+    expect((await ali.server.linkedDevices()).map((d) => d.deviceId)).toEqual([1, 2]);
+
+    const aliWeb = { name: 'Ali (web)', ...web, id: session.userId };
+    people.push(aliWeb);
+    const parts: { part: number; last: boolean; file: { id: string; key: string; digest: string } }[] = [];
+    web.client.on('history', (e) => parts.push(e));
+    await connected(web.client);
+
+    // The phone sends its history, locked, through its "Message yourself" chat.
+    const self = await ali.client.openDirect(ali.id);
+    for (const b of await exportHistory(ali.storage)) {
+      const { locked, key, digest } = await lockFile(new TextEncoder().encode(JSON.stringify(b)));
+      const { id, uploadUrl } = await ali.server.startUpload(self.id, locked.length);
+      const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: locked as BufferSource });
+      expect(res.status).toBe(204);
+      await ali.client.sendHistory(self.id, approved!.deviceId, { part: b.part, last: true, file: { id, key, digest, size: locked.length } });
+    }
+    await eventually(async () => expect(parts).toHaveLength(1));
+    const down = new Uint8Array(await (await fetch(await web.server.fileLink(parts[0].file.id))).arrayBuffer());
+    await web.client.importHistory(parseHistory(new TextDecoder().decode(await unlockFile(down, parts[0].file.key, parts[0].file.digest)))!);
+    // The same chat, in the same order, as on the phone.
+    expect(await texts(aliWeb, chat.id)).toEqual(await texts(ali, chat.id));
+    expect(await texts(aliWeb, chat.id)).toHaveLength(3);
+
+    // Ali's phone goes off. The website still sends and receives.
+    ali.client.stop();
+    await sara.client.sendText(chat.id, 'Phone off hai?');
+    await eventually(async () => expect((await texts(aliWeb, chat.id)).at(-1)).toBe('Sara: Phone off hai?'));
+    await web.client.sendText(chat.id, 'Haan, laptop se');
+    await eventually(async () => expect((await texts(sara, chat.id)).at(-1)).toBe('Ali: Haan, laptop se'));
+
+    // The phone logs the website out.
+    await ali.server.removeDevice(2);
+    expect((await ali.server.linkedDevices()).map((d) => d.deviceId)).toEqual([1]);
   });
 });

@@ -1,0 +1,60 @@
+// PhonePage.tsx: the website on a phone. PakChat Web is for computers, so a
+// phone gets the app: from Google Play once PakChat is public there, and
+// until then as an APK straight from our server, with how to install it.
+
+import { useEffect, useState } from 'react';
+
+import { APK_URL, onAndroid, PLAY_URL } from '../device';
+import { Icon, PlayBadge } from '../ui/Icon';
+
+export function PhonePage() {
+  const [started, setStarted] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Get the PakChat app';
+  }, []);
+
+  const apk = !PLAY_URL;
+  return (
+    <div className="pp">
+      <div className="ptop">
+        <div className="lg">
+          <Icon name="chat" size={22} />
+        </div>
+        <b>PakChat</b>
+      </div>
+      <div className="pmid">
+        <div className="pill2">
+          <Icon name="phone" size={16} /> You're on a phone
+        </div>
+        <h1>Get the PakChat app</h1>
+        <p>PakChat on the web is made for computers. On your phone, the app is faster, gets notifications, and is where your account lives.</p>
+        {onAndroid || !apk ? (
+          <a href={apk ? APK_URL : PLAY_URL} download={apk ? 'PakChat.apk' : undefined} onClick={() => setStarted(true)}>
+            <PlayBadge play={!apk} />
+          </a>
+        ) : (
+          <p className="ios">The iPhone app comes later. For now, PakChat is on Android.</p>
+        )}
+        {apk && onAndroid && (
+          <div className={`guide ${started ? 'on' : ''}`}>
+            <b>{started ? 'Downloading… then:' : 'After it downloads:'}</b>
+            <ol>
+              <li>Open <b>PakChat.apk</b> from your notifications or Downloads.</li>
+              <li>
+                If Android asks, tap <b>Settings</b> and turn on <b>Allow from this source</b>, then go back.
+              </li>
+              <li>
+                Tap <b>Install</b>, then <b>Open</b>.
+              </li>
+            </ol>
+            <small>PakChat isn't on Google Play yet, so Android asks this once. The app tells you when there's an update.</small>
+          </div>
+        )}
+      </div>
+      <div className="pfoot">
+        <Icon name="laptop" size={16} /> On a computer? Open this page there to link it to your phone.
+      </div>
+    </div>
+  );
+}

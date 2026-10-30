@@ -376,7 +376,7 @@ defmodule Pakchat.Relay do
   "Typing…" goes straight to the others' open connections and is never
   saved. People who blocked each other don't see it.
   """
-  def typing(%Device{} = sender, chat_id, typing?) do
+  def typing(%Device{} = sender, chat_id, typing?, audio? \\ false) do
     with {:ok, chat} <- member_chat(sender.user_id, chat_id) do
       blocked =
         Accounts.blocked_by(sender.user_id, Chats.member_ids(chat.id)) ++
@@ -388,7 +388,13 @@ defmodule Pakchat.Relay do
         Phoenix.PubSub.broadcast(
           Pakchat.PubSub,
           "user:" <> user_id,
-          {:typing, %{chat_id: chat.id, user_id: sender.user_id, typing: typing? == true}}
+          {:typing,
+           %{
+             chat_id: chat.id,
+             user_id: sender.user_id,
+             typing: typing? == true,
+             audio: audio? == true
+           }}
         )
       end
 

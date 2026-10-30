@@ -21,6 +21,7 @@ import { GestureDetector } from 'react-native-gesture-handler';
 import Animated, { interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
+import { useSettings } from '../../core/hooks';
 import { firstUrl, previewOf } from '../../core/links';
 import type { Recorded } from '../../core/voice';
 import { fill, useT } from '../../i18n';
@@ -73,6 +74,7 @@ export const Composer = memo(function Composer({
   const { theme, lang, rtl } = useLook();
   // The screen gives the composer a new key when editing starts, so it starts again with the old words.
   const [text, setText] = useState(() => editing?.text ?? core.prefs[chat.id]?.draft ?? '');
+  const enterSends = !!useSettings().enterSends;
   const [mentions, setMentions] = useState<string[]>([]);
   const [panel, setPanel] = useState(false);
   const input = useRef<TextInputInstance>(null);
@@ -212,7 +214,7 @@ export const Composer = memo(function Composer({
   const sendStyle = useAnimatedStyle(() => ({ opacity: v.value, transform: [{ scale: interpolate(v.value, [0, 1], [0.5, 1]) }] }));
 
   // Voice notes: the mic button records (hold, slide, lock, or tap).
-  const voice = useVoiceRecorder({ enabled: !hasText && !editing, onSend: onVoice });
+  const voice = useVoiceRecorder({ chatId: chat.id, enabled: !hasText && !editing, onSend: onVoice });
   const recording = voice.mode !== 'idle';
   const locked = voice.mode === 'locked' || voice.mode === 'paused';
   // Round videos: hold the 📷.
@@ -335,6 +337,10 @@ export const Composer = memo(function Composer({
                     cursorColor={theme.acc}
                     multiline
                     maxLength={4000}
+                    // Enter is send: the Enter key sends, and the keyboard stays up for the next one.
+                    submitBehavior={enterSends ? 'submit' : 'newline'}
+                    returnKeyType={enterSends ? 'send' : 'default'}
+                    onSubmitEditing={enterSends ? send : undefined}
                     style={[
                       fontStyle(text || null, lang, 16, '400'),
                       { flex: 1, color: theme.text, maxHeight: 132, minHeight: 42, paddingVertical: 9, paddingHorizontal: 2, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center' },

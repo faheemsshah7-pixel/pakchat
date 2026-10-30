@@ -4,7 +4,7 @@
 // whenever the core says something changed (core.emit). So a screen never
 // waits for the network: what's on the phone shows at once, and new things
 // slide in as they arrive.
-import type { Chat, Message } from '@pakchat/shared';
+import type { Chat, LinkedDevice, Message } from '@pakchat/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { Found } from '../data/sqliteStorage';
@@ -12,6 +12,7 @@ import { broadcast, broadcasts, sentTo, summaryOf, type Broadcast, type Broadcas
 import { core, type AppSettings, type ChatPrefs, type Person, type Presence } from './core';
 import { calls, callLog, onCallLog, type CallLogEntry, type CallView } from './calls';
 import { moving } from './files';
+import { linkedDevices, syncing } from './linking';
 import { reuse, same } from './reuse';
 import { loadStatuses, type StatusPerson } from './status';
 import { isAppLocked } from './lock';
@@ -630,3 +631,12 @@ export function useAfterStart() {
     () => listShown,
   );
 }
+
+/** My phone and its linked devices (null while loading or offline), and which are being sent chats. */
+export function useLinkedDevices() {
+  const list = useLoaded<LinkedDevice[] | null>(['devices', 'connection'], () => linkedDevices(), null, []);
+  const busy = useCore(['devices'], () => syncing.size);
+  return { list, syncing: busy ? syncing : NO_SYNC };
+}
+
+const NO_SYNC = new Set<number>();

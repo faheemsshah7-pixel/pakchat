@@ -9,6 +9,13 @@ import type { Chat, Message } from './storage';
 export const EDIT_MINUTES = 15;
 /** You can delete your own message for everyone for 60 hours. */
 export const UNSEND_HOURS = 60;
+/** From this many forwards a message says "Forwarded many times", and goes to one chat at a time (WhatsApp's rule). */
+export const MANY_HOPS = 5;
+/** How many times a message will have been forwarded once I forward it. */
+export const nextHops = (m: Message) => (m.forwardHops ?? (m.forwarded ? 1 : 0)) + 1;
+/** "Forwarded many times". */
+export const forwardedMany = (m: Message) => (m.forwardHops ?? 0) >= MANY_HOPS;
+
 /** A little extra, because a message can take a moment to reach the server. */
 const GRACE_MS = 60_000;
 
@@ -23,7 +30,7 @@ export function maySend(chat: Chat, userId: string, t: string) {
   // A status: only its owner posts; the people watching can like it.
   if (chat.kind === 'status') return userId === statusOwner(chat) || t === 'react';
   if (chat.kind !== 'group' || !chat.onlyAdminsSend) return true;
-  return roleOf(chat, userId) === 'admin' || t === 'react' || t === 'vote' || t === 'call' || t === 'opened';
+  return roleOf(chat, userId) === 'admin' || t === 'react' || t === 'vote' || t === 'call' || t === 'opened' || t === 'keep';
 }
 
 /** Whose status this is (the status chat's only admin), or null for other chats. */
@@ -50,6 +57,10 @@ export function changeAllowed(chat: Chat, m: Message, change: Change, from: stri
       return m.kind === 'poll' && !m.deleted && !!m.poll && change.options.every((o) => o < m.poll!.options.length) && (m.poll.multi || change.options.length <= 1);
     case 'pin':
       return !m.deleted;
+    case 'keep':
+      // Anyone keeps a disappearing message; only whoever kept it, or its author, lets it go again.
+      if (m.deleted || m.file?.once) return false;
+      return change.keep ? !!m.expiresAt && !m.keptBy : !!m.keptBy && (from === m.keptBy || from === m.author);
     case 'opened':
       // Only a view once message, and only by someone who got it (or my own other device).
       return !m.deleted && !!m.file?.once && m.author !== from;

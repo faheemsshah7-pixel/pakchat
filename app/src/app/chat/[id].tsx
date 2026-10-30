@@ -4,7 +4,7 @@
 // up from the bottom as they arrive. Hold a message to pick it (then reply,
 // react, star, copy, edit, pin, forward or delete); swipe one to reply.
 import type { ChatQuote, Gif, LinkPreview, Message, Place, Ref, SharedContact } from '@pakchat/shared';
-import { EDIT_MINUTES, UNSEND_HOURS, roleOf } from '@pakchat/shared';
+import { EDIT_MINUTES, nextHops, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
@@ -25,7 +25,7 @@ import { calls } from '../../core/calls';
 import { slowPhone } from '../../core/phone';
 import { dismissChatAlert } from '../../core/push';
 import { defaultTimer } from '../../core/timer';
-import { useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePerson, usePresence, useSettings, useStable, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
+import { useBlocked, useChat, useChatPrefs, useCore, useMessages, useNow, usePeople, usePerson, usePresence, useSettings, useStable, useStarred, useStickerSaved, useTyping } from '../../core/hooks';
 import { Backdrop } from '../../ui/chat/Backdrop';
 import { chatOpen, leftChat } from '../../core/lock';
 import { LeftGroupChoices } from '../../ui/DeleteChats';
@@ -106,6 +106,9 @@ function ChatScreen() {
   // WhatsApp's "Not in your contacts" card, for a one-to-one chat with someone I haven't saved.
   const stranger = !!other && other !== core.myId && !core.isContact(other);
   const [blocking, setBlocking] = useState(false);
+  // Someone I blocked: no message box, WhatsApp's "Tap to unblock" in its place.
+  const blockedList = useBlocked();
+  const iBlocked = !!other && other !== core.myId && !!blockedList?.some((p) => p.id === other);
 
   const [picked, setPicked] = useState<Map<string, Message>>(new Map());
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -261,6 +264,16 @@ function ChatScreen() {
   const unreadMark = unreadAt(list, unreadOpen, openedAt);
   const unreadKey = unreadMark?.key;
   const unreadN = unreadMark?.n ?? 0;
+
+  // WhatsApp's @ button: the unread @mentions of me (and replies to me) from when the chat
+  // opened, oldest first. Each tap goes to the next one.
+  const [forMeDone, setForMeDone] = useState<Set<string>>(new Set());
+  const forMe = useMemo(() => {
+    if (!unreadOpen || !list || chat?.kind !== 'group') return [];
+    const unreadOnes = list.filter((m) => m.kind !== 'system' && m.author !== core.myId && !m.deleted).slice(-unreadOpen);
+    return unreadOnes.filter((m) => m.mentions?.includes(core.myId) || m.replyTo?.author === core.myId).map(keyOf);
+  }, [list, unreadOpen, chat?.kind]);
+  const nextForMe = forMe.find((k) => !forMeDone.has(k)) ?? null;
 
   // Newest first (the list is upside down, so the newest sits at the bottom), with day labels between days.
   // Photos and videos sent together: one album each (albums.ts), shown where its newest is.
@@ -710,10 +723,13 @@ function ChatScreen() {
 
   const title = chat ? core.chatTitle(chat) : '';
   const group = chat?.kind === 'group';
+  const audio = typing.length > 0 && core.isRecordingAudio(id, typing[0]);
   const subtitle = typing.length
     ? group
-      ? fill(t.nameTyping, { name: core.name(typing[0]) || '…' })
-      : t.typing
+      ? fill(audio ? t.nameRecording : t.nameTyping, { name: core.name(typing[0]) || '…' })
+      : audio
+        ? t.recordingAudio
+        : t.typing
     : group
       ? (chat?.members ?? [])
           .map((mb) => (mb.userId === core.myId ? t.youWord : core.name(mb.userId)))
@@ -785,12 +801,15 @@ function ChatScreen() {
           size={bs}
           flip
           onPress={() => {
-            const texts = pickedList.filter((m) => m.kind === 'text' && !m.deleted && m.text).map((m) => m.text!);
+            const textMsgs = pickedList.filter((m) => m.kind === 'text' && !m.deleted && m.text);
+            const texts = textMsgs.map((m) => m.text!);
+            // How many times each has been forwarded, for "Forwarded many times".
+            const hops = textMsgs.map(nextHops);
             // Files go on only once they're on this phone (downloaded).
             // View once can't be forwarded.
             const files = pickedList.filter((m) => m.kind === 'file' && !m.deleted && !m.file?.once && haveFile(m)).map((m) => [m.chatId, m.author, m.id]);
             done();
-            if (texts.length || files.length) router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), files: JSON.stringify(files) } });
+            if (texts.length || files.length) router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), hops: JSON.stringify(hops), files: JSON.stringify(files) } });
           }}
           testID="pick-forward"
         />
@@ -964,6 +983,28 @@ function ChatScreen() {
 
           <DatePill pill={pill} />
 
+          {/* The next unread @mention of me. */}
+          {nextForMe && (
+            <Animated.View entering={popIn} exiting={popOut} style={{ position: 'absolute', end: 16, bottom: atBottom ? 12 : 64 }}>
+              <Pressy
+                onPress={() => {
+                  const m = byKey.get(nextForMe);
+                  setForMeDone((s) => new Set(s).add(nextForMe));
+                  if (m) jumpTo(m);
+                }}
+                label="@"
+                scale={0.9}
+                testID="to-mention"
+              >
+                <Glass strong style={{ width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}>
+                  <Txt size={19} weight="800" color={theme.accInk}>
+                    @
+                  </Txt>
+                </Glass>
+              </Pressy>
+            </Animated.View>
+          )}
+
           {/* Back to the newest, when you've scrolled up. */}
           {!atBottom && (
             <Animated.View entering={popIn} exiting={popOut} style={{ position: 'absolute', end: 16, bottom: 12 }}>
@@ -984,7 +1025,19 @@ function ChatScreen() {
         </View>
 
         {chat &&
-          (mayWrite ? (
+          (iBlocked ? (
+            <Pressy
+              onPress={() => void act(() => core.block(other!, false)).then(() => toast(t.unblocked))}
+              label={t.blockedBar}
+              testID="chat-blocked-bar"
+            >
+              <Glass style={{ margin: 10, padding: 14, borderRadius: 18 }}>
+                <Txt size={14} color={theme.muted} align="center">
+                  {t.blockedBar}
+                </Txt>
+              </Glass>
+            </Pressy>
+          ) : mayWrite ? (
             <>
               <ScheduledBar chatId={id} />
               <Composer
@@ -1051,6 +1104,18 @@ function ChatScreen() {
         {chat && !prefs.lock && (
           <MenuItem icon="plus" label={t.addShortcut} onPress={() => (setMenu(false), addShortcut(chat) || toast(t.shortcutNotHere))} testID="menu-shortcut" />
         )}
+        {!group && other && other !== core.myId && (
+          <MenuItem
+            icon="flag"
+            label={iBlocked ? t.unblock : t.block}
+            onPress={() => {
+              setMenu(false);
+              if (iBlocked) void act(() => core.block(other, false)).then(() => toast(t.unblocked));
+              else setBlocking(true);
+            }}
+            testID="menu-block"
+          />
+        )}
         {(group || (other && other !== core.myId)) && <MenuItem icon="warning" label={t.report} onPress={() => (setMenu(false), setReportOf(null))} testID="menu-report" />}
         <MenuItem icon="trash" label={t.clearChat} danger onPress={() => (setMenu(false), setClearing(true))} />
       </Popup>
@@ -1095,6 +1160,18 @@ function ChatScreen() {
               done();
             }}
             testID="pick-pin"
+          />
+        )}
+        {/* Keep in chat: a disappearing message stays (Unkeep: whoever kept it, or its author). */}
+        {one && !one.deleted && !one.file?.once && (one.expiresAt || (one.keptBy && (one.keptBy === core.myId || one.author === core.myId))) && chat?.kind !== 'status' && (
+          <MenuItem
+            icon="timer"
+            label={one.keptBy ? t.unkeepWord : t.keepWord}
+            onPress={() => {
+              void act(() => core.client.keep(id, ref(one), !one.keptBy));
+              done();
+            }}
+            testID="pick-keep"
           />
         )}
         {one && group && one.author !== core.myId && !one.deleted && one.kind !== 'system' && <MenuItem icon="reply" label={t.replyPrivately} onPress={() => replyPrivately(one)} testID="pick-reply-private" />}

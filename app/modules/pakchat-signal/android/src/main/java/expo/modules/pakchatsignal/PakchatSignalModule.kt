@@ -288,6 +288,24 @@ class PakchatSignalModule : Module() {
       VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, promise)
     }
 
+    /**
+     * This copy of PakChat: its build number, version, and which app installed it
+     * ("com.android.vending" for Google Play; null or a browser's for the website's APK).
+     */
+    Function("appInstall") {
+      val ctx = context()
+      val pm = ctx.packageManager
+      val info = pm.getPackageInfo(ctx.packageName, 0)
+      val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+      val installer = try {
+        if (android.os.Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(ctx.packageName).installingPackageName
+        else @Suppress("DEPRECATION") pm.getInstallerPackageName(ctx.packageName)
+      } catch (_: Throwable) {
+        null
+      }
+      mapOf("versionCode" to code.toDouble(), "versionName" to (info.versionName ?: ""), "installer" to installer)
+    }
+
     /** What made PakChat close by mistake since last asked (CrashLog), or null. */
     Function("lastCrash") {
       try {
@@ -331,6 +349,11 @@ class PakchatSignalModule : Module() {
     }
 
     /** The backup key from the backup password (slow on purpose). */
+    /** Locks what the phone tells a website it links by QR code, to the QR's key (see LinkLock.kt). */
+    AsyncFunction("lockProvision") { json: String, websiteKey: String ->
+      b64(LinkLock.lock(json.toByteArray(Charsets.UTF_8), bytes(websiteKey)))
+    }
+
     AsyncFunction("backupKey") { password: String, userId: String, promise: Promise ->
       slowly(promise) { b64(FileLock.backupKey(password, userId)) }
     }
