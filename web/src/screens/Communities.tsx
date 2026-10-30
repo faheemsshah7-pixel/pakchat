@@ -8,6 +8,7 @@ import { useChatRows, useLoaded, useViewing } from '../core/hooks';
 import { Avatar } from '../ui/Avatar';
 import { listTime, preview } from '../ui/format';
 import { Icon } from '../ui/Icon';
+import { tr } from '../i18n';
 
 export function Communities() {
   const rows = useChatRows();
@@ -17,13 +18,13 @@ export function Communities() {
   return (
     <>
       <header className="lh">
-        <span className="ptitle">Communities</span>
+        <span className="ptitle">{tr('Communities')}</span>
       </header>
       <div className="rows scroll list">
         {communities.length === 0 && (
           <div className="none big">
             <Icon name="community" size={48} stroke={1.4} />
-            <p>Communities bring members together in topic-based groups. Make one in the PakChat app on your phone.</p>
+            <p>{tr('Communities bring members together in topic-based groups. Make one in the PakChat app on your phone.')}</p>
           </div>
         )}
         {communities.map((c) => {

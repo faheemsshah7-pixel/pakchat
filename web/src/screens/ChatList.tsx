@@ -6,7 +6,7 @@ import type { Message } from '@pakchat/shared';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { core, openChat } from '../core/core';
-import { type ChatRow, useTopic, useTyping, useViewing } from '../core/hooks';
+import { type ChatRow, useLockedRows, usePrefs, useTopic, useTyping, useViewing } from '../core/hooks';
 import { Avatar, photoOf } from '../ui/Avatar';
 import { listTime, memberName, phoneOf, preview } from '../ui/format';
 import { Icon } from '../ui/Icon';
@@ -14,8 +14,11 @@ import { askText, type MenuItem, openMenu } from '../ui/overlay';
 import { Ticks } from '../ui/Ticks';
 import { msgKey, setView, toggleChatPick, useView } from '../ui/view';
 import { archiveMany, chatMenu, deleteMany, favouriteMany, isMuted, markManyRead, muteMany, pinMany } from './chatActions';
+import { appLockSetting, closeFolder, isFolderOpen, lockApp, openFolder, rightCode } from '../core/lock';
+import { askSecretCode } from './LockScreen';
 import { NewChat, NewGroup } from './NewChat';
 import { Starred } from './Starred';
+import { tr } from '../i18n';
 
 const SLOT = 76;
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
@@ -28,10 +31,29 @@ export function ChatList({ rows }: { rows: ChatRow[] | null }) {
   if (view.side === 'newChat') return <NewChat />;
   if (view.side === 'newGroup') return <NewGroup />;
   if (view.side === 'starred') return <Starred />;
+  if (view.side === 'locked') return <LockedChats />;
   return <Chats rows={rows} archived={view.side === 'archived'} />;
 }
 
-function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }) {
+/** The Locked chats folder, once its secret code was typed. */
+function LockedChats() {
+  const rows = useLockedRows();
+  const open = useTopic(['lock'], isFolderOpen);
+  useEffect(() => {
+    if (!open) setView({ side: null });
+  }, [open]);
+  return <Chats rows={rows} archived={false} folder />;
+}
+
+/** Opens the Locked chats folder with the secret code. */
+async function openLockedChats() {
+  if (await askSecretCode(tr('Locked chats'))) {
+    openFolder();
+    setView({ side: 'locked' });
+  }
+}
+
+function Chats({ rows, archived, folder = false }: { rows: ChatRow[] | null; archived: boolean; folder?: boolean }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const lists = useTopic(['prefs'], () => core.lists);
@@ -48,10 +70,14 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
   }, []);
 
   const all = rows ?? [];
-  const archivedCount = all.filter((r) => r.prefs.archived).length;
+  const archivedCount = folder ? 0 : all.filter((r) => r.prefs.archived).length;
+  // Locked chats folder: shown at the top when it has chats and this computer has the phone's secret code.
+  const prefsNow = usePrefs();
+  const lockCode = useTopic(['prefs'], () => core.lockCode);
+  const lockedCount = folder || !lockCode ? 0 : Object.values(prefsNow).filter((p) => p.lock === 'folder' && !p.deletedAt).length;
   const shown = useMemo(() => {
-    let list = all.filter((r) => !!r.prefs.archived === archived);
-    if (!archived) {
+    let list = folder ? all : all.filter((r) => !!r.prefs.archived === archived);
+    if (!archived && !folder) {
       if (filter === 'unread') list = list.filter((r) => r.chat.unread > 0 || r.prefs.markedUnread || r.chat.id === core.viewing);
       else if (filter === 'favourites') list = list.filter((r) => r.prefs.favourite);
       else if (filter === 'groups') list = list.filter((r) => r.chat.kind === 'group');
@@ -63,7 +89,7 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
     const words = q.trim().toLowerCase();
     if (words) list = all.filter((r) => r.title.toLowerCase().includes(words) || (r.other && phoneOf(r.other).replace(/\s/g, '').includes(words.replace(/\s/g, ''))));
     return list;
-  }, [all, archived, filter, q, lists]);
+  }, [all, archived, folder, filter, q, lists]);
 
   // Search also finds saved contacts I have no chat with yet.
   const contacts = useMemo(() => {
@@ -95,30 +121,30 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
     <>
       {picks ? (
         <PickBar picks={picks} rows={all} shown={shown} />
-      ) : archived ? (
+      ) : archived || folder ? (
         <header className="sh">
-          <button className="ib" onClick={() => setView({ side: null })} aria-label="Back">
+          <button className="ib" onClick={() => (folder && closeFolder(), setView({ side: null }))} aria-label={tr('Back')}>
             <Icon name="back" size={22} />
           </button>
-          <span>Archived</span>
+          <span>{folder ? tr('Locked chats') : tr('Archived')}</span>
         </header>
       ) : (
         <header className="lh">
-          <div className="brand">PakChat</div>
+          <div className="brand">{tr('PakChat')}</div>
           <div className="grow" />
-          <button className="ib" aria-label="Menu" onClick={(e) => openMenu(listMenu(), e.currentTarget.getBoundingClientRect().left, e.currentTarget.getBoundingClientRect().bottom + 4)}>
+          <button className="ib" aria-label={tr('Menu')} onClick={(e) => openMenu(listMenu(), e.currentTarget.getBoundingClientRect().left, e.currentTarget.getBoundingClientRect().bottom + 4)}>
             <Icon name="more" size={24} />
           </button>
-          <button className="ib fab" aria-label="New chat" data-tip="New chat" onClick={() => setView({ side: 'newChat' })}>
+          <button className="ib fab" aria-label={tr('New chat')} data-tip={tr('New chat')} onClick={() => setView({ side: 'newChat' })}>
             <Icon name="newChat" size={22} />
           </button>
         </header>
       )}
-      {!archived && (
+      {!archived && !folder && (
         <>
           <label className="search">
             {q ? (
-              <button className="sback" onClick={() => setQ('')} aria-label="Clear search">
+              <button className="sback" onClick={() => setQ('')} aria-label={tr('Clear search')}>
                 <Icon name="back" size={20} />
               </button>
             ) : (
@@ -127,8 +153,19 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
             <input
               ref={search}
               value={q}
-              placeholder="Search or start a new chat"
-              onChange={(e) => setQ(e.target.value)}
+              placeholder={tr('Search or start a new chat')}
+              onChange={(e) => {
+                const typed = e.target.value;
+                setQ(typed);
+                // The phone's secret code typed in search opens Locked chats, like WhatsApp.
+                if (core.lockCode && typed.trim().length >= 4)
+                  void rightCode(typed).then((ok) => {
+                    if (!ok) return;
+                    setQ('');
+                    openFolder();
+                    setView({ side: 'locked' });
+                  });
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setQ('');
                 if (e.key === 'Enter' && shown[0]) openChat(shown[0].chat.id);
@@ -138,16 +175,16 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
           {!q && (
             <div className="chips">
               <Chip on={filter === 'all'} onClick={() => setFilter('all')}>
-                All
+                {tr('All')}
               </Chip>
               <Chip on={filter === 'unread'} onClick={() => setFilter('unread')}>
-                Unread
+                {tr('Unread')}
               </Chip>
               <Chip on={filter === 'favourites'} onClick={() => setFilter('favourites')}>
-                Favourites
+                {tr('Favourites')}
               </Chip>
               <Chip on={filter === 'groups'} onClick={() => setFilter('groups')}>
-                Groups
+                {tr('Groups')}
               </Chip>
               {lists.map((l) => (
                 <Chip key={l.id} on={filter === `list:${l.id}`} onClick={() => setFilter(`list:${l.id}`)}>
@@ -157,8 +194,8 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
               {/* "+": a new list, like WhatsApp Web. Chats go in from their menu (Add to list). */}
               <button
                 className="chip add"
-                aria-label="New list"
-                data-tip="New list"
+                aria-label={tr('New list')}
+                data-tip={tr('New list')}
                 onClick={() =>
                   void askText('New list', 'Name, like Family or Work').then((name) => {
                     if (!name) return;
@@ -177,41 +214,54 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
       <Rows
         rows={shown}
         picks={picks}
-        topHeight={q.trim() ? 44 : 49}
+        topHeight={q.trim() ? 44 : !archived && !folder && filter === 'all' ? 49 * ((archivedCount > 0 ? 1 : 0) + (lockedCount > 0 ? 1 : 0) || 1) : 49}
         top={
           q.trim() && shown.length > 0 ? (
-            <div className="grp">Chats</div>
-          ) : !archived && !q && filter === 'all' && archivedCount > 0 ? (
-            <button className="arch" onClick={() => setView({ side: 'archived' })}>
-              <Icon name="archive" size={22} />
-              <span>Archived</span>
-              <em>{archivedCount}</em>
-            </button>
+            <div className="grp">{tr('Chats')}</div>
+          ) : !archived && !folder && !q && filter === 'all' && (archivedCount > 0 || lockedCount > 0) ? (
+            <>
+              {lockedCount > 0 && (
+                <button className="arch lockd" onClick={() => void openLockedChats()}>
+                  <Icon name="lock" size={22} />
+                  <span>{tr('Locked chats')}</span>
+                  <em>{lockedCount}</em>
+                </button>
+              )}
+              {archivedCount > 0 && (
+                <button className="arch" onClick={() => setView({ side: 'archived' })}>
+                  <Icon name="archive" size={22} />
+                  <span>{tr('Archived')}</span>
+                  <em>{archivedCount}</em>
+                </button>
+              )}
+            </>
           ) : null
         }
         empty={
           rows === null ? null : q ? (
             contacts.length || hits.length ? null : (
-              <p className="none">No chats, contacts or messages found</p>
+              <p className="none">{tr('No chats, contacts or messages found')}</p>
             )
+          ) : folder ? (
+            <p className="none">{tr('No locked chats')}</p>
           ) : archived ? (
-            <p className="none">No archived chats</p>
+            <p className="none">{tr('No archived chats')}</p>
           ) : filter === 'unread' ? (
-            <p className="none">No unread chats</p>
+            <p className="none">{tr('No unread chats')}</p>
           ) : filter === 'favourites' ? (
-            <p className="none">Add people or groups to Favourites from their chat's menu</p>
+            <p className="none">{tr('Add people or groups to Favourites from their chat\'s menu')}</p>
           ) : filter === 'groups' ? (
-            <p className="none">No groups yet</p>
+            <p className="none">{tr('No groups yet')}</p>
           ) : filter.startsWith('list:') ? (
-            <p className="none">Add chats to this list from their menu (Add to list)</p>
+            <p className="none">{tr('Add chats to this list from their menu (Add to list)')}</p>
           ) : (
-            <p className="none">Your chats from your phone show here</p>
+            <p className="none">{tr('Your chats from your phone show here')}</p>
           )
         }
         after={
           contacts.length > 0 || hits.length > 0 ? (
             <>
-              {contacts.length > 0 && <div className="grp">Contacts</div>}
+              {contacts.length > 0 && <div className="grp">{tr('Contacts')}</div>}
               {contacts.map(([id, c]) => (
                 <button key={id} className="row" onClick={() => void core.client.openDirect(id).then((chat) => openChat(chat.id))}>
                   <Avatar id={id} name={c.name} photo={photoOf(id)} />
@@ -225,7 +275,7 @@ function Chats({ rows, archived }: { rows: ChatRow[] | null; archived: boolean }
                   </div>
                 </button>
               ))}
-              {hits.length > 0 && <div className="grp">Messages</div>}
+              {hits.length > 0 && <div className="grp">{tr('Messages')}</div>}
               {hits.map((m) => (
                 <button
                   key={msgKey(m)}
@@ -266,31 +316,31 @@ function PickBar({ picks, rows, shown }: { picks: string[]; rows: ChatRow[]; sho
   const allArchived = chats.length > 0 && chats.every((c) => core.prefs[c.id]?.archived);
   const allMuted = chats.length > 0 && chats.every((c) => isMuted(core.prefs[c.id]));
   const more = (): MenuItem[] => [
-    { label: chats.length > 0 && chats.every((c) => core.prefs[c.id]?.pinnedAt) ? 'Unpin chats' : 'Pin chats', icon: 'pin', run: () => done(pinMany(chats)) },
-    { label: chats.length > 0 && chats.every((c) => core.prefs[c.id]?.favourite) ? 'Remove from Favourites' : 'Add to Favourites', icon: 'heart', run: () => done(favouriteMany(chats)) },
-    { label: 'Mark as unread', icon: 'unread', run: () => done(markManyRead(chats, false)) },
+    { label: chats.length > 0 && chats.every((c) => core.prefs[c.id]?.pinnedAt) ? tr('Unpin chats') : tr('Pin chats'), icon: 'pin', run: () => done(pinMany(chats)) },
+    { label: chats.length > 0 && chats.every((c) => core.prefs[c.id]?.favourite) ? tr('Remove from Favourites') : tr('Add to Favourites'), icon: 'heart', run: () => done(favouriteMany(chats)) },
+    { label: tr('Mark as unread'), icon: 'unread', run: () => done(markManyRead(chats, false)) },
     '-',
-    { label: 'Select all', icon: 'select', run: () => setView({ chatPicks: shown.map((r) => r.chat.id) }) },
+    { label: tr('Select all'), icon: 'select', run: () => setView({ chatPicks: shown.map((r) => r.chat.id) }) },
   ];
   return (
     <header className="lh pickh">
-      <button className="ib" aria-label="Cancel" onClick={() => setView({ chatPicks: null })}>
+      <button className="ib" aria-label={tr('Cancel')} onClick={() => setView({ chatPicks: null })}>
         <Icon name="close" size={22} />
       </button>
       <span className="selcount">{chats.length} selected</span>
-      <button className="ib" disabled={none} aria-label={allArchived ? 'Unarchive' : 'Archive'} data-tip={allArchived ? 'Unarchive' : 'Archive'} onClick={() => done(archiveMany(chats, !allArchived))}>
+      <button className="ib" disabled={none} aria-label={allArchived ? tr('Unarchive') : tr('Archive')} data-tip={allArchived ? tr('Unarchive') : tr('Archive')} onClick={() => done(archiveMany(chats, !allArchived))}>
         <Icon name="archive" size={22} />
       </button>
-      <button className="ib" disabled={none} aria-label={allMuted ? 'Unmute' : 'Mute'} data-tip={allMuted ? 'Unmute' : 'Mute'} onClick={() => void muteMany(chats).then(() => setView({ chatPicks: null }))}>
+      <button className="ib" disabled={none} aria-label={allMuted ? tr('Unmute') : tr('Mute')} data-tip={allMuted ? tr('Unmute') : tr('Mute')} onClick={() => void muteMany(chats).then(() => setView({ chatPicks: null }))}>
         <Icon name={allMuted ? 'bell' : 'muted'} size={22} />
       </button>
-      <button className="ib" disabled={none || allRead} aria-label="Mark as read" data-tip="Mark as read" onClick={() => done(markManyRead(chats, true))}>
+      <button className="ib" disabled={none || allRead} aria-label={tr('Mark as read')} data-tip={tr('Mark as read')} onClick={() => done(markManyRead(chats, true))}>
         <Icon name="unread" size={22} />
       </button>
-      <button className="ib" disabled={none} aria-label="Delete" data-tip="Delete" onClick={() => void deleteMany(chats).then((ok) => ok && setView({ chatPicks: null }))}>
+      <button className="ib" disabled={none} aria-label={tr('Delete')} data-tip={tr('Delete')} onClick={() => void deleteMany(chats).then((ok) => ok && setView({ chatPicks: null }))}>
         <Icon name="trash" size={22} />
       </button>
-      <button className="ib" disabled={none} aria-label="More" onClick={(e) => openMenu(more(), e.currentTarget.getBoundingClientRect().right - 220, e.currentTarget.getBoundingClientRect().bottom + 4)}>
+      <button className="ib" disabled={none} aria-label={tr('More')} onClick={(e) => openMenu(more(), e.currentTarget.getBoundingClientRect().right - 220, e.currentTarget.getBoundingClientRect().bottom + 4)}>
         <Icon name="more" size={22} />
       </button>
     </header>
@@ -318,14 +368,14 @@ function NotifyBanner() {
           })
         }
       >
-        <b>Get notified of new messages</b>
+        <b>{tr('Get notified of new messages')}</b>
         <span>
-          Turn on desktop notifications <Icon name="chevron" size={14} />
+          {tr('Turn on desktop notifications')}{' '}<Icon name="chevron" size={14} />
         </span>
       </button>
       <button
         className="ib nbx"
-        aria-label="Close"
+        aria-label={tr('Close')}
         onClick={() => {
           writeFlag(BANNER_KEY);
           setShow(false);
@@ -371,11 +421,11 @@ function Marked({ text, words }: { text: string; words: string }) {
 
 function listMenu() {
   return [
-    { label: 'New group', icon: 'group' as const, run: () => setView({ side: 'newGroup' }) },
-    { label: 'Starred messages', icon: 'star' as const, run: () => setView({ side: 'starred' }) },
-    { label: 'Select chats', icon: 'select' as const, run: () => setView({ chatPicks: [] }) },
+    { label: tr('New group'), icon: 'group' as const, run: () => setView({ side: 'newGroup' }) },
+    { label: tr('Starred messages'), icon: 'star' as const, run: () => setView({ side: 'starred' }) },
+    { label: tr('Select chats'), icon: 'select' as const, run: () => setView({ chatPicks: [] }) },
     {
-      label: 'Mark all as read',
+      label: tr('Mark all as read'),
       icon: 'unread' as const,
       run: () =>
         void (async () => {
@@ -385,9 +435,10 @@ function listMenu() {
           }
         })(),
     },
+    ...(appLockSetting() ? [{ label: tr('Lock app'), icon: 'lock' as const, run: lockApp }] : []),
     '-' as const,
-    { label: 'Settings', icon: 'settings' as const, run: () => setView({ tab: 'settings' }) },
-    { label: 'Log out', icon: 'logout' as const, run: () => dispatchEvent(new Event('pakchat:logout')) },
+    { label: tr('Settings'), icon: 'settings' as const, run: () => setView({ tab: 'settings' }) },
+    { label: tr('Log out'), icon: 'logout' as const, run: () => dispatchEvent(new Event('pakchat:logout')) },
   ];
 }
 
@@ -477,15 +528,15 @@ const Row = memo(function Row({ row, top, selected, picked, dropping, onDrop }: 
   const whoTypes = Object.entries(typing ?? {}).filter(([, at]) => Date.now() - at < 6000);
   const draft = prefs.draft && !selected ? prefs.draft : null;
   let line: React.ReactNode;
-  if (prefs.lock === 'list') line = <span className="pv">🔒 Locked chat</span>;
+  if (prefs.lock === 'list') line = <span className="pv">{tr('🔒 Locked chat')}</span>;
   else if (whoTypes.length) {
-    const doing = core.isRecordingAudio(chat.id, whoTypes[0][0]) ? 'recording audio…' : 'typing…';
+    const doing = core.isRecordingAudio(chat.id, whoTypes[0][0]) ? tr('recording audio…') : tr('typing…');
     line = <span className="pv typ">{group ? `${memberName(whoTypes[0][0])} is ${doing}` : doing}</span>;
   }
   else if (draft)
     line = (
       <span className="pv">
-        <span className="dr">Draft:</span> {draft}
+        <span className="dr">{tr('Draft:')}</span> {draft}
       </span>
     );
   else
@@ -551,7 +602,7 @@ const Row = memo(function Row({ row, top, selected, picked, dropping, onDrop }: 
             {unread && <span className={`badge ${muted ? 'm' : ''}`}>{chat.unread > 0 ? (chat.unread > 999 ? '999+' : chat.unread) : ''}</span>}
             <button
               className="chev"
-              aria-label="Open chat menu"
+              aria-label={tr('Open chat menu')}
               onClick={(e) => {
                 e.stopPropagation();
                 const r = e.currentTarget.getBoundingClientRect();

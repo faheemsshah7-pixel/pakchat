@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { useSync } from '../core/hooks';
 import { Icon } from '../ui/Icon';
+import { tr } from '../i18n';
 
 export function Loading({ quiet }: { quiet?: boolean }) {
   const sync = useSync();
@@ -28,13 +29,13 @@ export function Loading({ quiet }: { quiet?: boolean }) {
             <i style={{ width: `${Math.round(shown)}%` }} />
           </div>
           <b>
-            Loading your chats <span>{Math.round(shown)}%</span>
+            {tr('Loading your chats')}{' '}<span>{Math.round(shown)}%</span>
           </b>
-          <small className="lnote">Keep your phone connected to the internet until this finishes.</small>
+          <small className="lnote">{tr('Keep your phone connected to the internet until this finishes.')}</small>
         </>
       )}
       <p>
-        <Icon name="lock" size={14} /> End-to-end encrypted
+        <Icon name="lock" size={14} />{' '}{tr('End-to-end encrypted')}
       </p>
     </div>
   );

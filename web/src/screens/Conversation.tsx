@@ -2,10 +2,11 @@
 // and the composer. It opens at the first unread message (or the newest),
 // loads older ones as you scroll up, and marks what you see as read.
 
-import type { Chat, Message } from '@pakchat/shared';
+import { MAX_CALL_PEOPLE, type Chat, type Message } from '@pakchat/shared';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { core } from '../core/core';
+import { isChatOpen, openLockedChat } from '../core/lock';
 import { useChat, useLoaded, useMessages, usePrefs, usePresence, useTopic, useTyping } from '../core/hooks';
 import { Avatar, photoOf } from '../ui/Avatar';
 import { bodyLine, chatTitle, dayLabel, isSelfChat, lastSeen, memberName, otherPerson, sameDay } from '../ui/format';
@@ -13,11 +14,14 @@ import { Icon } from '../ui/Icon';
 import { closeLayer, openLayer, openMenu, toast } from '../ui/overlay';
 import { getView, msgKey, setView, useView } from '../ui/view';
 import { Bubble } from './Bubble';
+import { startCall } from './Call';
+import { askSecretCode } from './LockScreen';
 import { chatMenu, disappearing, exportChat } from './chatActions';
 import { Composer } from './Composer';
 import { deleteMessages, forward } from './dialogs';
 import { download } from './messageActions';
 import { plainText } from '../ui/richText';
+import { tr } from '../i18n';
 
 const Viewer = lazy(() => import('./Viewer').then((m) => ({ default: m.Viewer })));
 const SendPreview = lazy(() => import('./SendPreview').then((m) => ({ default: m.SendPreview })));
@@ -34,11 +38,13 @@ export function Conversation({ chatId }: { chatId: string }) {
     return () => setView({ replyTo: null, editing: null, files: null, selecting: null });
   }, [chatId]);
 
+  // Locked: its messages aren't even drawn here until the secret code is typed.
+  const opened = useTopic(['lock'], () => isChatOpen(chatId));
+
   if (!chat) return <div className="wall" />;
 
   const me = chat.members.find((m) => m.userId === core.myId);
-  // Locked on the phone: its messages aren't even drawn here, only the note.
-  const locked = prefs[chat.id]?.lock === 'list';
+  const locked = prefs[chat.id]?.lock === 'list' && !opened;
   const canSend = !locked && !chat.left && !!me && !(chat.onlyAdminsSend && me.role !== 'admin');
 
   return (
@@ -57,18 +63,18 @@ export function Conversation({ chatId }: { chatId: string }) {
         }}
       >
         <div className="doodle" />
-        {locked ? <LockedNote /> : <Messages chat={chat} canSend={canSend} />}
+        {locked ? <LockedNote chatId={chat.id} /> : <Messages chat={chat} canSend={canSend} />}
         {locked ? null : view.selecting ? (
           <SelectBar list={view.selecting} />
         ) : canSend ? (
           <Composer chat={chat} />
         ) : (
-          <div className="cant">{chat.left ? "You can't send messages to this group because you're no longer a member." : 'Only admins can send messages.'}</div>
+          <div className="cant">{chat.left ? tr('You can\'t send messages to this group because you\'re no longer a member.') : tr('Only admins can send messages.')}</div>
         )}
         {dragging && (
           <div className="dropzone">
             <Icon name="upload" size={40} />
-            Drop files here
+            {tr('Drop files here')}
           </div>
         )}
       </div>
@@ -82,6 +88,7 @@ export function Conversation({ chatId }: { chatId: string }) {
 }
 
 function Header({ chat }: { chat: Chat }) {
+  const prefs = usePrefs();
   const other = otherPerson(chat);
   const self = isSelfChat(chat);
   const presence = usePresence(self ? null : other);
@@ -99,7 +106,7 @@ function Header({ chat }: { chat: Chat }) {
 
   const who = Object.entries(typing ?? {}).filter(([id, at]) => id !== core.myId && Date.now() - at < 6000);
   let sub: string;
-  const doing = who.length && core.isRecordingAudio(chat.id, who[0][0]) ? 'recording audio…' : 'typing…';
+  const doing = who.length && core.isRecordingAudio(chat.id, who[0][0]) ? tr('recording audio…') : tr('typing…');
   if (who.length) sub = chat.kind === 'group' ? `${memberName(who[0][0])} is ${doing}` : doing;
   else if (chat.kind === 'group')
     sub = chat.members
@@ -109,6 +116,8 @@ function Header({ chat }: { chat: Chat }) {
   else if (self) sub = 'Message yourself';
   else sub = lastSeen(presence);
 
+  // Calls, like WhatsApp: with one person, or a group of up to 8 that I'm still in. A locked chat calls from the phone.
+  const canCall = !self && !chat.left && !prefs[chat.id]?.lock && chat.members.some((m) => m.userId === core.myId) && (chat.kind === 'direct' || (chat.kind === 'group' && chat.members.length <= MAX_CALL_PEOPLE));
   const info = () => setView({ drawer: getView().drawer === 'info' ? null : 'info' });
   return (
     <header className="chd">
@@ -119,22 +128,32 @@ function Header({ chat }: { chat: Chat }) {
           <span className={`ellip ${who.length ? 'typ' : ''}`}>{sub || (chat.kind === 'group' ? 'click here for group info' : 'click here for contact info')}</span>
         </span>
       </button>
-      <button className="ib" aria-label="Search" data-tip="Search" onClick={() => setView({ drawer: getView().drawer === 'search' ? null : 'search' })}>
+      {canCall && (
+        <>
+          <button className="ib" aria-label={tr('Video call')} data-tip={tr('Video call')} onClick={() => void startCall(chat.id, true)}>
+            <Icon name="video" size={24} />
+          </button>
+          <button className="ib" aria-label={tr('Voice call')} data-tip={tr('Voice call')} onClick={() => void startCall(chat.id, false)}>
+            <Icon name="calls" size={22} />
+          </button>
+        </>
+      )}
+      <button className="ib" aria-label={tr('Search')} data-tip={tr('Search')} onClick={() => setView({ drawer: getView().drawer === 'search' ? null : 'search' })}>
         <Icon name="search" size={22} />
       </button>
       <button
         className="ib"
-        aria-label="Menu"
+        aria-label={tr('Menu')}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           openMenu(
             [
-              { label: chat.kind === 'group' ? 'Group info' : 'Contact info', icon: 'info', run: () => setView({ drawer: 'info' }) },
-              { label: 'Select messages', icon: 'select', run: () => setView({ selecting: [] }) },
+              { label: chat.kind === 'group' ? tr('Group info') : tr('Contact info'), icon: 'info', run: () => setView({ drawer: 'info' }) },
+              { label: tr('Select messages'), icon: 'select', run: () => setView({ selecting: [] }) },
               ...(chat.kind !== 'group' || !chat.onlyAdminsSend || chat.members.some((m) => m.userId === core.myId && m.role === 'admin')
-                ? [{ label: 'Disappearing messages', icon: 'timer' as const, run: () => void disappearing(chat) }]
+                ? [{ label: tr('Disappearing messages'), icon: 'timer' as const, run: () => void disappearing(chat) }]
                 : []),
-              { label: 'Export chat', icon: 'export', run: () => void exportChat(chat) },
+              { label: tr('Export chat'), icon: 'export', run: () => void exportChat(chat) },
               '-',
               ...chatMenu(chat, { open: true }),
             ],
@@ -255,7 +274,7 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
     } else if (!all) more();
     else {
       setView({ jumpTo: null });
-      toast('That message is no longer here');
+      toast(tr('That message is no longer here'));
     }
   }, [view.jumpTo, messages, all, more, chat.id]);
 
@@ -293,7 +312,7 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
           <div className="e2e">
             <span>
               <Icon name="lock" size={12} stroke={2.4} />
-              Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.
+              {tr('Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.')}
             </span>
           </div>
         )}
@@ -322,7 +341,7 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
         )}
         {messages?.length === 0 && isSelfChat(chat) && (
           <div className="e2e">
-            <span>Message yourself: notes, links and files you want on all your devices.</span>
+            <span>{tr('Message yourself: notes, links and files you want on all your devices.')}</span>
           </div>
         )}
       </div>
@@ -334,7 +353,7 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
       {!atBottom && (
         <button
           className="jump"
-          aria-label="Scroll to bottom"
+          aria-label={tr('Scroll to bottom')}
           onClick={() => {
             const el = scroller.current!;
             el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
@@ -353,24 +372,37 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
   );
 }
 
-/** The phone's chat lock keeps the chat closed here too: its words only show on the phone. */
-function LockedNote() {
+/** The phone's chat lock keeps the chat closed here too, until its secret code is typed. */
+function LockedNote({ chatId }: { chatId: string }) {
+  const code = useTopic(['prefs', 'lock'], () => !!core.lockCode);
+  const unlock = useCallback(() => {
+    void askSecretCode(tr('Unlock chat')).then((ok) => ok && openLockedChat(chatId));
+  }, [chatId]);
   useEffect(() => {
+    if (code) return;
     const id = openLayer(
       <div className="dialog pop">
-        <h3>This chat is locked</h3>
-        <p className="dtext">You locked this chat on your phone. Unlock it there to read it here.</p>
+        <h3>{tr('This chat is locked')}</h3>
+        <p className="dtext">{tr('You locked this chat on your phone. Set a secret code there (Settings › Privacy › Chat lock) to open it here, or unlock it on your phone.')}</p>
         <div className="btns">
           <button className="btn fill" onClick={() => closeLayer(id)}>
-            OK
+            {tr('OK')}
           </button>
         </div>
       </div>,
       true,
     );
     return () => closeLayer(id);
-  }, []);
-  return <div className="lockcover" />;
+  }, [code]);
+  return (
+    <div className="lockcover">
+      {code && (
+        <button className="btn fill" onClick={unlock}>
+          <Icon name="lock" size={18} />{' '}{tr('Unlock chat')}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /** Pinned messages: a bar under the header with the newest one. Click it to go there; with more than one, each click shows the next. */
@@ -416,18 +448,18 @@ function SelectBar({ list }: { list: Message[] }) {
   const forwardable = n > 0 && list.every((m) => !m.deleted && !m.file?.once && m.kind !== 'poll');
   return (
     <footer className="selbar">
-      <button className="ib" aria-label="Cancel selection" onClick={done}>
+      <button className="ib" aria-label={tr('Cancel selection')} onClick={done}>
         <Icon name="close" size={22} />
       </button>
       <span className="selcount">{n} selected</span>
       {allText && (
         <button
           className="ib"
-          aria-label="Copy"
-          data-tip="Copy"
+          aria-label={tr('Copy')}
+          data-tip={tr('Copy')}
           onClick={() => {
             const text = ordered.map((m) => (n > 1 ? `[${new Date(m.sentAt).toLocaleString()}] ${memberName(m.author)}: ${plainText(m.text!)}` : plainText(m.text!))).join('\n');
-            void navigator.clipboard.writeText(text).then(() => toast(n === 1 ? 'Message copied' : 'Messages copied'));
+            void navigator.clipboard.writeText(text).then(() => toast(n === 1 ? tr('Message copied') : tr('Messages copied')));
             done();
           }}
         >
@@ -436,8 +468,8 @@ function SelectBar({ list }: { list: Message[] }) {
       )}
       <button
         className="ib"
-        aria-label="Star"
-        data-tip="Star"
+        aria-label={tr('Star')}
+        data-tip={tr('Star')}
         disabled={!n}
         onClick={() => {
           // Like WhatsApp: if any aren't starred, star them all; if all are, unstar them.
@@ -452,8 +484,8 @@ function SelectBar({ list }: { list: Message[] }) {
       </button>
       <button
         className="ib"
-        aria-label="Delete"
-        data-tip="Delete"
+        aria-label={tr('Delete')}
+        data-tip={tr('Delete')}
         disabled={!n}
         onClick={() => {
           void deleteMessages(ordered);
@@ -464,8 +496,8 @@ function SelectBar({ list }: { list: Message[] }) {
       </button>
       <button
         className="ib"
-        aria-label="Forward"
-        data-tip="Forward"
+        aria-label={tr('Forward')}
+        data-tip={tr('Forward')}
         disabled={!forwardable}
         onClick={() => {
           forward(ordered);
@@ -477,8 +509,8 @@ function SelectBar({ list }: { list: Message[] }) {
       {allFiles && (
         <button
           className="ib"
-          aria-label="Download"
-          data-tip="Download"
+          aria-label={tr('Download')}
+          data-tip={tr('Download')}
           onClick={() => {
             void (async () => {
               for (const m of ordered) await download(m);

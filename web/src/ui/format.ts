@@ -5,10 +5,11 @@ import type { Chat, Message } from '@pakchat/shared';
 
 import { core } from '../core/core';
 import { plainText } from './richText';
+import { tr } from '../i18n';
 
 const DAY = 86_400_000;
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d) => tr(d));
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m) => tr(m));
 
 function startOfDay(ms: number) {
   const d = new Date(ms);
@@ -23,7 +24,7 @@ export const sameDay = (a: number, b: number) => startOfDay(a) === startOfDay(b)
 export function clock(ms: number) {
   const d = new Date(ms);
   const h = d.getHours();
-  return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? tr('AM') : tr('PM')}`;
 }
 
 /** "29/10/2026" */
@@ -36,7 +37,7 @@ function shortDate(ms: number) {
 export function listTime(ms: number) {
   const days = daysAgo(ms);
   if (days <= 0) return clock(ms);
-  if (days === 1) return 'Yesterday';
+  if (days === 1) return tr('Yesterday');
   if (days < 7) return DAYS[new Date(ms).getDay()];
   return shortDate(ms);
 }
@@ -44,8 +45,8 @@ export function listTime(ms: number) {
 /** The pill between days: "Today", "Yesterday", "Monday", "3 October 2025". */
 export function dayLabel(ms: number) {
   const days = daysAgo(ms);
-  if (days <= 0) return 'Today';
-  if (days === 1) return 'Yesterday';
+  if (days <= 0) return tr('Today');
+  if (days === 1) return tr('Yesterday');
   if (days < 7) return DAYS[new Date(ms).getDay()];
   const d = new Date(ms);
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === new Date().getFullYear() ? '' : ` ${d.getFullYear()}`}`;
@@ -54,13 +55,13 @@ export function dayLabel(ms: number) {
 /** "online", "last seen today at 2:41 PM" … */
 export function lastSeen(p: { online: boolean; lastSeen: string | null } | undefined) {
   if (!p) return '';
-  if (p.online) return 'online';
+  if (p.online) return tr('online');
   const ms = p.lastSeen ? Date.parse(p.lastSeen) : 0;
   if (!ms) return '';
   const days = daysAgo(ms);
-  if (days <= 0) return `last seen today at ${clock(ms)}`;
-  if (days === 1) return `last seen yesterday at ${clock(ms)}`;
-  return `last seen ${shortDate(ms)} at ${clock(ms)}`;
+  if (days <= 0) return tr('last seen today at {time}', { time: clock(ms) });
+  if (days === 1) return tr('last seen yesterday at {time}', { time: clock(ms) });
+  return tr('last seen {date} at {time}', { date: shortDate(ms), time: clock(ms) });
 }
 
 /** "2.4 MB" */
@@ -91,7 +92,7 @@ export function otherPerson(chat: Chat): string | null {
 /** A group's title, or the other person's name ("Ali (You)" messaging myself). */
 export function chatTitle(chat: Chat) {
   if (chat.kind !== 'direct') return chat.title ?? '';
-  if (isSelfChat(chat)) return `${core.nameOf(core.myId)} (You)`;
+  if (isSelfChat(chat)) return tr('{name} (You)', { name: core.nameOf(core.myId) });
   const other = otherPerson(chat)!;
   return core.nameOf(other) || phoneOf(other) || '…';
 }
@@ -104,7 +105,7 @@ export function phoneOf(userId: string) {
 
 /** A name in a group: mine as saved, else "~ Their name", like WhatsApp. */
 export function memberName(userId: string) {
-  if (userId === core.myId) return 'You';
+  if (userId === core.myId) return tr('You');
   return core.nameOf(userId) || phoneOf(userId) || '…';
 }
 
@@ -116,46 +117,48 @@ export function groupName(userId: string) {
 
 // ---- Messages in one line ----
 
-const timerWords = (s: number) => (s <= 86_400 ? '24 hours' : s <= 7 * 86_400 ? '7 days' : '90 days');
+const timerWords = (s: number) => tr(s <= 86_400 ? '24 hours' : s <= 7 * 86_400 ? '7 days' : '90 days');
 
 /** "Ali added Sara", and the other notes in a chat. */
 export function systemText(m: Message) {
   const e = m.event;
   if (!e) return '';
-  const who = (id: string) => (id === core.myId ? 'You' : core.nameOf(id) || phoneOf(id) || '…');
+  const who = (id: string) => (id === core.myId ? tr('You') : core.nameOf(id) || phoneOf(id) || '…');
   const by = who(e.by);
   const users = (e.users ?? []).map(who).join(', ');
   const title = String(e.title ?? '');
   switch (e.event) {
     case 'created':
-      return `${by} created group "${title}"`;
+      return tr('{by} created group "{title}"', { by, title });
     case 'added':
-      return `${by} added ${users}`;
+      return tr('{by} added {users}', { by, users });
     case 'joined':
-      return `${users} joined using this group's invite link`;
+      return tr("{users} joined using this group's invite link", { users });
     case 'left':
-      return `${users || by} left`;
+      return tr('{users} left', { users: users || by });
     case 'removed':
-      return `${by} removed ${users}`;
+      return tr('{by} removed {users}', { by, users });
     case 'admin':
-      return `${users} is now an admin`;
+      return tr('{users} is now an admin', { users });
     case 'not_admin':
-      return `${users} is no longer an admin`;
+      return tr('{users} is no longer an admin', { users });
     case 'community':
-      return `${by} added this group to the community "${title}"`;
+      return tr('{by} added this group to the community "{title}"', { by, title });
     case 'community_left':
-      return `This group is no longer in the community "${title}"`;
+      return tr('This group is no longer in the community "{title}"', { title });
     case 'deactivated':
-      return `The community "${title}" was deactivated`;
+      return tr('The community "{title}" was deactivated', { title });
     case 'timer': {
       const s = Number(e.seconds ?? 0);
-      return s ? `${by} turned on disappearing messages. New messages will disappear from this chat ${timerWords(s)} after they're sent.` : `${by} turned off disappearing messages.`;
+      return s
+        ? tr("{by} turned on disappearing messages. New messages will disappear from this chat {after} after they're sent.", { by, after: timerWords(s) })
+        : tr('{by} turned off disappearing messages.', { by });
     }
     case 'call': {
       const video = e.video === true;
-      if (e.missed === true) return e.group === true ? 'Missed group call' : video ? 'Missed video call' : 'Missed voice call';
+      if (e.missed === true) return tr(e.group === true ? 'Missed group call' : video ? 'Missed video call' : 'Missed voice call');
       const seconds = Number(e.seconds ?? 0);
-      const kind = e.group === true ? 'Group call' : video ? 'Video call' : 'Voice call';
+      const kind = tr(e.group === true ? 'Group call' : video ? 'Video call' : 'Voice call');
       return seconds ? `${kind} · ${duration(seconds * 1000)}` : kind;
     }
     default:
@@ -166,14 +169,14 @@ export function systemText(m: Message) {
 /** What a file is, in words: "Photo", "Video", "Voice message", "notes.pdf". */
 export function fileWord(m: Message) {
   const f = m.file!;
-  if (f.once) return f.kind === 'video' ? 'Video' : f.kind === 'image' ? 'Photo' : 'Voice message';
-  if (f.kind === 'sticker') return 'Sticker';
+  if (f.once) return tr(f.kind === 'video' ? 'Video' : f.kind === 'image' ? 'Photo' : 'Voice message');
+  if (f.kind === 'sticker') return tr('Sticker');
   if (f.gif) return 'GIF';
-  if (f.kind === 'image') return 'Photo';
-  if (f.kind === 'video') return f.round ? 'Video message' : 'Video';
-  if (f.kind === 'voice') return 'Voice message';
-  if (f.kind === 'audio') return f.name ?? 'Audio';
-  return f.name ?? 'Document';
+  if (f.kind === 'image') return tr('Photo');
+  if (f.kind === 'video') return tr(f.round ? 'Video message' : 'Video');
+  if (f.kind === 'voice') return tr('Voice message');
+  if (f.kind === 'audio') return f.name ?? tr('Audio');
+  return f.name ?? tr('Document');
 }
 
 /** A message in one line: its words, or "Photo", "📍 Location", "📊 Lunch?" … */
@@ -183,9 +186,9 @@ export function bodyLine(m: Message) {
     if (m.file.once) return fileWord(m);
     return m.text ? plainText(m.text) : fileWord(m);
   }
-  if (m.kind === 'location') return m.location?.live ? 'Live location' : `📍 ${m.location?.name ?? 'Location'}`;
-  if (m.kind === 'contact') return `👤 ${m.contacts?.map((c) => c.name).join(', ') ?? 'Contact'}`;
-  if (m.kind === 'event') return `📅 ${m.plan?.title ?? 'Event'}`;
+  if (m.kind === 'location') return m.location?.live ? tr('Live location') : `📍 ${m.location?.name ?? tr('Location')}`;
+  if (m.kind === 'contact') return `👤 ${m.contacts?.map((c) => c.name).join(', ') ?? tr('Contact')}`;
+  if (m.kind === 'event') return `📅 ${m.plan?.title ?? tr('Event')}`;
   return plainText(m.text ?? '');
 }
 
@@ -193,7 +196,7 @@ export function bodyLine(m: Message) {
 export function preview(m: Message | null, group: boolean) {
   if (!m) return '';
   if (m.kind === 'system') return systemText(m);
-  if (m.deleted) return m.author === core.myId ? 'You deleted this message' : 'This message was deleted';
+  if (m.deleted) return tr(m.author === core.myId ? 'You deleted this message' : 'This message was deleted');
   const body = bodyLine(m);
   if (group && m.author !== core.myId) return `${memberName(m.author)}: ${body}`;
   return body;

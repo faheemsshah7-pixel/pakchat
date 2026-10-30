@@ -12,6 +12,7 @@ import { Icon } from '../ui/Icon';
 import { findLinks } from '../ui/richText';
 import { setView } from '../ui/view';
 import { download } from './messageActions';
+import { tr } from '../i18n';
 
 const Viewer = lazy(() => import('./Viewer').then((m) => ({ default: m.Viewer })));
 
@@ -37,15 +38,15 @@ export function MediaGallery({ chatId }: { chatId: string }) {
   return (
     <>
       <div className="dh">
-        <button className="ib" onClick={() => setView({ drawer: 'info' })} aria-label="Back">
+        <button className="ib" onClick={() => setView({ drawer: 'info' })} aria-label={tr('Back')}>
           <Icon name="back" size={22} />
         </button>
-        Media, links and docs
+        {tr('Media, links and docs')}
       </div>
       <div className="mtabs" role="tablist">
         {(['media', 'docs', 'links'] as const).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
-            {t === 'media' ? 'Media' : t === 'docs' ? 'Docs' : 'Links'}
+            {t === 'media' ? 'Media' : t === 'docs' ? tr('Docs') : tr('Links')}
           </button>
         ))}
       </div>
@@ -54,7 +55,7 @@ export function MediaGallery({ chatId }: { chatId: string }) {
           (media.length ? (
             <div className="mgrid">
               {media.map((m) => (
-                <button key={`${m.author}/${m.id}`} onClick={() => setViewing(m)} aria-label={m.file!.kind === 'video' ? 'Video' : 'Photo'}>
+                <button key={`${m.author}/${m.id}`} onClick={() => setViewing(m)} aria-label={m.file!.kind === 'video' ? tr('Video') : tr('Photo')}>
                   {m.file!.thumb ? <img src={`data:image/jpeg;base64,${m.file!.thumb}`} alt="" /> : <Icon name="photo" size={28} />}
                   {m.file!.kind === 'video' && (
                     <span className="mvid">
@@ -65,7 +66,7 @@ export function MediaGallery({ chatId }: { chatId: string }) {
               ))}
             </div>
           ) : (
-            <p className="mempty">No media</p>
+            <p className="mempty">{tr('No media')}</p>
           ))}
         {tab === 'docs' &&
           (docs.length ? (
@@ -82,7 +83,7 @@ export function MediaGallery({ chatId }: { chatId: string }) {
               </button>
             ))
           ) : (
-            <p className="mempty">No docs</p>
+            <p className="mempty">{tr('No docs')}</p>
           ))}
         {tab === 'links' &&
           (links.length ? (
@@ -98,7 +99,7 @@ export function MediaGallery({ chatId }: { chatId: string }) {
               </a>
             ))
           ) : (
-            <p className="mempty">No links</p>
+            <p className="mempty">{tr('No links')}</p>
           ))}
       </div>
       {viewing && (

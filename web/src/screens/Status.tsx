@@ -12,6 +12,7 @@ import { Avatar, photoOf } from '../ui/Avatar';
 import { clock, dayLabel, memberName } from '../ui/format';
 import { Icon, StatusIcon } from '../ui/Icon';
 import { openMenu, toast } from '../ui/overlay';
+import { tr } from '../i18n';
 
 const STATUS_BG = ['#2F6BF0', '#7C3AED', '#DB2777', '#E11D48', '#EA580C', '#B45309', '#16A34A', '#0D9488', '#0891B2', '#4F46E5', '#334155', '#9333EA'];
 const SHOW_MS = 5_000;
@@ -55,22 +56,22 @@ export function StatusPanel() {
   const addMenu = (x: number, y: number) =>
     openMenu(
       [
-        { label: 'Photos & videos', icon: 'photo', run: () => file.current?.click() },
-        { label: 'Text', icon: 'edit', run: () => setWriting(true) },
+        { label: tr('Photos & videos'), icon: 'photo', run: () => file.current?.click() },
+        { label: tr('Text'), icon: 'edit', run: () => setWriting(true) },
       ],
       x,
       y,
     );
 
   async function postFile(f: File) {
-    if (!/^(image|video)\//.test(f.type)) return toast('Only photos and videos can be a status');
+    if (!/^(image|video)\//.test(f.type)) return toast(tr('Only photos and videos can be a status'));
     setPosting(true);
     try {
       const chat = await readyMyStatus();
       await core.sendFiles(chat.id, [f]);
-      toast('Status posted');
+      toast(tr('Status posted'));
     } catch {
-      toast("Couldn't post your status. Check your internet connection.");
+      toast(tr('Couldn\'t post your status. Check your internet connection.'));
     } finally {
       setPosting(false);
     }
@@ -95,9 +96,9 @@ export function StatusPanel() {
   return (
     <>
       <header className="lh">
-        <span className="ptitle">Status</span>
+        <span className="ptitle">{tr('Status')}</span>
         <div className="grow" />
-        <button className="ib" aria-label="Add status" data-tip="Add status" disabled={posting} onClick={(e) => addMenu(e.clientX, e.clientY)}>
+        <button className="ib" aria-label={tr('Add status')} data-tip={tr('Add status')} disabled={posting} onClick={(e) => addMenu(e.clientX, e.clientY)}>
           <Icon name="plus" size={22} />
         </button>
       </header>
@@ -124,19 +125,19 @@ export function StatusPanel() {
               </i>
             </span>
             <div className="rt">
-              <span className="nm">My status</span>
-              <span className="pv">{posting ? 'Posting…' : 'Click to add status update'}</span>
+              <span className="nm">{tr('My status')}</span>
+              <span className="pv">{posting ? tr('Posting…') : tr('Click to add status update')}</span>
             </div>
           </button>
         )}
-        {recent.length > 0 && <div className="grp">Recent</div>}
+        {recent.length > 0 && <div className="grp">{tr('Recent')}</div>}
         {recent.map(row)}
-        {viewed.length > 0 && <div className="grp">Viewed</div>}
+        {viewed.length > 0 && <div className="grp">{tr('Viewed')}</div>}
         {viewed.map(row)}
         {data.others.length === 0 && (
           <div className="none big">
             <StatusIcon size={48} stroke={1.4} />
-            <p>Status updates from your contacts show here for 24 hours.</p>
+            <p>{tr('Status updates from your contacts show here for 24 hours.')}</p>
           </div>
         )}
       </div>
@@ -165,11 +166,11 @@ function TextStatus({ onClose }: { onClose: () => void }) {
     try {
       const chat = await readyMyStatus();
       await core.client.sendText(chat.id, words, { bg });
-      toast('Status posted');
+      toast(tr('Status posted'));
       onClose();
     } catch {
       setBusy(false);
-      toast("Couldn't post your status. Check your internet connection.");
+      toast(tr('Couldn\'t post your status. Check your internet connection.'));
     }
   }
 
@@ -182,18 +183,18 @@ function TextStatus({ onClose }: { onClose: () => void }) {
   return createPortal(
     <div className="stview stnew" role="dialog" aria-modal style={{ background: STATUS_BG[bg] }}>
       <div className="sttop">
-        <button className="ib" onClick={onClose} aria-label="Close">
+        <button className="ib" onClick={onClose} aria-label={tr('Close')}>
           <Icon name="close" size={24} />
         </button>
         <div className="grow" />
-        <button className="ib" onClick={() => setBg((bg + 1) % STATUS_BG.length)} aria-label="Colour" data-tip="Colour">
+        <button className="ib" onClick={() => setBg((bg + 1) % STATUS_BG.length)} aria-label={tr('Colour')} data-tip={tr('Colour')}>
           <Icon name="palette" size={22} />
         </button>
       </div>
-      <textarea autoFocus maxLength={700} placeholder="Type a status" value={text} onChange={(e) => setText(e.target.value)} />
+      <textarea autoFocus maxLength={700} placeholder={tr('Type a status')} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="stsend">
-        <span>Your contacts can see it for 24 hours</span>
-        <button className="send" disabled={!text.trim() || busy} onClick={() => void send()} aria-label="Send">
+        <span>{tr('Your contacts can see it for 24 hours')}</span>
+        <button className="send" disabled={!text.trim() || busy} onClick={() => void send()} aria-label={tr('Send')}>
           <Icon name="send" size={22} />
         </button>
       </div>
@@ -269,9 +270,9 @@ function StatusViewer({ people, start, onClose }: { people: Person[]; start: Per
       const chat = await core.client.openDirect(m.author);
       const kind = m.file ? (m.file.kind === 'video' ? 'video' : 'image') : 'text';
       await core.client.sendText(chat.id, text, { status: { author: m.author, id: m.id, kind, ...(m.text ? { text: m.text.slice(0, 700) } : {}), ...(m.file?.thumb ? { thumb: m.file.thumb } : {}) } });
-      toast('Reply sent');
+      toast(tr('Reply sent'));
     } catch {
-      toast("Couldn't send. Try again.");
+      toast(tr('Couldn\'t send. Try again.'));
     }
   }
 
@@ -293,14 +294,14 @@ function StatusViewer({ people, start, onClose }: { people: Person[]; start: Per
           </span>
         </div>
         <div className="grow" />
-        <button className="ib" onClick={() => setPaused(!paused)} aria-label={paused ? 'Play' : 'Pause'}>
+        <button className="ib" onClick={() => setPaused(!paused)} aria-label={paused ? tr('Play') : tr('Pause')}>
           <Icon name={paused ? 'play' : 'pause'} size={22} />
         </button>
-        <button className="ib" onClick={onClose} aria-label="Close">
+        <button className="ib" onClick={onClose} aria-label={tr('Close')}>
           <Icon name="close" size={24} />
         </button>
       </div>
-      <button className="stnav l" onClick={prev} aria-label="Previous">
+      <button className="stnav l" onClick={prev} aria-label={tr('Previous')}>
         <Icon name="back" size={24} />
       </button>
       <div className="stbody">
@@ -319,14 +320,14 @@ function StatusViewer({ people, start, onClose }: { people: Person[]; start: Per
         )}
         {m.file && m.text && <div className="stcap">{m.text}</div>}
       </div>
-      <button className="stnav r" onClick={next} aria-label="Next">
+      <button className="stnav r" onClick={next} aria-label={tr('Next')}>
         <Icon name="forwardArrow" size={24} />
       </button>
       {p.owner !== core.myId && (
         <div className="streply">
           <input
             value={reply}
-            placeholder="Type a reply…"
+            placeholder={tr('Type a reply…')}
             onFocus={() => setPaused(true)}
             onBlur={() => setPaused(false)}
             onChange={(e) => setReply(e.target.value)}
@@ -334,12 +335,12 @@ function StatusViewer({ people, start, onClose }: { people: Person[]; start: Per
           />
           <button
             className="ib"
-            aria-label="Like"
+            aria-label={tr('Like')}
             onClick={() => void core.client.react(m.chatId, { author: m.author, id: m.id }, m.reactions?.[core.myId] ? null : '❤️')}
           >
             {m.reactions?.[core.myId] ? '❤️' : <Icon name="heart" size={22} />}
           </button>
-          <button className="send" onClick={() => void send()} aria-label="Send">
+          <button className="send" onClick={() => void send()} aria-label={tr('Send')}>
             <Icon name="send" size={20} />
           </button>
         </div>

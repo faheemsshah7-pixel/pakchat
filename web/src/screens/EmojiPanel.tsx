@@ -7,16 +7,17 @@ import { Icon } from '../ui/Icon';
 import type { IconName } from '../ui/icons';
 import { EMOJI_GROUPS } from '../ui/emojiList';
 import { closeLayer, openLayer, usePlace } from '../ui/overlay';
+import { tr } from '../i18n';
 
 const GROUPS: { key: (typeof EMOJI_GROUPS)[number]['key']; icon: IconName; title: string }[] = [
-  { key: 'smileys', icon: 'smile', title: 'Smileys & emotion' },
-  { key: 'people', icon: 'user', title: 'People & body' },
-  { key: 'nature', icon: 'paw', title: 'Animals & nature' },
-  { key: 'food', icon: 'food', title: 'Food & drink' },
-  { key: 'activity', icon: 'ball', title: 'Activity' },
-  { key: 'travel', icon: 'car', title: 'Travel & places' },
-  { key: 'objects', icon: 'bulb', title: 'Objects' },
-  { key: 'symbols', icon: 'sym', title: 'Symbols & flags' },
+  { key: 'smileys', icon: 'smile', title: tr('Smileys & emotion') },
+  { key: 'people', icon: 'user', title: tr('People & body') },
+  { key: 'nature', icon: 'paw', title: tr('Animals & nature') },
+  { key: 'food', icon: 'food', title: tr('Food & drink') },
+  { key: 'activity', icon: 'ball', title: tr('Activity') },
+  { key: 'travel', icon: 'car', title: tr('Travel & places') },
+  { key: 'objects', icon: 'bulb', title: tr('Objects') },
+  { key: 'symbols', icon: 'sym', title: tr('Symbols & flags') },
 ];
 
 const RECENT_KEY = 'pakchat-recent-emoji';
@@ -70,7 +71,7 @@ function Panel({ x, y, onPick }: { x: number; y: number; onPick: (e: string) => 
   return (
     <div ref={ref} className="emoji pop" style={style} onMouseDown={(e) => e.preventDefault()}>
       <div className="cats">
-        <button className={on === 'recent' ? 'on' : ''} onClick={() => go('recent')} aria-label="Recent">
+        <button className={on === 'recent' ? 'on' : ''} onClick={() => go('recent')} aria-label={tr('Recent')}>
           <Icon name="clock" size={20} />
         </button>
         {GROUPS.map((g) => (
@@ -81,7 +82,7 @@ function Panel({ x, y, onPick }: { x: number; y: number; onPick: (e: string) => 
       </div>
       <label className="es" onMouseDown={(e) => e.stopPropagation()}>
         <Icon name="search" size={18} />
-        <input value={q} placeholder="Search emoji" onChange={(e) => setQ(e.target.value)} />
+        <input value={q} placeholder={tr('Search emoji')} onChange={(e) => setQ(e.target.value)} />
       </label>
       <div ref={body} className="ebody scroll">
         {words ? (
@@ -97,7 +98,7 @@ function Panel({ x, y, onPick }: { x: number; y: number; onPick: (e: string) => 
             {rec.length > 0 && (
               <>
                 <div className="eh" data-g="recent">
-                  Recent
+                  {tr('Recent')}
                 </div>
                 <div className="eg">
                   {rec.map((e) => (

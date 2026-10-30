@@ -4,7 +4,7 @@
 import { Socket } from 'phoenix';
 
 import type { PakChat, Session } from './client';
-import { identityCheck, newLinkKeys, openProvision, type Provision, qrText } from './link';
+import { identityCheck, newLinkKeys, openProvision, pairKey, type Provision, qrText, sealQr } from './link';
 import { type HttpServer, linkedFromWire, ServerError, type SignedIn } from './server';
 
 /** All six codes ran out with nobody scanning: show "Click to reload QR code". */
@@ -21,6 +21,12 @@ export type LinkOptions = {
   onQr(text: string, seconds: number): void;
   /** Stops waiting (the person closed the page). */
   signal?: AbortSignal;
+  /**
+   * Linking with a phone number instead: the number as typed, and the
+   * 8-letter code shown (see link.ts). `onPhone` hears the number tidied, and
+   * `onReady` that the phone can find it, so the code can show.
+   */
+  pair?: { phone: string; code: string; onPhone?(phone: string): void; /** The phone can find it now: show the code. */ onReady?(): void };
 };
 
 /**
@@ -34,6 +40,13 @@ export async function linkThisBrowser(o: LinkOptions): Promise<{ session: Sessio
     const linkKeys = await newLinkKeys();
     const check = await identityCheck(device.identityKey);
     const start = await o.server.startLink(device, keys);
+    // With a phone number: the server tidies it, and the code's key is made once.
+    let pair: { phone: string; key: Uint8Array } | null = null;
+    if (o.pair) {
+      const phone = await o.server.pairPhone(start.id, start.secret, o.pair.phone);
+      pair = { phone, key: await pairKey(o.pair.code, phone) };
+      o.pair.onPhone?.(phone);
+    }
     const { result, close } = waitOnSocket(o.socketUrl, start.id, start.secret);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stop = () => {
@@ -44,7 +57,15 @@ export async function linkThisBrowser(o: LinkOptions): Promise<{ session: Sessio
     try {
       const expired = new Promise<never>((_, reject) => {
         const show = (code: string, seconds: number) => {
-          o.onQr(qrText(code, linkKeys.publicKey, check), seconds);
+          const text = qrText(code, linkKeys.publicKey, check);
+          o.onQr(text, seconds);
+          if (pair) {
+            const { phone, key } = pair;
+            void sealQr(text, key, phone)
+              .then((sealed) => o.server.pairPhone(start.id, start.secret, phone, sealed))
+              .then(() => o.pair?.onReady?.())
+              .catch((err: unknown) => console.warn('[pakchat] pairing', err));
+          }
           timer = setTimeout(async () => {
             try {
               const next = await o.server.newLinkCode(start.id, start.secret);

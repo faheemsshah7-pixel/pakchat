@@ -9,6 +9,7 @@ import { Avatar, photoOf } from '../ui/Avatar';
 import { Icon } from '../ui/Icon';
 import { closeLayer, Dialog, openLayer, toast } from '../ui/overlay';
 import { setView } from '../ui/view';
+import { tr } from '../i18n';
 
 const MAX_OPTIONS = 12;
 
@@ -62,20 +63,20 @@ function Camera({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="camera" role="dialog" aria-label="Take photo">
+    <div className="camera" role="dialog" aria-label={tr('Take photo')}>
       <div className="cambar">
-        <button className="ib" onClick={onClose} aria-label="Close">
+        <button className="ib" onClick={onClose} aria-label={tr('Close')}>
           <Icon name="close" size={24} />
         </button>
-        <span>Take photo</span>
+        <span>{tr('Take photo')}</span>
       </div>
       {failed ? (
-        <p className="camfail">Allow PakChat to use your camera in your browser, then try again.</p>
+        <p className="camfail">{tr('Allow PakChat to use your camera in your browser, then try again.')}</p>
       ) : (
         <video ref={video} autoPlay playsInline muted />
       )}
       {!failed && (
-        <button className="snap" onClick={snap} aria-label="Take photo">
+        <button className="snap" onClick={snap} aria-label={tr('Take photo')}>
           <Icon name="camera" size={28} />
         </button>
       )}
@@ -101,16 +102,16 @@ function ContactPicker({ chat, onClose }: { chat: Chat; onClose: () => void }) {
       const c = core.contacts[uid];
       return { name: c.name, phones: c.phone ? [c.phone] : [], ...(c.email ? { emails: [c.email] } : {}), user: uid };
     });
-    await core.client.sendContacts(chat.id, cards).catch(() => toast("Couldn't send. Try again."));
+    await core.client.sendContacts(chat.id, cards).catch(() => toast(tr('Couldn\'t send. Try again.')));
   }
   return (
-    <Dialog title="Send contacts" wide onClose={onClose} buttons={[{ label: 'Cancel' }, { label: 'Send', fill: true, disabled: !picked.length, run: () => void send() }]}>
+    <Dialog title={tr('Send contacts')} wide onClose={onClose} buttons={[{ label: tr('Cancel') }, { label: tr('Send'), fill: true, disabled: !picked.length, run: () => void send() }]}>
       <label className="search">
         <Icon name="search" size={20} />
-        <input autoFocus value={q} placeholder="Search name or number" onChange={(e) => setQ(e.target.value)} />
+        <input autoFocus value={q} placeholder={tr('Search name or number')} onChange={(e) => setQ(e.target.value)} />
       </label>
       <div className="fl scroll pick">
-        {shown.length === 0 && <p className="none">{all.length ? 'No contacts found' : 'Contacts you save on your phone show here'}</p>}
+        {shown.length === 0 && <p className="none">{all.length ? tr('No contacts found') : tr('Contacts you save on your phone show here')}</p>}
         {shown.map(([uid, c]) => {
           const on = picked.includes(uid);
           return (
@@ -150,22 +151,22 @@ function PollMaker({ chat, onClose }: { chat: Chat; onClose: () => void }) {
   };
   return (
     <Dialog
-      title="Create poll"
+      title={tr('Create poll')}
       onClose={onClose}
       buttons={[
-        { label: 'Cancel' },
-        { label: 'Send', fill: true, disabled: !ok, run: () => void core.client.sendPoll(chat.id, question.trim(), filled, multi).catch(() => toast("Couldn't send. Try again.")) },
+        { label: tr('Cancel') },
+        { label: tr('Send'), fill: true, disabled: !ok, run: () => void core.client.sendPoll(chat.id, question.trim(), filled, multi).catch(() => toast(tr('Couldn\'t send. Try again.'))) },
       ]}
     >
-      <label className="flab">Question</label>
-      <input className="dinput" autoFocus maxLength={255} placeholder="Ask question" value={question} onChange={(e) => setQuestion(e.target.value)} />
-      <label className="flab">Options</label>
+      <label className="flab">{tr('Question')}</label>
+      <input className="dinput" autoFocus maxLength={255} placeholder={tr('Ask question')} value={question} onChange={(e) => setQuestion(e.target.value)} />
+      <label className="flab">{tr('Options')}</label>
       {options.map((o, i) => (
-        <input key={i} className="dinput opt" maxLength={100} placeholder="+ Add" value={o} onChange={(e) => change(i, e.target.value)} />
+        <input key={i} className="dinput opt" maxLength={100} placeholder={tr('+ Add')} value={o} onChange={(e) => change(i, e.target.value)} />
       ))}
-      {filled.length !== new Set(filled).size && <p className="ferr">Each option must be different</p>}
+      {filled.length !== new Set(filled).size && <p className="ferr">{tr('Each option must be different')}</p>}
       <label className="switchrow">
-        <span>Allow multiple answers</span>
+        <span>{tr('Allow multiple answers')}</span>
         <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} />
       </label>
     </Dialog>
@@ -195,16 +196,16 @@ function EventMaker({ chat, onClose }: { chat: Chat; onClose: () => void }) {
   async function send() {
     await core.client
       .sendPlan(chat.id, { title: title.trim(), at, video: false, general: true, ...(place.trim() ? { place: place.trim() } : {}), ...(about.trim() ? { about: about.trim() } : {}) })
-      .catch(() => toast("Couldn't send. Try again."));
+      .catch(() => toast(tr('Couldn\'t send. Try again.')));
   }
   return (
-    <Dialog title="Create event" onClose={onClose} buttons={[{ label: 'Cancel' }, { label: 'Send', fill: true, disabled: !ok, run: () => void send() }]}>
-      <input className="dinput" autoFocus maxLength={100} placeholder="Event name" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <label className="flab">Date and time</label>
+    <Dialog title={tr('Create event')} onClose={onClose} buttons={[{ label: tr('Cancel') }, { label: tr('Send'), fill: true, disabled: !ok, run: () => void send() }]}>
+      <input className="dinput" autoFocus maxLength={100} placeholder={tr('Event name')} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <label className="flab">{tr('Date and time')}</label>
       <input className="dinput" type="datetime-local" value={when} min={localInput(Date.now())} onChange={(e) => setWhen(e.target.value)} />
-      {Number.isFinite(at) && at <= Date.now() && <p className="ferr">Pick a time in the future</p>}
-      <input className="dinput" maxLength={200} placeholder="Location (optional)" value={place} onChange={(e) => setPlace(e.target.value)} />
-      <textarea className="dinput" rows={3} maxLength={2000} placeholder="Description (optional)" value={about} onChange={(e) => setAbout(e.target.value)} />
+      {Number.isFinite(at) && at <= Date.now() && <p className="ferr">{tr('Pick a time in the future')}</p>}
+      <input className="dinput" maxLength={200} placeholder={tr('Location (optional)')} value={place} onChange={(e) => setPlace(e.target.value)} />
+      <textarea className="dinput" rows={3} maxLength={2000} placeholder={tr('Description (optional)')} value={about} onChange={(e) => setAbout(e.target.value)} />
     </Dialog>
   );
 }

@@ -471,6 +471,20 @@ export class HttpServer implements ServerApi {
     return { code: r.code, expiresIn: r.expires_in };
   }
 
+  /**
+   * The website, linking with a phone number instead: the number (answered
+   * tidied, "+92…"), then with each new code its QR text sealed with the
+   * code it shows (see link.ts).
+   */
+  async pairPhone(id: string, secret: string, phone: string, sealed?: string) {
+    return (await this.call<{ phone: string }>('POST', `/link/${encodeURIComponent(id)}/phone`, { secret, phone, ...(sealed ? { sealed } : {}) })).phone;
+  }
+
+  /** The phone: what websites have sealed for my number, newest first. */
+  async pairing(): Promise<{ phone: string | null; waiting: { sealed: string; name: string }[] }> {
+    return this.call('GET', '/me/pairing');
+  }
+
   /** The phone: which website a scanned code belongs to, to check against the QR. */
   async linkInfo(code: string) {
     const r = await this.call<{ name: string; identity_key: string }>('GET', `/link/${encodeURIComponent(code)}`);

@@ -93,10 +93,15 @@ export function useChatRows(): ChatRow[] | null {
   return useLoaded<ChatRow[] | null>(['chats', 'prefs', 'people', 'phase'], chatRows, [], null);
 }
 
+/** The chats in the Locked chats folder (only read while it's open). */
+export function useLockedRows(): ChatRow[] | null {
+  return useLoaded<ChatRow[] | null>(['chats', 'prefs', 'people', 'phase'], () => chatRows(true), [], null);
+}
+
 /** The chat list as it is now, read once (for shortcuts like Next chat). */
 export const chatRowsNow = () => chatRows();
 
-async function chatRows(): Promise<ChatRow[]> {
+async function chatRows(folder = false): Promise<ChatRow[]> {
   if (!core.client?.me) return [];
   const [chats, newest] = await Promise.all([core.storage.listChats(), core.storage.newestOfEach()]);
   const now = Date.now();
@@ -104,7 +109,8 @@ async function chatRows(): Promise<ChatRow[]> {
   for (const chat of chats) {
     if (chat.kind === 'status' || chat.kind === 'community' || chat.callLink) continue;
     const prefs = core.prefs[chat.id] ?? {};
-    if (prefs.lock === 'folder') continue;
+    // The Locked chats folder's chats are only in its own list.
+    if ((prefs.lock === 'folder') !== folder) continue;
     let last = newest.get(chat.id) ?? null;
     if (last?.expiresAt && last.expiresAt <= now) {
       last = (await core.storage.listMessages(chat.id, { limit: 20 })).filter((m) => !m.expiresAt || m.expiresAt > now).at(-1) ?? null;

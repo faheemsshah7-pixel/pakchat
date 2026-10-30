@@ -9,34 +9,35 @@ import { confirm } from '../ui/overlay';
 import { getView, setView } from '../ui/view';
 import { archive, markRead, mute, pin } from './chatActions';
 import { EDIT_MS } from './messageActions';
+import { tr } from '../i18n';
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-const MOD = MAC ? 'Cmd+Ctrl' : 'Ctrl+Alt';
+const MOD = MAC ? tr('Cmd+Ctrl') : tr('Ctrl+Alt');
 
 /** For Settings › Keyboard shortcuts. */
 export const SHORTCUTS: [string, string][] = [
   ['New chat', `${MOD}+N`],
   ['New group', `${MOD}+Shift+N`],
   ['Search', `${MOD}+/`],
-  ['Search in chat', MAC ? 'Cmd+Shift+F' : 'Ctrl+Shift+F'],
+  ['Search in chat', MAC ? tr('Cmd+Shift+F') : tr('Ctrl+Shift+F')],
   ['Next chat', `${MOD}+Shift+]`],
   ['Previous chat', `${MOD}+Shift+[`],
   ['Close chat', 'Escape'],
-  ['Chat info', MAC ? 'Option+I' : 'Alt+I'],
+  ['Chat info', MAC ? tr('Option+I') : tr('Alt+I')],
   ['Settings', `${MOD}+,`],
   ['Mark as unread', `${MOD}+Shift+U`],
   ['Mute', `${MOD}+Shift+M`],
   ['Archive chat', `${MOD}+Shift+E`],
   ['Pin chat', `${MOD}+Shift+P`],
-  ['Edit last message', MAC ? 'Cmd+↑' : 'Ctrl+↑'],
+  ['Edit last message', MAC ? tr('Cmd+↑') : tr('Ctrl+↑')],
   ['Record voice message', `${MOD}+Shift+R`],
-  ['Pause or continue recording', MAC ? 'Option+P' : 'Alt+P'],
-  ['Send voice message', MAC ? 'Cmd+Enter' : 'Ctrl+Enter'],
+  ['Pause or continue recording', MAC ? tr('Option+P') : tr('Alt+P')],
+  ['Send voice message', MAC ? tr('Cmd+Enter') : tr('Ctrl+Enter')],
   ['Dark theme on or off', `${MOD}+T`],
 ];
 
 export async function logOut() {
-  if (await confirm('Log out?', "Your chats on this computer will be removed. They stay on your phone, and you can link this computer again any time.", 'Log out', true)) await core.signOut();
+  if (await confirm(tr('Log out?'), "Your chats on this computer will be removed. They stay on your phone, and you can link this computer again any time.", 'Log out', true)) await core.signOut();
 }
 
 async function step(by: number) {

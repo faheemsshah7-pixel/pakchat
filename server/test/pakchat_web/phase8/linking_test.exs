@@ -68,7 +68,10 @@ defmodule PakchatWeb.LinkingTest do
 
     # The phone lists its devices.
     devices = as(ali) |> get(~p"/api/me/devices") |> json_response(200)
-    assert [%{"device_id" => 1}, %{"device_id" => 2, "name" => "Chrome on Mac"} = laptop] = devices
+
+    assert [%{"device_id" => 1}, %{"device_id" => 2, "name" => "Chrome on Mac"} = laptop] =
+             devices
+
     # Not connected yet: not online, and never active.
     assert %{"online" => false, "last_active" => nil} = laptop
   end
@@ -214,5 +217,112 @@ defmodule PakchatWeb.LinkingTest do
     Linking.sweep()
     assert {:error, :not_found} = Linking.check(w["id"], w["secret"])
     assert :ets.lookup(Linking, {:code, w["code"]}) == []
+  end
+
+  describe "linking with a phone number instead" do
+    defp sealed, do: Base.encode64(:crypto.strong_rand_bytes(120))
+
+    defp with_phone(%{user: user} = who, phone) do
+      %{who | user: user |> Ecto.Changeset.change(phone: phone) |> Pakchat.Repo.update!()}
+    end
+
+    test "the website seals its QR for a number, and only that number's phone sees it", %{
+      ali: ali,
+      sara: sara
+    } do
+      ali = with_phone(ali, "+923001234567")
+      sara = with_phone(sara, "+923007654321")
+      w = website()
+      s1 = sealed()
+
+      # The number as typed comes back tidied, for the website's sealing.
+      assert %{"phone" => "+923001234567"} =
+               build_conn()
+               |> post(~p"/api/link/#{w["id"]}/phone", %{
+                 "secret" => w["secret"],
+                 "phone" => "0300 1234567"
+               })
+               |> json_response(200)
+
+      # Nothing sealed yet: nothing to show.
+      assert %{"phone" => "+923001234567", "waiting" => []} =
+               as(ali) |> get(~p"/api/me/pairing") |> json_response(200)
+
+      build_conn()
+      |> post(~p"/api/link/#{w["id"]}/phone", %{
+        "secret" => w["secret"],
+        "phone" => "+923001234567",
+        "sealed" => s1
+      })
+      |> json_response(200)
+
+      assert %{"waiting" => [%{"sealed" => ^s1, "name" => "Chrome on Mac"}]} =
+               as(ali) |> get(~p"/api/me/pairing") |> json_response(200)
+
+      assert %{"waiting" => []} = as(sara) |> get(~p"/api/me/pairing") |> json_response(200)
+
+      # With each new code it's sealed again: the phone sees the newest.
+      %{"code" => code} =
+        build_conn()
+        |> post(~p"/api/link/#{w["id"]}/code", %{"secret" => w["secret"]})
+        |> json_response(200)
+
+      s2 = sealed()
+
+      build_conn()
+      |> post(~p"/api/link/#{w["id"]}/phone", %{
+        "secret" => w["secret"],
+        "phone" => "+923001234567",
+        "sealed" => s2
+      })
+      |> json_response(200)
+
+      assert %{"waiting" => [%{"sealed" => ^s2}]} =
+               as(ali) |> get(~p"/api/me/pairing") |> json_response(200)
+
+      # The phone opens it and approves the code inside, as with a QR. Then it's gone.
+      {%{}, _socket} = wait(w)
+
+      as(ali)
+      |> post(~p"/api/link/#{code}", %{"provision" => provision()})
+      |> json_response(200)
+
+      assert_push "linked", %{device_id: 2}
+      assert %{"waiting" => []} = as(ali) |> get(~p"/api/me/pairing") |> json_response(200)
+    end
+
+    test "a wrong secret, a bad number or a bad seal is refused, and a linked device can't look",
+         %{ali: ali} do
+      ali = with_phone(ali, "+923001234567")
+      w = website()
+
+      assert build_conn()
+             |> post(~p"/api/link/#{w["id"]}/phone", %{
+               "secret" => "nope",
+               "phone" => "+923001234567"
+             })
+             |> json_response(404)
+
+      assert build_conn()
+             |> post(~p"/api/link/#{w["id"]}/phone", %{"secret" => w["secret"], "phone" => "12"})
+             |> json_response(422)
+
+      for bad <- ["not base64!", Base.encode64("short"), String.duplicate("A", 2000), 5] do
+        assert build_conn()
+               |> post(~p"/api/link/#{w["id"]}/phone", %{
+                 "secret" => w["secret"],
+                 "phone" => "+923001234567",
+                 "sealed" => bad
+               })
+               |> json_response(400)
+      end
+
+      assert as(linked(ali.user)) |> get(~p"/api/me/pairing") |> json_response(403)
+    end
+
+    test "someone signed in with Gmail only has nothing waiting", %{sara: sara} do
+      assert %{"phone" => nil, "waiting" => []} =
+               as(sara) |> get(~p"/api/me/pairing") |> json_response(200)
+    end
   end
 end

@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 
 import { Icon } from './Icon';
 import type { IconName } from './icons';
+import { tr } from '../i18n';
 
 // ---- A tiny store for what's open ----
 
@@ -245,7 +246,7 @@ export function confirm(title: string, body: string, yes: string, red = false): 
           resolve(false);
         }}
         buttons={[
-          { label: 'Cancel' },
+          { label: tr('Cancel') },
           {
             label: yes,
             fill: true,
@@ -262,7 +263,7 @@ export function confirm(title: string, body: string, yes: string, red = false): 
 }
 
 /** A dialog of choices (Mute: 8 hours, 1 week, Always). Resolves with the one picked, or null. */
-export function choose<T extends string>(title: string, options: { value: T; label: string }[], current: T, ok = 'OK'): Promise<T | null> {
+export function choose<T extends string>(title: string, options: { value: T; label: string }[], current: T, ok = tr('OK')): Promise<T | null> {
   return new Promise((resolve) => {
     function Choices() {
       const [v, setV] = useState(current);
@@ -273,7 +274,7 @@ export function choose<T extends string>(title: string, options: { value: T; lab
             closeLayer(id);
             resolve(null);
           }}
-          buttons={[{ label: 'Cancel', run: () => resolve(null) }, { label: ok, fill: true, run: () => resolve(v) }]}
+          buttons={[{ label: tr('Cancel'), run: () => resolve(null) }, { label: ok, fill: true, run: () => resolve(v) }]}
         >
           {options.map((o) => (
             <button key={o.value} className={`radio ${v === o.value ? 'on' : ''}`} onClick={() => setV(o.value)}>
@@ -302,7 +303,7 @@ export function askText(title: string, placeholder: string, ok = 'Save', max = 4
               closeLayer(id);
               resolve(null);
             }}
-            buttons={[{ label: 'Cancel' }, { label: ok, fill: true, run: () => resolve(v.trim()) }]}
+            buttons={[{ label: tr('Cancel') }, { label: ok, fill: true, run: () => resolve(v.trim()) }]}
           >
             <textarea className="dinput long" autoFocus maxLength={max} placeholder={placeholder} value={v} rows={5} onChange={(e) => setV(e.target.value)} />
           </Dialog>
@@ -315,7 +316,7 @@ export function askText(title: string, placeholder: string, ok = 'Save', max = 4
             closeLayer(id);
             resolve(null);
           }}
-          buttons={[{ label: 'Cancel' }, { label: ok, fill: true, run: () => resolve(v.trim() || null) }]}
+          buttons={[{ label: tr('Cancel') }, { label: ok, fill: true, run: () => resolve(v.trim() || null) }]}
         >
           <input
             className="dinput"

@@ -8,6 +8,8 @@ import type { ChatPrefs } from '../core/core';
 import { bodyLine, chatTitle, isSelfChat, memberName, otherPerson } from '../ui/format';
 import { askText, choose, confirm, type MenuItem, toast } from '../ui/overlay';
 import { setView } from '../ui/view';
+import { askSecretCode } from './LockScreen';
+import { tr } from '../i18n';
 
 const HOUR = 3_600_000;
 export const MAX_PINNED = 3;
@@ -19,7 +21,7 @@ export async function archive(chat: Chat, on: boolean) {
   await core.setPrefs(chat.id, { archived: on, pinnedAt: on ? undefined : pinnedAt });
   if (on && core.viewing === chat.id) openChat(null);
   // Undo puts it back as it was, pinned too.
-  toast(on ? 'Chat archived' : 'Chat unarchived', { label: 'Undo', run: () => void core.setPrefs(chat.id, { archived: !on, pinnedAt }) });
+  toast(on ? tr('Chat archived') : tr('Chat unarchived'), { label: tr('Undo'), run: () => void core.setPrefs(chat.id, { archived: !on, pinnedAt }) });
 }
 
 export async function mute(chat: Chat) {
@@ -34,11 +36,11 @@ export async function mute(chat: Chat) {
 /** "Mute notifications": how long. Null if cancelled; undefined for "Always". */
 async function askMute(): Promise<number | undefined | null> {
   const pick = await choose(
-    'Mute notifications',
+    tr('Mute notifications'),
     [
-      { value: '8h', label: '8 hours' },
-      { value: '1w', label: '1 week' },
-      { value: 'always', label: 'Always' },
+      { value: '8h', label: tr('8 hours') },
+      { value: '1w', label: tr('1 week') },
+      { value: 'always', label: tr('Always') },
     ],
     '8h',
     'Mute',
@@ -74,7 +76,7 @@ export async function archiveMany(chats: Chat[], on: boolean) {
   for (const c of chats) await core.setPrefs(c.id, { archived: on, pinnedAt: on ? undefined : core.prefs[c.id]?.pinnedAt });
   if (on && chats.some((c) => c.id === core.viewing)) openChat(null);
   toast(`${plural(chats.length, 'chat')} ${on ? 'archived' : 'unarchived'}`, {
-    label: 'Undo',
+    label: tr('Undo'),
     run: () => void Promise.all(before.map(([id, pinnedAt]) => core.setPrefs(id, { archived: !on, pinnedAt }))),
   });
 }
@@ -115,7 +117,7 @@ export async function deleteMany(chats: Chat[]): Promise<boolean> {
   const inGroups = chats.filter((c) => c.kind === 'group' && !c.left);
   const ok = chats.filter((c) => !inGroups.includes(c));
   if (!ok.length) {
-    toast(inGroups.length === 1 ? 'Exit the group first to delete it' : 'Exit the groups first to delete them');
+    toast(inGroups.length === 1 ? tr('Exit the group first to delete it') : tr('Exit the groups first to delete them'));
     return false;
   }
   const extra = inGroups.length ? ` ${plural(inGroups.length, 'group')} you're still in won't be deleted.` : '';
@@ -167,7 +169,7 @@ export async function block(chat: Chat) {
     await core.block(other, !blocked);
     toast(blocked ? `${chatTitle(chat)} unblocked` : `${chatTitle(chat)} blocked`);
   } catch {
-    toast("Couldn't do that. Check your internet connection.");
+    toast(tr('Couldn\'t do that. Check your internet connection.'));
   }
 }
 
@@ -177,7 +179,7 @@ function listItems(chat: Chat): MenuItem[] {
     run: () => void core.setLists(core.lists.map((x) => (x.id === l.id ? { ...x, chatIds: x.chatIds.includes(chat.id) ? x.chatIds.filter((c) => c !== chat.id) : [...x.chatIds, chat.id] } : x))),
   }));
   items.push({
-    label: 'New list',
+    label: tr('New list'),
     icon: 'plus',
     run: () =>
       void askText('New list', 'Name, like Family or Work').then((name) => {
@@ -188,16 +190,16 @@ function listItems(chat: Chat): MenuItem[] {
 }
 
 export const TIMERS = [
-  { value: '0', label: 'Off' },
-  { value: String(86_400), label: '24 hours' },
-  { value: String(7 * 86_400), label: '7 days' },
-  { value: String(90 * 86_400), label: '90 days' },
+  { value: '0', label: tr('Off') },
+  { value: String(86_400), label: tr('24 hours') },
+  { value: String(7 * 86_400), label: tr('7 days') },
+  { value: String(90 * 86_400), label: tr('90 days') },
 ];
 
 /** Disappearing messages: off, 24 hours, 7 days or 90 days, for everyone in the chat. */
 export async function disappearing(chat: Chat) {
-  const pick = await choose('Disappearing messages', TIMERS, String(chat.timer ?? 0));
-  if (pick != null && Number(pick) !== (chat.timer ?? 0)) await core.client.setTimer(chat.id, Number(pick)).catch(() => toast("Couldn't change it. Try again."));
+  const pick = await choose(tr('Disappearing messages'), TIMERS, String(chat.timer ?? 0));
+  if (pick != null && Number(pick) !== (chat.timer ?? 0)) await core.client.setTimer(chat.id, Number(pick)).catch(() => toast(tr('Couldn\'t change it. Try again.')));
 }
 
 /**
@@ -221,6 +223,27 @@ export async function exportChat(chat: Chat) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/**
+ * Lock chat, the phone's way (it moves to Locked chats, on the phone too), or
+ * Unlock chat. Both need the secret code set on the phone.
+ */
+export async function lockChat(chat: Chat, on: boolean) {
+  if (!core.lockCode) {
+    toast(tr('To lock chats, first set a secret code on your phone: Settings › Privacy › Chat lock › Secret code'));
+    return;
+  }
+  if (on) {
+    if (!(await confirm(tr('Lock this chat?'), 'It moves to Locked chats, here and on your phone, and opens with your secret code. Its notifications say only "New message".', 'Lock chat'))) return;
+    await core.setPrefs(chat.id, { lock: 'folder', archived: false });
+    if (core.viewing === chat.id) openChat(null);
+    toast(tr('Chat locked'));
+  } else {
+    if (!(await askSecretCode(tr('Unlock chat')))) return;
+    await core.setPrefs(chat.id, { lock: undefined });
+    toast(tr('Chat unlocked'));
+  }
+}
+
 /** The chat menu, in WhatsApp Web's order. */
 export function chatMenu(chat: Chat, opts: { open?: boolean } = {}): MenuItem[] {
   const p = core.prefs[chat.id] ?? {};
@@ -229,17 +252,18 @@ export function chatMenu(chat: Chat, opts: { open?: boolean } = {}): MenuItem[] 
   const other = otherPerson(chat);
   const blocked = !!other && !!core.blocked?.has(other);
   const items: MenuItem[] = [
-    { label: p.archived ? 'Unarchive chat' : 'Archive chat', icon: 'archive', run: () => void archive(chat, !p.archived) },
-    isMuted(p) ? { label: 'Unmute notifications', icon: 'bell', run: () => void mute(chat) } : { label: 'Mute notifications', icon: 'muted', run: () => void mute(chat) },
-    { label: p.pinnedAt ? 'Unpin chat' : 'Pin chat', icon: 'pin', run: () => void pin(chat) },
-    { label: unread ? 'Mark as read' : 'Mark as unread', icon: 'unread', run: () => void markRead(chat, unread) },
-    { label: p.favourite ? 'Remove from Favourites' : 'Add to Favourites', icon: 'heart', run: () => void favourite(chat) },
+    { label: p.archived ? tr('Unarchive chat') : tr('Archive chat'), icon: 'archive', run: () => void archive(chat, !p.archived) },
+    isMuted(p) ? { label: tr('Unmute notifications'), icon: 'bell', run: () => void mute(chat) } : { label: tr('Mute notifications'), icon: 'muted', run: () => void mute(chat) },
+    { label: p.pinnedAt ? tr('Unpin chat') : tr('Pin chat'), icon: 'pin', run: () => void pin(chat) },
+    { label: unread ? tr('Mark as read') : tr('Mark as unread'), icon: 'unread', run: () => void markRead(chat, unread) },
+    { label: p.favourite ? tr('Remove from Favourites') : tr('Add to Favourites'), icon: 'heart', run: () => void favourite(chat) },
   ];
-  if (opts.open) items.push({ label: 'Close chat', icon: 'close', run: () => (openChat(null), setView({ drawer: null })) });
-  items.push({ label: core.lists.some((l) => l.chatIds.includes(chat.id)) ? 'Change list' : 'Add to list', icon: 'lists', sub: listItems(chat) });
+  if (opts.open) items.push({ label: tr('Close chat'), icon: 'close', run: () => (openChat(null), setView({ drawer: null })) });
+  items.push({ label: core.lists.some((l) => l.chatIds.includes(chat.id)) ? tr('Change list') : tr('Add to list'), icon: 'lists', sub: listItems(chat) });
+  if (chat.kind !== 'status' && !isSelfChat(chat)) items.push({ label: p.lock ? tr('Unlock chat') : tr('Lock chat'), icon: 'lock', run: () => void lockChat(chat, !p.lock) });
   items.push('-');
-  if (direct) items.push({ label: blocked ? 'Unblock' : 'Block', icon: 'block', run: () => void block(chat) });
-  items.push({ label: 'Clear chat', icon: 'close', run: () => void clearChat(chat) });
-  items.push(chat.kind === 'group' && !chat.left ? { label: 'Exit group', icon: 'leave', red: true, run: () => void deleteChat(chat) } : { label: 'Delete chat', icon: 'trash', red: true, run: () => void deleteChat(chat) });
+  if (direct) items.push({ label: blocked ? tr('Unblock') : tr('Block'), icon: 'block', run: () => void block(chat) });
+  items.push({ label: tr('Clear chat'), icon: 'close', run: () => void clearChat(chat) });
+  items.push(chat.kind === 'group' && !chat.left ? { label: tr('Exit group'), icon: 'leave', red: true, run: () => void deleteChat(chat) } : { label: tr('Delete chat'), icon: 'trash', red: true, run: () => void deleteChat(chat) });
   return items;
 }

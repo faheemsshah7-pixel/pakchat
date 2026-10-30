@@ -9,6 +9,7 @@ import { Avatar, photoOf } from '../ui/Avatar';
 import { Icon } from '../ui/Icon';
 import { closeLayer, confirm, Dialog, openLayer, openMenu, type MenuItem, toast } from '../ui/overlay';
 import { openEmojiPicker } from './EmojiPanel';
+import { tr } from '../i18n';
 
 const NAME_MAX = 25;
 const ABOUT_MAX = 139;
@@ -23,15 +24,15 @@ export function Profile() {
 
   const photoMenu = (x: number, y: number) => {
     const items: MenuItem[] = [];
-    if (has) items.push({ label: 'View photo', icon: 'eye', run: () => viewPhoto(core.photoUrl(me.me.photo), me.me.name) });
-    items.push({ label: 'Upload photo', icon: 'upload', run: () => file.current?.click() });
+    if (has) items.push({ label: tr('View photo'), icon: 'eye', run: () => viewPhoto(core.photoUrl(me.me.photo), me.me.name) });
+    items.push({ label: tr('Upload photo'), icon: 'upload', run: () => file.current?.click() });
     if (has)
       items.push({
-        label: 'Remove photo',
+        label: tr('Remove photo'),
         icon: 'trash',
         run: () =>
           void (async () => {
-            if (!(await confirm('Remove your profile photo?', '', 'Remove', true))) return;
+            if (!(await confirm(tr('Remove your profile photo?'), '', 'Remove', true))) return;
             await core.updateMe({ photo: null }).catch(() => toast(OFFLINE));
           })(),
       });
@@ -41,12 +42,12 @@ export function Profile() {
   return (
     <>
       <header className="sh">
-        <span>Profile</span>
+        <span>{tr('Profile')}</span>
       </header>
       <div className="sbody scroll pbody">
         <button
           className={`pphoto ${busy ? 'busy' : ''}`}
-          aria-label="Change profile photo"
+          aria-label={tr('Change profile photo')}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             photoMenu(e.clientX || r.left + r.width / 2, e.clientY || r.top + r.height / 2);
@@ -55,7 +56,7 @@ export function Profile() {
           <Avatar id={me.userId} name={me.me.name} photo={photoOf(me.userId)} size={200} />
           <span className="pcover">
             <Icon name="camera" size={24} />
-            {has ? 'Change profile photo' : 'Add profile photo'}
+            {has ? tr('Change profile photo') : tr('Add profile photo')}
           </span>
           {busy && <span className="spin" />}
         </button>
@@ -73,7 +74,7 @@ export function Profile() {
               setBusy(true);
               try {
                 await core.setMyPhoto(square);
-                toast('Profile photo updated');
+                toast(tr('Profile photo updated'));
               } catch {
                 toast(OFFLINE);
               } finally {
@@ -83,12 +84,12 @@ export function Profile() {
           }}
         />
 
-        <EditLine label="Name" value={me.me.name} max={NAME_MAX} required save={(name) => core.updateMe({ name })} />
-        <p className="pnote">This is not your username or PIN. This name will be visible to your PakChat contacts.</p>
-        <EditLine label="About" value={me.me.about ?? ''} max={ABOUT_MAX} save={(about) => core.updateMe({ about })} />
+        <EditLine label={tr('Name')} value={me.me.name} max={NAME_MAX} required save={(name) => core.updateMe({ name })} />
+        <p className="pnote">{tr('This is not your username or PIN. This name will be visible to your PakChat contacts.')}</p>
+        <EditLine label={tr('About')} value={me.me.about ?? ''} max={ABOUT_MAX} save={(about) => core.updateMe({ about })} />
         {(me.me.phone || me.me.email) && (
           <div className="pline">
-            <span className="plabel">{me.me.phone ? 'Phone' : 'Email'}</span>
+            <span className="plabel">{me.me.phone ? tr('Phone') : tr('Email')}</span>
             <div className="prow">
               <span className="pval">{me.me.phone ? prettyPhone(me.me.phone) : me.me.email}</span>
             </div>
@@ -158,7 +159,7 @@ function EditLine({ label, value, max, required, save }: { label: string; value:
           <span className={`pleft ${left < 0 ? 'over' : ''}`}>{left}</span>
           <button
             className="ib"
-            aria-label="Emoji"
+            aria-label={tr('Emoji')}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
@@ -172,13 +173,13 @@ function EditLine({ label, value, max, required, save }: { label: string; value:
           >
             <Icon name="emoji" size={20} />
           </button>
-          <button className="ib pok" aria-label="Save" disabled={!ok} onClick={() => void done()}>
+          <button className="ib pok" aria-label={tr('Save')} disabled={!ok} onClick={() => void done()}>
             <Icon name="check" size={22} />
           </button>
         </div>
       ) : (
         <div className="prow">
-          <span className="pval">{value || <span className="muted">Add a few words about yourself</span>}</span>
+          <span className="pval">{value || <span className="muted">{tr('Add a few words about yourself')}</span>}</span>
           <button className="ib" aria-label={`Edit ${label.toLowerCase()}`} onClick={() => setEditing(true)}>
             <Icon name="edit" size={20} />
           </button>
@@ -202,7 +203,7 @@ export function viewPhoto(url: string | null, title: string) {
       <div className="pview" onClick={close} role="dialog" aria-label={title}>
         <header>
           <b>{title}</b>
-          <button className="ib" aria-label="Close" onClick={close}>
+          <button className="ib" aria-label={tr('Close')} onClick={close}>
             <Icon name="close" size={24} />
           </button>
         </header>
@@ -269,9 +270,9 @@ export function cropPhoto(file: File): Promise<Blob | null> {
 
       return (
         <Dialog
-          title="Drag the image to adjust"
+          title={tr('Drag the image to adjust')}
           onClose={() => finish(null)}
-          buttons={[{ label: 'Cancel', run: () => finish(null) }, { label: 'Save', fill: true, disabled: !size, run: save }]}
+          buttons={[{ label: tr('Cancel'), run: () => finish(null) }, { label: tr('Save'), fill: true, disabled: !size, run: save }]}
         >
           <div
             className="crop"
@@ -300,7 +301,7 @@ export function cropPhoto(file: File): Promise<Blob | null> {
                 setPos({ x: (STAGE - w * b) / 2, y: (STAGE - h * b) / 2 });
               }}
               onError={() => {
-                toast("This picture can't be used. Try another one.");
+                toast(tr('This picture can\'t be used. Try another one.'));
                 finish(null);
               }}
               style={size ? { width: size.w * s, height: size.h * s, transform: `translate(${pos.x}px, ${pos.y}px)` } : { opacity: 0 }}
@@ -308,11 +309,11 @@ export function cropPhoto(file: File): Promise<Blob | null> {
             <span className="cropring" />
           </div>
           <div className="zoom">
-            <button className="ib" aria-label="Zoom out" onClick={() => zoomTo(zoom - 0.25)}>
+            <button className="ib" aria-label={tr('Zoom out')} onClick={() => zoomTo(zoom - 0.25)}>
               <Icon name="minus" size={20} />
             </button>
-            <input type="range" min={1} max={4} step={0.01} value={zoom} onChange={(e) => zoomTo(Number(e.target.value))} aria-label="Zoom" />
-            <button className="ib" aria-label="Zoom in" onClick={() => zoomTo(zoom + 0.25)}>
+            <input type="range" min={1} max={4} step={0.01} value={zoom} onChange={(e) => zoomTo(Number(e.target.value))} aria-label={tr('Zoom')} />
+            <button className="ib" aria-label={tr('Zoom in')} onClick={() => zoomTo(zoom + 0.25)}>
               <Icon name="plus" size={20} />
             </button>
           </div>

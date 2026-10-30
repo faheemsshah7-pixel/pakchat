@@ -8,6 +8,7 @@ import { type ChatRow, useChatRows } from '../core/hooks';
 import { Avatar, photoOf } from '../ui/Avatar';
 import { Icon } from '../ui/Icon';
 import { closeLayer, Dialog, openLayer, toast } from '../ui/overlay';
+import { tr } from '../i18n';
 
 const ref = (m: Message) => ({ author: m.author, id: m.id });
 
@@ -22,15 +23,15 @@ export async function deleteMessages(list: Message[]) {
   const forAll = () =>
     void (async () => {
       for (const m of list) await core.client.deleteForEveryone(m.chatId, ref(m));
-    })().catch(() => toast("Couldn't delete. Try again."));
+    })().catch(() => toast(tr('Couldn\'t delete. Try again.')));
   const id: number = openLayer(
     <Dialog
       title={list.length === 1 ? 'Delete message?' : `Delete ${list.length} messages?`}
       onClose={() => closeLayer(id)}
       buttons={[
-        { label: 'Cancel' },
-        { label: 'Delete for me', fill: !everyone, red: !everyone, run: forMe },
-        ...(everyone ? [{ label: 'Delete for everyone', fill: true, red: true, run: forAll }] : []),
+        { label: tr('Cancel') },
+        { label: tr('Delete for me'), fill: !everyone, red: !everyone, run: forMe },
+        ...(everyone ? [{ label: tr('Delete for everyone'), fill: true, red: true, run: forAll }] : []),
       ]}
     />,
     true,
@@ -73,24 +74,24 @@ function ForwardDialog({ list, onClose }: { list: Message[]; onClose: () => void
         }
       }
       onClose();
-      toast(list.length === 1 ? 'Message forwarded' : 'Messages forwarded');
+      toast(list.length === 1 ? tr('Message forwarded') : tr('Messages forwarded'));
     } catch {
       setBusy(false);
-      toast("Couldn't forward. Check your internet connection.");
+      toast(tr('Couldn\'t forward. Check your internet connection.'));
     }
   }
 
   return (
     <div className="dialog pop fwd" role="dialog" aria-modal>
       <div className="fh">
-        <button className="ib" onClick={onClose} aria-label="Close">
+        <button className="ib" onClick={onClose} aria-label={tr('Close')}>
           <Icon name="close" size={22} />
         </button>
-        <h3>Forward message to</h3>
+        <h3>{tr('Forward message to')}</h3>
       </div>
       <label className="search">
         <Icon name="search" size={20} />
-        <input autoFocus value={q} placeholder="Search name or number" onChange={(e) => setQ(e.target.value)} />
+        <input autoFocus value={q} placeholder={tr('Search name or number')} onChange={(e) => setQ(e.target.value)} />
       </label>
       <div className="fl scroll">
         {shown.map((r) => {
@@ -117,7 +118,7 @@ function ForwardDialog({ list, onClose }: { list: Message[]; onClose: () => void
       {picked.length > 0 && (
         <div className="fbar">
           <span className="ellip">{(rows ?? []).filter((r) => picked.includes(r.chat.id)).map((r) => r.title).join(', ')}</span>
-          <button className="go" disabled={busy} onClick={() => void send()} aria-label="Send">
+          <button className="go" disabled={busy} onClick={() => void send()} aria-label={tr('Send')}>
             <Icon name="send" size={22} />
           </button>
         </div>

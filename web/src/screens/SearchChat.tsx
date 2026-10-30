@@ -12,6 +12,7 @@ import { Icon } from '../ui/Icon';
 import { plainText } from '../ui/richText';
 import { toast } from '../ui/overlay';
 import { msgKey, setView } from '../ui/view';
+import { tr } from '../i18n';
 
 export function SearchChat({ chatId }: { chatId: string }) {
   const [q, setQ] = useState('');
@@ -43,30 +44,35 @@ export function SearchChat({ chatId }: { chatId: string }) {
     const from = new Date(y, mo - 1, d).getTime();
     const m = all.find((x) => x.kind !== 'system' && !x.deleted && x.sentAt >= from);
     if (m) setView({ jumpTo: msgKey(m) });
-    else toast('No messages on or after that day');
+    else toast(tr('No messages on or after that day'));
   };
 
   return (
     <>
       <div className="dh">
-        <button className="ib" onClick={() => setView({ drawer: null })} aria-label="Close">
+        <button className="ib" onClick={() => setView({ drawer: null })} aria-label={tr('Close')}>
           <Icon name="close" size={22} />
         </button>
-        Search messages
+        {tr('Search messages')}
       </div>
       <div className="ssrow">
         <label className="search ss">
           <Icon name="search" size={20} />
-          <input autoFocus value={q} placeholder="Search…" onChange={(e) => setQ(e.target.value)} />
+          <input autoFocus value={q} placeholder={tr('Search…')} onChange={(e) => setQ(e.target.value)} />
         </label>
-        <button className="ib" aria-label="Go to date" data-tip="Go to date" onClick={() => (day.current && 'showPicker' in day.current ? day.current.showPicker() : day.current?.click())}>
+        <button className="ib" aria-label={tr('Go to date')} data-tip={tr('Go to date')} onClick={() => {
+            // Older browsers have no date picker to open: a click opens it instead.
+            const el = day.current;
+            if (typeof el?.showPicker === 'function') el.showPicker();
+            else el?.click();
+          }}>
           <Icon name="calendar" size={22} />
         </button>
         <input ref={day} className="dpick" type="date" max={max} tabIndex={-1} aria-hidden onChange={(e) => e.target.value && jumpToDay(e.target.value)} />
       </div>
       <div className="db scroll">
-        {!words && <p className="none">Search for messages in this chat.</p>}
-        {words && found.length === 0 && <p className="none">No messages found</p>}
+        {!words && <p className="none">{tr('Search for messages in this chat.')}</p>}
+        {words && found.length === 0 && <p className="none">{tr('No messages found')}</p>}
         {found.map((m) => (
           <button key={msgKey(m)} className="hit" onClick={() => setView({ jumpTo: msgKey(m) })}>
             <small>

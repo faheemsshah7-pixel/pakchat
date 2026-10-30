@@ -15,7 +15,7 @@
 // the person who left can't read what comes next.
 
 import type { Connection, ConnectionFactory, WireEnvelope } from './connection';
-import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content, HistoryFile, LinkPreview, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
+import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content, HistoryFile, LinkPreview, SyncChange, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
 import { isBody, isChange, LIVE_MAX_MS, parseContent, writeContent } from './content';
 import type { HistoryBundle } from './history';
 import { importHistory } from './history';
@@ -86,6 +86,8 @@ export type Events = {
   notice: (e: { chatId: string; event: string }) => void;
   /** A website: my phone sent a part of its history. The app downloads it and calls `importHistory`. */
   history: (e: { part: number; last: boolean; file: HistoryFile }) => void;
+  /** One of my other devices changed a chat setting (see SyncChange): do the same here. */
+  sync: (e: SyncChange) => void;
   /** Something went wrong that the app might want to log. */
   error: (err: Error) => void;
 };
@@ -718,6 +720,29 @@ export class PakChat {
     void this.flush();
   }
 
+  /**
+   * Tells my other devices (the phone, linked websites) about a chat setting
+   * changed here, through the outbox, so it still goes after being offline.
+   * Nothing goes if this is my only device.
+   */
+  async sendSync(change: SyncChange) {
+    if (!this.session) return;
+    let mine: number[];
+    try {
+      mine = await this.o.server.devices(this.s.userId);
+      await this.o.storage.setValue(`devices:${this.s.userId}`, mine);
+    } catch {
+      mine = await this.devicesOf(this.s.userId);
+    }
+    const to = mine.filter((d) => d !== this.s.deviceId).map((deviceId) => ({ userId: this.s.userId, deviceId }));
+    if (!to.length) return;
+    const self = await this.openDirect(this.s.userId);
+    const content = this.content(self.id, { t: 'sync', ...change });
+    if (!parseContent(writeContent(content))) throw new Error('Bad sync change');
+    await this.inLane(() => this.queue(content, 'control', undefined, to));
+    void this.flush();
+  }
+
   /** This device's Signal identity key (base64), as others see it. */
   async myIdentityKey(): Promise<string> {
     return (await this.inLane(() => this.o.signal.deviceKeys(this.s.handle))).identityKey;
@@ -1257,6 +1282,14 @@ export class PakChat {
       return;
     }
     if (c.t === 'retry') return;
+    if (c.t === 'sync') {
+      // Only from my own devices.
+      if (e.from === this.s.userId && e.from_device !== this.s.deviceId && e.kind === 'control') {
+        const { t: _t, v: _v, id: _id, chat: _chat, at: _at, ...change } = c;
+        this.emit('sync', change);
+      }
+      return;
+    }
     if (c.t === 'history') {
       // Only from my own phone, to a linked device.
       if (e.from === this.s.userId && e.from_device === 1 && this.s.deviceId !== 1 && e.kind === 'control') {

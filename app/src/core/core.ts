@@ -19,6 +19,8 @@ import {
   type Me,
   type Message,
   type Session,
+  SYNCED_PREFS,
+  type SyncChange,
 } from '@pakchat/shared';
 import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
@@ -307,6 +309,8 @@ class Core {
     // First time with the missed-calls number: start from now, not from every old missed call.
     if (this.settings.callsSeenAt === undefined) this.setSettings({ callsSeenAt: Date.now() });
     startLock();
+    // Linked computers open locked chats with the same secret code (its check is copied when linking).
+    void s.setValue('app:lockCode', this.settings.secretCode ?? null);
     this.starred = starred ?? {};
     this.lists = lists ?? [];
     this.at('loading the encryption');
@@ -378,6 +382,7 @@ class Core {
     this.client.on('presence', (p) => this.setPresence(p));
     // Calls: ringing, answering, connecting (calls.ts).
     this.client.on('call', (e) => calls.onSignal(e));
+    this.client.on('sync', (e) => this.takeSync(e));
   }
 
   /** Keeps a group's or community's photo value where Avatar finds it. */
@@ -764,6 +769,7 @@ class Core {
     void this.storage.setValue('app:contacts', this.contacts);
     this.emit('people');
     this.emit('chats');
+    this.share({ key: 'app:contacts', set: { [userId]: contactCard(contact) } });
   }
 
   removeContact(userId: string) {
@@ -773,6 +779,7 @@ class Core {
     void this.storage.setValue('app:contacts', this.contacts);
     this.emit('people');
     this.emit('chats');
+    this.share({ key: 'app:contacts', del: [userId] });
   }
 
   /**
@@ -808,6 +815,9 @@ class Core {
     await this.storage.setValue('app:people', this.people);
     this.emit('people');
     this.emit('chats');
+    // Linked computers get the names too, a thousand at a time.
+    const changed = [...found].filter((id) => next[id]);
+    for (let i = 0; i < changed.length; i += 1000) this.share({ key: 'app:contacts', set: Object.fromEntries(changed.slice(i, i + 1000).map((id) => [id, contactCard(next[id])])) });
     return found.size;
   }
 
@@ -941,6 +951,56 @@ class Core {
     for (const id of this.watching.keys()) this.follow(id);
   }
 
+  // ---- The same on this phone and linked computers (two ways, like WhatsApp) ----
+
+  /** Tells my linked computers about a change made on this phone. */
+  private share(change: SyncChange) {
+    if (!this.client?.me) return;
+    void this.client.sendSync(change).catch((err: unknown) => console.log(`[pakchat] sync: ${String(err)}`));
+  }
+
+  /** A change made on a linked computer: the same here, without sending it back. */
+  private takeSync(e: SyncChange) {
+    const s = this.storage;
+    if (e.key === 'app:prefs') {
+      const next = { ...this.prefs };
+      for (const [chatId, theirs] of Object.entries(e.set ?? {})) {
+        if (!theirs || typeof theirs !== 'object') continue;
+        next[chatId] = { ...withoutSynced(next[chatId]), ...syncedPrefs(theirs as ChatPrefs) };
+      }
+      for (const chatId of e.del ?? []) if (next[chatId]) next[chatId] = withoutSynced(next[chatId]);
+      this.prefs = next;
+      void s.setValue('app:prefs', next);
+      this.emit('prefs');
+      this.emit('chats');
+      this.unmuteDue();
+    } else if (e.key === 'app:starred') {
+      const next = { ...this.starred };
+      for (const k of Object.keys(e.set ?? {})) next[k] = true;
+      for (const k of e.del ?? []) delete next[k];
+      this.starred = next;
+      void s.setValue('app:starred', next);
+      for (const chatId of new Set([...Object.keys(e.set ?? {}), ...(e.del ?? [])].map((k) => k.split('/')[0]))) this.emit(`messages:${chatId}`);
+    } else if (e.key === 'app:contacts') {
+      const next = { ...this.contacts };
+      for (const [userId, c] of Object.entries(e.set ?? {})) {
+        const card = c as Contact | null;
+        if (typeof card?.name === 'string' && card.name) next[userId] = { ...next[userId], ...contactCard(card) };
+      }
+      for (const userId of e.del ?? []) delete next[userId];
+      this.contacts = next;
+      void s.setValue('app:contacts', next);
+      this.emit('people');
+      this.emit('chats');
+    } else if (e.key === 'app:lists') {
+      if (!Array.isArray(e.value)) return;
+      this.lists = (e.value as ChatList[]).filter((l) => l && typeof l.id === 'string' && typeof l.name === 'string' && Array.isArray(l.chatIds));
+      void s.setValue('app:lists', this.lists);
+      this.emit('prefs');
+    }
+    // The secret code is only ever set on the phone ("app:lockCode" from a computer is ignored).
+  }
+
   // ---- This phone's own notes about chats ----
 
   setPrefs(chatId: string, change: Partial<ChatPrefs>) {
@@ -950,6 +1010,8 @@ class Core {
     void this.storage.setValue('app:prefs', this.prefs);
     this.emit('prefs');
     if (change.muted) this.unmuteDue();
+    // Archive, pin, mute, favourite, unread, lock and delete go to linked computers too (drafts, tones and wallpapers stay here).
+    if (Object.keys(change).some((k) => (SYNCED_PREFS as readonly string[]).includes(k))) this.share({ key: 'app:prefs', set: { [chatId]: syncedPrefs(next) } });
   }
 
   /** Mutes a chat for `ms` (8 hours, a week), or Always (null), like WhatsApp. */
@@ -982,6 +1044,12 @@ class Core {
     this.settings = { ...this.settings, ...change };
     void this.storage.setValue('app:settings', this.settings);
     this.emit('settings');
+    // The chat lock's secret code (its check, never the code) opens locked chats on linked computers too.
+    if ('secretCode' in change) {
+      const code = this.settings.secretCode ?? null;
+      void this.storage.setValue('app:lockCode', code);
+      this.share({ key: 'app:lockCode', value: code });
+    }
   }
 
   /** Is this chat locked (either way)? */
@@ -996,12 +1064,14 @@ class Core {
     this.lists = at === -1 ? [...others, list] : [...others.slice(0, at), list, ...others.slice(at)];
     void this.storage.setValue('app:lists', this.lists);
     this.emit('prefs');
+    this.share({ key: 'app:lists', value: this.lists });
   }
 
   deleteList(id: string) {
     this.lists = this.lists.filter((l) => l.id !== id);
     void this.storage.setValue('app:lists', this.lists);
     this.emit('prefs');
+    this.share({ key: 'app:lists', value: this.lists });
   }
 
   isStarred(m: Pick<Message, 'chatId' | 'author' | 'id'>) {
@@ -1018,6 +1088,8 @@ class Core {
     this.starred = next;
     void this.storage.setValue('app:starred', next);
     for (const chatId of new Set(list.map((m) => m.chatId))) this.emit(`messages:${chatId}`);
+    const keys = list.map((m) => `${m.chatId}/${m.author}/${m.id}`);
+    this.share(on ? { key: 'app:starred', set: Object.fromEntries(keys.map((k) => [k, true])) } : { key: 'app:starred', del: keys });
   }
 
   /** "Delete for me": only from this phone. */
@@ -1088,6 +1160,25 @@ class Core {
     if (chat.kind === 'group' || chat.kind === 'community') return null;
     return chat.members.find((m) => m.userId !== this.myId)?.userId ?? this.myId;
   }
+}
+
+/** Only the chat settings that are the same on all my devices. */
+function syncedPrefs(p: ChatPrefs): Partial<ChatPrefs> {
+  const out: Record<string, unknown> = {};
+  for (const k of SYNCED_PREFS) if (p[k] !== undefined && p[k] !== false) out[k] = p[k];
+  return out as Partial<ChatPrefs>;
+}
+
+/** A chat's settings with the shared ones taken out (its draft, tone and wallpaper stay). */
+function withoutSynced(p: ChatPrefs | undefined): ChatPrefs {
+  const out: Record<string, unknown> = { ...(p ?? {}) };
+  for (const k of SYNCED_PREFS) delete out[k];
+  return out as ChatPrefs;
+}
+
+/** What a linked computer needs of a saved contact. */
+function contactCard(c: Contact): Contact {
+  return { name: c.name, ...(c.phone ? { phone: c.phone } : {}), ...(c.email ? { email: c.email } : {}) };
 }
 
 export const core = new Core();

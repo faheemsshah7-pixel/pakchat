@@ -14,6 +14,7 @@ import { Icon } from '../ui/Icon';
 import { msgKey, setView } from '../ui/view';
 import { download } from './messageActions';
 import { forward } from './dialogs';
+import { tr } from '../i18n';
 
 const isMedia = (m: Message) => !m.deleted && m.kind === 'file' && !!m.file && (m.file.kind === 'image' || m.file.kind === 'video') && !m.file.once && m.file.id !== 'pending';
 
@@ -47,8 +48,8 @@ export function Viewer({ chat, start, onClose }: { chat: Chat; start: Message; o
         <div className="grow" />
         <button
           className="ib"
-          aria-label="Go to message"
-          data-tip="Go to message"
+          aria-label={tr('Go to message')}
+          data-tip={tr('Go to message')}
           onClick={() => {
             onClose();
             setView({ jumpTo: msgKey(m) });
@@ -56,29 +57,29 @@ export function Viewer({ chat, start, onClose }: { chat: Chat; start: Message; o
         >
           <Icon name="chat" size={22} />
         </button>
-        <button className="ib" aria-label="Star" onClick={() => void core.toggleStar(m)}>
+        <button className="ib" aria-label={tr('Star')} onClick={() => void core.toggleStar(m)}>
           <Icon name={core.starred[msgKey(m)] ? 'starFilled' : 'star'} size={22} />
         </button>
-        <button className="ib" aria-label="Forward" onClick={() => forward([m])}>
+        <button className="ib" aria-label={tr('Forward')} onClick={() => forward([m])}>
           <Icon name="forward" size={22} />
         </button>
-        <button className="ib" aria-label="Download" onClick={() => void download(m)}>
+        <button className="ib" aria-label={tr('Download')} onClick={() => void download(m)}>
           <Icon name="download2" size={22} />
         </button>
-        <button className="ib" style={{ marginLeft: 12 }} aria-label="Close" onClick={onClose}>
+        <button className="ib" style={{ marginLeft: 12 }} aria-label={tr('Close')} onClick={onClose}>
           <Icon name="close" size={24} />
         </button>
       </div>
       <div className="vstage" onClick={(e) => e.target === e.currentTarget && onClose()}>
         {i > 0 && (
-          <button className="varr" style={{ left: 28 }} onClick={() => setKey(msgKey(all[i - 1]))} aria-label="Previous">
+          <button className="varr" style={{ left: 28 }} onClick={() => setKey(msgKey(all[i - 1]))} aria-label={tr('Previous')}>
             <Icon name="back" size={24} />
           </button>
         )}
         <Big m={m} />
         {m.text && <div className="vcap">{m.text}</div>}
         {i < all.length - 1 && (
-          <button className="varr" style={{ right: 28 }} onClick={() => setKey(msgKey(all[i + 1]))} aria-label="Next">
+          <button className="varr" style={{ right: 28 }} onClick={() => setKey(msgKey(all[i + 1]))} aria-label={tr('Next')}>
             <Icon name="forwardArrow" size={24} />
           </button>
         )}
@@ -111,7 +112,7 @@ function Big({ m }: { m: Message }) {
       alive = false;
     };
   }, [f]);
-  if (failed) return <div className="vimg msg">This file is no longer on the server. Ask the sender to send it again.</div>;
+  if (failed) return <div className="vimg msg">{tr('This file is no longer on the server. Ask the sender to send it again.')}</div>;
   if (!url) return <div className="vimg">{f.thumb ? <img className="blur" src={`data:image/jpeg;base64,${f.thumb}`} alt="" /> : null}<span className="spin over" /></div>;
   return <div className="vimg">{f.kind === 'video' ? <video src={url} controls autoPlay loop={!!f.gif} muted={!!f.gif} /> : <img src={url} alt="" />}</div>;
 }

@@ -198,9 +198,11 @@ export class IdbStorage implements Storage {
   async pinnedMessages(chatId: string): Promise<Message[]> {
     const now = Date.now();
     const range = IDBKeyRange.bound([chatId, now], [chatId, Infinity]);
+    // Changes not saved yet: pinned, unpinned or deleted meanwhile. Taken before the read, which
+    // started before they're saved: afterwards they'd be gone from here but missing from it.
+    const waiting = this.waiting('messages');
     const byKey = new Map(((await done(this.store('messages').index('pinned').getAll(range))) as Message[]).map((m) => [textKey(msgKey(m.chatId, m.author, m.id)), m]));
-    // Changes not saved yet: pinned, unpinned or deleted meanwhile.
-    for (const [k, v] of this.waiting('messages')) {
+    for (const [k, v] of waiting) {
       if ((JSON.parse(k) as string[])[0] !== chatId) continue;
       if (v !== GONE && ((v as Message).pinnedUntil ?? 0) > now) byKey.set(k, structuredClone(v as Message));
       else byKey.delete(k);

@@ -1,10 +1,12 @@
 // App.tsx: which page to show. Phones get "Get the PakChat app"; computers
 // get the QR page, then "Loading your chats", then the app itself.
 
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
 
 import { WALLPAPERS } from './core/core';
-import { usePhase, useSettings } from './core/hooks';
+import { calls } from './core/calls';
+import { usePhase, useSettings, useTopic } from './core/hooks';
+import { isAppLocked } from './core/lock';
 import { onPhone } from './device';
 import { LinkPage } from './screens/LinkPage';
 import { Loading } from './screens/Loading';
@@ -14,9 +16,13 @@ import { Overlays } from './ui/overlay';
 // The app itself loads while the QR shows, so it's ready by the time the phone has scanned.
 const loadShell = () => import('./screens/Shell');
 const Shell = lazy(() => loadShell().then((m) => ({ default: m.Shell })));
+const LockScreen = lazy(() => import('./screens/LockScreen').then((m) => ({ default: m.LockScreen })));
 
 export function App() {
   const phase = usePhase();
+  const locked = useTopic(['lock'], isAppLocked);
+  // A call going on carries on behind App lock (its sound is in the call window).
+  const inCall = useSyncExternalStore((f) => calls.on(f), () => calls.live);
   useTheme();
 
   useEffect(() => {
@@ -41,7 +47,12 @@ export function App() {
         <Loading />
       ) : (
         <Suspense fallback={<Loading quiet />}>
-          <Shell />
+          {(!locked || inCall) && (
+            <div className={`shellwrap ${locked ? 'hidden' : ''}`} aria-hidden={locked || undefined}>
+              <Shell />
+            </div>
+          )}
+          {locked && <LockScreen />}
         </Suspense>
       )}
       <Overlays />

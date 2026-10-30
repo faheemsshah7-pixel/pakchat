@@ -159,7 +159,26 @@ export type Control =
   | { t: 'retry'; seq: number; why: 'session' | 'groupKey' }
   /** My phone to a website it just linked: one part of its chat history (see history.ts). */
   | { t: 'history'; part: number; last: boolean; file: HistoryFile }
+  /** A chat setting changed on one of my devices: my other devices do the same (see SyncChange). */
+  | ({ t: 'sync' } & SyncChange)
   | CallSignal;
+
+/**
+ * What my own devices keep the same, both ways, like WhatsApp's: archive,
+ * pin, mute, favourites, lists, starred messages, saved contacts and chat
+ * lock. Sent locked to my other devices only (the server never sees it).
+ *   key:  which list, e.g. "app:prefs" (by chat), "app:starred" (by message).
+ *   set:  entries that are new or changed, whole.
+ *   del:  entries that are gone.
+ *   value: lists kept whole ("app:lists"), or the secret code's check ("app:lockCode").
+ */
+export type SyncChange = { key: SyncKey; set?: Record<string, unknown>; del?: string[]; value?: unknown };
+export const SYNC_KEYS = ['app:prefs', 'app:starred', 'app:contacts', 'app:lists', 'app:lockCode'] as const;
+export type SyncKey = (typeof SYNC_KEYS)[number];
+/** The chat settings that go to my other devices (drafts, tones and wallpapers stay on each). */
+export const SYNCED_PREFS = ['pinnedAt', 'archived', 'muted', 'mutedUntil', 'favourite', 'markedUnread', 'lock', 'deletedAt'] as const;
+const MAX_SYNC_ENTRIES = 5000;
+const MAX_SYNC_BYTES = 256_000;
 
 /** A locked history part on the server: where it is, its key and digest, and its size before locking. */
 export type HistoryFile = { id: string; key: string; digest: string; size: number };
@@ -483,11 +502,29 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (!isId(f.id) || !isText(f.key, 200) || !isText(f.digest, 200) || !isCount(f.size)) return null;
       return { t: 'history', part: x.part, last: x.last, file: { id: f.id, key: f.key, digest: f.digest, size: f.size } };
     }
+    case 'sync':
+      return checkSync(x);
     case 'call':
       return checkCall(x);
     default:
       return null;
   }
+}
+
+function checkSync(x: Record<string, unknown>): Control | null {
+  if (!SYNC_KEYS.includes(x.key as SyncKey)) return null;
+  const out: Control = { t: 'sync', key: x.key as SyncKey };
+  if (x.set !== undefined) {
+    if (!isObject(x.set) || Object.keys(x.set).length > MAX_SYNC_ENTRIES || !Object.keys(x.set).every((k) => k.length > 0 && k.length <= 200)) return null;
+    out.set = x.set;
+  }
+  if (x.del !== undefined) {
+    if (!Array.isArray(x.del) || x.del.length > MAX_SYNC_ENTRIES || !x.del.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 200)) return null;
+    out.del = x.del as string[];
+  }
+  if (x.value !== undefined) out.value = x.value;
+  if (JSON.stringify(out).length > MAX_SYNC_BYTES) return null;
+  return out;
 }
 
 /** Reads a message's inside. Anything that isn't exactly right gives null. */

@@ -8,7 +8,8 @@
 //   - what the phone tells the website is locked to a key that's only in the QR;
 //   - the chat history is locked like any file, and its key goes to the website
 //     alone inside a Signal message.
-import { approveQr, exportHistory, fromBytes, LinkRefused, type LinkedDevice, type Provision } from '@pakchat/shared';
+import { approvePairing, approveQr, exportHistory, fromBytes, LinkRefused, type LinkedDevice, pairExtra, type Provision, toBytes } from '@pakchat/shared';
+import { AESEncryptionKey, AESSealedData, aesDecryptAsync } from 'expo-crypto';
 import * as Device from 'expo-device';
 import { File, Paths } from 'expo-file-system';
 import KV from 'expo-sqlite/kv-store';
@@ -20,7 +21,7 @@ import { listen, stopped } from './files';
 export { LinkRefused };
 
 /** The app's own lists a website needs too: names, saved contacts, chat settings, starred, lists. */
-const VALUES = ['app:people', 'app:contacts', 'app:ways', 'app:prefs', 'app:starred', 'app:lists'];
+const VALUES = ['app:people', 'app:contacts', 'app:ways', 'app:prefs', 'app:starred', 'app:lists', 'app:lockCode'];
 
 /** Websites the phone is copying chats to right now (device id), for "Syncing…" on the list. */
 export const syncing = new Set<number>();
@@ -47,6 +48,36 @@ export async function linkFromQr(text: string): Promise<{ deviceId: number; name
   const fm = fileModule();
   const linked = await approveQr(core.server, text, provision, (p, key) => fm.lockProvision(JSON.stringify(p), fromBytes(key)));
   if (!linked) throw new LinkRefused('expired');
+  core.emit('devices');
+  void sendHistory(linked.deviceId).catch((err: unknown) => console.log(`[pakchat] history: ${String(err)}`));
+  return linked;
+}
+
+/**
+ * "Link with phone number instead": the 8-letter code the website shows.
+ * Finds the website waiting for my number that the code opens (see
+ * shared/src/link.ts), then links it just like a scanned QR. Throws
+ * LinkRefused, also "wrong_code" and "no_phone".
+ */
+export async function linkFromCode(typed: string): Promise<{ deviceId: number; name: string }> {
+  const me = core.client.me;
+  if (!me) throw new Error('Not signed in');
+  const provision: Provision = { v: 1, userId: me.userId, identityKey: await core.client.myIdentityKey(), phoneName: Device.modelName ?? 'Android phone' };
+  const fm = fileModule();
+  // The key is slow to make on purpose: once, then it tries every waiting website.
+  let key: { phone: string; key: AESEncryptionKey } | null = null;
+  const open = async (sealed: string, code: string, phone: string) => {
+    if (key?.phone !== phone) key = { phone, key: await AESEncryptionKey.import(toBytes(await fm.backupKey(code, `pair:${phone}`)).slice(0, 32)) };
+    try {
+      const bytes = toBytes(sealed);
+      const plain = await aesDecryptAsync(AESSealedData.fromParts(bytes.slice(0, 12), bytes.slice(12), 16), key.key, { additionalData: pairExtra(phone) });
+      // A QR text is plain ASCII.
+      return String.fromCharCode(...plain);
+    } catch {
+      return null;
+    }
+  };
+  const linked = await approvePairing(core.server, typed, provision, (p, k) => fm.lockProvision(JSON.stringify(p), fromBytes(k)), open);
   core.emit('devices');
   void sendHistory(linked.deviceId).catch((err: unknown) => console.log(`[pakchat] history: ${String(err)}`));
   return linked;

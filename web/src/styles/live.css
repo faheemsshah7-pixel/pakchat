@@ -159,6 +159,8 @@ body { user-select: none; -webkit-user-select: none; }
 .day.sys span { max-width: 80%; text-align: center; font-weight: 400; }
 .sticky { pointer-events: none; opacity: 0; transform: translateY(-130%); transition: transform .3s, opacity .3s; }
 .sticky.show { opacity: 1; transform: none; }
+/* Below the pinned bar when there is one, not on top of it. */
+.pinbar ~ .sticky { top: 56px; }
 .jump { cursor: pointer; }
 .who3 { font-size: 12.8px; line-height: 20px; font-weight: 500; margin-bottom: 2px; }
 .fwdl { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); font-style: italic; margin-bottom: 2px; }
@@ -280,7 +282,7 @@ body { user-select: none; -webkit-user-select: none; }
 .cant { position: relative; z-index: 2; margin: 0 12px 12px; padding: 16px; border-radius: 16px; background: var(--composer); color: var(--muted); text-align: center; font-size: 14px; }
 .dropzone { position: absolute; inset: 0; z-index: 10; margin: 12px; border-radius: 16px; border: 2px dashed rgba(11,20,26,.3); background: rgba(255,255,255,.75); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 18px; color: var(--muted); pointer-events: none; }
 .dark .dropzone { background: rgba(52,70,81,.5); border-color: rgba(255,255,255,.3); }
-.lockcover { position: absolute; inset: 64px 0 0 0; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); z-index: 9; }
+.lockcover { position: absolute; inset: 64px 0 0 0; display: grid; place-items: center; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); z-index: 9; }
 
 /* The emoji panel */
 .emoji .cats button { width: 36px; height: 36px; display: grid; place-items: center; position: relative; color: var(--muted); }
@@ -564,3 +566,62 @@ a.drow small { display: block; }
 .ssrow { display: flex; align-items: center; gap: 4px; padding-right: 12px; position: relative; flex: none; }
 .ssrow .search.ss { flex: 1; margin-right: 0; }
 .dpick { position: absolute; right: 12px; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* The "out of chat" recorder under the chat list, while a voice message records for another chat */
+.minirec { flex: none; display: flex; align-items: center; gap: 6px; margin: 8px 10px 10px; padding: 6px 6px 6px 4px; border-radius: 26px; background: var(--composer); box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+.minirec .mrwho { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); text-align: start; padding: 6px 4px; border-radius: 16px; }
+.minirec .mrwho:hover { background: var(--hover); }
+.minirec .mrwho .ellip { min-width: 0; }
+.minirec .rdot { margin-left: 2px; flex: none; }
+.minirec.paused .mrwho svg { color: #FF3B30; flex: none; }
+.minirec .send { width: 36px; height: 36px; }
+
+/* App lock: the password screen. A call going on stays on top of it. */
+.shellwrap { display: contents; }
+.shellwrap.hidden > :not(.callcard, .callwin) { visibility: hidden; }
+.lockscreen { position: fixed; inset: 0; z-index: 50; background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; color: var(--text); }
+.lockscreen .lg { width: 72px; height: 72px; border-radius: 22px; background: var(--acc); color: #fff; display: grid; place-items: center; margin-bottom: 18px; }
+.lockscreen h1 { font-size: 24px; font-weight: 400; }
+.lockscreen > p { color: var(--muted); font-size: 15px; }
+.lockscreen form { display: flex; gap: 10px; margin-top: 14px; width: min(360px, 100%); }
+.lockscreen input { flex: 1; min-width: 0; height: 44px; padding: 0 16px; border-radius: 22px; background: var(--searchBg); font-size: 15px; color: var(--text); }
+.lockscreen .btn { height: 44px; border-radius: 22px; }
+.lockscreen .btn:disabled { opacity: .5; }
+.lockscreen .lerr { min-height: 20px; color: var(--red); font-size: 14px; }
+.lockscreen .lnk { color: var(--link); font-size: 14px; }
+.lockscreen small { position: absolute; bottom: 32px; display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 14px; }
+.derr { color: var(--red); font-size: 13.5px; margin-top: 6px; }
+
+/* Locked chats: the row at the top of the chat list, like Archived */
+.arch.lockd svg { color: var(--icon); }
+.lockcover .btn { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 22px; }
+
+/* Log in with phone number (rulebook 5.6) */
+.cphone { padding: 48px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0; }
+.cphone h1 { font-size: 32px; line-height: 40px; font-weight: 400; }
+.cphone > p { font-size: 18px; line-height: 26px; margin-top: 10px; }
+.cphone > p .ul { font-size: 18px; display: inline; }
+.cphone form { display: flex; flex-direction: column; align-items: center; gap: 16px; margin: 32px 0 28px; }
+.pfield { width: 320px; height: 52px; border: 1px solid #0A0A0A; border-radius: 24px; display: flex; align-items: center; gap: 10px; padding: 0 18px; position: relative; }
+.pfield select { appearance: none; flex: 1; min-width: 0; height: 100%; background: none; border: 0; font-size: 14px; font-weight: 420; color: #1D1F1F; cursor: pointer; }
+.pfield svg { position: absolute; right: 16px; pointer-events: none; }
+.pfield input { flex: 1; min-width: 0; height: 100%; font-size: 15px; color: #1D1F1F; background: none; }
+.pflag { font-size: 20px; }
+.pdial { font-size: 15px; color: #1D1F1F; }
+.perr { color: var(--red); font-size: 14px; max-width: 320px; }
+.pnext { height: 40px; padding: 0 24px; border-radius: 9999px; font-weight: 600; }
+.pnext:disabled { background: rgba(17,27,33,.2); color: rgba(17,27,33,.4); }
+.pcode { display: flex; align-items: center; gap: 8px; margin: 36px 0 36px; }
+.pcode i { width: 52px; height: 64px; border: 1px solid #0A0A0A; border-radius: 12px; display: grid; place-items: center; font-style: normal; font-size: 30px; font-weight: 500; font-family: "Roboto Mono", Menlo, Consolas, monospace; }
+.pcode .pdash { width: 14px; height: 2px; background: #0A0A0A; margin: 0 4px; }
+.pcode.off { flex-direction: column; gap: 14px; font-size: 16px; }
+.cphone .steps { text-align: left; margin-bottom: 30px; }
+@media (max-width: 900px) {
+  .cphone { padding: 32px 20px; }
+  .pcode i { width: 34px; height: 46px; font-size: 22px; }
+}
+.lhd .lang { margin-inline-start: auto; font-size: 16px; color: #1D1F1F; }
+
+/* Urdu: right to left (i18n/index.ts). Names and messages take their own direction, so English stays readable. */
+html[lang='ur'] { --font: 'Roboto Flex', Roboto, 'Noto Nastaliq Urdu', 'Helvetica Neue', Helvetica, 'Noto Color Emoji', sans-serif; }
+html[lang='ur'] :is(.nm, .pv, .txt, .ttl, input, textarea, [contenteditable]) { unicode-bidi: plaintext; }

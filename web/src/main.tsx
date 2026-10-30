@@ -3,6 +3,7 @@
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/live.css';
+import './styles/calls.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -10,6 +11,9 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { core } from './core/core';
 import { onPhone } from './device';
+import { applyLang } from './i18n';
+
+applyLang();
 
 // Phones only see "Get the PakChat app", so they never load the chat engine.
 if (!onPhone) void core.init();

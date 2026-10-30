@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { fromBytes, toBytes } from '../src/bytes';
 import { parseContent } from '../src/content';
 import { exportHistory, parseHistory } from '../src/history';
-import { browserName, identityCheck, identityMatches, lockProvision, newLinkKeys, openProvision, parseQr, qrText } from '../src/link';
+import { approvePairing, browserName, identityCheck, identityMatches, LinkRefused, lockProvision, newLinkKeys, newPairCode, openProvision, openSealedQr, pairKey, parseQr, qrText, sealQr, showPairCode, tidyPairCode } from '../src/link';
 import { FileChanged, lockedSize, lockFile, unlockFile } from '../src/web/fileLock';
 import { World } from './people';
 
@@ -58,6 +58,53 @@ describe('the QR code', () => {
     expect(browserName('Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0')).toBe('Firefox on Linux');
     expect(browserName('curl/8')).toBe('Browser');
   });
+});
+
+describe('linking with a phone number instead', () => {
+  test('codes are 8 letters with nothing to mix up, and typing is forgiving', () => {
+    for (let i = 0; i < 50; i++) expect(newPairCode()).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    expect(showPairCode('K7QM2XRP')).toBe('K7QM-2XRP');
+    expect(tidyPairCode(' k7qm-2xrp ')).toBe('K7QM2XRP');
+    expect(tidyPairCode('K7QM2XR')).toBeNull();
+    expect(tidyPairCode('K7QM2XR0')).toBeNull();
+  });
+
+  test('the QR text opens only with the right code and the same number', async () => {
+    const keys = await newLinkKeys();
+    const text = qrText('abcdefghijklmnopqrstuv', keys.publicKey, await identityCheck(identity));
+    const key = await pairKey('K7QM2XRP', '+923001234567');
+    expect(key.length).toBe(32);
+    const sealed = await sealQr(text, key, '+923001234567');
+    expect(await openSealedQr(sealed, key, '+923001234567')).toBe(text);
+    expect(await openSealedQr(sealed, await pairKey('K7QM2XRQ', '+923001234567'), '+923001234567')).toBeNull();
+    expect(await openSealedQr(sealed, await pairKey('K7QM2XRP', '+923007654321'), '+923007654321')).toBeNull();
+    // The key is the phone's backup-key sum, so the phone makes the same one natively.
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode('K7QM2XRP'), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: new TextEncoder().encode('pakchat-backup:pair:+923001234567'), iterations: 310_000 }, base, 512));
+    expect(fromBytes(bits.slice(0, 32))).toBe(fromBytes(key));
+  });
+
+  test('the phone finds the website its code opens, among others for its number, and approves it', async () => {
+    const site = await newLinkKeys();
+    const check = await identityCheck(identity);
+    const phone = '+923001234567';
+    const mine = await sealQr(qrText('abcdefghijklmnopqrstuv', site.publicKey, check), await pairKey('K7QM2XRP', phone), phone);
+    const someoneElses = await sealQr(qrText('zzzzzzzzzzzzzzzzzzzzzz', site.publicKey, check), await pairKey('AAAAAAAA', phone), phone);
+    const approved: string[] = [];
+    const server = {
+      pairing: async () => ({ phone, waiting: [{ sealed: someoneElses, name: 'Firefox on Windows' }, { sealed: mine, name: 'Chrome on Mac' }] }),
+      linkInfo: async () => ({ name: 'Chrome on Mac', identityKey: identity }),
+      approveLink: async (code: string) => (approved.push(code), { deviceId: 2, deviceUuid: 'd2' }),
+    };
+    const open = async (sealed: string, code: string, ph: string) => openSealedQr(sealed, await pairKey(code, ph), ph);
+    const linked = await approvePairing(server, 'k7qm-2xrp', provision, lockProvision, open);
+    expect(linked).toEqual({ deviceId: 2, deviceUuid: 'd2', name: 'Chrome on Mac' });
+    expect(approved).toEqual(['abcdefghijklmnopqrstuv']);
+
+    await expect(approvePairing(server, 'BBBBBBBB', provision, lockProvision, open)).rejects.toEqual(new LinkRefused('wrong_code'));
+    const noPhone = { ...server, pairing: async () => ({ phone: null, waiting: [] }) };
+    await expect(approvePairing(noPhone, 'K7QM2XRP', provision, lockProvision, open)).rejects.toMatchObject({ reason: 'no_phone' });
+  }, 20_000);
 });
 
 describe('files in the browser', () => {
@@ -175,5 +222,56 @@ describe('history sync', () => {
     expect(part.messages.map((m) => m.id)).toEqual([base.id, 'photo']);
     expect(part.messages[1].file).not.toHaveProperty('local');
     expect(part.chats.every((c) => c.kind !== 'status')).toBe(true);
+  });
+});
+
+describe('chat settings sync between my devices', () => {
+  const wrap = (x: Record<string, unknown>) => JSON.stringify({ v: 1, id: 'm1', chat: 'c1', at: 1, ...x });
+
+  test('a sync change is a control message with a known list', () => {
+    expect(parseContent(wrap({ t: 'sync', key: 'app:prefs', set: { c1: { archived: true } }, del: ['c2'] }))).toMatchObject({ t: 'sync', key: 'app:prefs', set: { c1: { archived: true } }, del: ['c2'] });
+    expect(parseContent(wrap({ t: 'sync', key: 'app:lists', value: [{ id: 'l', name: 'Family', chatIds: [] }] }))).toMatchObject({ value: [{ name: 'Family' }] });
+    expect(parseContent(wrap({ t: 'sync', key: 'app:secrets', set: {} }))).toBeNull();
+    expect(parseContent(wrap({ t: 'sync', key: 'app:prefs', set: [] }))).toBeNull();
+    expect(parseContent(wrap({ t: 'sync', key: 'app:prefs', del: [5] }))).toBeNull();
+    expect(parseContent(wrap({ t: 'sync', key: 'app:prefs', value: 'x'.repeat(300_000) }))).toBeNull();
+  });
+
+  test('a change on the website reaches the phone, and one on the phone reaches the website; nobody else gets them', async () => {
+    w = new World();
+    const ali = await w.person('Ali', 'node');
+    const sara = await w.person('Sara', 'node');
+    const web = await w.website(ali, 'wasm');
+    const onPhone: unknown[] = [];
+    const onWeb: unknown[] = [];
+    const onSara: unknown[] = [];
+    ali.client.on('sync', (e) => onPhone.push(e));
+    web.client.on('sync', (e) => onWeb.push(e));
+    sara.client.on('sync', (e) => onSara.push(e));
+
+    await web.client.sendSync({ key: 'app:prefs', set: { chat1: { archived: true, pinnedAt: 5 } } });
+    await ali.client.sendSync({ key: 'app:starred', del: ['chat1/u/m'] });
+    await w.settle();
+    expect(onPhone).toEqual([{ key: 'app:prefs', set: { chat1: { archived: true, pinnedAt: 5 } } }]);
+    expect(onWeb).toEqual([{ key: 'app:starred', del: ['chat1/u/m'] }]);
+    expect(onSara).toEqual([]);
+    // "Message yourself" carries them but shows nothing.
+    const self = await ali.client.openDirect(ali.id);
+    expect(await w.texts(ali, self.id)).toEqual([]);
+  });
+
+  test("a sync change from someone else's device is ignored", async () => {
+    w = new World();
+    const ali = await w.person('Ali', 'node');
+    const sara = await w.person('Sara', 'node');
+    const got: unknown[] = [];
+    ali.client.on('sync', (e) => got.push(e));
+    const chat = await sara.client.openDirect(ali.id);
+    await sara.client.sendText(chat.id, 'Hi');
+    await w.settle();
+    // Sara's own devices get it, never Ali's.
+    await sara.client.sendSync({ key: 'app:prefs', set: { [chat.id]: { archived: true } } });
+    await w.settle();
+    expect(got).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import { bodyLine } from '../ui/format';
 import { Icon } from '../ui/Icon';
 import { closeLayer, confirm, Dialog, openLayer, toast } from '../ui/overlay';
 import { usePeopleList } from './NewChat';
+import { tr } from '../i18n';
 
 const OFFLINE = "Couldn't do that. Check your internet connection.";
 
@@ -40,17 +41,17 @@ function AddMembers({ chat, onClose }: { chat: Chat; onClose: () => void }) {
   return (
     <div className="dialog pop fwd" role="dialog" aria-modal>
       <div className="fh">
-        <button className="ib" onClick={onClose} aria-label="Close">
+        <button className="ib" onClick={onClose} aria-label={tr('Close')}>
           <Icon name="close" size={22} />
         </button>
-        <h3>Add member</h3>
+        <h3>{tr('Add member')}</h3>
       </div>
       <label className="search">
         <Icon name="search" size={20} />
-        <input autoFocus value={q} placeholder="Search name or number" onChange={(e) => setQ(e.target.value)} />
+        <input autoFocus value={q} placeholder={tr('Search name or number')} onChange={(e) => setQ(e.target.value)} />
       </label>
       <div className="fl scroll">
-        {people.length === 0 && <p className="mnone">No contacts to add</p>}
+        {people.length === 0 && <p className="mnone">{tr('No contacts to add')}</p>}
         {people.map((p) => {
           const on = picked.includes(p.id);
           return (
@@ -68,7 +69,7 @@ function AddMembers({ chat, onClose }: { chat: Chat; onClose: () => void }) {
       {picked.length > 0 && (
         <div className="fbar">
           <span className="ellip">{people.filter((p) => picked.includes(p.id)).map((p) => p.name).join(', ')}</span>
-          <button className="go" disabled={busy} onClick={() => void add()} aria-label="Add">
+          <button className="go" disabled={busy} onClick={() => void add()} aria-label={tr('Add')}>
             <Icon name="check" size={22} />
           </button>
         </div>
@@ -107,33 +108,33 @@ function Invite({ chat, onClose }: { chat: Chat; onClose: () => void }) {
 
   return (
     <Dialog
-      title="Invite to group via link"
+      title={tr('Invite to group via link')}
       onClose={onClose}
       buttons={[
         {
-          label: 'Reset link',
+          label: tr('Reset link'),
           disabled: busy || !link,
           run: () =>
-            void confirm('Reset this link?', 'The current link will stop working, and a new one will be made.', 'Reset link', true).then((yes) => {
+            void confirm(tr('Reset this link?'), 'The current link will stop working, and a new one will be made.', 'Reset link', true).then((yes) => {
               if (yes) {
                 inviteLink({ ...chat, inviteCode: null });
               } else inviteLink({ ...chat, inviteCode: code });
             }),
         },
-        { label: 'Copy link', fill: true, disabled: !link, run: () => void navigator.clipboard.writeText(link!).then(() => toast('Link copied')) },
+        { label: tr('Copy link'), fill: true, disabled: !link, run: () => void navigator.clipboard.writeText(link!).then(() => toast(tr('Link copied'))) },
       ]}
     >
-      <p className="vtext">Anyone with PakChat can follow this link to join this group. Only share it with people you trust.</p>
+      <p className="vtext">{tr('Anyone with PakChat can follow this link to join this group. Only share it with people you trust.')}</p>
       <p className="ilink">{link ?? <span className="spin" />}</p>
     </Dialog>
   );
 }
 
 const REASONS: { value: ReportReason; label: string }[] = [
-  { value: 'spam', label: 'Spam' },
-  { value: 'scam', label: 'Scam or fraud' },
-  { value: 'abuse', label: 'Harassment or abuse' },
-  { value: 'other', label: 'Something else' },
+  { value: 'spam', label: tr('Spam') },
+  { value: 'scam', label: tr('Scam or fraud') },
+  { value: 'abuse', label: tr('Harassment or abuse') },
+  { value: 'other', label: tr('Something else') },
 ];
 
 /**
@@ -158,16 +159,16 @@ function Report({ chat, userId, name, after, onClose }: { chat: Chat; userId: st
         userId,
         recent.map((m) => ({ author: m.author, text: bodyLine(m).slice(0, 2000), at: m.sentAt })),
       );
-      toast('Report sent');
+      toast(tr('Report sent'));
       if (also) after();
     } catch {
-      toast("Couldn't report. Check your internet connection.");
+      toast(tr('Couldn\'t report. Check your internet connection.'));
     }
   }
 
   return (
-    <Dialog title={group ? 'Report this group?' : `Report ${name}?`} onClose={onClose} buttons={[{ label: 'Cancel' }, { label: 'Report', fill: true, red: true, run: () => void send() }]}>
-      <p className="vtext">The last 5 messages {group ? 'in this group' : `from ${name}`} will be sent to PakChat. No one in this chat will know.</p>
+    <Dialog title={group ? 'Report this group?' : `Report ${name}?`} onClose={onClose} buttons={[{ label: tr('Cancel') }, { label: tr('Report'), fill: true, red: true, run: () => void send() }]}>
+      <p className="vtext">{tr('The last 5 messages')}{' '}{group ? 'in this group' : `from ${name}`}{' '}{tr('will be sent to PakChat. No one in this chat will know.')}</p>
       {REASONS.map((r) => (
         <button key={r.value} className={`radio ${reason === r.value ? 'on' : ''}`} onClick={() => setReason(r.value)}>
           <i />

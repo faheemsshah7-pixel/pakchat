@@ -14,6 +14,15 @@
 //      tells the website which phone linked it, so the website can check
 //      that the history it is sent really comes from that phone.
 //
+// Linking with a phone number instead, like WhatsApp's: the website shows an
+// 8-letter code and no QR. It seals its QR text with that code (PBKDF2, then
+// AES-256-GCM, bound to the number) and gives the server the number and the
+// sealed text. The phone with that number fetches what is waiting for it,
+// opens it with the code its owner types, and goes on as if it had scanned
+// the QR. The server never sees the code. The key is the phone's backup-key
+// sum (PBKDF2-SHA256, 310,000 rounds, salt "pakchat-backup:pair:<number>"),
+// so the phone can make it with what it already has.
+//
 // The website side uses WebCrypto. The phone does the same in Kotlin
 // (LinkLock.kt); `test/link.test.ts` checks the two agree.
 
@@ -141,6 +150,97 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+// ---- Linking with a phone number ----
+
+/** No 0/O or 1/I to mix up: 32 letters, so 8 of them are 40 bits. */
+const PAIR_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PAIR_ROUNDS = 310_000;
+const pairAad = (phone: string) => new TextEncoder().encode(`PakChat pairing v1:${phone}`) as BufferSource;
+
+/** A new 8-letter code for the website to show, like "K7QM2XRP". */
+export function newPairCode(): string {
+  return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => PAIR_LETTERS[b % 32]).join('');
+}
+
+/** The code as typed on the phone ("k7qm-2xrp"), tidied, or null if it can't be one. */
+export function tidyPairCode(typed: string): string | null {
+  const code = typed.toUpperCase().replace(/[\s-]/g, '');
+  return code.length === 8 && [...code].every((c) => PAIR_LETTERS.includes(c)) ? code : null;
+}
+
+/** "K7QM-2XRP", as the website shows it. */
+export const showPairCode = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
+
+/** The AES key from the code and the tidied number (the phone makes the same one natively). */
+export async function pairKey(code: string, phone: string): Promise<Uint8Array> {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(code), 'PBKDF2', false, ['deriveBits']);
+  const salt = new TextEncoder().encode(`pakchat-backup:pair:${phone}`);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PAIR_ROUNDS }, base, 512);
+  return new Uint8Array(bits).slice(0, 32);
+}
+
+/** The website: its QR text sealed with the code's key. Base64 of the IV (12), then AES-GCM's output. */
+export async function sealQr(text: string, key: Uint8Array, phone: string): Promise<string> {
+  const k = await crypto.subtle.importKey('raw', key as BufferSource, 'AES-GCM', false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: pairAad(phone) }, k, new TextEncoder().encode(text)));
+  return fromBytes(concat(iv, sealed));
+}
+
+/** Opens a sealed QR text (WebCrypto: tests, and any phone that has it). Null if the code is wrong. */
+export async function openSealedQr(sealed: string, key: Uint8Array, phone: string): Promise<string | null> {
+  try {
+    const bytes = toBytes(sealed);
+    const k = await crypto.subtle.importKey('raw', key as BufferSource, 'AES-GCM', false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12), additionalData: pairAad(phone) }, k, bytes.slice(12));
+    return new TextDecoder().decode(plain);
+  } catch {
+    return null;
+  }
+}
+
+/** The extra data the seal is bound to, for a phone that opens it itself (base64). */
+export const pairExtra = (phone: string) => fromBytes(new TextEncoder().encode(`PakChat pairing v1:${phone}`));
+
+/**
+ * The phone, after its owner typed the website's code: finds the website
+ * waiting for this number that the code opens, then links it just as a
+ * scanned QR does. Throws LinkRefused "wrong_code" if none opens, or
+ * "no_phone" if this account has no number.
+ */
+export async function approvePairing(
+  server: LinkServer & { pairing(): Promise<{ phone: string | null; waiting: { sealed: string; name: string }[] }> },
+  typed: string,
+  provision: Provision,
+  lock: (p: Provision, websiteKey: Uint8Array) => Promise<string>,
+  open: (sealed: string, code: string, phone: string) => Promise<string | null>,
+): Promise<{ deviceId: number; deviceUuid: string; name: string }> {
+  const code = tidyPairCode(typed);
+  if (!code) throw new LinkRefused('wrong_code');
+  // A new code can come in while this runs (they change every 20 seconds): one more go then.
+  for (let tries = 0; ; tries++) {
+    const { phone, waiting } = await server.pairing();
+    if (!phone) throw new LinkRefused('no_phone');
+    let text: string | null = null;
+    for (const w of waiting) {
+      const t = await open(w.sealed, code, phone);
+      if (t && parseQr(t)) {
+        text = t;
+        break;
+      }
+    }
+    if (!text) throw new LinkRefused('wrong_code');
+    try {
+      const linked = await approveQr(server, text, provision, lock);
+      if (linked) return linked;
+      throw new LinkRefused('expired');
+    } catch (err) {
+      if (tries === 0 && err instanceof LinkRefused && err.reason === 'expired') continue;
+      throw err;
+    }
+  }
+}
+
 /** A name for this browser in "Linked devices", like "Chrome on Mac". */
 export function browserName(userAgent: string): string {
   const browser = /Edg\//.test(userAgent)
@@ -171,7 +271,7 @@ export function browserName(userAgent: string): string {
 
 /** Why the phone couldn't link a QR, in words the app can show. */
 export class LinkRefused extends Error {
-  constructor(readonly reason: 'not_a_qr' | 'expired' | 'mismatch' | 'too_many_devices') {
+  constructor(readonly reason: 'not_a_qr' | 'expired' | 'mismatch' | 'too_many_devices' | 'wrong_code' | 'no_phone') {
     super(reason);
   }
 }

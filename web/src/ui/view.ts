@@ -6,14 +6,14 @@ import { useSyncExternalStore } from 'react';
 
 import type { Message } from '../core/core';
 
-export type Tab = 'chats' | 'status' | 'communities' | 'settings' | 'profile';
+export type Tab = 'chats' | 'calls' | 'status' | 'communities' | 'settings' | 'profile';
 export type Drawer = null | 'info' | 'verify' | 'search' | 'starred' | 'msginfo' | 'media';
 
 export type View = {
   tab: Tab;
   drawer: Drawer;
   /** The chat list's own pages: archived chats, or starting a new chat. */
-  side: null | 'archived' | 'newChat' | 'newGroup' | 'starred';
+  side: null | 'archived' | 'locked' | 'newChat' | 'newGroup' | 'starred';
   /** Replying to, or editing, one message (cleared when the chat changes). */
   replyTo: Message | null;
   editing: Message | null;

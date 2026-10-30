@@ -9,11 +9,14 @@
 import {
   browserName,
   HttpServer,
+  LinkExpired,
   linkThisBrowser,
   OfflineError,
   parseHistory,
+  newPairCode,
   PakChat,
   phoenixConnection,
+  ServerError,
   type Chat,
   type FileUploader,
   type HistoryFile,
@@ -21,10 +24,14 @@ import {
   type Message,
   type Provision,
   type Ref,
+  SYNCED_PREFS,
+  type SyncChange,
 } from '@pakchat/shared';
 import { lockFile, unlockFile } from '@pakchat/shared/web';
 
+import { calls } from './calls';
 import { IdbStorage, openIdb } from './idbStorage';
+import { isAppLocked, startLock } from './lock';
 import { workerSignal } from './workerSignal';
 
 // ---- Where the server is ----
@@ -38,7 +45,7 @@ const WS = SERVER.replace(/^http/, 'ws');
 
 export type Person = { id: string; name: string; about?: string | null; photo?: string | null };
 export type Contact = { name: string; phone?: string; email?: string };
-/** A chat's settings on this computer (the phone's come over with the history). */
+/** A chat's settings. Archive, pin, mute, favourite, unread, lock and delete are kept the same as the phone's, both ways (see takeSync); the draft stays here. */
 export type ChatPrefs = {
   pinnedAt?: number;
   archived?: boolean;
@@ -83,7 +90,7 @@ const DEFAULT_SETTINGS: Settings = { theme: 'system', enterSends: true, notifica
  */
 export type Phase = 'loading' | 'signedOut' | 'syncing' | 'ready';
 
-type Topic = 'phase' | 'qr' | 'chats' | 'people' | 'prefs' | 'settings' | 'presence' | 'typing' | 'connection' | 'sync' | 'files' | 'photos' | 'blocked' | `messages:${string}`;
+type Topic = 'phase' | 'qr' | 'chats' | 'people' | 'prefs' | 'settings' | 'presence' | 'typing' | 'connection' | 'sync' | 'files' | 'photos' | 'blocked' | 'lock' | `messages:${string}`;
 
 /** Kept by the browser until the tab closes (for "Stay logged in" off). */
 const TAB_MARK = 'pakchat-tab';
@@ -108,6 +115,8 @@ class WebCore {
   lists: ChatList[] = [];
   prefs: Record<string, ChatPrefs> = {};
   starred: Record<string, true> = {};
+  /** The phone's chat lock secret code, as a check (SHA-256), never the code itself. Null: none set. */
+  lockCode: string | null = null;
   settings: Settings = DEFAULT_SETTINGS;
   presence: Record<string, Presence> = {};
   /** chatId → userId → when they started typing. */
@@ -174,6 +183,7 @@ class WebCore {
     });
     this.listen();
     await this.loadLocal();
+    await startLock();
     if (await this.client.load()) {
       // "Stay logged in" was off and the tab was closed since: log out, like WhatsApp Web.
       if ((await this.storage.getValue<boolean>('web:sessionOnly')) && !sessionStorage.getItem(TAB_MARK)) return this.signOut();
@@ -194,6 +204,7 @@ class WebCore {
     this.prefs = (await s.getValue<Record<string, ChatPrefs>>('app:prefs')) ?? {};
     this.starred = (await s.getValue<Record<string, true>>('app:starred')) ?? {};
     this.settings = { ...DEFAULT_SETTINGS, ...((await s.getValue<Partial<Settings>>('web:settings')) ?? {}) };
+    this.lockCode = (await s.getValue<string | null>('app:lockCode')) ?? null;
   }
 
   private listen() {
@@ -233,6 +244,9 @@ class WebCore {
       this.presence = { ...this.presence, [id]: { online: p.online === true, lastSeen: (p.last_seen as string | null) ?? null } };
       this.emit('presence');
     });
+    // Calls (calls.ts): rung, answered, connected and hung up through these.
+    c.on('call', (e) => calls.onSignal(e));
+    c.on('sync', (e) => void this.takeSync(e).catch((err: unknown) => console.warn('[pakchat] sync', err)));
     c.on('history', (e) => void this.takeHistory(e.part, e.last, e.file).catch((err: unknown) => console.warn('[pakchat] history', err)));
     c.on('error', (err) => console.warn('[pakchat]', err));
   }
@@ -317,12 +331,13 @@ class WebCore {
   private linking: AbortController | null = null;
 
   /** Shows a QR and waits for the phone. Called again by "Click to reload QR code". */
-  async showQr() {
+  async showQr(retry = 0) {
     this.linking?.abort();
     const stop = (this.linking = new AbortController());
     this.qr = null;
     this.qrExpired = false;
     this.emit('qr');
+    let shown = false;
     try {
       const { provision } = await linkThisBrowser({
         client: this.client,
@@ -330,6 +345,7 @@ class WebCore {
         socketUrl: `${WS}/link`,
         signal: stop.signal,
         onQr: (text, seconds) => {
+          shown = true;
           this.qr = { text, seconds, at: Date.now() };
           this.emit('qr');
         },
@@ -338,13 +354,80 @@ class WebCore {
     } catch (err) {
       if (stop.signal.aborted) return;
       console.warn('[pakchat] linking', err);
+      // The server couldn't be reached before any QR showed (it's starting, or the
+      // connection dropped): keep the spinner and try again, like WhatsApp Web.
+      if (!shown && !(err instanceof LinkExpired)) {
+        setTimeout(() => {
+          if (this.linking === stop) void this.showQr(retry + 1);
+        }, Math.min(2000 * 2 ** retry, 15_000));
+        return;
+      }
       this.qr = null;
       this.qrExpired = true;
       this.emit('qr');
     }
   }
 
+  /**
+   * "Log in with phone number": the 8-letter code to type on the phone,
+   * instead of a QR (see shared/src/link.ts). `phone` is the number tidied.
+   */
+  pair: { typed: string; code: string; phone: string | null; ready: boolean; error: 'bad_phone' | 'expired' | 'offline' | null } | null = null;
+
+  async linkWithPhone(typed: string) {
+    this.linking?.abort();
+    const stop = (this.linking = new AbortController());
+    this.pair = { typed, code: newPairCode(), phone: null, ready: false, error: null };
+    this.emit('qr');
+    const code = this.pair.code;
+    try {
+      const { provision } = await linkThisBrowser({
+        client: this.client,
+        server: this.server,
+        socketUrl: `${WS}/link`,
+        signal: stop.signal,
+        onQr: () => {},
+        pair: {
+          phone: typed,
+          code,
+          onPhone: (phone) => {
+            if (this.linking !== stop || !this.pair) return;
+            this.pair = { ...this.pair, phone };
+            this.emit('qr');
+          },
+          onReady: () => {
+            if (this.linking !== stop || !this.pair || this.pair.ready) return;
+            this.pair = { ...this.pair, ready: true };
+            this.emit('qr');
+          },
+        },
+      });
+      await this.linked(provision);
+    } catch (err) {
+      if (stop.signal.aborted || !this.pair) return;
+      console.warn('[pakchat] linking by phone number', err);
+      const error = err instanceof ServerError && err.reason === 'bad_phone' ? 'bad_phone' : err instanceof LinkExpired ? 'expired' : 'offline';
+      this.pair = { ...this.pair, error };
+      this.emit('qr');
+    }
+  }
+
+  /** "(edit)": back to typing the number; the code stops. */
+  editPhone() {
+    this.linking?.abort();
+    this.linking = null;
+    this.pair = null;
+    this.emit('qr');
+  }
+
+  /** "Log in with QR code": back from the phone number. */
+  backToQr() {
+    this.pair = null;
+    void this.showQr();
+  }
+
   private async linked(provision: Provision) {
+    this.pair = null;
     await this.storage.setValue('web:provision', provision);
     await this.storage.setValue('web:sessionOnly', !this.stayLoggedIn);
     sessionStorage.setItem(TAB_MARK, '1');
@@ -387,6 +470,7 @@ class WebCore {
 
   async signOut() {
     this.linking?.abort();
+    await calls.hangUp().catch(() => {});
     await this.client.signOut().catch(() => {});
     await this.storage.clear();
     await this.signal.wipe().catch(() => {});
@@ -432,6 +516,7 @@ class WebCore {
     this.lists = lists;
     await this.storage.setValue('app:lists', lists);
     this.emit('prefs');
+    this.share({ key: 'app:lists', value: lists });
   }
 
   // ---- People ----
@@ -497,6 +582,60 @@ class WebCore {
     await this.storage.setValue('app:prefs', this.prefs);
     this.emit('prefs');
     this.emit('chats');
+    // Archive, pin, mute, favourite, unread, lock and delete go to the phone too (drafts stay here).
+    if (Object.keys(change).some((k) => (SYNCED_PREFS as readonly string[]).includes(k))) this.share({ key: 'app:prefs', set: { [chatId]: syncedPrefs(next) } });
+  }
+
+  // ---- The same on the phone and here (two ways, like WhatsApp) ----
+
+  /** Tells my phone (and other linked computers) about a change made here. */
+  private share(change: SyncChange) {
+    if (!this.client?.me) return;
+    void this.client.sendSync(change).catch((err: unknown) => console.warn('[pakchat] sync', err));
+  }
+
+  /** A change made on my phone (or another linked computer): the same here, without sending it back. */
+  private async takeSync(e: SyncChange) {
+    const s = this.storage;
+    if (e.key === 'app:prefs') {
+      const next = { ...this.prefs };
+      for (const [chatId, theirs] of Object.entries(e.set ?? {})) {
+        if (!theirs || typeof theirs !== 'object') continue;
+        next[chatId] = { ...withoutSynced(next[chatId]), ...syncedPrefs(theirs as ChatPrefs) };
+      }
+      for (const chatId of e.del ?? []) if (next[chatId]) next[chatId] = withoutSynced(next[chatId]);
+      this.prefs = next;
+      await s.setValue('app:prefs', next);
+      this.emit('prefs');
+      this.emit('chats');
+    } else if (e.key === 'app:starred') {
+      const next = { ...this.starred };
+      for (const k of Object.keys(e.set ?? {})) next[k] = true;
+      for (const k of e.del ?? []) delete next[k];
+      this.starred = next;
+      await s.setValue('app:starred', next);
+      for (const chatId of new Set([...Object.keys(e.set ?? {}), ...(e.del ?? [])].map((k) => k.split('/')[0]))) this.emit(`messages:${chatId}`);
+    } else if (e.key === 'app:contacts') {
+      const next = { ...this.contacts };
+      for (const [userId, c] of Object.entries(e.set ?? {})) {
+        const name = (c as Contact | null)?.name;
+        if (typeof name === 'string' && name) next[userId] = { name, phone: (c as Contact).phone, email: (c as Contact).email };
+      }
+      for (const userId of e.del ?? []) delete next[userId];
+      this.contacts = next;
+      await s.setValue('app:contacts', next);
+      this.emit('people');
+      this.emit('chats');
+    } else if (e.key === 'app:lists') {
+      if (!Array.isArray(e.value)) return;
+      this.lists = (e.value as ChatList[]).filter((l) => l && typeof l.id === 'string' && typeof l.name === 'string' && Array.isArray(l.chatIds));
+      await s.setValue('app:lists', this.lists);
+      this.emit('prefs');
+    } else if (e.key === 'app:lockCode') {
+      this.lockCode = typeof e.value === 'string' ? e.value : null;
+      await s.setValue('app:lockCode', this.lockCode);
+      this.emit('prefs');
+    }
   }
 
   async setSettings(change: Partial<Settings>) {
@@ -508,11 +647,13 @@ class WebCore {
   async toggleStar(m: Message) {
     const k = `${m.chatId}/${m.author}/${m.id}`;
     const next = { ...this.starred };
-    if (next[k]) delete next[k];
-    else next[k] = true;
+    const on = !next[k];
+    if (on) next[k] = true;
+    else delete next[k];
     this.starred = next;
     await this.storage.setValue('app:starred', next);
     this.emit(`messages:${m.chatId}`);
+    this.share(on ? { key: 'app:starred', set: { [k]: true } } : { key: 'app:starred', del: [k] });
   }
 
   // ---- Files ----
@@ -640,8 +781,8 @@ class WebCore {
     if (this.settings.sounds) ping();
     if (!this.settings.notifications || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const { bodyLine, chatTitle } = await import('../ui/format');
-    // A locked chat's alert says only "New message": no name, no words (the phone's chat lock).
-    const locked = !!prefs?.lock;
+    // A locked chat's alert says only "New message": no name, no words (the phone's chat lock). So does every alert while App lock is locked.
+    const locked = !!prefs?.lock || isAppLocked();
     const group = chat.kind === 'group';
     const who = this.nameOf(m.author) || 'PakChat';
     const words = this.settings.previews && !locked ? bodyLine(m) : 'New message';
@@ -656,6 +797,20 @@ class WebCore {
       n.close();
     };
   }
+}
+
+/** Only the chat settings that are the same on all my devices. */
+function syncedPrefs(p: ChatPrefs): Partial<ChatPrefs> {
+  const out: Record<string, unknown> = {};
+  for (const k of SYNCED_PREFS) if (p[k] !== undefined && p[k] !== false) out[k] = p[k];
+  return out as Partial<ChatPrefs>;
+}
+
+/** A chat's settings with the shared ones taken out (its draft stays). */
+function withoutSynced(p: ChatPrefs | undefined): ChatPrefs {
+  const out: Record<string, unknown> = { ...(p ?? {}) };
+  for (const k of SYNCED_PREFS) delete out[k];
+  return out as ChatPrefs;
 }
 
 /** A short soft two-note sound for a new message, made on the spot (no sound file to download). */

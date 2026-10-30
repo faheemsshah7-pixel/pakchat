@@ -42,6 +42,13 @@ export const en8 = {
   mediaVisibility: 'Media visibility',
   mediaVisibilitySub: "Show newly downloaded media in your phone's gallery",
   galleryDenied: 'PakChat needs permission to save to your gallery',
+  linkWithPhone: 'Link with phone number instead',
+  linkWithQr: 'Scan QR code instead',
+  enterLinkCode: 'Enter code',
+  enterLinkCodeNote: 'Enter the 8-letter code shown on the PakChat website on your computer.',
+  linkWord: 'Link',
+  wrongLinkCode: "That code didn't match a computer waiting for your number. Check it and try again.",
+  noPhoneForLink: 'Your account has no phone number. Scan the QR code instead.',
 };
 
 export const ur8: typeof en8 = {
@@ -85,4 +92,11 @@ export const ur8: typeof en8 = {
   mediaVisibility: 'میڈیا کی نمائش',
   mediaVisibilitySub: 'نئی ڈاؤن لوڈ کی گئی میڈیا فون کی گیلری میں دکھائیں',
   galleryDenied: 'گیلری میں محفوظ کرنے کے لیے PakChat کو اجازت چاہیے',
+  linkWithPhone: 'اس کی بجائے فون نمبر سے منسلک کریں',
+  linkWithQr: 'اس کی بجائے QR کوڈ اسکین کریں',
+  enterLinkCode: 'کوڈ درج کریں',
+  enterLinkCodeNote: 'اپنے کمپیوٹر پر پاک چیٹ کی ویب سائٹ پر دکھایا گیا 8 حروف کا کوڈ درج کریں۔',
+  linkWord: 'منسلک کریں',
+  wrongLinkCode: 'یہ کوڈ آپ کے نمبر کے منتظر کسی کمپیوٹر سے نہیں ملا۔ اسے چیک کر کے دوبارہ کوشش کریں۔',
+  noPhoneForLink: 'آپ کے اکاؤنٹ میں کوئی فون نمبر نہیں ہے۔ اس کی بجائے QR کوڈ اسکین کریں۔',
 };

@@ -9,6 +9,7 @@ import { fileSize } from '../ui/format';
 import { Icon } from '../ui/Icon';
 import { toast } from '../ui/overlay';
 import { getView, setView } from '../ui/view';
+import { tr } from '../i18n';
 
 /** The server takes files up to this size, like the phone. */
 const MAX_FILE = 100 * 1024 * 1024;
@@ -50,14 +51,14 @@ export function SendPreview({ chat, files: start }: { chat: Chat; files: File[] 
     try {
       await core.sendFiles(chat.id, files, caption.trim() || undefined, reply?.chatId === chat.id ? { author: reply.author, id: reply.id } : undefined);
     } catch {
-      toast("Couldn't send. Try again.");
+      toast(tr('Couldn\'t send. Try again.'));
     }
   }
 
   return (
     <div className="sendpv">
       <div className="spbar">
-        <button className="ib" onClick={close} aria-label="Close">
+        <button className="ib" onClick={close} aria-label={tr('Close')}>
           <Icon name="close" size={24} />
         </button>
         <span className="ellip">{f.name}</span>
@@ -81,7 +82,7 @@ export function SendPreview({ chat, files: start }: { chat: Chat; files: File[] 
         <input
           autoFocus
           value={caption}
-          placeholder="Add a caption"
+          placeholder={tr('Add a caption')}
           maxLength={4096}
           onChange={(e) => setCaption(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && void send()}
@@ -94,7 +95,7 @@ export function SendPreview({ chat, files: start }: { chat: Chat; files: File[] 
             <span
               className="spx"
               role="button"
-              aria-label="Remove"
+              aria-label={tr('Remove')}
               onClick={(e) => {
                 e.stopPropagation();
                 setFiles(files.filter((_, j) => j !== i));
@@ -105,7 +106,7 @@ export function SendPreview({ chat, files: start }: { chat: Chat; files: File[] 
             </span>
           </button>
         ))}
-        <button className="spt add" onClick={() => more.current?.click()} aria-label="Add file">
+        <button className="spt add" onClick={() => more.current?.click()} aria-label={tr('Add file')}>
           <Icon name="plus" size={24} />
         </button>
         <input
@@ -118,7 +119,7 @@ export function SendPreview({ chat, files: start }: { chat: Chat; files: File[] 
             e.target.value = '';
           }}
         />
-        <button className="send big" onClick={() => void send()} aria-label="Send">
+        <button className="send big" onClick={() => void send()} aria-label={tr('Send')}>
           <Icon name="send" size={26} />
           {files.length > 1 && <span className="badge">{files.length}</span>}
         </button>

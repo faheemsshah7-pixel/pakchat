@@ -16,6 +16,13 @@ defmodule Pakchat.Linking do
   A code lasts 60 seconds, the ones after it 20 seconds, and a website can
   get 6 codes. After that it shows "Click to reload QR code" and starts over.
   Nothing here is saved to the database until the phone approves.
+
+  Linking with a phone number instead (WhatsApp's "Link with phone number"):
+  the website shows an 8-letter code rather than a QR, and gives us the
+  number and its QR text sealed with that code (`set_phone/4`). The phone
+  with that number fetches what is waiting for it (`for_phone/1`), opens it
+  with the code its owner types, and carries on exactly as if it had
+  scanned the QR. We never see the code, so we can't open it either.
   """
   use GenServer
 
@@ -25,6 +32,9 @@ defmodule Pakchat.Linking do
   @max_codes 6
   # How long a linked result waits for a website that lost its connection.
   @keep_result_ms 60_000
+  # Websites waiting on one phone number that the phone is shown (anyone can
+  # type any number, so the phone tries them all with the code it was given).
+  @max_waiting 20
 
   @doc """
   Starts a link request for a website's keys. Returns
@@ -45,7 +55,10 @@ defmodule Pakchat.Linking do
       ends: now + @first_code_ms + (@max_codes - 1) * @next_code_ms + 30_000,
       device: device_attrs,
       keys: keys,
-      result: nil
+      result: nil,
+      phone: nil,
+      sealed: nil,
+      sealed_at: nil
     }
 
     :ets.insert(@table, [{{:id, id}, request}, {{:code, code}, id}])
@@ -72,6 +85,43 @@ defmodule Pakchat.Linking do
       _ -> {:error, :expired}
     end
   end
+
+  @doc """
+  Linking with a phone number: the number the website typed and its QR text,
+  sealed with the code it shows. Sent again with each new code. Returns
+  `{:ok, request}` or an error.
+  """
+  def set_phone(id, secret, phone, sealed) do
+    with {:ok, request} <- check(id, secret),
+         nil <- request.result do
+      request = %{request | phone: phone, sealed: sealed, sealed_at: now()}
+      :ets.insert(@table, {{:id, id}, request})
+      {:ok, request}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :expired}
+    end
+  end
+
+  @doc """
+  What websites waiting on a phone number have sealed for it: the newest
+  first, at most `@max_waiting`, as `[%{sealed, name}]`.
+  """
+  def for_phone(phone) when is_binary(phone) do
+    now = now()
+
+    for {{:id, _}, %{phone: ^phone, sealed: sealed, result: nil} = r} <-
+          :ets.match_object(@table, {{:id, :_}, :_}),
+        sealed != nil,
+        r.code_expires > now do
+      r
+    end
+    |> Enum.sort_by(& &1.sealed_at, :desc)
+    |> Enum.take(@max_waiting)
+    |> Enum.map(&%{sealed: &1.sealed, name: &1.device.name})
+  end
+
+  def for_phone(_), do: []
 
   @doc "Checks a website's id and secret. Returns `{:ok, request}` or `{:error, :not_found}`."
   def check(id, secret) when is_binary(id) and is_binary(secret) do

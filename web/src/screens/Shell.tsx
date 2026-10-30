@@ -4,15 +4,19 @@
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 
 import { core, openChat } from '../core/core';
-import { useChatRows, useConnected, usePrefs, useViewing } from '../core/hooks';
+import { useChatRows, useConnected, usePrefs, useTopic, useViewing } from '../core/hooks';
+import { isFolderOpen, relockChats } from '../core/lock';
 import { Avatar, photoOf } from '../ui/Avatar';
 import { setFavicon } from '../ui/favicon';
 import { Icon, StatusIcon } from '../ui/Icon';
 import { setView, useView } from '../ui/view';
+import { CallBar, CallLayer } from './Call';
 import { ChatList } from './ChatList';
+import { MiniRecorder } from './Recorder';
 import { Conversation } from './Conversation';
 import { EmptyMain } from './EmptyMain';
 import { useShortcuts } from './shortcuts';
+import { tr } from '../i18n';
 
 // Opened less often, so they load the first time they're needed.
 const Settings = lazy(() => import('./Settings').then((m) => ({ default: m.Settings })));
@@ -23,6 +27,7 @@ const MediaGallery = lazy(() => import('./MediaGallery').then((m) => ({ default:
 const SearchChat = lazy(() => import('./SearchChat').then((m) => ({ default: m.SearchChat })));
 const Communities = lazy(() => import('./Communities').then((m) => ({ default: m.Communities })));
 const Profile = lazy(() => import('./Profile').then((m) => ({ default: m.Profile })));
+const CallsTab = lazy(() => import('./CallsTab').then((m) => ({ default: m.CallsTab })));
 const StatusPanel = lazy(() => import('./Status').then((m) => ({ default: m.StatusPanel })));
 
 export function Shell() {
@@ -49,39 +54,49 @@ export function Shell() {
     return () => clearTimeout(t);
   }, [unread, connected]);
 
-  // A chat that's gone from the list (deleted, or the chat lock's folder) closes.
+  // A chat in the Locked chats folder closes unless the folder was opened with the secret code.
+  const folderOpen = useTopic(['lock'], isFolderOpen);
   useEffect(() => {
-    if (viewing && prefs[viewing]?.lock === 'folder') openChat(null);
-  }, [viewing, prefs]);
+    if (viewing && prefs[viewing]?.lock === 'folder' && !folderOpen) openChat(null);
+  }, [viewing, prefs, folderOpen]);
+  // Leaving the folder (or a locked chat) locks it again, like the phone.
+  useEffect(() => {
+    if (view.side !== 'locked') relockChats(viewing);
+  }, [view.side, viewing]);
 
   const tab = view.tab;
   const me = core.client.me;
   return (
     <>
       <nav className="rail">
-        <RailButton label="Chats" on={tab === 'chats'} badge={unread} onClick={() => setView({ tab: 'chats' })}>
+        <RailButton label={tr('Chats')} on={tab === 'chats'} badge={unread} onClick={() => setView({ tab: 'chats' })}>
           <Icon name={tab === 'chats' ? 'chatFill' : 'chatO'} size={24} />
         </RailButton>
-        <RailButton label="Status" on={tab === 'status'} onClick={() => setView({ tab: 'status' })}>
+        <RailButton label={tr('Calls')} on={tab === 'calls'} onClick={() => setView({ tab: 'calls' })}>
+          <Icon name="calls" size={22} />
+        </RailButton>
+        <RailButton label={tr('Status')} on={tab === 'status'} onClick={() => setView({ tab: 'status' })}>
           <StatusIcon size={24} />
         </RailButton>
-        <RailButton label="Communities" on={tab === 'communities'} onClick={() => setView({ tab: 'communities' })}>
+        <RailButton label={tr('Communities')} on={tab === 'communities'} onClick={() => setView({ tab: 'communities' })}>
           <Icon name="community" size={24} />
         </RailButton>
         <div className="grow" />
-        <RailButton label="Settings" on={tab === 'settings'} onClick={() => setView({ tab: 'settings' })}>
+        <RailButton label={tr('Settings')} on={tab === 'settings'} onClick={() => setView({ tab: 'settings' })}>
           <Icon name="settings" size={24} />
         </RailButton>
-        <RailButton label="Profile" on={tab === 'profile'} onClick={() => setView({ tab: 'profile' })}>
+        <RailButton label={tr('Profile')} on={tab === 'profile'} onClick={() => setView({ tab: 'profile' })}>
           <Avatar id={me?.userId ?? ''} name={me?.me.name ?? ''} photo={photoOf(me?.userId ?? null)} className="me" />
         </RailButton>
       </nav>
 
       <section className="side">
+        <CallBar />
         {!connected && <Offline />}
         <Suspense fallback={null}>
-          {tab === 'settings' ? <Settings /> : tab === 'profile' ? <Profile /> : tab === 'communities' ? <Communities /> : tab === 'status' ? <StatusPanel /> : <ChatList rows={rows} />}
+          {tab === 'settings' ? <Settings /> : tab === 'profile' ? <Profile /> : tab === 'communities' ? <Communities /> : tab === 'calls' ? <CallsTab /> : tab === 'status' ? <StatusPanel /> : <ChatList rows={rows} />}
         </Suspense>
+        <MiniRecorder />
       </section>
 
       <main className="main">{viewing ? <Conversation key={viewing} chatId={viewing} /> : <EmptyMain />}</main>
@@ -103,6 +118,7 @@ export function Shell() {
           </Suspense>
         </aside>
       )}
+      <CallLayer />
     </>
   );
 }
@@ -122,8 +138,8 @@ function Offline() {
     <div className="offline">
       <Icon name="warning" size={20} />
       <div>
-        <b>Connecting…</b>
-        <span>Messages you send go when the internet is back.</span>
+        <b>{tr('Connecting…')}</b>
+        <span>{tr('Messages you send go when the internet is back.')}</span>
       </div>
     </div>
   );

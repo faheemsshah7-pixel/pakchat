@@ -9,6 +9,10 @@ defmodule PakchatWeb.LinkController do
       Then it joins `"link:<id>"` on `/link/websocket?id=...&secret=...`.
     * `POST /api/link/:id/code` with `{"secret"}` answers a new
       `{"code", "expires_in"}`, or 422 `expired` after the 6th code.
+    * `POST /api/link/:id/phone` with `{"secret", "phone", "sealed"?}`, to link
+      with a phone number instead: answers the number tidied, `{"phone"}`.
+      `sealed` (base64) is the QR text sealed with the code the website shows,
+      sent again with each new code.
 
   The phone (only the main phone, device 1):
 
@@ -17,6 +21,9 @@ defmodule PakchatWeb.LinkController do
     * `POST /api/link/:code` with `{"provision": "<base64, locked to the QR's key>"}`
       adds the website and answers `{"device_id", "device_uuid"}`. The website
       gets `"linked"` with `{token, user, device_id, device_uuid, provision}`.
+
+    * `GET /api/me/pairing` answers `{"phone", "waiting": [{"sealed", "name"}]}`,
+      what websites have sealed for my number.
 
   And to see and remove linked devices:
 
@@ -58,6 +65,24 @@ defmodule PakchatWeb.LinkController do
   end
 
   def new_code(_conn, _params), do: {:error, :bad_request}
+
+  def phone(conn, %{"id" => id, "secret" => secret, "phone" => typed} = params) do
+    with {:ok, sealed} <- sealed(params["sealed"]),
+         :ok <- if(sealed, do: :ok, else: RateLimit.hit(:link, ip(conn))),
+         {:ok, phone} <- Pakchat.Phone.normalize(typed),
+         {:ok, _} <- Linking.set_phone(id, secret, phone, sealed) do
+      json(conn, %{phone: phone})
+    end
+  end
+
+  def phone(_conn, _params), do: {:error, :bad_request}
+
+  def pairing(conn, _params) do
+    with :ok <- main_phone(conn) do
+      phone = conn.assigns.user.phone
+      json(conn, %{phone: phone, waiting: Linking.for_phone(phone)})
+    end
+  end
 
   def show(conn, %{"code" => code}) do
     with :ok <- main_phone(conn),
@@ -157,6 +182,18 @@ defmodule PakchatWeb.LinkController do
 
     if changeset.valid?, do: :ok, else: {:error, changeset}
   end
+
+  # A sealed QR text is small: a few hundred bytes.
+  defp sealed(nil), do: {:ok, nil}
+
+  defp sealed(text) when is_binary(text) and byte_size(text) <= 1024 do
+    case Base.decode64(text) do
+      {:ok, bytes} when byte_size(bytes) > 28 -> {:ok, text}
+      _ -> {:error, :bad_request}
+    end
+  end
+
+  defp sealed(_), do: {:error, :bad_request}
 
   defp ok_or_bad({:ok, _} = ok), do: ok
   defp ok_or_bad(:error), do: {:error, :bad_request}

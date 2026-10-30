@@ -7,6 +7,7 @@ import { useLoaded } from '../core/hooks';
 import { bodyLine, chatTitle, clock, dayLabel, memberName } from '../ui/format';
 import { Icon } from '../ui/Icon';
 import { msgKey, setView } from '../ui/view';
+import { tr } from '../i18n';
 
 export function Starred() {
   const list = useLoaded<{ m: Message; chat: string }[] | null>(
@@ -28,16 +29,16 @@ export function Starred() {
   return (
     <>
       <header className="sh slide">
-        <button className="ib" onClick={() => setView({ side: null })} aria-label="Back">
+        <button className="ib" onClick={() => setView({ side: null })} aria-label={tr('Back')}>
           <Icon name="back" size={22} />
         </button>
-        <span>Starred messages</span>
+        <span>{tr('Starred messages')}</span>
       </header>
       <div className="rows scroll list starred">
         {list?.length === 0 && (
           <div className="none big">
             <Icon name="star" size={48} stroke={1.4} />
-            <p>Click a message's menu and choose Star to find it here later.</p>
+            <p>{tr('Click a message\'s menu and choose Star to find it here later.')}</p>
           </div>
         )}
         {list?.map(({ m, chat }) => (

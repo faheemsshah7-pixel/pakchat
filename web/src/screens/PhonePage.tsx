@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 
 import { APK_URL, onAndroid, PLAY_URL } from '../device';
 import { Icon, PlayBadge } from '../ui/Icon';
+import { tr } from '../i18n';
 
 export function PhonePage() {
   const [started, setStarted] = useState(false);
@@ -21,39 +22,39 @@ export function PhonePage() {
         <div className="lg">
           <Icon name="chat" size={22} />
         </div>
-        <b>PakChat</b>
+        <b>{tr('PakChat')}</b>
       </div>
       <div className="pmid">
         <div className="pill2">
-          <Icon name="phone" size={16} /> You're on a phone
+          <Icon name="phone" size={16} />{' '}{tr('You\'re on a phone')}
         </div>
-        <h1>Get the PakChat app</h1>
-        <p>PakChat on the web is made for computers. On your phone, the app is faster, gets notifications, and is where your account lives.</p>
+        <h1>{tr('Get the PakChat app')}</h1>
+        <p>{tr('PakChat on the web is made for computers. On your phone, the app is faster, gets notifications, and is where your account lives.')}</p>
         {onAndroid || !apk ? (
           <a href={apk ? APK_URL : PLAY_URL} download={apk ? 'PakChat.apk' : undefined} onClick={() => setStarted(true)}>
             <PlayBadge play={!apk} />
           </a>
         ) : (
-          <p className="ios">The iPhone app comes later. For now, PakChat is on Android.</p>
+          <p className="ios">{tr('The iPhone app comes later. For now, PakChat is on Android.')}</p>
         )}
         {apk && onAndroid && (
           <div className={`guide ${started ? 'on' : ''}`}>
-            <b>{started ? 'Downloading… then:' : 'After it downloads:'}</b>
+            <b>{started ? tr('Downloading… then:') : tr('After it downloads:')}</b>
             <ol>
-              <li>Open <b>PakChat.apk</b> from your notifications or Downloads.</li>
+              <li>{tr('Open')}{' '}<b>{tr('PakChat.apk')}</b>{' '}{tr('from your notifications or Downloads.')}</li>
               <li>
-                If Android asks, tap <b>Settings</b> and turn on <b>Allow from this source</b>, then go back.
+                {tr('If Android asks, tap')}{' '}<b>{tr('Settings')}</b>{' '}{tr('and turn on')}{' '}<b>{tr('Allow from this source')}</b>{tr(', then go back.')}
               </li>
               <li>
-                Tap <b>Install</b>, then <b>Open</b>.
+                {tr('Tap')}{' '}<b>{tr('Install')}</b>{tr(', then')}{' '}<b>{tr('Open')}</b>.
               </li>
             </ol>
-            <small>PakChat isn't on Google Play yet, so Android asks this once. The app tells you when there's an update.</small>
+            <small>{tr('PakChat isn\'t on Google Play yet, so Android asks this once. The app tells you when there\'s an update.')}</small>
           </div>
         )}
       </div>
       <div className="pfoot">
-        <Icon name="laptop" size={16} /> On a computer? Open this page there to link it to your phone.
+        <Icon name="laptop" size={16} />{' '}{tr('On a computer? Open this page there to link it to your phone.')}
       </div>
     </div>
   );

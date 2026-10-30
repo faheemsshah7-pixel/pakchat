@@ -43,6 +43,7 @@ defmodule PakchatWeb.Router do
     # A website asking for a QR code to link to a phone (see LinkController).
     post "/link", LinkController, :start
     post "/link/:id/code", LinkController, :new_code
+    post "/link/:id/phone", LinkController, :phone
 
     # Signed links: the token in the link is the permission (see Pakchat.Files).
     put "/files/:id/data", FileController, :upload
@@ -66,6 +67,7 @@ defmodule PakchatWeb.Router do
     get "/link/:code", LinkController, :show
     post "/link/:code", LinkController, :approve
     get "/me/devices", LinkController, :devices
+    get "/me/pairing", LinkController, :pairing
     delete "/me/devices/:device_id", LinkController, :remove
 
     post "/contacts/match", UserController, :match

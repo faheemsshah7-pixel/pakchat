@@ -1,7 +1,7 @@
 // ContactInfo.tsx: the right-hand drawer: Contact info (or Group info), and
 // Verify security code.
 
-import type { Chat, Message } from '@pakchat/shared';
+import { MAX_CALL_PEOPLE, type Chat, type Message } from '@pakchat/shared';
 import { useEffect, useRef, useState } from 'react';
 
 import { core, openChat } from '../core/core';
@@ -15,7 +15,9 @@ import { Ticks } from '../ui/Ticks';
 import { setView, useView } from '../ui/view';
 import { block, deleteChat, disappearing, favourite, isMuted, mute, TIMERS } from './chatActions';
 import { addMembers, inviteLink, report } from './groupDialogs';
+import { startCall } from './Call';
 import { cropPhoto, viewPhoto } from './Profile';
+import { tr } from '../i18n';
 
 const OFFLINE = "Couldn't do that. Check your internet connection.";
 /** Does it, and says so if it couldn't. */
@@ -78,13 +80,13 @@ export function ContactInfo({ chatId }: { chatId: string }) {
   };
   const photoMenu = (x: number, y: number) => {
     const items: MenuItem[] = [];
-    if (chat.photo) items.push({ label: 'View photo', icon: 'eye', run: () => viewPhoto(core.photoUrl(chat.photo), title) });
-    items.push({ label: 'Upload photo', icon: 'upload', run: () => photoFile.current?.click() });
+    if (chat.photo) items.push({ label: tr('View photo'), icon: 'eye', run: () => viewPhoto(core.photoUrl(chat.photo), title) });
+    items.push({ label: tr('Upload photo'), icon: 'upload', run: () => photoFile.current?.click() });
     if (chat.photo)
       items.push({
-        label: 'Remove photo',
+        label: tr('Remove photo'),
         icon: 'trash',
-        run: () => void confirm('Remove group photo?', '', 'Remove', true).then((yes) => yes && act(core.client.updateGroup(chat.id, { photo: '' }))),
+        run: () => void confirm(tr('Remove group photo?'), '', 'Remove', true).then((yes) => yes && act(core.client.updateGroup(chat.id, { photo: '' }))),
       });
     openMenu(items, x, y);
   };
@@ -94,7 +96,7 @@ export function ContactInfo({ chatId }: { chatId: string }) {
     openMenu(
       [
         { label: `Message ${name}`, icon: 'chat', run: () => void core.client.openDirect(userId).then((c) => openChat(c.id)) },
-        { label: admin ? 'Dismiss as admin' : 'Make group admin', icon: 'shield', run: () => act(core.client.setAdmin(chat.id, userId, !admin)) },
+        { label: admin ? tr('Dismiss as admin') : tr('Make group admin'), icon: 'shield', run: () => act(core.client.setAdmin(chat.id, userId, !admin)) },
         {
           label: `Remove ${name}`,
           icon: 'leave',
@@ -111,10 +113,10 @@ export function ContactInfo({ chatId }: { chatId: string }) {
   return (
     <>
       <div className="dh">
-        <button className="ib" onClick={close} aria-label="Close">
+        <button className="ib" onClick={close} aria-label={tr('Close')}>
           <Icon name="close" size={22} />
         </button>
-        {group ? 'Group info' : 'Contact info'}
+        {group ? tr('Group info') : tr('Contact info')}
       </div>
       <div className="db scroll">
         <div className="who blk">
@@ -137,8 +139,8 @@ export function ContactInfo({ chatId }: { chatId: string }) {
                 if (!f) return;
                 void cropPhoto(f).then((square) => {
                   if (!square) return;
-                  toast('Uploading photo…');
-                  act(core.uploadPhoto(square, chat.id).then((photo) => core.client.updateGroup(chat.id, { photo })).then(() => toast('Group photo updated')));
+                  toast(tr('Uploading photo…'));
+                  act(core.uploadPhoto(square, chat.id).then((photo) => core.client.updateGroup(chat.id, { photo })).then(() => toast(tr('Group photo updated'))));
                 });
               }}
             />
@@ -146,7 +148,7 @@ export function ContactInfo({ chatId }: { chatId: string }) {
           <h2 className="ename">
             {title}
             {canEdit && (
-              <button className="ib" onClick={() => void rename()} aria-label="Edit group name" data-tip="Edit">
+              <button className="ib" onClick={() => void rename()} aria-label={tr('Edit group name')} data-tip={tr('Edit')}>
                 <Icon name="edit" size={18} />
               </button>
             )}
@@ -154,9 +156,21 @@ export function ContactInfo({ chatId }: { chatId: string }) {
           <p>{group ? `Group · ${chat.members.length} members` : self ? 'Message yourself' : phoneOf(other!) || lastSeen(presence)}</p>
           {!group && !self && core.contacts[other!] == null && core.people[other!]?.name && <p className="sm">~{core.people[other!]!.name}</p>}
           <div className="acts">
+            {!self && !chat.left && !chat.callLink && (!group || chat.members.length <= MAX_CALL_PEOPLE) && (
+              <>
+                <button onClick={() => void startCall(chat.id, false)}>
+                  <Icon name="calls" size={22} />
+                  {tr('Voice')}
+                </button>
+                <button onClick={() => void startCall(chat.id, true)}>
+                  <Icon name="video" size={22} />
+                  {tr('Video')}
+                </button>
+              </>
+            )}
             <button onClick={() => setView({ drawer: 'search' })}>
               <Icon name="search" size={22} />
-              Search
+              {tr('Search')}
             </button>
           </div>
         </div>
@@ -164,16 +178,16 @@ export function ContactInfo({ chatId }: { chatId: string }) {
         {(group ? chat.description || canEdit : core.people[other!]?.about) && (
           <div className="blk">
             <div className="lab l1">
-              <span style={{ flex: 1 }}>{group ? 'Description' : 'About'}</span>
+              <span style={{ flex: 1 }}>{group ? tr('Description') : tr('About')}</span>
               {canEdit && (
-                <button className="ib" onClick={() => void describe()} aria-label="Edit group description" data-tip="Edit">
+                <button className="ib" onClick={() => void describe()} aria-label={tr('Edit group description')} data-tip={tr('Edit')}>
                   <Icon name="edit" size={18} />
                 </button>
               )}
             </div>
             {group && !chat.description ? (
               <button className="addesc" onClick={() => void describe()}>
-                Add group description
+                {tr('Add group description')}
               </button>
             ) : (
               <div className="pre">{group ? chat.description : core.people[other!]?.about}</div>
@@ -184,7 +198,7 @@ export function ContactInfo({ chatId }: { chatId: string }) {
         <div className="blk mlink" role="button" tabIndex={0} onClick={() => setView({ drawer: 'media' })} onKeyDown={(e) => e.key === 'Enter' && setView({ drawer: 'media' })}>
           <div className="l1">
             <span className="lab" style={{ flex: 1, margin: 0 }}>
-              Media, links and docs
+              {tr('Media, links and docs')}
             </span>
             <span className="lab" style={{ margin: 0 }}>
               {media.length}
@@ -205,22 +219,22 @@ export function ContactInfo({ chatId }: { chatId: string }) {
         </div>
 
         <div className="blk" style={{ padding: '4px 0' }}>
-          <Row icon="star" title="Starred messages" right={<Icon name="forwardArrow" size={18} />} onClick={() => setView({ tab: 'chats', side: 'starred' })} />
-          <Row icon="bell" title="Mute notifications" right={<span className={`sw ${isMuted(p) ? 'on' : ''}`} />} onClick={() => void mute(chat)} />
-          {(!group || amAdmin || !chat.onlyAdminsSend) && <Row icon="timer" title="Disappearing messages" sub={timerLabel(chat.timer)} right={<Icon name="forwardArrow" size={18} />} onClick={() => void setTimer()} />}
-          {!self && !group && <Row icon="lock" title="Encryption" sub="Messages are end-to-end encrypted. Click to verify." onClick={() => setView({ drawer: 'verify' })} />}
-          {group && <Row icon="lock" title="Encryption" sub="Messages are end-to-end encrypted." />}
+          <Row icon="star" title={tr('Starred messages')} right={<Icon name="forwardArrow" size={18} />} onClick={() => setView({ tab: 'chats', side: 'starred' })} />
+          <Row icon="bell" title={tr('Mute notifications')} right={<span className={`sw ${isMuted(p) ? 'on' : ''}`} />} onClick={() => void mute(chat)} />
+          {(!group || amAdmin || !chat.onlyAdminsSend) && <Row icon="timer" title={tr('Disappearing messages')} sub={timerLabel(chat.timer)} right={<Icon name="forwardArrow" size={18} />} onClick={() => void setTimer()} />}
+          {!self && !group && <Row icon="lock" title={tr('Encryption')} sub={tr('Messages are end-to-end encrypted. Click to verify.')} onClick={() => setView({ drawer: 'verify' })} />}
+          {group && <Row icon="lock" title={tr('Encryption')} sub={tr('Messages are end-to-end encrypted.')} />}
         </div>
 
         {group && amAdmin && !ann && !chat.left && (
           <div className="blk" style={{ padding: '4px 0' }}>
             <div className="lab" style={{ padding: '10px 24px 4px' }}>
-              Group permissions
+              {tr('Group permissions')}
             </div>
-            <Row title="Edit group settings" sub="Members can change the group's name, photo and description" right={<span className={`sw ${chat.membersEdit ? 'on' : ''}`} />} onClick={() => act(core.client.updateGroup(chat.id, { membersEdit: !chat.membersEdit }))} />
-            <Row title="Send messages" sub={chat.onlyAdminsSend ? 'Only admins' : 'All members'} right={<span className={`sw ${chat.onlyAdminsSend ? '' : 'on'}`} />} onClick={() => act(core.client.updateGroup(chat.id, { onlyAdminsSend: !chat.onlyAdminsSend }))} />
-            <Row title="Add other members" sub="Members can add people to the group" right={<span className={`sw ${chat.membersAdd ? 'on' : ''}`} />} onClick={() => act(core.client.updateGroup(chat.id, { membersAdd: !chat.membersAdd }))} />
-            <Row title="Approve new members" sub="Admins approve who joins with the invite link" right={<span className={`sw ${chat.joinApproval ? 'on' : ''}`} />} onClick={() => act(core.client.updateGroup(chat.id, { joinApproval: !chat.joinApproval }))} />
+            <Row title={tr('Edit group settings')} sub={tr('Members can change the group\'s name, photo and description')} right={<span className={`sw ${chat.membersEdit ? 'on' : ''}`} />} onClick={() => act(core.client.updateGroup(chat.id, { membersEdit: !chat.membersEdit }))} />
+            <Row title={tr('Send messages')} sub={chat.onlyAdminsSend ? tr('Only admins') : tr('All members')} right={<span className={`sw ${chat.onlyAdminsSend ? '' : 'on'}`} />} onClick={() => act(core.client.updateGroup(chat.id, { onlyAdminsSend: !chat.onlyAdminsSend }))} />
+            <Row title={tr('Add other members')} sub={tr('Members can add people to the group')} right={<span className={`sw ${chat.membersAdd ? 'on' : ''}`} />} onClick={() => act(core.client.updateGroup(chat.id, { membersAdd: !chat.membersAdd }))} />
+            <Row title={tr('Approve new members')} sub={tr('Admins approve who joins with the invite link')} right={<span className={`sw ${chat.joinApproval ? 'on' : ''}`} />} onClick={() => act(core.client.updateGroup(chat.id, { joinApproval: !chat.joinApproval }))} />
           </div>
         )}
 
@@ -229,8 +243,8 @@ export function ContactInfo({ chatId }: { chatId: string }) {
             <div className="lab" style={{ padding: '10px 24px 4px' }}>
               {chat.members.length} members
             </div>
-            {canAdd && <Row icon="userPlus" title="Add member" onClick={() => addMembers(chat)} />}
-            {amAdmin && !ann && !chat.left && <Row icon="link" title="Invite to group via link" onClick={() => inviteLink(chat)} />}
+            {canAdd && <Row icon="userPlus" title={tr('Add member')} onClick={() => addMembers(chat)} />}
+            {amAdmin && !ann && !chat.left && <Row icon="link" title={tr('Invite to group via link')} onClick={() => inviteLink(chat)} />}
             {[...chat.members]
               .sort((a, b) => (a.userId === core.myId ? -1 : b.userId === core.myId ? 1 : memberName(a.userId).localeCompare(memberName(b.userId))))
               .map((m) => (
@@ -249,7 +263,7 @@ export function ContactInfo({ chatId }: { chatId: string }) {
                     {m.userId === core.myId ? 'You' : groupName(m.userId)}
                     <small>{core.people[m.userId]?.about ?? ''}</small>
                   </span>
-                  {m.role === 'admin' && <span className="admin">Group admin</span>}
+                  {m.role === 'admin' && <span className="admin">{tr('Group admin')}</span>}
                 </button>
               ))}
           </div>
@@ -270,8 +284,8 @@ export function ContactInfo({ chatId }: { chatId: string }) {
         )}
 
         <div className="blk" style={{ padding: '4px 0', border: 0 }}>
-          <Row icon="heart" title={p.favourite ? 'Remove from Favourites' : 'Add to Favourites'} onClick={() => void favourite(chat)} />
-          {!group && !self && <Row icon="block" title={`${blocked ? 'Unblock' : 'Block'} ${title}`} red onClick={() => void block(chat)} />}
+          <Row icon="heart" title={p.favourite ? tr('Remove from Favourites') : tr('Add to Favourites')} onClick={() => void favourite(chat)} />
+          {!group && !self && <Row icon="block" title={`${blocked ? tr('Unblock') : tr('Block')} ${title}`} red onClick={() => void block(chat)} />}
           {!self && (
             <Row
               icon="flag"
@@ -280,7 +294,7 @@ export function ContactInfo({ chatId }: { chatId: string }) {
               onClick={() => report(chat, group ? null : other, title, () => void (group ? deleteChat(chat) : !blocked && block(chat)))}
             />
           )}
-          {group && !chat.left ? <Row icon="leave" title="Exit group" red onClick={() => void deleteChat(chat)} /> : <Row icon="trash" title="Delete chat" red onClick={() => void deleteChat(chat)} />}
+          {group && !chat.left ? <Row icon="leave" title={tr('Exit group')} red onClick={() => void deleteChat(chat)} /> : <Row icon="trash" title={tr('Delete chat')} red onClick={() => void deleteChat(chat)} />}
         </div>
       </div>
     </>
@@ -306,10 +320,10 @@ export function Verify({ chatId }: { chatId: string }) {
   return (
     <>
       <div className="dh">
-        <button className="ib" onClick={() => setView({ drawer: 'info' })} aria-label="Back">
+        <button className="ib" onClick={() => setView({ drawer: 'info' })} aria-label={tr('Back')}>
           <Icon name="back" size={22} />
         </button>
-        Verify security code
+        {tr('Verify security code')}
       </div>
       <div className="db verify">
         <div className="vshield">
@@ -322,20 +336,20 @@ export function Verify({ chatId }: { chatId: string }) {
             ))}
           </div>
         ) : failed ? (
-          <p className="vtext">Couldn't work out the code. Check your internet connection and try again.</p>
+          <p className="vtext">{tr('Couldn\'t work out the code. Check your internet connection and try again.')}</p>
         ) : (
           <div className="code">
             <span className="spin" />
           </div>
         )}
         <p className="vtext">
-          To check that your messages with {name} are end-to-end encrypted, compare these 60 numbers with the ones on {name}'s phone (their chat with you › Encryption). If they match, nobody is in the middle.
+          {tr('To check that your messages with')}{' '}{name}{' '}{tr('are end-to-end encrypted, compare these 60 numbers with the ones on')}{' '}{name}{tr('\'s phone (their chat with you › Encryption). If they match, nobody is in the middle.')}
         </p>
         <div className="vnote">
           <Icon name="shield" size={20} />
           <div>
-            <b>The code changes when either of you reinstalls PakChat.</b>
-            You'll see a note in the chat when that happens.
+            <b>{tr('The code changes when either of you reinstalls PakChat.')}</b>
+            {tr('You\'ll see a note in the chat when that happens.')}
           </div>
         </div>
       </div>
@@ -363,7 +377,7 @@ export function MessageInfo({ chatId }: { chatId: string }) {
         {title}
       </div>
       {ids.length === 0 ? (
-        <p className="mnone">{chat.kind === 'group' ? 'No one yet' : 'Not yet'}</p>
+        <p className="mnone">{chat.kind === 'group' ? tr('No one yet') : tr('Not yet')}</p>
       ) : (
         ids.map((id) => (
           <div key={id} className="drow mem">
@@ -377,10 +391,10 @@ export function MessageInfo({ chatId }: { chatId: string }) {
   return (
     <>
       <div className="dh">
-        <button className="ib" onClick={close} aria-label="Close">
+        <button className="ib" onClick={close} aria-label={tr('Close')}>
           <Icon name="close" size={22} />
         </button>
-        Message info
+        {tr('Message info')}
       </div>
       <div className="db">
         <div className="mipv">

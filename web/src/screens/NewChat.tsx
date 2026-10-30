@@ -8,6 +8,7 @@ import { Avatar, photoOf } from '../ui/Avatar';
 import { Icon } from '../ui/Icon';
 import { toast } from '../ui/overlay';
 import { setView } from '../ui/view';
+import { tr } from '../i18n';
 
 type Person = { id: string; name: string; about: string };
 
@@ -25,7 +26,7 @@ export function usePeopleList(q: string): Person[] {
 function Header({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <header className="sh slide">
-      <button className="ib" onClick={onBack} aria-label="Back">
+      <button className="ib" onClick={onBack} aria-label={tr('Back')}>
         <Icon name="back" size={22} />
       </button>
       <span>{title}</span>
@@ -48,7 +49,7 @@ async function message(userId: string) {
     setView({ side: null });
     openChat(chat.id);
   } catch {
-    toast("Couldn't open the chat. Check your internet connection.");
+    toast(tr('Couldn\'t open the chat. Check your internet connection.'));
   }
 }
 
@@ -58,8 +59,8 @@ export function NewChat() {
   const me = core.client.me;
   return (
     <>
-      <Header title="New chat" onBack={() => setView({ side: null })} />
-      <SearchBox q={q} setQ={setQ} placeholder="Search name or number" />
+      <Header title={tr('New chat')} onBack={() => setView({ side: null })} />
+      <SearchBox q={q} setQ={setQ} placeholder={tr('Search name or number')} />
       <div className="rows scroll list">
         {!q && (
           <button className="row act" onClick={() => setView({ side: 'newGroup' })}>
@@ -67,17 +68,17 @@ export function NewChat() {
               <Icon name="group" size={24} />
             </div>
             <div className="rt">
-              <span className="nm">New group</span>
+              <span className="nm">{tr('New group')}</span>
             </div>
           </button>
         )}
-        <div className="grp">Contacts on PakChat</div>
+        <div className="grp">{tr('Contacts on PakChat')}</div>
         {me && !q && (
           <button className="row" onClick={() => void message(me.userId)}>
             <Avatar id={me.userId} name={me.me.name} photo={photoOf(me.userId)} />
             <div className="rt">
-              <span className="nm">{me.me.name} (You)</span>
-              <span className="pv">Message yourself</span>
+              <span className="nm">{me.me.name}{' '}{tr('(You)')}</span>
+              <span className="pv">{tr('Message yourself')}</span>
             </div>
           </button>
         )}
@@ -107,17 +108,17 @@ export function NewGroup() {
   if (step === 'name') {
     return (
       <>
-        <Header title="New group" onBack={() => setStep('people')} />
+        <Header title={tr('New group')} onBack={() => setStep('people')} />
         <div className="ngname">
           <div className="av t1 big">
             <Icon name="group" size={56} />
           </div>
-          <input autoFocus className="line" maxLength={100} placeholder="Group subject" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input autoFocus className="line" maxLength={100} placeholder={tr('Group subject')} value={title} onChange={(e) => setTitle(e.target.value)} />
           <p className="pv">{picked.map((p) => p.name).join(', ')}</p>
           <button
             className="go"
             disabled={!title.trim() || busy}
-            aria-label="Create group"
+            aria-label={tr('Create group')}
             onClick={() => {
               setBusy(true);
               core.client
@@ -128,7 +129,7 @@ export function NewGroup() {
                 })
                 .catch(() => {
                   setBusy(false);
-                  toast("Couldn't create the group. Check your internet connection.");
+                  toast(tr('Couldn\'t create the group. Check your internet connection.'));
                 });
             }}
           >
@@ -141,7 +142,7 @@ export function NewGroup() {
 
   return (
     <>
-      <Header title="Add group members" onBack={() => setView({ side: 'newChat' })} />
+      <Header title={tr('Add group members')} onBack={() => setView({ side: 'newChat' })} />
       {picked.length > 0 && (
         <div className="picked">
           {picked.map((p) => (
@@ -153,7 +154,7 @@ export function NewGroup() {
           ))}
         </div>
       )}
-      <SearchBox q={q} setQ={setQ} placeholder="Search name or number" />
+      <SearchBox q={q} setQ={setQ} placeholder={tr('Search name or number')} />
       <div className="rows scroll list">
         {people.map((p) => {
           const on = picked.some((x) => x.id === p.id);
@@ -170,7 +171,7 @@ export function NewGroup() {
         })}
       </div>
       {picked.length > 0 && (
-        <button className="go" aria-label="Next" onClick={() => setStep('name')}>
+        <button className="go" aria-label={tr('Next')} onClick={() => setStep('name')}>
           <Icon name="forwardArrow" size={26} stroke={2.4} />
         </button>
       )}

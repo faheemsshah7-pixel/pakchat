@@ -14,6 +14,7 @@ import { emojiOnly, parseRich, plainText, readMoreCut, type Span } from '../ui/r
 import { Ticks } from '../ui/Ticks';
 import { msgKey, setView, toggleSelected } from '../ui/view';
 import { download, messageMenu, QUICK_REACTIONS, react } from './messageActions';
+import { tr } from '../i18n';
 
 // Group members' names, each in its own colour (like WhatsApp's).
 const NAME_COLOURS = ['#1F7AEC', '#C2185B', '#7B1FA2', '#00897B', '#E65100', '#5D4037', '#3949AB', '#2E7D32'];
@@ -75,7 +76,7 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
       }}
     >
       {selected !== null && (
-        <span className={`chk ${selected ? '' : 'off'}`} aria-label={selected ? 'Selected' : 'Not selected'}>
+        <span className={`chk ${selected ? '' : 'off'}`} aria-label={selected ? tr('Selected') : tr('Not selected')}>
           {selected && <Icon name="check" size={13} stroke={3} />}
         </span>
       )}
@@ -91,7 +92,7 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
             <div className="fwdl">
               <Icon name="forward" size={14} />
               {forwardedMany(m) && <Icon name="forward" size={14} />}
-              {forwardedMany(m) ? 'Forwarded many times' : 'Forwarded'}
+              {forwardedMany(m) ? tr('Forwarded many times') : tr('Forwarded')}
             </div>
           )}
           <Body m={m} openViewer={openViewer} big={big} />
@@ -99,7 +100,7 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
           {!m.deleted && (
             <button
               className="mchev"
-              aria-label="Message menu"
+              aria-label={tr('Message menu')}
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
                 menu(r.right - 4, r.bottom + 2);
@@ -113,7 +114,7 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
         {!m.deleted && canSend && (
           <button
             className="rbtn"
-            aria-label="React"
+            aria-label={tr('React')}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               reactBar(m, mine ? r.right : r.left, r.top - 8, mine);
@@ -133,8 +134,8 @@ function Meta({ m, over }: { m: Message; over?: boolean }) {
     <span className={`meta ${over ? 'over' : ''}`}>
       {m.pinnedUntil && m.pinnedUntil > Date.now() && <Icon name="pin" size={12} />}
       {core.starred[msgKey(m)] && <Icon name="starFilled" size={12} />}
-      {m.keptBy && !m.deleted && <span className="ed">Kept</span>}
-      {m.editedAt && !m.deleted && <span className="ed">Edited</span>}
+      {m.keptBy && !m.deleted && <span className="ed">{tr('Kept')}</span>}
+      {m.editedAt && !m.deleted && <span className="ed">{tr('Edited')}</span>}
       {clock(m.sentAt)}
       {m.author === core.myId && !m.deleted && <Ticks status={m.status} size={16} />}
     </span>
@@ -145,7 +146,7 @@ function Body({ m, openViewer, big }: { m: Message; openViewer: (m: Message) => 
   if (m.deleted)
     return (
       <span className="gone">
-        <Icon name="block" size={16} /> {m.author === core.myId ? 'You deleted this message' : 'This message was deleted'}
+        <Icon name="block" size={16} /> {m.author === core.myId ? tr('You deleted this message') : tr('This message was deleted')}
       </span>
     );
   return (
@@ -155,8 +156,8 @@ function Body({ m, openViewer, big }: { m: Message; openViewer: (m: Message) => 
         <div className="quote">
           <i />
           <div>
-            <b>{memberName(m.statusReply.author)} · Status</b>
-            {m.statusReply.text ?? (m.statusReply.kind === 'video' ? 'Video' : 'Photo')}
+            <b>{memberName(m.statusReply.author)}{' '}{tr('· Status')}</b>
+            {m.statusReply.text ?? (m.statusReply.kind === 'video' ? tr('Video') : tr('Photo'))}
           </div>
         </div>
       )}
@@ -171,7 +172,7 @@ function Body({ m, openViewer, big }: { m: Message; openViewer: (m: Message) => 
           <span>
             <b>{m.location.live ? 'Live location' : (m.location.name ?? 'Location')}</b>
             {m.location.address && <small>{m.location.address}</small>}
-            <small className="lnk">Open in Google Maps</small>
+            <small className="lnk">{tr('Open in Google Maps')}</small>
           </span>
         </a>
       )}
@@ -232,7 +233,7 @@ function Words({ text, big, mentions }: { text: string; big: number; mentions?: 
       ))}
       {cut != null && (
         <button className="more" onClick={() => setAll(true)}>
-          Read more
+          {tr('Read more')}
         </button>
       )}
     </span>
@@ -262,7 +263,7 @@ function PrivateQuote({ q }: { q: NonNullable<Message['quote']> }) {
     const c = await core.storage.getChat(q.chat);
     return c ? chatTitle(c) : 'Group';
   }, [q.chat], 'Group');
-  const words = q.text ? plainText(q.text) : q.kind === 'image' ? 'Photo' : q.kind === 'video' ? 'Video' : q.kind === 'voice' ? 'Voice message' : q.kind === 'poll' ? 'Poll' : 'Message';
+  const words = q.text ? plainText(q.text) : q.kind === 'image' ? 'Photo' : q.kind === 'video' ? 'Video' : q.kind === 'voice' ? 'Voice message' : q.kind === 'poll' ? tr('Poll') : tr('Message');
   return (
     <button
       className="quote"
@@ -353,14 +354,14 @@ function FileBody({ m, openViewer }: { m: Message; openViewer: (m: Message) => v
         <span className="oi">1</span>
         <span>
           <b>{fileWord(m)}</b>
-          <small>View once. Open it on your phone.</small>
+          <small>{tr('View once. Open it on your phone.')}</small>
         </span>
       </div>
     );
   }
 
   if (f.kind === 'sticker') {
-    return <div ref={box} className="stkimg">{url ? <img src={url} alt="Sticker" /> : <div className="ph" />}</div>;
+    return <div ref={box} className="stkimg">{url ? <img src={url} alt={tr('Sticker')} /> : <div className="ph" />}</div>;
   }
 
   if (f.kind === 'image' || f.kind === 'video') {
@@ -371,7 +372,7 @@ function FileBody({ m, openViewer }: { m: Message; openViewer: (m: Message) => v
     const height = Math.round(Math.min(Math.max((width * h) / w, 120), 400));
     return (
       <>
-        <div ref={box} className={`img ${f.round ? 'round' : ''}`} style={{ width, height }} onClick={() => openViewer(m)} role="button" aria-label={f.kind === 'video' ? 'Play video' : 'Open photo'}>
+        <div ref={box} className={`img ${f.round ? 'round' : ''}`} style={{ width, height }} onClick={() => openViewer(m)} role="button" aria-label={f.kind === 'video' ? tr('Play video') : tr('Open photo')}>
           {f.thumb && <img className="blur" src={`data:image/jpeg;base64,${f.thumb}`} alt="" />}
           {url && f.kind === 'image' && <img className="full" src={url} alt="" />}
           {url && f.kind === 'video' && <video className="full" src={url} muted={!!f.gif} autoPlay={!!f.gif} loop={!!f.gif} playsInline preload="metadata" />}
@@ -386,7 +387,7 @@ function FileBody({ m, openViewer }: { m: Message; openViewer: (m: Message) => v
             </span>
           ) : null}
           {f.gif && <span className="vlen">GIF</span>}
-          {failed && <span className="ferr">Couldn't load</span>}
+          {failed && <span className="ferr">{tr('Couldn\'t load')}</span>}
           {f.id === 'pending' && <span className="spin over" />}
           {!m.text && <Meta m={m} over />}
         </div>
@@ -468,7 +469,7 @@ function Voice({ m }: { m: Message }) {
   const progress = total ? at / total : 0;
   return (
     <div className="voice">
-      <button className="play" onClick={() => void toggle()} aria-label={playing ? 'Pause' : 'Play'}>
+      <button className="play" onClick={() => void toggle()} aria-label={playing ? tr('Pause') : tr('Play')}>
         {loading ? <span className="spin" /> : <Icon name={playing ? 'pause' : 'play'} size={26} />}
       </button>
       <div
@@ -541,7 +542,7 @@ function Poll({ m }: { m: Message }) {
   return (
     <div className="poll">
       <b className="pq">{p.question}</b>
-      <small>{p.multi ? 'Select one or more' : 'Select one'}</small>
+      <small>{p.multi ? tr('Select one or more') : tr('Select one')}</small>
       {p.options.map((o, i) => (
         <button key={i} className="po" onClick={() => vote(i)}>
           <span className={`chk round ${mine.includes(i) ? '' : 'off'}`}>{mine.includes(i) && <Icon name="check" size={12} stroke={3} />}</span>
@@ -591,7 +592,7 @@ function ReactionList({ m, x, y }: { m: Message; x: number; y: number }) {
     <div ref={ref} className="menu pop rxl" style={style}>
       <div className="rxt">
         <button className={tab === null ? 'on' : ''} onClick={() => setTab(null)}>
-          All {list.length}
+          {tr('All')}{' '}{list.length}
         </button>
         {tabs.map((e) => (
           <button key={e} className={tab === e ? 'on' : ''} onClick={() => setTab(e)}>
@@ -612,7 +613,7 @@ function ReactionList({ m, x, y }: { m: Message; x: number; y: number }) {
         >
           <span className="ml">
             {who === core.myId ? 'You' : memberName(who)}
-            {who === core.myId && <small>Click to remove</small>}
+            {who === core.myId && <small>{tr('Click to remove')}</small>}
           </span>
           <span className="rxe">{e}</span>
         </button>
@@ -653,7 +654,7 @@ function QuickReactions({ m }: { m: Message }) {
       ))}
       <button
         className="plus"
-        aria-label="More reactions"
+        aria-label={tr('More reactions')}
         onClick={(ev) => {
           const r = ev.currentTarget.getBoundingClientRect();
           closeLayer();

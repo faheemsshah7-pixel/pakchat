@@ -1,0 +1,64 @@
+/* calls.css: calls on the website. The ringing card is the approved design (designs/web/screens/design-1/d1-call.png). */
+
+/* A call ringing here: the card at the top right */
+.callcard { position: fixed; top: 76px; right: 24px; z-index: 60; width: 340px; padding: 20px; border-radius: 20px; background: var(--callBg); color: var(--callText); box-shadow: 0 24px 48px -16px rgba(0,0,0,.45); }
+.dark .callcard { --callBg: #242626; --callText: #FAFAFA; --callLive: #1D1F1F; }
+.callcard .top { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.callcard .top > div:last-child { min-width: 0; }
+.callcard .av { width: 56px; height: 56px; font-size: 20px; flex: none; }
+.callcard b { display: block; font-size: 18px; font-weight: 600; line-height: 24px; }
+.callcard .k { font-size: 13.5px; opacity: .75; }
+.callcard .live { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; padding: 10px 12px; border-radius: 12px; background: var(--callLive); font-size: 13px; line-height: 18px; }
+.callcard .live i { width: 8px; height: 8px; border-radius: 50%; background: #22C55E; margin-top: 5px; flex: none; box-shadow: 0 0 0 4px rgba(34,197,94,.2); }
+.callcard .cb { display: flex; gap: 10px; }
+.callcard .cb button { flex: 1; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; font-weight: 600; color: #fff; }
+.callcard .no { background: #E5484D; }
+.callcard .yes { background: #22A559; }
+
+/* The call window */
+.callwin { position: fixed; inset: 0; z-index: 55; background: #0B141A; color: #fff; display: flex; flex-direction: column; animation: fade .2s; }
+.callwin .chead { display: flex; align-items: center; gap: 6px; padding: 12px 16px; font-size: 13px; color: rgba(255,255,255,.7); position: relative; z-index: 2; }
+.callwin .chead .ib { color: #fff; }
+.callwin .chead .ib:hover { background: rgba(255,255,255,.1); }
+.callwin .who { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding-bottom: 120px; min-width: 0; }
+.callwin .who .av { width: 128px; height: 128px; font-size: 44px; margin-bottom: 12px; }
+.callwin .who b { font-size: 26px; font-weight: 500; max-width: 80vw; }
+.callwin .who > span { font-size: 15px; color: rgba(255,255,255,.7); min-height: 20px; }
+.callwin .people { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; max-width: 520px; }
+.callwin .people span { display: flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 14px; background: rgba(255,255,255,.1); font-size: 13px; }
+.callwin .people span.dim { opacity: .55; }
+.callwin .tiles { position: absolute; inset: 0; display: grid; gap: 4px; padding: 4px; }
+.callwin .tiles.n2 { grid-template-columns: 1fr 1fr; }
+.callwin .tiles.n3, .callwin .tiles.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.callwin .tile { position: relative; background: #111B21; border-radius: 12px; overflow: hidden; min-height: 0; }
+.callwin .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.callwin .tile video.fit { object-fit: contain; }
+.callwin .tname { position: absolute; left: 12px; bottom: 96px; display: flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 12px; background: rgba(0,0,0,.45); font-size: 13px; }
+.callwin .tiles.n3 .tname, .callwin .tiles.n4 .tname { bottom: 10px; }
+.callwin .vstatus { position: absolute; top: 56px; left: 0; right: 0; text-align: center; font-size: 14px; color: rgba(255,255,255,.85); text-shadow: 0 1px 3px rgba(0,0,0,.6); z-index: 2; pointer-events: none; }
+.callwin .mirror { position: absolute; right: 20px; bottom: 104px; width: 220px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; transform: scaleX(-1); background: #111B21; box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 2; }
+.callwin .sharing { position: absolute; right: 20px; bottom: 104px; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.12); font-size: 13px; z-index: 2; }
+.callwin .cbar { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 40px; background: rgba(32,44,51,.9); z-index: 3; }
+.callwin .round { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgba(255,255,255,.12); }
+.callwin .round:hover:not(:disabled) { background: rgba(255,255,255,.2); }
+.callwin .round.on { background: #fff; color: #0B141A; }
+.callwin .round:disabled { opacity: .4; cursor: default; }
+.callwin .end { width: 64px; height: 52px; border-radius: 26px; display: grid; place-items: center; color: #fff; background: #E5484D; }
+.callwin .end:disabled { opacity: .5; }
+.callwin .waiting { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: min(460px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: #fff; color: #0A0A0A; box-shadow: 0 16px 32px -12px rgba(0,0,0,.6); z-index: 4; animation: popIn .3s cubic-bezier(.17,.17,0,1); }
+.callwin .waiting .av { width: 44px; height: 44px; font-size: 16px; flex: none; }
+.callwin .waiting .grow { min-width: 0; }
+.callwin .waiting b { display: block; font-size: 15px; font-weight: 600; }
+.callwin .waiting span { font-size: 13px; color: rgba(0,0,0,.6); }
+.btn.red { background: #E5484D; color: #fff; }
+.btn.green { background: #22A559; color: #fff; }
+
+/* A minimised call: the green bar above the chat list (like the phone's) */
+.callbar { flex: none; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px; background: #22A559; color: #fff; font-size: 14px; font-weight: 500; text-align: start; }
+.callbar .grow { min-width: 0; }
+.callbar:hover { background: #1E954F; }
+
+/* The Calls tab */
+.callrow .sub { display: flex; align-items: center; gap: 4px; }
+.callrow .sub.missed { color: var(--red); }
+.callrow .kind { color: var(--icon); }
