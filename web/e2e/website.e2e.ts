@@ -63,6 +63,19 @@ async function eventually(check: () => Promise<void>, ms = 15_000) {
 const texts = async (p: { client: PakChat }, chatId: string) => (await p.client.messages(chatId, { limit: 500 })).filter((m: Message) => m.kind === 'text').map((m) => m.text);
 
 type Phone = Awaited<ReturnType<typeof phone>>;
+
+/** What the app does after a website links (app/src/core/linking.ts): forget any old lock for its number, then send the chats. */
+async function sendHistory(p: Phone, deviceId: number) {
+  // off
+  const self = await p.client.openDirect(p.id);
+  const parts = await exportHistory(p.storage, { valueKeys: [] });
+  for (const [i, b] of parts.entries()) {
+    const { locked, key, digest } = await lockFile(new TextEncoder().encode(JSON.stringify(b)));
+    const { id, uploadUrl } = await p.server.startUpload(self.id, locked.length);
+    await fetch(uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: locked as BodyInit });
+    await p.client.sendHistory(self.id, deviceId, { part: b.part, last: i === parts.length - 1, file: { id, key, digest, size: locked.length } });
+  }
+}
 let ali: Phone;
 let sara: Phone;
 let chat: Awaited<ReturnType<PakChat['openDirect']>>;
@@ -114,14 +127,7 @@ test('a phone links the website by QR, its chats arrive, and the website chats w
   await page.screenshot({ path: `${SHOTS}2-loading.png` });
 
   // The phone sends its chats through "Message yourself", locked for the website alone.
-  const self = await ali.client.openDirect(ali.id);
-  const parts = await exportHistory(ali.storage, { valueKeys: [] });
-  for (const [i, b] of parts.entries()) {
-    const { locked, key, digest } = await lockFile(new TextEncoder().encode(JSON.stringify(b)));
-    const { id, uploadUrl } = await ali.server.startUpload(self.id, locked.length);
-    await fetch(uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: locked as BodyInit });
-    await ali.client.sendHistory(self.id, approved!.deviceId, { part: b.part, last: i === parts.length - 1, file: { id, key, digest, size: locked.length } });
-  }
+  await sendHistory(ali, approved!.deviceId);
 
   // The chat list fills in.
   const row = page.locator('.row', { hasText: 'Sara Ahmed' });
@@ -535,6 +541,15 @@ test('everyday actions: reply, edit, delete for everyone, forward, star, search,
   const identityKey = (await ali.signal.deviceKeys(ali.client.me!.handle)).identityKey;
   const linked = await approveQr(ali.server, again, { v: 1, userId: ali.id, identityKey, phoneName: 'Pixel 7' }, lockProvision);
   await page.locator('[data-qr^="PAKCHAT1,"]').waitFor({ state: 'detached', timeout: 15_000 });
+  // Linked again, it gets the number the first website had, and the phone's chats still arrive.
+  expect(linked!.deviceId).toBe(2);
+  await new Promise<void>((resolve) => {
+    const off = ali.client.on('connection', (c) => c && (off(), resolve()));
+    ali.client.start();
+  });
+  await sendHistory(ali, linked!.deviceId);
+  await page.locator('.row[aria-label="Sara Ahmed"]').waitFor({ timeout: 20_000 });
+  await page.screenshot({ path: `${SHOTS}21-relinked.png` });
   await ali.server.removeDevice(linked!.deviceId);
   await page.locator('[data-qr^="PAKCHAT1,"]').waitFor({ timeout: 40_000 });
 

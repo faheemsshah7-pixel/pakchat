@@ -33,6 +33,8 @@ export function linkedDevices(): Promise<LinkedDevice[]> {
 export async function logOutDevice(deviceId: number) {
   await core.server.removeDevice(deviceId);
   owe(deviceId, null);
+  // The next website linked may get this number: don't lock anything for this one again.
+  await core.client.forgetMyDevice(deviceId).catch(() => {});
   core.emit('devices');
 }
 
@@ -48,8 +50,7 @@ export async function linkFromQr(text: string): Promise<{ deviceId: number; name
   const fm = fileModule();
   const linked = await approveQr(core.server, text, provision, (p, key) => fm.lockProvision(JSON.stringify(p), fromBytes(key)));
   if (!linked) throw new LinkRefused('expired');
-  core.emit('devices');
-  void sendHistory(linked.deviceId).catch((err: unknown) => console.log(`[pakchat] history: ${String(err)}`));
+  await linkedNew(linked.deviceId);
   return linked;
 }
 
@@ -78,9 +79,20 @@ export async function linkFromCode(typed: string): Promise<{ deviceId: number; n
     }
   };
   const linked = await approvePairing(core.server, typed, provision, (p, k) => fm.lockProvision(JSON.stringify(p), fromBytes(k)), open);
-  core.emit('devices');
-  void sendHistory(linked.deviceId).catch((err: unknown) => console.log(`[pakchat] history: ${String(err)}`));
+  await linkedNew(linked.deviceId);
   return linked;
+}
+
+/**
+ * A website was just linked. It often gets the number of one logged out before,
+ * and the phone may still hold that old website's lock: forget it, so the chats
+ * are locked for this one. Then copy them over, without waiting.
+ */
+async function linkedNew(deviceId: number) {
+  owe(deviceId, null);
+  await core.client.forgetMyDevice(deviceId);
+  core.emit('devices');
+  void sendHistory(deviceId).catch((err: unknown) => console.log(`[pakchat] history: ${String(err)}`));
 }
 
 /** Copies still owed to a website (device id → the next part to send), kept until done. */

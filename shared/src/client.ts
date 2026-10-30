@@ -709,6 +709,18 @@ export class PakChat {
   }
 
   /**
+   * The phone: one of my devices was logged out, or a new one was just linked.
+   * The server gives a new website the first free number, often the one a
+   * logged-out website had, so drop any lock made for that number: the next
+   * message then fetches the new device's keys instead of locking it for the
+   * old one, which no longer exists.
+   */
+  async forgetMyDevice(deviceId: number) {
+    if (deviceId === this.s.deviceId) return;
+    await this.inLane(() => this.o.signal.deleteSession(this.s.handle, this.s.userId, deviceId));
+  }
+
+  /**
    * The phone: sends one part of its history to a device it just linked,
    * through the outbox (so it still goes if the phone is offline for a bit).
    * `chatId` is my "Message yourself" chat, where the part was uploaded.
@@ -1047,7 +1059,8 @@ export class PakChat {
           changed = m;
         }
       }
-      if (item.kind !== 'control') await this.rememberSent({ chatId: item.chatId, seq, kind: item.kind, content: item.content, at: this.now() });
+      // A history part is kept too: if the website can't open it, it asks for it again.
+      if (item.kind !== 'control' || parseContent(item.content)?.t === 'history') await this.rememberSent({ chatId: item.chatId, seq, kind: item.kind, content: item.content, at: this.now() });
       const chat = await storage.getChat(item.chatId);
       if (chat) await storage.putChat({ ...chat, lastActivity: Math.max(chat.lastActivity, sentAt) });
       await storage.deleteOutbox(item.id);
