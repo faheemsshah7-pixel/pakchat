@@ -21,9 +21,12 @@ export default function LinkDevice() {
   const [byCode, setByCode] = useState(false);
   const [code, setCode] = useState('');
   const working = useRef(false);
+  // The scanner starts again after a failure and sees the same QR at once: wait a few seconds first.
+  const failed = useRef({ text: '', at: 0 });
 
   async function link(text: string, how: 'qr' | 'code' = 'qr') {
     if (working.current) return;
+    if (how === 'qr' && text === failed.current.text && Date.now() - failed.current.at < 5_000) return;
     working.current = true;
     setBusy(true);
     thud();
@@ -32,6 +35,7 @@ export default function LinkDevice() {
       toast(fill(t.deviceLinked, { name }), undefined, 4000);
       router.back();
     } catch (err) {
+      console.log(`[pakchat] link: ${String(err)}`);
       const why = err instanceof LinkRefused ? err.reason : null;
       toast(
         why === 'not_a_qr'
@@ -52,6 +56,7 @@ export default function LinkDevice() {
         undefined,
         4000,
       );
+      failed.current = { text, at: Date.now() };
       working.current = false;
       setBusy(false);
     }
