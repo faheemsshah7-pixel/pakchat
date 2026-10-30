@@ -25,6 +25,15 @@ Compute › Instances › Create instance:
 - Networking: a new public subnet, "Assign a public IPv4 address".
 - SSH keys: upload the public key made on the Mac (`ssh-keygen -t ed25519`); the private key never leaves the Mac.
 
+"Out of capacity" (Mumbai's free Ampere servers are all taken): let the Mac ask for one every
+minute until it frees up, with `oracle-retry.sh`. It also makes the network and opens the ports
+in step 4. Once:
+1. `brew install oci-cli`
+2. Oracle › Profile (top right) › My profile › API keys › Add API key › Generate API key pair ›
+   Download private key › Add. Copy the "Configuration file preview" it shows, then:
+   `mkdir -p ~/.oci && mv ~/Downloads/*.pem ~/.oci/oci_api_key.pem && pbpaste > ~/.oci/config && sed -i '' 's#^key_file=.*#key_file=~/.oci/oci_api_key.pem#' ~/.oci/config && oci setup repair-file-permissions --file ~/.oci/config && oci setup repair-file-permissions --file ~/.oci/oci_api_key.pem`
+3. `cd deploy && caffeinate -i ./oracle-retry.sh` (Mac awake, lid open). It says when it has the server.
+
 ## 3. An address
 Make a free name at duckdns.org (for example `pakchat.duckdns.org`) and point it at the
 server's public IP. HTTPS needs a name; Caddy gets the certificate by itself.

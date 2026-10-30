@@ -19,9 +19,7 @@ export function PhonePage() {
   return (
     <div className="pp">
       <div className="ptop">
-        <div className="lg">
-          <Icon name="chat" size={22} />
-        </div>
+        <img className="lg" src="/icon-192.png" alt="" />
         <b>{tr('PakChat')}</b>
       </div>
       <div className="pmid">

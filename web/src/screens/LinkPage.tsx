@@ -35,9 +35,7 @@ export function LinkPage() {
   return (
     <div className="lp">
       <div className="lhd">
-        <div className="lg">
-          <Icon name="chat" size={18} />
-        </div>
+        <img className="lg" src="/icon-192.png" alt="" />
         <span>{tr('PakChat')}</span>
         <button className="ul lang" onClick={() => setLang(getLang() === 'ur' ? 'en' : 'ur')}>
           {getLang() === 'ur' ? 'English' : 'اردو'}

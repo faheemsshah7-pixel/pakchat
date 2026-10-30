@@ -346,6 +346,8 @@ kbd { font: inherit; }
 .ptop { display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--acc); }
 .ptop .lg { width: 36px; height: 36px; border-radius: 11px; background: var(--acc); color: #fff; display: grid; place-items: center; }
 .ptop .lg svg { width: 22px; height: 22px; }
+/* PakChat's own icon (the app's): it brings its own blue and round corners. */
+:is(.loading, .lhd, .ptop) img.lg { background: none; border-radius: 0; }
 .pmid { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
 .pill2 { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #0A0A0A; font-size: 13px; margin-bottom: 18px; background: #fff; }
 .pmid h1 { font-size: 34px; line-height: 40px; font-weight: 400; margin-bottom: 14px; }

@@ -23,7 +23,7 @@ function draw() {
   if (key === shown) return;
   if (!count && !offline) {
     shown = key;
-    link().href = '/favicon.png';
+    link().href = '/favicon.png?v=2';
     return;
   }
   if (!base?.complete || !base.naturalWidth) return; // draws once the picture has loaded
@@ -82,7 +82,7 @@ export function setFavicon(count: number, offline: boolean) {
   if (!base && (count || offline)) {
     base = new Image();
     base.onload = draw;
-    base.src = '/favicon.png';
+    base.src = '/favicon.png?v=2';
   }
   draw();
 }

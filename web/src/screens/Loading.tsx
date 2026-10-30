@@ -20,9 +20,7 @@ export function Loading({ quiet }: { quiet?: boolean }) {
 
   return (
     <div className="loading">
-      <div className="lg">
-        <Icon name="chat" size={36} />
-      </div>
+      <img className="lg" src="/icon-192.png" alt="" />
       {!quiet && (
         <>
           <div className="lbar">

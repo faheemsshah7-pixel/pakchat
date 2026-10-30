@@ -21,15 +21,8 @@ export function Qr({ text, size, logo = true }: { text: string; size: number; lo
       {logo && (
         <g shapeRendering="auto">
           <rect x={at - 0.6} y={at - 0.6} width={box + 1.2} height={box + 1.2} rx={box * 0.3} fill="#fff" />
-          <rect x={at} y={at} width={box} height={box} rx={box * 0.26} fill="#2563EB" />
-          <path
-            transform={`translate(${at + box * 0.2} ${at + box * 0.22}) scale(${(box * 0.6) / 16})`}
-            d="M1.5 2.5h13v8.5H6L1.5 14.5z"
-            fill="none"
-            stroke="#fff"
-            strokeWidth={2}
-            strokeLinejoin="round"
-          />
+          {/* The same picture as the app's icon and the tab's. */}
+          <image href="/icon-192.png" x={at} y={at} width={box} height={box} />
         </g>
       )}
     </svg>
