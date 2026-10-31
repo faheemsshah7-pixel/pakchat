@@ -52,6 +52,9 @@ kbd { font: inherit; }
 .msgs.top { justify-content: flex-start; padding-top: 48px; }
 .mrow { position: relative; display: flex; margin-top: 2px; }
 .mrow.first { margin-top: 12px; }
+/* A message sent or received while the chat is open rises gently into place as it fades in, like the app's. */
+.mrow.new { animation: arrive .18s cubic-bezier(.33,1,.68,1); }
+@keyframes arrive { from { opacity: 0; transform: translateY(10px); } }
 .mrow.out { justify-content: flex-end; }
 .bub { position: relative; max-width: var(--bubMax); padding: 6px 7px 8px 9px; border-radius: var(--bubR); background: var(--bubIn); color: var(--bubInText); font-size: var(--msgSize); line-height: 20px; box-shadow: var(--bubShadow); overflow-wrap: anywhere; }
 .bub.out { background: var(--bubOut); color: var(--bubOutText); }

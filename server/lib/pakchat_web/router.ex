@@ -36,6 +36,13 @@ defmodule PakchatWeb.Router do
     post "/auth/google", AuthController, :google
     post "/auth/phone/code", AuthController, :phone_code
     post "/auth/phone", AuthController, :phone
+    # Checking a number with WhatsApp instead of an SMS code (see WhatsAppController).
+    get "/auth/whatsapp", WhatsAppController, :show
+    post "/auth/whatsapp", WhatsAppController, :start
+    post "/auth/whatsapp/:id", WhatsAppController, :claim
+    # Meta telling us about messages to PakChat's WhatsApp number.
+    get "/whatsapp/webhook", WhatsAppController, :verify
+    post "/whatsapp/webhook", WhatsAppController, :webhook
     get "/auth/test", AuthController, :test
     post "/auth/test", AuthController, :test
     get "/auth/test/code", AuthController, :test_code
@@ -89,6 +96,8 @@ defmodule PakchatWeb.Router do
     get "/users/:id/presence", UserController, :presence
     get "/users/:id/devices", KeyController, :devices
     post "/users/:id/bundles", KeyController, :bundles
+
+    post "/receipts", ReceiptController, :create
 
     get "/chats", ChatController, :index
     post "/chats/direct", ChatController, :direct

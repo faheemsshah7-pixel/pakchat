@@ -21,7 +21,8 @@
 //      the camera's picture is added to each connection, which is set up again
 //      with a fresh "offer" (by whichever phone turned it on). The others then
 //      see me, and can turn their own camera on the same way.
-//   2b. Connecting while it rings (owner, 25 Oct), one-to-one calls from a saved contact: Sara's
+//   2b. Connecting while it rings (owner, 25 Oct; for everyone since 31 Oct, through our relay
+//      only when the caller isn't a saved contact), one-to-one calls: Sara's
 //      "ringing" says she can ("early"). Ali's phone then offers a connection
 //      straight away and they trade "ice" while it rings, but neither sends
 //      anything yet: Ali's mic and camera are held back (empty senders), and
@@ -139,6 +140,11 @@ type Peer = {
   giveUp: (() => void) | null;
   /** Connected while it rang (see 2b at the top). */
   early: boolean;
+  /**
+   * Only through our relay (TURN): connecting while it rings for someone who isn't
+   * in my contacts, so their phone never learns my address (owner, 31 Oct).
+   */
+  relayOnly?: boolean;
   /** `stream` was put together here from their tracks (it's released with the connection). */
   ownStream: boolean;
 };
@@ -464,20 +470,24 @@ class Calls {
     c.joined = true;
     this.emit();
     stopAll();
+    // The mic (and camera) start while we make sure we're connected: both at once, not one after the other.
+    const online = this.connected();
     if (!(await this.media(c))) return this.end(c, 'permission');
     fileModule().callAudioStart(c.video);
     this.watchAudio(c);
     // Connected while it rang: my mic (and camera) go on that connection now.
     const early = this.keepEarly(c);
-    if (!(await this.connected())) return this.end(c, 'offline');
+    if (!(await online)) return this.end(c, 'offline');
     if (c.done) return;
-    // Tell everyone (the caller, others in a group, and my other phones).
-    if (!(await this.send(c, { op: 'join', video: c.camera, audio: true, ...(early ? { early: true } : {}) }, undefined, true))) return this.end(c, 'offline');
-    this.ongoing(c);
+    // Tell everyone (the caller, others in a group, and my other phones), and meanwhile put my
+    // mic (and camera) on the connection made while it rang, so the sound flows the moment they hear.
+    const joined = this.send(c, { op: 'join', video: c.camera, audio: true, ...(early ? { early: true } : {}) }, undefined, true);
     if (early) {
       await this.sendTracks(c, early);
-      if (early.pc?.connectionState === 'connected') this.connectionChanged(c, early);
+      if (!c.done && early.pc?.connectionState === 'connected') this.connectionChanged(c, early);
     }
+    if (!(await joined)) return this.end(c, 'offline');
+    this.ongoing(c);
     c.cancel.push(
       later(CONNECT_MS, () => {
         if (!c.done && !c.connectedOnce) this.end(c, 'failed');
@@ -662,9 +672,12 @@ class Calls {
       // Tell the caller's phone it's ringing here, so it shows "Ringing…", and (one to one)
       // that it can start connecting now.
       const caller = { userId: c.from, deviceId: c.fromDevice };
-      // Only for my contacts: connecting tells the other phone my address (as answering does),
-      // so a stranger calling doesn't learn it unless I answer.
-      if (!r.group && core.isContact(c.from)) c.early = this.newPeer(c, caller, true);
+      // Anyone (owner, 31 Oct): a call from someone not in my contacts connects only
+      // through our relay while it rings, so they don't learn my address unless I answer.
+      if (!r.group) {
+        c.early = this.newPeer(c, caller, true);
+        if (!core.isContact(c.from)) c.early.relayOnly = true;
+      }
       void this.whenConnected(() => this.sendTo(c.chatId, c.id, { op: 'ringing', ...(c.early ? { early: true } : {}) }, [caller])).catch(() => {});
     }
     c.cancel.push(
@@ -946,7 +959,9 @@ class Calls {
     const e = c.early;
     if (!e) return null;
     c.early = null;
-    if (e.pc?.remoteDescription && e.pc.localDescription) {
+    // Through the relay only (a non-contact's call): kept only if it really got through.
+    const through = !e.relayOnly || e.pc?.connectionState === 'connected';
+    if (e.pc?.remoteDescription && e.pc.localDescription && through) {
       c.peers.set(e.key, e);
       return e;
     }
@@ -1015,7 +1030,10 @@ class Calls {
     const iceServers = await this.iceServers();
     // Protect IP address in calls (Settings › Privacy): only through our relay, so the
     // other phone never learns my address. Only when there is a relay to go through.
-    const relay = !!core.settings.protectIp && iceServers.some((x) => [x.urls].flat().some((u) => /^turns?:/i.test(u)));
+    const hasRelay = iceServers.some((x) => [x.urls].flat().some((u) => /^turns?:/i.test(u)));
+    // Relay-only while it rings for a non-contact even with no relay to hand: then it simply
+    // doesn't connect early (never a way round it), and connects the usual way on answering.
+    const relay = (!!core.settings.protectIp && hasRelay) || !!p.relayOnly;
     const pc = new RTCPeerConnection({ iceServers, bundlePolicy: 'max-bundle', iceTransportPolicy: relay ? 'relay' : 'all' });
     if (p.pc) {
       pc.close();
@@ -1554,7 +1572,7 @@ class Calls {
   /** Waits (up to 10 seconds) to be connected to the server. */
   private async connected() {
     core.client.start();
-    for (let i = 0; i < 40 && !core.client.isConnected; i++) await fileModule().wait(250);
+    for (let i = 0; i < 200 && !core.client.isConnected; i++) await fileModule().wait(50);
     return core.client.isConnected;
   }
 

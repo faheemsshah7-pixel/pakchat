@@ -9,7 +9,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, BackHandler, FlatList, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
+import { AppState, BackHandler, FlatList, Keyboard, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
 import Animated, { FadeIn, FadeOut, KeyboardState, LayoutAnimationConfig, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -167,14 +167,30 @@ function ChatScreen() {
   // which is what made the keyboard feel slow on some phones.
   const keyboard = useAnimatedKeyboard();
   const rest = useSharedValue(0);
+  // Is the keyboard really up? Asked of the phone itself as well: opening a chat
+  // could inherit a keyboard height left over from before, which left a big
+  // empty gap under the typing bar with no keyboard there (owner, 31 Oct).
+  const shown = useSharedValue(Keyboard.isVisible());
+  useEffect(() => {
+    shown.value = Keyboard.isVisible();
+    const up = Keyboard.addListener('keyboardDidShow', () => (shown.value = true));
+    // (Gone: the reaction below then settles the space under the chat back to none.)
+    const down = Keyboard.addListener('keyboardDidHide', () => (shown.value = false));
+    return () => {
+      up.remove();
+      down.remove();
+    };
+  }, [shown]);
   useAnimatedReaction(
-    () => (keyboard.state.value === KeyboardState.OPEN || keyboard.state.value === KeyboardState.CLOSED ? keyboard.height.value : -1),
+    () => (keyboard.state.value === KeyboardState.CLOSED ? 0 : keyboard.state.value === KeyboardState.OPEN ? (shown.value ? keyboard.height.value : 0) : -1),
     (h) => {
       if (h >= 0) rest.value = h;
     },
   );
   const lift = useAnimatedStyle(() => {
-    const now = Math.max(keyboard.height.value, insets.bottom);
+    const moving = keyboard.state.value === KeyboardState.OPENING || keyboard.state.value === KeyboardState.CLOSING;
+    const height = moving || shown.value ? keyboard.height.value : 0;
+    const now = Math.max(height, insets.bottom);
     const settledAt = Math.max(rest.value, insets.bottom);
     return { paddingBottom: settledAt, transform: [{ translateY: settledAt - now }] };
   });

@@ -8,9 +8,12 @@ defmodule Pakchat.Push.Fcm do
   `server/.env` as `FCM_SERVICE_ACCOUNT=/Users/you/pakchat-secrets/fcm.json`.
   Without it, alerts are only written in the log.
 
-  The push carries no names and no words, because the server can't read
-  messages anyway. It's "data only" and high priority: Android wakes the app,
-  which collects and unlocks the message and shows "Sara: hi" itself.
+  The push carries no names and no readable words, because the server can't
+  read messages anyway. Like WhatsApp's, it can carry the newest messages still
+  LOCKED (Signal's end-to-end encryption, which only the phone can open; Google
+  sees only scrambled bytes), so the phone shows "Sara: hi" at once instead of
+  connecting to us first. It's "data only" and high priority: Android wakes the
+  app, which unlocks the message and shows the alert itself.
   """
   require Logger
 
@@ -27,7 +30,9 @@ defmodule Pakchat.Push.Fcm do
   def send(token, opts \\ []) do
     with %{} = acc <- account(),
          {:ok, access} <- access_token(acc) do
-      body = %{message: Map.put(alert(opts[:call] == true), :token, token)}
+      body = %{
+        message: Map.put(alert(opts[:call] == true, opts[:envelopes] || []), :token, token)
+      }
 
       case Req.post("https://fcm.googleapis.com/v1/projects/#{acc["project_id"]}/messages:send",
              json: body,
@@ -52,18 +57,43 @@ defmodule Pakchat.Push.Fcm do
   end
 
   @doc false
-  def alert(true = _call) do
+  def alert(call, envelopes \\ [])
+
+  def alert(true = _call, envelopes) do
     %{
       android: %{priority: "high", ttl: "60s", collapse_key: "pakchat-call"},
-      data: %{wake: "1", call: "1"}
+      data: with_envelopes(%{wake: "1", call: "1"}, envelopes)
     }
   end
 
-  def alert(false) do
+  def alert(false, envelopes) do
     %{
       android: %{priority: "high", ttl: "86400s", collapse_key: "pakchat-wake"},
-      data: %{wake: "1"}
+      data: with_envelopes(%{wake: "1"}, envelopes)
     }
+  end
+
+  # Google takes at most 4 KB of data in a push: room for a few short messages.
+  @room 3_200
+
+  @doc """
+  The locked envelopes (already in the app's wire shape) that fit, oldest
+  first, as one JSON text under "env". Any that don't fit come the usual way,
+  when the phone connects.
+  """
+  def with_envelopes(data, []), do: data
+
+  def with_envelopes(data, envelopes) do
+    {fit, _} =
+      Enum.reduce(envelopes, {[], 2}, fn e, {list, used} ->
+        size = byte_size(Jason.encode!(e)) + 1
+        if used + size <= @room, do: {[e | list], used + size}, else: {list, @room + 1}
+      end)
+
+    case fit do
+      [] -> data
+      list -> Map.put(data, :env, Jason.encode!(Enum.reverse(list)))
+    end
   end
 
   # The key file, read once.

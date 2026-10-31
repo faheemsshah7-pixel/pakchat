@@ -10,9 +10,16 @@ import { tr } from '../i18n';
 
 export function PhonePage() {
   const [started, setStarted] = useState(false);
+  // The newest APK's build number, put in the link, so the phone's browser never hands back
+  // an older copy it kept (that one can't install over a newer PakChat).
+  const [build, setBuild] = useState<number | null>(null);
 
   useEffect(() => {
     document.title = 'Get the PakChat app';
+    fetch('/pakchat-apk.json', { cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<{ versionCode?: number }>) : null))
+      .then((j) => typeof j?.versionCode === 'number' && setBuild(j.versionCode))
+      .catch(() => {});
   }, []);
 
   const apk = !PLAY_URL;
@@ -29,7 +36,7 @@ export function PhonePage() {
         <h1>{tr('Get the PakChat app')}</h1>
         <p>{tr('PakChat on the web is made for computers. On your phone, the app is faster, gets notifications, and is where your account lives.')}</p>
         {onAndroid || !apk ? (
-          <a href={apk ? APK_URL : PLAY_URL} download={apk ? 'PakChat.apk' : undefined} onClick={() => setStarted(true)}>
+          <a href={apk ? (build ? `${APK_URL}?v=${build}` : APK_URL) : PLAY_URL} download={apk ? 'PakChat.apk' : undefined} onClick={() => setStarted(true)}>
             <PlayBadge play={!apk} />
           </a>
         ) : (

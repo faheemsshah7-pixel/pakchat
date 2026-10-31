@@ -57,6 +57,21 @@ defmodule Pakchat.PhoneCodes do
     end
   end
 
+  @doc """
+  Lets `code` sign in (or link) `phone` once, without sending anything: used
+  when the number has already proved itself another way (Pakchat.WhatsApp).
+  """
+  def allow(phone, purpose, code) when is_binary(code) do
+    Repo.insert!(%Code{
+      phone: phone,
+      purpose: purpose,
+      code_hash: hash(phone, code),
+      expires_at: DateTime.add(DateTime.utc_now(), @lasts_minutes, :minute)
+    })
+
+    :ok
+  end
+
   @doc "Checks a code. A code works once."
   def check(phone, purpose, code) when is_binary(code) do
     now = DateTime.utc_now()

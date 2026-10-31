@@ -437,6 +437,27 @@ defmodule Pakchat.Relay do
     )
   end
 
+  @doc """
+  The newest few waiting envelopes that wake a phone (messages, reactions, a
+  call ringing), in the app's wire shape, to ride along in the push alert
+  still locked (see `Pakchat.Push.Fcm`). Only from the last two minutes: older
+  ones come when the phone connects.
+  """
+  def for_push(%Device{id: device_id}) do
+    now = DateTime.utc_now()
+    since = DateTime.add(now, -120, :second)
+
+    Repo.all(
+      from e in Envelope,
+        where:
+          e.device_id == ^device_id and e.kind in ["message", "reaction", "call"] and
+            e.sent_at >= ^since and e.expires_at > ^now,
+        order_by: e.id,
+        limit: 10
+    )
+    |> Enum.map(&PakchatWeb.Wire.envelope/1)
+  end
+
   @doc "The device has these envelopes, so they are deleted. Only its own, of course."
   def ack(%Device{id: device_id}, ids) when is_list(ids) do
     ids = Enum.filter(ids, &is_integer/1)

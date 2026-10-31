@@ -131,6 +131,40 @@ describe.each(WAYS)('chats (%s)', (_label, phone, web) => {
     expect(mine).toEqual([]);
   });
 
+  test('a message inside a push alert opens before connecting, ticks "delivered" at once, and is confirmed once connected (owner, 31 Oct)', async () => {
+    const { ali, sara, chat } = await two();
+    const alerts: string[] = [];
+    sara.client.on('arrived', (m) => alerts.push(m.text ?? ''));
+    sara.client.stop();
+    const sent = await ali.client.sendText(chat.id, 'Fast like WhatsApp');
+    await w.settle();
+    // What the server put in the push: the locked envelope, as it is.
+    const d = w.server.devices.find((x) => x.userId === sara.id && x.deviceId === 1)!;
+    const inPush = [...(w.server.pending.get(d.uuid) ?? [])];
+    expect(inPush).toHaveLength(1);
+
+    // Still offline: it opens and alerts at once.
+    await sara.client.takeFromPush(inPush);
+    expect(alerts).toEqual(['Fast like WhatsApp']);
+    expect(await w.texts(sara, chat.id)).toEqual(['Ali: Fast like WhatsApp']);
+    // Ali already has two ticks (sent over HTTP, like WhatsApp), but it isn't confirmed
+    // yet: the server still has it until Sara connects.
+    await w.settle();
+    expect(w.server.httpReceipts).toBe(1);
+    expect((await ali.storage.getMessage(chat.id, ali.id, sent.id))!.status).toBe('delivered');
+    expect(w.server.pendingFor(sara.id, 1)).toBe(1);
+
+    // Connected: it comes again, shows once, alerts once, and is confirmed.
+    sara.client.start();
+    await w.settle();
+    expect(alerts).toEqual(['Fast like WhatsApp']);
+    expect(await w.texts(sara, chat.id)).toEqual(['Ali: Fast like WhatsApp']);
+    expect(w.server.pendingFor(sara.id, 1)).toBe(0);
+    expect((await ali.storage.getMessage(chat.id, ali.id, sent.id))!.status).toBe('delivered');
+    // The tick went once, not again over the connection.
+    expect(w.server.httpReceipts).toBe(1);
+  });
+
   test('settled() waits for a send to finish, so the app can let go safely', async () => {
     const { ali, chat } = await two();
     const sent = await ali.client.sendText(chat.id, 'Before I go');

@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The small speech bubble in the status bar for PakChat's alerts. -->
+<!-- PakChat's mark for the status bar: the speech bubble with the crescent and star cut out, like the app icon.
+     Android paints it in one colour, so the crescent and star are holes in the white bubble. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-  <path
-      android:fillColor="#FFFFFFFF"
-      android:pathData="M4,4h16a2,2 0,0 1,2 2v10a2,2 0,0 1,-2 2H9l-5,4v-4H4a2,2 0,0 1,-2 -2V6a2,2 0,0 1,2 -2z" />
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+  <group
+      android:pivotX="512"
+      android:pivotY="512"
+      android:scaleX="1.45"
+      android:scaleY="1.45">
+    <!-- The bubble, with the crescent's big circle cut out. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M512,215 C770,215 830,285 830,480 C830,685 770,745 512,745 L460,745 C385,782 290,815 200,826 C252,795 288,757 306,720 C222,684 195,622 195,480 C195,285 255,215 512,215 z M320,478 a170,170 0,1 0,340,0 a170,170 0,1 0,-340,0 z" />
+    <!-- The smaller circle that turns the cut-out into a crescent, with the star cut out of it. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M415,420 a138,138 0,1 0,276,0 a138,138 0,1 0,-276,0 z M565.0,350.0 L576.8,383.8 L612.6,384.5 L584.0,406.2 L594.4,440.5 L565.0,420.0 L535.6,440.5 L546.0,406.2 L517.4,384.5 L553.2,383.8 z" />
+  </group>
 </vector>

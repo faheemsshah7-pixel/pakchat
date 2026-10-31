@@ -11,7 +11,7 @@ defmodule Pakchat.Push do
   A phone that looks connected isn't always: a connection can die without
   saying goodbye (screen off, Wi-Fi asleep), and the server only notices a
   while later. So a connected phone that hasn't collected a message within
-  3 seconds gets the push anyway.
+  a second gets the push anyway (it was 3 seconds before 31 Oct: too slow).
 
   Only real messages wake a phone, never ticks or typing, and never the
   sender's own other devices. A call that starts ringing gets a "call" push:
@@ -24,11 +24,11 @@ defmodule Pakchat.Push do
   alias Pakchat.Push.Notify
 
   # How long a connected phone has to collect a message before it's pushed anyway.
-  @grace_seconds 3
+  @grace_seconds 1
 
   @doc """
   Queues an alert for each device that has a push token: now if it's offline,
-  in 3 seconds (only if the message is still waiting then) if it's connected.
+  in a second (only if the message is still waiting then) if it's connected.
   `senders` maps each device id to who sent it something, so a person's own
   messages don't wake their own other devices.
   """

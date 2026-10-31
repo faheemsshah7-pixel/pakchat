@@ -5,7 +5,8 @@
 // app a signed "ID token". The server checks Google's signature on it, then
 // makes (or finds) your account. No password ever touches PakChat.
 //
-// With a phone number, the server sends a 6-digit code. Until PakChat goes live
+// With a phone number: on the live server, WhatsApp proves it (ui/WhatsAppCheck.tsx, free).
+// Otherwise the server sends a 6-digit code. Until PakChat goes live
 // the code isn't texted: it shows in the Mac's Terminal (server/README.md, "SMS").
 // On a test server the app fills it in by itself, for the emulator tests.
 //
@@ -16,7 +17,7 @@
 // The keyboard: Android draws the app behind it, so the screen makes room
 // itself (an empty space as tall as the keyboard at the bottom) and scrolls
 // down, so the box you're typing in is never hidden.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, ScrollView, View, type ScrollViewInstance } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
@@ -30,6 +31,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
 import { phoneError } from '../ui/format';
+import { WhatsAppCheck } from '../ui/WhatsAppCheck';
 
 /** Google's "G", in its four colours (Google asks for it on sign-in buttons). */
 function GoogleG() {
@@ -54,7 +56,9 @@ export default function SignIn() {
   const [testOn, setTestOn] = useState(false);
   const [testName, setTestName] = useState('');
   // Signing in by phone: type the number, then the code.
-  const [step, setStep] = useState<'start' | 'number' | 'code'>('start');
+  const [step, setStep] = useState<'start' | 'number' | 'code' | 'whatsapp'>('start');
+  // A live server checks numbers with WhatsApp (free) instead of SMS codes.
+  const [waOn, setWaOn] = useState(false);
   const [phone, setPhone] = useState('');
   const [sentTo, setSentTo] = useState('');
   const [code, setCode] = useState('');
@@ -87,6 +91,22 @@ export default function SignIn() {
       alive = false;
     };
   }, [server]);
+
+  useEffect(() => {
+    let alive = true;
+    void core
+      .whatsAppOn()
+      .then((on) => alive && setWaOn(on))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [server]);
+
+  // WhatsApp proved the number: its one-time code signs in, exactly like an SMS code.
+  const whatsAppSignIn = useCallback(async (number: string, oneTime: string) => {
+    await core.signInWithPhone(number, oneTime);
+  }, []);
 
   async function google() {
     setError('');
@@ -266,9 +286,15 @@ export default function SignIn() {
                   </Txt>
                 </View>
               </Pressy>
-              <Button title={t.usePhone} icon="calls" onPress={() => (setError(''), setStep('number'))} testID="use-phone" />
+              {waOn ? (
+                <Button title={t.continueWhatsApp} icon="send" onPress={() => (setError(''), setStep('whatsapp'))} testID="use-whatsapp" />
+              ) : (
+                <Button title={t.usePhone} icon="calls" onPress={() => (setError(''), setStep('number'))} testID="use-phone" />
+              )}
             </>
           )}
+
+          {step === 'whatsapp' && <WhatsAppCheck purpose="sign_in" onChecked={whatsAppSignIn} onBack={() => (setError(''), setStep('start'))} />}
 
           {step === 'number' && (
             <Animated.View style={{ gap: 8 }}>

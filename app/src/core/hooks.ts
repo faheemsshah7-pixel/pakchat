@@ -143,6 +143,29 @@ export function useConnected() {
   return useCore(['connection'], () => core.connected);
 }
 
+/** How long the connection may take before the chat list says "Connecting…" (owner, 31 Oct). */
+const CONNECTING_AFTER_MS = 4_000;
+
+/**
+ * Like WhatsApp: opening PakChat connects quietly, and "Connecting…" shows
+ * only if it's still not through after a few seconds (a bad network). A quick
+ * reconnect never flashes it.
+ */
+export function useSlowConnecting() {
+  const connected = useConnected();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (connected) return;
+    const id = setTimeout(() => setSlow(true), CONNECTING_AFTER_MS);
+    // Through again: ready to wait quietly next time.
+    return () => {
+      clearTimeout(id);
+      setSlow(false);
+    };
+  }, [connected]);
+  return !connected && slow;
+}
+
 // ---- The chat list ----
 
 export type ChatRow = {
@@ -636,6 +659,12 @@ export function useAfterStart() {
 export function useLinkedDevices() {
   const list = useLoaded<LinkedDevice[] | null>(['devices', 'connection'], () => linkedDevices(), null, []);
   const busy = useCore(['devices'], () => syncing.size);
+  // A website going on or offline doesn't tell this phone, so look again every
+  // few seconds while the screen is open: "Active now" and "Last active" stay true.
+  useEffect(() => {
+    const id = setInterval(() => core.emit('devices'), 8_000);
+    return () => clearInterval(id);
+  }, []);
   return { list, syncing: busy ? syncing : NO_SYNC };
 }
 

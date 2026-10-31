@@ -88,6 +88,19 @@ docker compose exec -T db pg_restore -U pakchat -d pakchat --clean < backups/<fi
 docker compose exec -T app tar -C /data/files -xf - < backups/<photos file>.tar
 ```
 
+## 9. WhatsApp number check
+People prove their number by sending a short code to PakChat's WhatsApp number (free; see
+`server/lib/pakchat/whatsapp.ex`). Once, in Meta's developer site (developers.facebook.com):
+1. My Apps › Create app › "Other" › "Business", then add the **WhatsApp** product. Meta gives a
+   free test number to start with; a real number (its own SIM, not on the WhatsApp app) comes later.
+2. WhatsApp › Configuration › Webhook: callback URL `https://<domain>/api/whatsapp/webhook`,
+   verify token: a long word you make up. Then subscribe to **messages**.
+3. In `deploy/.env`: `WHATSAPP_NUMBER` (digits), `WHATSAPP_APP_SECRET` (App settings › Basic),
+   `WHATSAPP_VERIFY_TOKEN` (the same made-up word), and for the "Done" reply `WHATSAPP_TOKEN`
+   and `WHATSAPP_PHONE_NUMBER_ID` (WhatsApp › API Setup). Then `docker compose up -d`.
+
+The app shows "Continue with WhatsApp" by itself once the server has these.
+
 ## Updating PakChat
 ```sh
 git pull && docker compose up -d --build && ./build-site.sh

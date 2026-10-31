@@ -49,6 +49,8 @@ config :pakchat, :allowed_origins, ["http://localhost:5173"]
 config :pakchat, :rate_limits,
   sign_in: {1000, 60_000},
   sms: {1000, 60_000},
+  whatsapp: {1000, 60_000},
+  whatsapp_claim: {1000, 60_000},
   link: {1000, 60_000}
 
 # Files from the tests go in a folder of their own.

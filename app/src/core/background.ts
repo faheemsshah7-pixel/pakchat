@@ -15,8 +15,21 @@ import { core } from './core';
 import { alertPlain, dismissChatAlert, WAKE_TASK } from './push';
 import { onAlarm } from './scheduled';
 
-TaskManager.defineTask(WAKE_TASK, async () => {
+/** The locked messages a push brought along (see the server's Push.Fcm), as JSON text. */
+function lockedIn(payload: unknown): string | null {
+  const p = payload as { data?: Record<string, unknown> } | undefined;
+  const d = p?.data;
+  const inner = d?.data as Record<string, unknown> | undefined;
+  const env = inner?.env ?? d?.env;
+  return typeof env === 'string' ? env : null;
+}
+
+TaskManager.defineTask(WAKE_TASK, async ({ data }) => {
   try {
+    // Like WhatsApp: the newest messages came in the push itself, still locked.
+    // Open them and show the alert now, before connecting.
+    const env = lockedIn({ data });
+    if (env) await core.fromPush(env).catch((err: unknown) => console.log(`[pakchat] push messages: ${String(err)}`));
     // Connect, collect what's waiting (the alerts show as each message is opened), let go.
     if (!(await core.collect())) await alertPlain();
   } catch (err) {

@@ -145,7 +145,9 @@ function App() {
         }}
       >
         <Stack.Protected guard={state === 'signedIn'}>
-          <Stack.Screen name="(tabs)" />
+          {/* The chat list is the first screen: it appears straight after the logo, like
+              WhatsApp, rather than sliding in. (Going back to it still slides the other screen away.) */}
+          <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
           <Stack.Screen name="chat/[id]" />
           <Stack.Screen name="info/[id]" />
           <Stack.Screen name="verify/[id]" />

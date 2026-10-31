@@ -20,9 +20,10 @@ import { tr } from '../i18n';
 const NAME_COLOURS = ['#1F7AEC', '#C2185B', '#7B1FA2', '#00897B', '#E65100', '#5D4037', '#3949AB', '#2E7D32'];
 
 /** `selected`: ticked (true) or not (false) while selecting messages; null when not selecting. */
-type Props = { m: Message; chat: Chat; first: boolean; canSend: boolean; flash: boolean; selected: boolean | null; openViewer: (m: Message) => void };
+/** `fresh`: sent or received while the chat is open, so it glides in (like the app's). */
+type Props = { m: Message; chat: Chat; first: boolean; canSend: boolean; flash: boolean; selected: boolean | null; openViewer: (m: Message) => void; fresh?: boolean };
 
-export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, selected, openViewer }: Props) {
+export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, selected, openViewer, fresh }: Props) {
   const mine = m.author === core.myId;
   const group = chat.kind === 'group';
   const side = mine ? 'out' : 'in';
@@ -57,7 +58,7 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
   return (
     <div
       ref={row}
-      className={`mrow ${side} ${first ? 'first' : ''} ${m.reactions && Object.keys(m.reactions).length ? 'hasrx' : ''} ${flash ? 'flash' : ''} ${selected === null ? '' : 'sel'} ${selected ? 'on' : ''}`}
+      className={`mrow ${side} ${first ? 'first' : ''} ${fresh ? 'new' : ''} ${m.reactions && Object.keys(m.reactions).length ? 'hasrx' : ''} ${flash ? 'flash' : ''} ${selected === null ? '' : 'sel'} ${selected ? 'on' : ''}`}
       data-key={msgKey(m)}
       data-at={m.sentAt}
       // Selecting: a click anywhere on the row ticks it, and nothing else happens.

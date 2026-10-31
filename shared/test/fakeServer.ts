@@ -33,6 +33,8 @@ export class FakeServer {
   seen: WireEnvelope[] = [];
   /** Every call message sent: which chat, from whom, did it ring, to how many devices. */
   calls: { chatId: string; from: string; ring: boolean; to: number }[] = [];
+  /** Ticks sent over HTTP (a phone woken by a push, before connecting). */
+  httpReceipts = 0;
   /** Misbehave like a weak network (or a server that's up to no good). */
   chaos: { duplicate?: boolean; shuffle?: boolean; reverse?: boolean; rewrite?: (e: WireEnvelope) => WireEnvelope } = {};
   /** The server's clock, so tests can move time on. */
@@ -127,6 +129,11 @@ export class FakeServer {
           return this.wireChat(chat);
         }),
       lookup: (email) => call(() => [...this.users.values()].find((u) => u.email === email) ?? null),
+      receipt: (r) =>
+        call(() => {
+          this.httpReceipts++;
+          this.receipt(who(), { chat_id: r.chatId, to: r.to, status: r.status, seqs: r.seqs });
+        }),
       statusAudience: (ids) =>
         call(() => {
           const me = who().userId;

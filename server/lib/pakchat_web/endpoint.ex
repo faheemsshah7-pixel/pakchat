@@ -57,12 +57,16 @@ defmodule PakchatWeb.Endpoint do
     cookie_key: "request_logger"
 
   plug Plug.RequestId
+  # Each visitor's own address, not Caddy's (see plugs/real_ip.ex).
+  plug PakchatWeb.Plugs.RealIp
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    # Meta's WhatsApp webhook needs its exact bytes, to check Meta's signature.
+    body_reader: {PakchatWeb.Plugs.RawBody, :read_body, []}
 
   # Lets PakChat's own websites call /api (see plugs/cors.ex).
   plug PakchatWeb.Plugs.CORS

@@ -20,7 +20,7 @@ KEY=${KEY:-$HOME/.ssh/id_ed25519.pub}
 say_and_show() {
   echo "$1"
   osascript -e "display notification \"$1\" with title \"PakChat server\"" 2>/dev/null || true
-  say "$1" 2>/dev/null || true
+  [ "${SPEAK:-0}" = 1 ] && say "$1" 2>/dev/null || true
 }
 
 command -v oci >/dev/null || { echo "The oci tool isn't installed yet: brew install oci-cli"; exit 1; }

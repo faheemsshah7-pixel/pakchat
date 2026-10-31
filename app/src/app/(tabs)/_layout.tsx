@@ -2,17 +2,17 @@
 // Communities). Settings and you are in the chat list's ⋮ menu, as on WhatsApp.
 //
 // The bar is our own: a soft pill sits behind the open tab (on the other side in
-// Urdu). It moves at once, with no animation.
+// Urdu), and glides with the tabs as they move.
 //
 // Like WhatsApp, swipe sideways anywhere on a tab to go to the next one: the
 // tabs sit side by side in a pager (react-native-tab-view) and move with your
-// finger. Tapping a tab switches at once (no sliding), and all four are made
-// ready just after the chat list first shows, so none has to load when you get
-// to it, and starting up draws the chat list first.
+// finger. Tapping a tab slides across to it too (the owner, 31 Oct: "it should
+// slide, like WhatsApp"). All four are made ready just after the chat list first
+// shows, so none has to load when you get to it, and starting up draws the chat
+// list first.
 import { TopTabs, type MaterialTopTabBarProps } from 'expo-router/js-top-tabs';
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { Animated, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { markListShown, useChatList, useMissedCalls } from '../../core/hooks';
@@ -29,26 +29,24 @@ const TABS: { name: string; icon: IconName; label: 'chats' | 'status' | 'calls' 
   { name: 'communities', icon: 'community', label: 'communities' },
 ];
 
-function TabBar({ state, navigateToTab }: MaterialTopTabBarProps) {
+function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
   const t = useT();
   const { theme, rtl } = useLook();
   const insets = useSafeAreaInsets();
   const [width, setWidth] = useState(0);
   const tabW = width / TABS.length;
-  const x = useSharedValue(0);
   const rows = useChatList();
   const unreadChats = (rows ?? []).filter((r) => (r.chat.unread > 0 || r.prefs.markedUnread) && !r.prefs.archived).length;
   const missed = useMissedCalls();
 
-  useEffect(() => {
-    x.value = state.index * tabW;
-  }, [state.index, tabW, x]);
   // A tap is timed until the tab is on screen (Settings › Help › Speed check).
   useEffect(() => {
     requestAnimationFrame(() => stopTimer('tab', 'tab'));
   }, [state.index]);
 
-  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: rtl ? -x.value : x.value }] }));
+  // The pill follows the pager itself, so it moves with a swipe and with a tap's slide.
+  const last = TABS.length - 1;
+  const pill = { transform: [{ translateX: position.interpolate({ inputRange: [0, last], outputRange: [0, (rtl ? -1 : 1) * last * tabW], extrapolate: 'clamp' }) }] };
 
   return (
     <View
@@ -134,7 +132,7 @@ export default function TabsLayout() {
     <TopTabs
       tabBarPosition="bottom"
       tabBar={(props) => <TabBar {...props} />}
-      screenOptions={{ swipeEnabled: true, animationEnabled: false, lazy: true, lazyPreloadDistance: 3, sceneStyle: { backgroundColor: theme.bg } }}
+      screenOptions={{ swipeEnabled: true, animationEnabled: true, lazy: true, lazyPreloadDistance: 3, sceneStyle: { backgroundColor: theme.bg } }}
     >
       {TABS.map((tab) => (
         <TopTabs.Screen key={tab.name} name={tab.name} />

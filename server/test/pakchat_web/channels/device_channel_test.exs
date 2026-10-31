@@ -145,10 +145,10 @@ defmodule PakchatWeb.DeviceChannelTest do
     send_msg(a, chat.id, [sealed(sara, "are you there?")])
     [env] = envelopes_for(sara.device)
 
-    # Not now: it's connected. A check in 3 seconds instead.
+    # Not now: it's connected. A check in a second instead.
     assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
     assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => false}
-    assert DateTime.diff(job.scheduled_at, DateTime.utc_now()) in 1..3
+    assert DateTime.diff(job.scheduled_at, DateTime.utc_now(), :millisecond) in 0..1_000
 
     # Still waiting then (a dead connection): it's pushed. Collected: it isn't.
     assert Relay.waiting?(sara.device.id, before)

@@ -176,6 +176,8 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
   const selecting = useMemo(() => (view.selecting ? new Set(view.selecting.map(msgKey)) : null), [view.selecting]);
   const scroller = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // Messages from after the chat opened glide in (Bubble's `fresh`); the ones already there just show.
+  const [openedAt] = useState(Date.now);
   const [newCount, setNewCount] = useState(0);
   const [flash, setFlash] = useState<string | null>(null);
   const [viewer, setViewer] = useState<Message | null>(null);
@@ -336,6 +338,7 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
               flash={flash === it.key}
               selected={selecting ? selecting.has(it.key) : null}
               openViewer={openViewer}
+              fresh={it.m.sentAt > openedAt}
             />
           ),
         )}

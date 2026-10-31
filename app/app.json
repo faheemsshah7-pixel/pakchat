@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.0",
+    "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,6 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
+      "versionCode": 14,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -141,6 +142,7 @@
       [
         "expo-notifications",
         {
+          "icon": "./assets/notification-icon.png",
           "color": "#2F6BF0",
           "defaultChannel": "messages"
         }
@@ -175,7 +177,7 @@
     ],
     "extra": {
       "googleWebClientId": "459861530466-6clhf90r8bfd2urbikjsqicvkcndbel9.apps.googleusercontent.com",
-      "serverUrl": "http://192.168.1.10:4000"
+      "serverUrl": "https://pakchat.duckdns.org"
     },
     "scheme": "pakchat",
     "experiments": {

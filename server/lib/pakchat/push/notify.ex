@@ -51,7 +51,7 @@ defmodule Pakchat.Push.Notify do
   end
 
   defp send_fcm(device, token, call?) do
-    case Fcm.send(token, call: call?) do
+    case Fcm.send(token, call: call?, envelopes: Relay.for_push(device)) do
       :gone ->
         # The app was removed or its token changed: stop using this one.
         Accounts.set_push_token(device, %{push_token: nil, push_platform: nil})

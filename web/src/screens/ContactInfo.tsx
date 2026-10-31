@@ -154,7 +154,6 @@ export function ContactInfo({ chatId }: { chatId: string }) {
             )}
           </h2>
           <p>{group ? `Group · ${chat.members.length} members` : self ? 'Message yourself' : phoneOf(other!) || lastSeen(presence)}</p>
-          {!group && !self && core.contacts[other!] == null && core.people[other!]?.name && <p className="sm">~{core.people[other!]!.name}</p>}
           <div className="acts">
             {!self && !chat.left && !chat.callLink && (!group || chat.members.length <= MAX_CALL_PEOPLE) && (
               <>

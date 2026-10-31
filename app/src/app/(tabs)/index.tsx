@@ -14,7 +14,7 @@ import { findBackup } from '../../core/backup';
 import { handOffMedia, type Picked } from '../../core/files';
 import { chatOpen, FOLDER, leftFolder, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
-import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useConnected, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
+import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useCore, useSlowConnecting, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
@@ -50,7 +50,8 @@ export default function Chats() {
   const lists = useLists();
   const typing = useAllTyping();
   const presence = useAllPresence();
-  const connected = useConnected();
+  // "Connecting…" only when it takes a while (a quick connect stays quiet, like WhatsApp).
+  const connecting = useSlowConnecting();
   const [filter, setFilter] = useState<Filter>('all');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState(false);
@@ -327,7 +328,7 @@ export default function Chats() {
         <Chip label={t.newList} icon="plus" on={false} onPress={() => router.push('/list')} testID="new-list" />
       </ScrollView>
 
-      {!connected && (
+      {connecting && (
         <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint }} />
           <Txt size={12.5} weight="500" color={theme.muted} testID="connecting">

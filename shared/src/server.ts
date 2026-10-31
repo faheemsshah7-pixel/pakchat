@@ -65,6 +65,8 @@ export interface ServerApi {
   lookup(email: string): Promise<{ id: string; name: string } | null>;
   /** Sets who sees my status; answers my status chat. */
   statusAudience(userIds: string[]): Promise<ServerChat>;
+  /** Ticks without the live connection: a phone woken by a push says "delivered" at once. */
+  receipt(r: { chatId: string; to: string; status: 'delivered' | 'read'; seqs: number[] }): Promise<void>;
 }
 
 /** The server said no. `reason` is its word for why, like "not_found". */
@@ -316,6 +318,32 @@ export class HttpServer implements ServerApi {
     return signedIn(await this.call<WireSignedIn>('POST', '/auth/phone', { phone, code, device: deviceToWire(device), ...keysToWire(keys) }));
   }
 
+  // ---- Checking a number with WhatsApp (instead of an SMS code) ----
+
+  /** Whether this server checks numbers with WhatsApp. */
+  async whatsAppOn(): Promise<boolean> {
+    try {
+      return (await this.call<{ on?: boolean }>('GET', '/auth/whatsapp')).on === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Starts a check: open `url` (WhatsApp, with "PakChat code: …" ready to send to PakChat's number),
+   * then keep asking `claimWhatsApp`. The secret then signs in (or adds) that number, like an SMS code.
+   */
+  async startWhatsApp(purpose: 'sign_in' | 'link') {
+    const r = await this.call<{ id: string; secret: string; code: string; url: string; expires_in: number }>('POST', '/auth/whatsapp', { purpose });
+    return { id: r.id, secret: r.secret, code: r.code, url: r.url, expiresIn: r.expires_in };
+  }
+
+  /** Null while the message hasn't arrived; the number that sent it once it has. */
+  async claimWhatsApp(id: string, secret: string): Promise<string | null> {
+    const r = await this.call<{ status: string; phone?: string }>('POST', `/auth/whatsapp/${encodeURIComponent(id)}`, { secret });
+    return r.status === 'done' && r.phone ? r.phone : null;
+  }
+
   /** Emulator tests only: the last code the Mac's server printed for a number. */
   async testCode(phone: string) {
     return (await this.call<{ code: string }>('GET', `/auth/test/code?phone=${encodeURIComponent(phone)}`)).code;
@@ -409,6 +437,10 @@ export class HttpServer implements ServerApi {
 
   async statusAudience(userIds: string[]) {
     return chatFromWire(await this.call<WireChat>('PUT', '/status/audience', { user_ids: userIds }));
+  }
+
+  async receipt(r: { chatId: string; to: string; status: 'delivered' | 'read'; seqs: number[] }) {
+    await this.call('POST', '/receipts', { chat_id: r.chatId, to: r.to, status: r.status, seqs: r.seqs });
   }
 
   /** Popular GIFs, or a search. Null when the server has no GIF key (the GIF tab hides). */

@@ -7,7 +7,7 @@
 // need to log out), and Log out.
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
 import { core, reasonOf, serverUrl } from '../../core/core';
@@ -18,6 +18,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Button, Divider, Field, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { phoneError } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
+import { WhatsAppCheck } from '../../ui/WhatsAppCheck';
 
 export default function Account() {
   const t = useT();
@@ -43,6 +44,29 @@ export default function Account() {
       toast(t.couldNot);
     }
   }
+
+  // A live server checks numbers with WhatsApp (free) instead of SMS codes.
+  const [waOn, setWaOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void core
+      .whatsAppOn()
+      .then((on) => alive && setWaOn(on))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // WhatsApp proved the number: its one-time code adds it, exactly like an SMS code.
+  const whatsAppAdd = useCallback(
+    async (number: string, oneTime: string) => {
+      await core.linkPhone(number, oneTime);
+      setAdding(false);
+      toast(t.linked2);
+    },
+    [t],
+  );
 
   function startAdding() {
     setSentTo('');
@@ -193,7 +217,9 @@ export default function Account() {
 
       <Sheet visible={adding} onClose={() => setAdding(false)} title={t.linkPhone}>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 12 }}>
-          {!sentTo ? (
+          {waOn ? (
+            <WhatsAppCheck purpose="link" onChecked={whatsAppAdd} onBack={() => setAdding(false)} />
+          ) : !sentTo ? (
             <>
               <Txt size={13} color={theme.muted}>
                 {t.phoneHint}

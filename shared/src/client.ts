@@ -1180,6 +1180,18 @@ export class PakChat {
 
   // ---- Receiving ----
 
+  /**
+   * The phone: locked messages that came inside a push alert (like WhatsApp's),
+   * opened straight away so the alert shows before we've even connected. They
+   * still come again over the connection (unconfirmed), and are skipped then as
+   * already seen; that's when they're confirmed and the "delivered" ticks go.
+   */
+  async takeFromPush(list: WireEnvelope[]) {
+    if (!list.length) return;
+    this.receive(list);
+    await this.draining;
+  }
+
   private receive(list: WireEnvelope[]) {
     this.incoming.push(...list);
     this.draining ??= this.drain().finally(() => {
@@ -1199,6 +1211,13 @@ export class PakChat {
 
   /** Confirms what we got, sends "delivered" ticks, and asks again for anything we couldn't open. */
   private async afterBatch() {
+    // Opened from a push before connecting: "delivered" goes at once over HTTP, so the
+    // sender sees two ticks as the alert shows (like WhatsApp). The confirming waits for
+    // the connection (the server sends them again then, which brings us back here).
+    if (!this.connected) {
+      await this.tickWithoutConnection();
+      return;
+    }
     const ids = this.acks.splice(0);
     if (ids.length) {
       // Saved and marked seen: Signal can let go of the opened texts, then the server of the envelopes.
@@ -1223,6 +1242,22 @@ export class PakChat {
     if (this.keysUsed >= 10) {
       this.keysUsed = 0;
       void this.checkKeys();
+    }
+  }
+
+  /** Sends the waiting "delivered" ticks over HTTP. Any that fail wait for the connection. */
+  private async tickWithoutConnection() {
+    const ticks = [...this.delivered];
+    this.delivered.clear();
+    for (const [key, seqs] of ticks) {
+      const [chatId, to] = key.split('|');
+      try {
+        await this.o.server.receipt({ chatId, to, status: 'delivered', seqs: [...seqs] });
+      } catch {
+        const still = this.delivered.get(key) ?? new Set<number>();
+        for (const n of seqs) still.add(n);
+        this.delivered.set(key, still);
+      }
     }
   }
 

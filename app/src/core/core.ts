@@ -21,6 +21,7 @@ import {
   type Session,
   SYNCED_PREFS,
   type SyncChange,
+  type WireEnvelope,
 } from '@pakchat/shared';
 import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
@@ -54,6 +55,8 @@ export type Wallpaper = {
 };
 
 const HOUR = 3_600_000;
+/** How long the connection stays after leaving PakChat (owner, 31 Oct: "connected all the time"). */
+const STAY_CONNECTED_MS = 60_000;
 
 /** Muted right now: Always, or its 8 hours or week isn't up yet (even before the timer unmutes it, say in the background). */
 export function isMuted(p?: ChatPrefs) {
@@ -442,11 +445,13 @@ class Core {
   private moves = 0;
 
   /**
-   * Leaving PakChat lets go of the connection straight away, so the server
-   * sees the phone as away and wakes it for the next message (it never wakes a
-   * phone that's connected). Only a message still being sent is let finish
-   * first, for at most two seconds. Coming back connects again and collects
-   * what came in.
+   * Leaving PakChat keeps the connection for a minute (owner, 31 Oct), like
+   * WhatsApp: a quick look at another app and back needs no reconnecting (no
+   * "Connecting…"), and messages in that minute come straight down it. If
+   * Android freezes PakChat meanwhile, the server notices the message wasn't
+   * collected within a second and wakes the phone with a push anyway. After
+   * the minute it lets go, and the pushes take over. Coming back connects again
+   * if need be and collects what came in.
    *
    * No timers here: phones pause them while the app is in the background, so
    * the waiting is done by the phone itself (fileModule().wait).
@@ -468,12 +473,19 @@ class Core {
     }
     if (s !== 'background') return;
     this.client.setActive(false);
-    void Promise.race([this.client.settled(), fileModule().wait(2_000)])
+    this.stayUntil = Date.now() + STAY_CONNECTED_MS;
+    void fileModule()
+      .wait(STAY_CONNECTED_MS)
+      .catch(() => {})
+      .then(() => Promise.race([this.client.settled(), fileModule().wait(2_000)]))
       .catch(() => {})
       .then(() => {
         if (move === this.moves && this.awake === 0 && AppState.currentState !== 'active' && !calls.live) this.client.stop();
       });
   }
+
+  /** Until when the connection is kept after leaving PakChat (see appMoved). */
+  private stayUntil = 0;
 
   private collecting: Promise<boolean> | null = null;
   /** Background jobs holding the connection open right now (wake-ups, alert buttons). */
@@ -493,6 +505,25 @@ class Core {
       this.collecting = null;
     });
     return this.collecting;
+  }
+
+  /**
+   * Locked messages that came inside a push (background.ts): opened and alerted
+   * at once, before connecting. Anything odd in it is ignored; the connection
+   * brings everything anyway.
+   */
+  async fromPush(json: string) {
+    await this.init();
+    if (this.state !== 'signedIn') return;
+    let list: unknown;
+    try {
+      list = JSON.parse(json);
+    } catch {
+      return;
+    }
+    if (!Array.isArray(list)) return;
+    const ok = list.filter((e): e is WireEnvelope => !!e && typeof e === 'object' && typeof (e as WireEnvelope).id === 'number' && typeof (e as WireEnvelope).chat_id === 'string');
+    await this.client.takeFromPush(ok);
   }
 
   /** Reply, Mark as read or Mute, pressed on a message alert (background.ts). */
@@ -527,8 +558,9 @@ class Core {
       // up in time: the connection may have died without noticing, so make a new one.
       if (fresh && AppState.currentState === 'active') this.client.stop();
       this.client.start();
-      // Up to 10 seconds to get through.
-      for (let i = 0; i < 40 && !this.client.isConnected; i++) await wait(250);
+      // Up to 10 seconds to get through, looking often: every moment here is a moment
+      // before the alert shows.
+      for (let i = 0; i < 200 && !this.client.isConnected; i++) await wait(50);
       const reached = this.client.isConnected;
       if (reached) {
         await work(wait);
@@ -555,6 +587,8 @@ class Core {
 
   /** Out of PakChat with nothing to do (no call, no background job): let go of the connection. */
   letGoIfAway() {
+    // Just left PakChat: the connection stays its minute (appMoved lets go after).
+    if (Date.now() < this.stayUntil) return;
     if (this.awake === 0 && AppState.currentState !== 'active' && !calls.live && this.state === 'signedIn') this.client.stop();
   }
 
@@ -600,6 +634,23 @@ class Core {
   async testCode(phone: string) {
     if (Device.isDevice) throw new Error('Only on an emulator');
     return new HttpServer(serverUrl(), 3_000).testCode(phone);
+  }
+
+  /** Whether the server checks numbers with WhatsApp (then the sign-in screen offers it instead of SMS). */
+  async whatsAppOn() {
+    await this.init();
+    return new HttpServer(serverUrl(), 5_000).whatsAppOn();
+  }
+
+  /** Starts a WhatsApp number check, for signing in or for adding a number to my account. */
+  async startWhatsApp(purpose: 'sign_in' | 'link') {
+    await this.init();
+    return new HttpServer(serverUrl()).startWhatsApp(purpose);
+  }
+
+  /** Null until the person has sent the code from WhatsApp; then the number that sent it. */
+  claimWhatsApp(id: string, secret: string) {
+    return new HttpServer(serverUrl()).claimWhatsApp(id, secret);
   }
 
   /** Signs in with a number and its code. True when the account is new (ask for a name). */

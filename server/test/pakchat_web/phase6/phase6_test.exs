@@ -130,6 +130,45 @@ defmodule PakchatWeb.Phase6Test do
       refute Map.has_key?(data, :call)
     end
 
+    test "the push carries the newest waiting messages, still locked (owner, 31 Oct)", ctx do
+      %{ali: ali, sara: sara, chat: chat} = ctx
+      a = online(ali.token, ali.device)
+      call(a, chat.id, [sealed(sara, "ring")], %{"ring" => true})
+
+      [wire] = Relay.for_push(sara.device)
+      assert wire.kind == "call"
+      assert is_binary(wire.body)
+
+      %{data: data} = Fcm.alert(true, Relay.for_push(sara.device))
+      assert [%{"id" => id, "kind" => "call"}] = Jason.decode!(data.env)
+      assert id == wire.id
+
+      # More than fits: only what fits goes; the rest comes over the connection.
+      big = for i <- 1..20, do: %{id: i, body: String.duplicate("x", 400)}
+      %{data: data} = Fcm.alert(false, big)
+      assert byte_size(data.env) <= 3_200
+      assert [%{"id" => 1} | _] = Jason.decode!(data.env)
+
+      # Nothing waiting: just the wake-up, as before.
+      refute Map.has_key?(Fcm.alert(false, []).data, :env)
+    end
+
+    test "a phone woken by a push says delivered without connecting (owner, 31 Oct)", ctx do
+      %{ali: ali, sara: sara, chat: chat} = ctx
+      _a = online(ali.token, ali.device)
+
+      body = %{"chat_id" => chat.id, "to" => ali.user.id, "status" => "delivered", "seqs" => [1]}
+      assert %{"ok" => true} = as(sara) |> post("/api/receipts", body) |> json_response(200)
+      assert [%{kind: "receipt"}] = envelopes_for(ali.device)
+
+      # Only a chat you're in, and only proper ticks.
+      bilal = ctx.bilal
+      assert as(bilal) |> post("/api/receipts", body) |> json_response(404)
+      assert as(sara) |> post("/api/receipts", %{body | "seqs" => []}) |> json_response(400)
+      assert as(sara) |> post("/api/receipts", %{"to" => ali.user.id}) |> json_response(400)
+      assert build_conn() |> post("/api/receipts", body) |> json_response(401)
+    end
+
     test "an old one is never handed out, even before the clean-up", ctx do
       %{ali: ali, sara: sara, chat: chat} = ctx
       a = online(ali.token, ali.device)

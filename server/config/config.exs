@@ -42,6 +42,10 @@ config :pakchat, :rate_limits,
   # Asking for SMS codes, per internet address (or per person, when linking a number).
   # Codes also have daily caps of their own (Pakchat.PhoneCodes).
   sms: {5, 600_000},
+  # Starting a WhatsApp number check, per internet address.
+  whatsapp: {10, 600_000},
+  # The app asking "has my code arrived?" (every 2 seconds while it waits), per check.
+  whatsapp_claim: {60, 60_000},
   # "Which of my contacts are on PakChat?", per person.
   contacts: {20, 3_600_000},
   # Call messages (ringing, connection details), per device. A call sends

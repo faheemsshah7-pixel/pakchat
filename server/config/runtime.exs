@@ -63,6 +63,14 @@ if config_env() != :test do
       auth_token: System.get_env("TWILIO_AUTH_TOKEN"),
       verify_sid: System.get_env("TWILIO_VERIFY_SID")
     ],
+    # Checking numbers with WhatsApp instead (Pakchat.WhatsApp): on once the first three are set.
+    whatsapp: [
+      number: System.get_env("WHATSAPP_NUMBER", "") |> String.replace(~r/\D/, ""),
+      app_secret: System.get_env("WHATSAPP_APP_SECRET"),
+      verify_token: System.get_env("WHATSAPP_VERIFY_TOKEN"),
+      token: System.get_env("WHATSAPP_TOKEN"),
+      phone_number_id: System.get_env("WHATSAPP_PHONE_NUMBER_ID")
+    ],
     # Numbers typed with a leading 0 are in this country (92 is Pakistan).
     phone_country: System.get_env("PHONE_COUNTRY", "92"),
     # The biggest file to send, and the biggest backup, in MB.

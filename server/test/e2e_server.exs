@@ -81,7 +81,10 @@ Application.put_env(
 Application.put_env(
   :pakchat,
   :rate_limits,
-  for({name, {_, window}} <- Application.fetch_env!(:pakchat, :rate_limits), do: {name, {100_000, window}})
+  for(
+    {name, {_, window}} <- Application.fetch_env!(:pakchat, :rate_limits),
+    do: {name, {100_000, window}}
+  )
 )
 
 # Phone sign-in: codes are kept for GET /api/auth/test/code instead of being texted,

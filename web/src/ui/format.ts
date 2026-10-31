@@ -94,6 +94,8 @@ export function chatTitle(chat: Chat) {
   if (chat.kind !== 'direct') return chat.title ?? '';
   if (isSelfChat(chat)) return tr('{name} (You)', { name: core.nameOf(core.myId) });
   const other = otherPerson(chat)!;
+  // Not in my contacts: "~ Their name", like the phone app and WhatsApp. Saved: just my name for them.
+  if (!core.isContact(other) && core.people[other]?.name) return `~ ${core.people[other]!.name}`;
   return core.nameOf(other) || phoneOf(other) || '…';
 }
 

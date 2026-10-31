@@ -19,6 +19,10 @@
 		header /sw.js Cache-Control "no-cache"
 		header /pakchat-apk.json Cache-Control "no-store"
 		header /pakchat.apk Content-Type "application/vnd.android.package-archive"
+		# Never an older copy from the phone's own browser (which can't install over a newer
+		# PakChat: "Can't install app"), and always saved as a file.
+		header /pakchat.apk Cache-Control "no-store"
+		header /pakchat.apk Content-Disposition `attachment; filename="PakChat.apk"`
 		header {
 			X-Content-Type-Options "nosniff"
 			Referrer-Policy "same-origin"

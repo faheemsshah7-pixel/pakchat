@@ -9,7 +9,7 @@ defmodule Pakchat.Files.Cleanup do
   @impl Oban.Worker
   def perform(_job) do
     files = Pakchat.Files.delete_expired()
-    codes = Pakchat.PhoneCodes.delete_old()
+    codes = Pakchat.PhoneCodes.delete_old() + Pakchat.WhatsApp.delete_old()
     if files + codes > 0, do: Logger.info("cleanup: deleted #{files} files, #{codes} old codes")
     :ok
   end
