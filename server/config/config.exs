@@ -11,6 +11,13 @@ config :pakchat,
   ecto_repos: [Pakchat.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# When many people connect or send at the same moment, a database request
+# waits its turn (up to about a second) instead of failing after a tenth of a
+# second (Ecto's default), which broke connections in the load test (1 Nov).
+config :pakchat, Pakchat.Repo,
+  queue_target: 500,
+  queue_interval: 5_000
+
 # Background jobs (Oban). "push" sends alerts; Cron runs the hourly clean-up
 # that deletes envelopes nobody collected in 30 days.
 config :pakchat, Oban,

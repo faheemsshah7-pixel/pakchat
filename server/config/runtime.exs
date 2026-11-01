@@ -135,7 +135,8 @@ if config_env() == :prod do
   config :pakchat, Pakchat.Repo,
     # ssl: true,
     url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    # 20 lines to the database: enough for 2,000 people chatting at once (load test, 1 Nov).
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "20"),
     # For machines with several cores, consider starting multiple pools of `pool_size`
     # pool_count: 4,
     socket_options: maybe_ipv6

@@ -1,0 +1,8 @@
+## Settings for the server's Erlang VM (see `mix help release`).
+
+## When there's no work, the VM keeps its cores spinning for a moment, waiting
+## for more. The database runs on the same few cores and needs them more, so
+## the VM lets go of them at once (load test, 1 Nov: the cores were full).
++sbwt none
++sbwtdcpu none
++sbwtdio none

@@ -44,7 +44,7 @@ open -p tcp --dport 443
 open -p udp --dport 443
 open -p tcp --dport 3478
 open -p udp --dport 3478
-open -p udp --dport 49160:49200
+open -p udp --dport 49160:51159
 netfilter-persistent save
 
 echo "5/6 Secrets"

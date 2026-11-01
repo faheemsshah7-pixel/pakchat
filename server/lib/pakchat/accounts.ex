@@ -450,7 +450,14 @@ defmodule Pakchat.Accounts do
   end
 
   @doc "Has either of the two blocked the other?"
-  def blocked_between?(a, b), do: blocked?(a, b) or blocked?(b, a)
+  def blocked_between?(a, b) do
+    Repo.exists?(
+      from x in Block,
+        where:
+          (x.blocker_id == ^a and x.blocked_id == ^b) or
+            (x.blocker_id == ^b and x.blocked_id == ^a)
+    )
+  end
 
   @doc "The ids, out of `user_ids`, of everyone who has blocked `user_id`."
   def blocked_by(user_id, user_ids) do

@@ -51,11 +51,11 @@ if [ -z "$VCN" ] || [ "$VCN" = "null" ]; then
   RT=$(oci network vcn get --vcn-id "$VCN" --query 'data."default-route-table-id"' --raw-output) || exit 1
   oci network route-table update --rt-id "$RT" --force \
     --route-rules "[{\"destination\":\"0.0.0.0/0\",\"destinationType\":\"CIDR_BLOCK\",\"networkEntityId\":\"$IGW\"}]" >/dev/null || exit 1
-  # Open: SSH, the website (80, 443 and 443/UDP), and calls (3478, 49160-49200).
+  # Open: SSH, the website (80, 443 and 443/UDP), and calls (3478, 49160-51159).
   SL=$(oci network vcn get --vcn-id "$VCN" --query 'data."default-security-list-id"' --raw-output) || exit 1
   tcp() { printf '{"source":"0.0.0.0/0","protocol":"6","tcpOptions":{"destinationPortRange":{"min":%s,"max":%s}}}' "$1" "$2"; }
   udp() { printf '{"source":"0.0.0.0/0","protocol":"17","udpOptions":{"destinationPortRange":{"min":%s,"max":%s}}}' "$1" "$2"; }
-  RULES="[$(tcp 22 22),$(tcp 80 80),$(tcp 443 443),$(udp 443 443),$(tcp 3478 3478),$(udp 3478 3478),$(udp 49160 49200),"
+  RULES="[$(tcp 22 22),$(tcp 80 80),$(tcp 443 443),$(udp 443 443),$(tcp 3478 3478),$(udp 3478 3478),$(udp 49160 51159),"
   RULES+='{"source":"0.0.0.0/0","protocol":"1","icmpOptions":{"type":3,"code":4}},{"source":"10.0.0.0/16","protocol":"1","icmpOptions":{"type":3}}]'
   oci network security-list update --security-list-id "$SL" --force --ingress-security-rules "$RULES" >/dev/null || exit 1
 fi

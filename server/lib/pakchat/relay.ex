@@ -58,10 +58,10 @@ defmodule Pakchat.Relay do
     envelopes = params[:envelopes] || []
     group = params[:group]
 
-    with {:ok, chat} <- member_chat(sender.user_id, chat_id),
+    with {:ok, chat, role, devices} <- member_chat_devices(sender.user_id, chat_id),
          :ok <- validate(kind, envelopes, group),
-         :ok <- may_send(chat, sender.user_id, kind),
-         devices = recipients(chat.id, sender),
+         :ok <- may_send(chat, sender.user_id, kind, role),
+         devices = Enum.reject(devices, fn {_user, _dev, id} -> id == sender.id end),
          :ok <- status_viewer(chat, sender.user_id, devices, envelopes, group),
          :ok <- check_devices(chat, kind, devices, envelopes, group, params[:devices]) do
       # In a one-to-one chat, someone who blocked you never gets your
@@ -165,18 +165,18 @@ defmodule Pakchat.Relay do
   # Only its owner posts to a status. Viewers can like it ("reaction") or ask
   # for a resend ("control"), to the owner only (see `status_viewer/5`).
   # A community only holds its members: its messages go in its groups.
-  defp may_send(%Chat{kind: "community"}, _user_id, _kind), do: {:error, :forbidden}
+  defp may_send(%Chat{kind: "community"}, _user_id, _kind, _role), do: {:error, :forbidden}
 
-  defp may_send(%Chat{kind: "status", created_by: owner}, user_id, kind) do
+  defp may_send(%Chat{kind: "status", created_by: owner}, user_id, kind, _role) do
     if user_id == owner or kind in ["reaction", "control"], do: :ok, else: {:error, :forbidden}
   end
 
   # "Only admins can send messages": everyone else can still react.
-  defp may_send(%Chat{only_admins_send: true} = chat, user_id, "message") do
-    if Chats.role(chat.id, user_id) == "admin", do: :ok, else: {:error, :admins_only}
+  defp may_send(%Chat{only_admins_send: true}, _user_id, "message", role) do
+    if role == "admin", do: :ok, else: {:error, :admins_only}
   end
 
-  defp may_send(_chat, _user_id, _kind), do: :ok
+  defp may_send(_chat, _user_id, _kind, _role), do: :ok
 
   # Every device in the chat except the one sending.
   defp recipients(chat_id, sender) do
@@ -291,28 +291,85 @@ defmodule Pakchat.Relay do
   """
   def send_receipt(%Device{} = sender, chat_id, to_user_id, status, seqs)
       when status in ["delivered", "read"] do
+    # Ticks are the busiest thing the server does (one per message per
+    # person), so this asks the database as little as it can: the chat, its
+    # people and their devices in one go.
     with :ok <- check_seqs(seqs),
-         {:ok, chat} <- member_chat(sender.user_id, chat_id),
-         {:ok, _} <- member_chat(to_user_id, chat.id) do
-      them? = receipt_allowed?(chat, sender.user_id, to_user_id, status)
+         {:ok, chat_id} <- Ecto.UUID.cast(chat_id),
+         {:ok, to_user_id} <- Ecto.UUID.cast(to_user_id),
+         {:ok, kind, blocked?, devices} <- chat_devices(chat_id, sender.user_id, to_user_id) do
+      them? = receipt_allowed?(%Chat{kind: kind}, sender.user_id, to_user_id, status, blocked?)
 
       targets =
-        recipients(chat.id, sender)
-        |> Enum.filter(fn {user, _, _} ->
-          (user == to_user_id and them?) or (user == sender.user_id and status == "read")
+        Enum.filter(devices, fn {user, _, id} ->
+          id != nil and id != sender.id and
+            ((user == to_user_id and them?) or (user == sender.user_id and status == "read"))
         end)
 
       body = Jason.encode!(%{status: status, seqs: seqs, to: to_user_id})
-      base = base_row(chat.id, nil, sender, "receipt", DateTime.utc_now())
+      base = base_row(chat_id, nil, sender, "receipt", DateTime.utc_now())
 
-      targets
-      |> Enum.map(fn {_, _, id} -> Map.merge(base, %{device_id: id, type: 0, body: body}) end)
-      |> insert()
-      |> deliver()
+      rows =
+        Enum.map(targets, fn {user, _, id} ->
+          {user, Map.merge(base, %{device_id: id, type: 0, body: body})}
+        end)
+
+      # Ticks are most of the server's work, so a device that's connected gets
+      # them straight away without saving them first. Its connection keeps
+      # them in memory and saves them only if they aren't collected in time
+      # (see `PakchatWeb.DeviceChannel`), so a dead connection loses nothing.
+      {live, saved} =
+        Enum.split_with(rows, fn {user, row} ->
+          Pakchat.Presence.device_online?(user, row.device_id)
+        end)
+
+      for {_, row} <- live do
+        envelope = struct(Envelope, Map.put(row, :id, live_id()))
+        Phoenix.PubSub.broadcast(Pakchat.PubSub, "relay:" <> row.device_id, {:live, envelope})
+      end
+
+      saved |> Enum.map(&elem(&1, 1)) |> insert() |> deliver()
+    else
+      :error -> {:error, :not_found}
+      other -> other
     end
   end
 
   def send_receipt(_sender, _chat_id, _to, _status, _seqs), do: {:error, :bad_request}
+
+  # The chat's kind, whether `me` and `them` blocked each other, and every
+  # device of everyone in the chat, `{user_id, device_id, device uuid}`
+  # (`nil` ids for someone with no device), in one query. Not found unless
+  # both are in the chat.
+  defp chat_devices(chat_id, me, them) do
+    rows =
+      Repo.all(
+        from m in Chats.Member,
+          join: c in Chat,
+          on: c.id == m.chat_id,
+          left_join: d in Device,
+          on: d.user_id == m.user_id,
+          where: m.chat_id == ^chat_id,
+          select:
+            {c.kind,
+             fragment(
+               "EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = ?) OR (b.blocker_id = ? AND b.blocked_id = ?))",
+               type(^me, :binary_id),
+               type(^them, :binary_id),
+               type(^them, :binary_id),
+               type(^me, :binary_id)
+             ), m.user_id, d.device_id, d.id}
+      )
+
+    users = MapSet.new(rows, &elem(&1, 2))
+
+    with [{kind, blocked?, _, _, _} | _] <- rows,
+         true <- MapSet.member?(users, me) and MapSet.member?(users, them) do
+      {:ok, kind, blocked?, Enum.map(rows, fn {_, _, u, dev, id} -> {u, dev, id} end)}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
 
   defp check_seqs(seqs) when is_list(seqs) and seqs != [] and length(seqs) <= 500 do
     if Enum.all?(seqs, &is_integer/1), do: :ok, else: {:error, :bad_request}
@@ -322,8 +379,8 @@ defmodule Pakchat.Relay do
 
   # Does the other person get this receipt? Not if it's to myself, not if
   # either of us blocked the other, and "read" only if read receipts allow it.
-  defp receipt_allowed?(chat, from, to, status) do
-    from != to and not Accounts.blocked_between?(from, to) and
+  defp receipt_allowed?(chat, from, to, status, blocked?) do
+    from != to and not blocked? and
       (status == "delivered" or read_receipts_allowed?(chat, from, to))
   end
 
@@ -332,6 +389,24 @@ defmodule Pakchat.Relay do
   defp read_receipts_allowed?(_chat, a, b) do
     Repo.aggregate(from(u in User, where: u.id in ^[a, b] and u.read_receipts), :count) ==
       length(Enum.uniq([a, b]))
+  end
+
+  # Envelopes sent live (never saved) get a negative id: unique, and never
+  # mixed up with a saved one, which are all positive.
+  defp live_id, do: -System.unique_integer([:positive, :monotonic])
+
+  @doc """
+  Saves live envelopes a device didn't collect in time (or whose connection
+  closed first), so it gets them when it comes back, like any other.
+  """
+  def save_live([]), do: :ok
+
+  def save_live(envelopes) do
+    envelopes
+    |> Enum.map(fn e -> e |> Map.from_struct() |> Map.drop([:__meta__, :id]) end)
+    |> insert()
+
+    :ok
   end
 
   ## Group notes
@@ -378,11 +453,10 @@ defmodule Pakchat.Relay do
   """
   def typing(%Device{} = sender, chat_id, typing?, audio? \\ false) do
     with {:ok, chat} <- member_chat(sender.user_id, chat_id) do
-      blocked =
-        Accounts.blocked_by(sender.user_id, Chats.member_ids(chat.id)) ++
-          blocked_by_me(sender.user_id)
+      members = Chats.member_ids(chat.id)
+      blocked = Accounts.blocked_by(sender.user_id, members) ++ blocked_by_me(sender.user_id)
 
-      for user_id <- Chats.member_ids(chat.id),
+      for user_id <- members,
           user_id != sender.user_id,
           user_id not in blocked do
         Phoenix.PubSub.broadcast(
@@ -460,12 +534,17 @@ defmodule Pakchat.Relay do
 
   @doc "The device has these envelopes, so they are deleted. Only its own, of course."
   def ack(%Device{id: device_id}, ids) when is_list(ids) do
-    ids = Enum.filter(ids, &is_integer/1)
+    # Live ones (negative ids) were never saved.
+    ids = Enum.filter(ids, &(is_integer(&1) and &1 > 0))
 
-    {count, _} =
-      Repo.delete_all(from e in Envelope, where: e.device_id == ^device_id and e.id in ^ids)
+    if ids == [] do
+      0
+    else
+      {count, _} =
+        Repo.delete_all(from e in Envelope, where: e.device_id == ^device_id and e.id in ^ids)
 
-    count
+      count
+    end
   end
 
   @doc """
@@ -511,10 +590,6 @@ defmodule Pakchat.Relay do
   def deliver(envelopes, opts) do
     by_device = Enum.group_by(envelopes, & &1.device_id)
 
-    for {device_id, list} <- by_device do
-      Phoenix.PubSub.broadcast(Pakchat.PubSub, "relay:" <> device_id, {:envelopes, list})
-    end
-
     # Only messages wake a closed app: not ticks, reactions or group notes
     # (except a like on a status, `wake_kind: "reaction"`). A call that
     # starts ringing wakes it too, with a call push.
@@ -523,20 +598,93 @@ defmodule Pakchat.Relay do
         do: {"call", opts[:wake] == true},
         else: {opts[:wake_kind] || "message", opts[:wake] != false}
 
-    if wake? do
-      by_device
-      |> Enum.map(fn {id, list} ->
-        {id, for(e <- list, e.kind == kind, uniq: true, do: e.sender_id)}
-      end)
-      |> Enum.reject(fn {_id, senders} -> senders == [] end)
-      |> Map.new()
-      |> Push.wake_offline(call: opts[:call] == true)
+    senders =
+      if wake? do
+        by_device
+        |> Enum.map(fn {id, list} ->
+          {id, for(e <- list, e.kind == kind, uniq: true, do: e.sender_id)}
+        end)
+        |> Enum.reject(fn {_id, senders} -> senders == [] end)
+        |> Map.new()
+      else
+        %{}
+      end
+
+    cond do
+      senders == %{} ->
+        broadcast(by_device, MapSet.new(), kind)
+
+      opts[:call] ->
+        broadcast(by_device, MapSet.new(), kind)
+        Push.wake_offline(senders, call: true)
+
+      true ->
+        # A connected phone keeps its own watch: if it hasn't collected
+        # these within a second, its connection asks for the push.
+        case busy_safe(fn -> Push.wakeable(senders) end) do
+          {:ok, {connected, offline}} ->
+            broadcast(by_device, MapSet.new(connected), kind)
+
+            if busy_safe(fn -> Enum.each(offline, &Push.wake/1) end) == :busy,
+              do: wake_later(Map.take(senders, offline))
+
+          :busy ->
+            # The database is too busy to look up who needs a push. The
+            # message is saved already, so deliver it and sort out pushes
+            # in a moment, rather than failing a message that was sent.
+            broadcast(by_device, MapSet.new(), kind)
+            wake_later(senders)
+        end
     end
 
     :ok
   end
 
+  defp busy_safe(fun) do
+    {:ok, fun.()}
+  rescue
+    DBConnection.ConnectionError -> :busy
+  end
+
+  defp wake_later(senders) do
+    Task.start(fn ->
+      Process.sleep(2_000)
+      busy_safe(fn -> Push.wake_offline(senders) end)
+    end)
+  end
+
+  defp broadcast(by_device, watch, kind) do
+    for {device_id, list} <- by_device do
+      message =
+        if MapSet.member?(watch, device_id),
+          do: {:envelopes, list, for(e <- list, e.kind == kind, do: e.id)},
+          else: {:envelopes, list}
+
+      Phoenix.PubSub.broadcast(Pakchat.PubSub, "relay:" <> device_id, message)
+    end
+  end
+
   ## Helpers
+
+  # The chat, my role in it, and every device of everyone in it
+  # (`{user_id, device_id, device uuid}`), in two queries. Sending is busy.
+  defp member_chat_devices(user_id, chat_id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(chat_id),
+         %Chat{} = chat <- Repo.get(Chat, uuid),
+         rows =
+           Repo.all(
+             from m in Chats.Member,
+               left_join: d in Device,
+               on: d.user_id == m.user_id,
+               where: m.chat_id == ^uuid,
+               select: {m.user_id, m.role, d.device_id, d.id}
+           ),
+         {_, role, _, _} <- List.keyfind(rows, user_id, 0) do
+      {:ok, chat, role, for({u, _, dev, id} <- rows, id != nil, do: {u, dev, id})}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
 
   defp member_chat(user_id, chat_id) do
     with {:ok, uuid} <- Ecto.UUID.cast(chat_id),

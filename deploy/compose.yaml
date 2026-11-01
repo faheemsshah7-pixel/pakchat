@@ -41,6 +41,14 @@ services:
       - files:/data
       # Firebase's key for push alerts (FCM_SERVICE_ACCOUNT=/secrets/firebase.json). Never in git.
       - ./secrets:/secrets:ro
+    # Every connected phone holds one open connection, and each one uses a "file
+    # handle". Docker's default allows only 1,024, so at about 1,000 people new
+    # connections (and the health check) silently waited and the server looked
+    # down (load test, 1 Nov). This allows 100,000.
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
 
   web:
     image: caddy:2.8.4
@@ -59,6 +67,11 @@ services:
       - ./site:/srv/site:ro
       - caddy_data:/data
       - caddy_config:/config
+    # The front door holds two connections per phone (the phone's, and its own to the app).
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
 
   turn:
     image: coturn/coturn:4.6.3
@@ -68,8 +81,11 @@ services:
     command:
       - -n
       - --listening-port=3478
+      # Each call through the relay uses a port or two from this range: 2,000 ports is
+      # about 1,000 calls at once (it was 41, about 20 calls, until 1 Nov). The same range
+      # is open in the server's firewall (setup.sh) and Oracle's security list (README.md).
       - --min-port=49160
-      - --max-port=49200
+      - --max-port=51159
       - --use-auth-secret
       - --static-auth-secret=${TURN_SECRET:?put TURN_SECRET in deploy/.env}
       - --realm=${PAKCHAT_DOMAIN}
@@ -89,7 +105,7 @@ services:
       - --denied-peer-ip=172.16.0.0-172.31.255.255
       - --denied-peer-ip=192.168.0.0-192.168.255.255
       - --user-quota=12
-      - --total-quota=200
+      - --total-quota=2000
       - --log-file=stdout
       - --simple-log
 

@@ -26,11 +26,16 @@ defmodule PakchatWeb.DeviceChannel do
   To the device: `"envelopes"`, `"typing"` and `"presence"`.
   """
   use PakchatWeb, :channel
-  alias Pakchat.{Accounts, Presence, Privacy, RateLimit, Relay}
+  require Logger
+  alias Pakchat.{Accounts, Presence, Privacy, Push, RateLimit, Relay}
   alias PakchatWeb.{Params, Wire}
 
   # Most people one device can follow at once.
   @max_watching 200
+  # New envelopes are gathered this long (ms) and pushed together.
+  @batch_ms 20
+  # How long a connected phone has to collect a live tick before it's saved.
+  @live_grace_ms 10_000
 
   @impl true
   def join("device:" <> id, params, socket) do
@@ -45,7 +50,15 @@ defmodule PakchatWeb.DeviceChannel do
       send(self(), :after_join)
       # An app too old to say counts as on screen, as before.
       active = params["active"] != false
-      {:ok, socket |> assign(:watching, MapSet.new()) |> assign(:active, active)}
+
+      {:ok,
+       socket
+       |> assign(:watching, MapSet.new())
+       |> assign(:active, active)
+       |> assign(:uncollected, MapSet.new())
+       |> assign(:outgoing, [])
+       |> assign(:outgoing_watch, [])
+       |> assign(:live, %{})}
     else
       {:error, %{reason: "not_yours"}}
     end
@@ -65,14 +78,81 @@ defmodule PakchatWeb.DeviceChannel do
         active: socket.assigns.active
       })
 
-    Accounts.touch_device(device.id)
-    push_pending(socket)
+    send(self(), :pending)
     {:noreply, socket}
   end
 
-  def handle_info({:envelopes, envelopes}, socket) do
-    push(socket, "envelopes", %{envelopes: Enum.map(envelopes, &Wire.envelope/1)})
+  # What was waiting while it was away. If the database is too busy right
+  # now, try again in a moment instead of dropping the connection.
+  def handle_info(:pending, socket) do
+    busy_safe(fn ->
+      Accounts.touch_device(socket.assigns.device.id)
+      push_pending(socket)
+    end) || Process.send_after(self(), :pending, 1_000)
+
     {:noreply, socket}
+  end
+
+  # New envelopes are gathered for a moment and pushed together: a busy group
+  # chat (or the ticks for one message from everyone in a group) goes as one
+  # push, and the phone answers it with one "ack" instead of one each.
+  def handle_info({:envelopes, envelopes}, socket), do: {:noreply, gather(socket, envelopes, [])}
+
+  # Messages that should wake this phone if it doesn't collect them: a
+  # connection can be dead without the server knowing yet. Watched here, in
+  # memory, so a phone that collects them (nearly always) costs nothing.
+  def handle_info({:envelopes, envelopes, watch}, socket),
+    do: {:noreply, gather(socket, envelopes, watch)}
+
+  # A tick sent live, not saved (see `Pakchat.Relay.send_receipt/5`). Kept
+  # here until the phone says it has it; saved if it doesn't in time.
+  def handle_info({:live, envelope}, socket) do
+    Process.send_after(self(), {:live_collected?, envelope.id}, @live_grace_ms)
+    socket = assign(socket, :live, Map.put(socket.assigns.live, envelope.id, envelope))
+    {:noreply, gather(socket, [envelope], [])}
+  end
+
+  def handle_info({:live_collected?, id}, socket) do
+    case Map.fetch(socket.assigns.live, id) do
+      {:ok, envelope} ->
+        if busy_safe(fn -> Relay.save_live([envelope]) end) do
+          {:noreply, assign(socket, :live, Map.delete(socket.assigns.live, id))}
+        else
+          Process.send_after(self(), {:live_collected?, id}, 1_000)
+          {:noreply, socket}
+        end
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_info(:flush, socket) do
+    %{outgoing: outgoing, outgoing_watch: watch} = socket.assigns
+    envelopes = outgoing |> Enum.reverse() |> List.flatten()
+    push(socket, "envelopes", %{envelopes: Enum.map(envelopes, &Wire.envelope/1)})
+    socket = socket |> assign(:outgoing, []) |> assign(:outgoing_watch, [])
+
+    if watch == [] do
+      {:noreply, socket}
+    else
+      Process.send_after(self(), {:collected?, watch}, Push.grace_ms())
+
+      {:noreply,
+       assign(socket, :uncollected, MapSet.union(socket.assigns.uncollected, MapSet.new(watch)))}
+    end
+  end
+
+  def handle_info({:collected?, ids}, socket) do
+    uncollected = socket.assigns.uncollected
+    still = Enum.filter(ids, &MapSet.member?(uncollected, &1))
+
+    if still != [] and not busy_safe(fn -> Push.wake_if_waiting(socket.assigns.device.id) end) do
+      # The database is too busy to queue the push right now: ask again shortly.
+      Process.send_after(self(), {:collected?, still}, 1_000)
+    end
+
+    {:noreply, assign(socket, :uncollected, MapSet.difference(uncollected, MapSet.new(ids)))}
   end
 
   def handle_info({:typing, payload}, socket) do
@@ -89,8 +169,22 @@ defmodule PakchatWeb.DeviceChannel do
 
   def handle_info(_other, socket), do: {:noreply, socket}
 
+  # When the database is overloaded for a moment, answer "rate_limited" (the
+  # app tries again in a few seconds) instead of letting the error drop the
+  # whole connection: dropped connections reconnect and add even more load.
   @impl true
-  def handle_in("send", payload, socket) do
+  def handle_in(event, payload, socket) do
+    do_handle_in(event, payload, socket)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.warning(
+        "busy: #{event} not done, the database is overloaded (#{Exception.message(e) |> String.slice(0, 80)})"
+      )
+
+      {:reply, {:error, %{reason: "rate_limited"}}, socket}
+  end
+
+  defp do_handle_in("send", payload, socket) do
     device = socket.assigns.device
 
     with :ok <- RateLimit.hit(:send, device.id),
@@ -106,7 +200,7 @@ defmodule PakchatWeb.DeviceChannel do
     end
   end
 
-  def handle_in("call", payload, socket) do
+  defp do_handle_in("call", payload, socket) do
     device = socket.assigns.device
 
     with :ok <- RateLimit.hit(:calls, device.id),
@@ -118,30 +212,32 @@ defmodule PakchatWeb.DeviceChannel do
     end
   end
 
-  def handle_in("ack", %{"ids" => ids}, socket) when is_list(ids) do
+  defp do_handle_in("ack", %{"ids" => ids}, socket) when is_list(ids) do
     Relay.ack(socket.assigns.device, ids)
-    {:reply, :ok, socket}
+    socket = assign(socket, :live, Map.drop(socket.assigns.live, ids))
+    uncollected = MapSet.difference(socket.assigns.uncollected, MapSet.new(ids))
+    {:reply, :ok, assign(socket, :uncollected, uncollected)}
   end
 
-  def handle_in("sync", %{"after" => upto}, socket) when is_map(upto) do
+  defp do_handle_in("sync", %{"after" => upto}, socket) when is_map(upto) do
     Relay.ack_upto(socket.assigns.device, upto)
     push_pending(socket)
     {:reply, :ok, socket}
   end
 
-  def handle_in("receipt", %{"chat_id" => chat_id, "to" => to} = p, socket) do
+  defp do_handle_in("receipt", %{"chat_id" => chat_id, "to" => to} = p, socket) do
     case Relay.send_receipt(socket.assigns.device, chat_id, to, p["status"], p["seqs"]) do
       :ok -> {:reply, :ok, socket}
       {:error, reason} -> {:reply, {:error, %{reason: reason}}, socket}
     end
   end
 
-  def handle_in("typing", %{"chat_id" => chat_id} = p, socket) do
+  defp do_handle_in("typing", %{"chat_id" => chat_id} = p, socket) do
     Relay.typing(socket.assigns.device, chat_id, p["typing"] == true, p["audio"] == true)
     {:noreply, socket}
   end
 
-  def handle_in("watch", %{"user_id" => user_id}, socket) do
+  defp do_handle_in("watch", %{"user_id" => user_id}, socket) do
     watching = socket.assigns.watching
 
     cond do
@@ -162,12 +258,12 @@ defmodule PakchatWeb.DeviceChannel do
     end
   end
 
-  def handle_in("unwatch", %{"user_id" => user_id}, socket) do
+  defp do_handle_in("unwatch", %{"user_id" => user_id}, socket) do
     Phoenix.PubSub.unsubscribe(Pakchat.PubSub, Presence.topic(user_id))
     {:reply, :ok, assign(socket, :watching, MapSet.delete(socket.assigns.watching, user_id))}
   end
 
-  def handle_in("active", %{"active" => active}, socket) when is_boolean(active) do
+  defp do_handle_in("active", %{"active" => active}, socket) when is_boolean(active) do
     if active == socket.assigns.active do
       {:reply, :ok, socket}
     else
@@ -182,7 +278,7 @@ defmodule PakchatWeb.DeviceChannel do
     end
   end
 
-  def handle_in(_event, _payload, socket) do
+  defp do_handle_in(_event, _payload, socket) do
     {:reply, {:error, %{reason: "bad_request"}}, socket}
   end
 
@@ -190,11 +286,34 @@ defmodule PakchatWeb.DeviceChannel do
   # phone that only woke in the background: nobody saw them then.
   @impl true
   def terminate(_reason, socket) do
+    # Live ticks it never collected: saved, so it gets them when it's back.
+    Relay.save_live(Map.values(socket.assigns[:live] || %{}))
+
+    # Gone before collecting what came in its last second: wake the phone.
+    if MapSet.size(socket.assigns[:uncollected] || MapSet.new()) > 0,
+      do: Push.wake_if_waiting(socket.assigns.device.id)
+
     if socket.assigns[:active] != false,
       do: Accounts.touch_last_seen(socket.assigns.device.user_id)
 
     Accounts.touch_device(socket.assigns.device.id)
     :ok
+  end
+
+  defp gather(socket, envelopes, watch) do
+    if socket.assigns.outgoing == [], do: Process.send_after(self(), :flush, @batch_ms)
+
+    socket
+    |> assign(:outgoing, [envelopes | socket.assigns.outgoing])
+    |> assign(:outgoing_watch, watch ++ socket.assigns.outgoing_watch)
+  end
+
+  # Runs `fun`; false if the database was too busy to answer in time.
+  defp busy_safe(fun) do
+    fun.()
+    true
+  rescue
+    DBConnection.ConnectionError -> false
   end
 
   defp push_pending(socket, after_id \\ 0) do

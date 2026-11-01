@@ -115,6 +115,23 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert env.from == ali.user.id
   end
 
+  test "envelopes that come close together go as one push, in order", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    a = online(ali.token, ali.device)
+    online(sara.token, sara.device)
+
+    # Sent straight after each other, without waiting for the server's answer.
+    refs =
+      for text <- ["one", "two", "three"] do
+        push(a, "send", %{"chat_id" => chat.id, "envelopes" => [sealed(sara, text)]})
+      end
+
+    for ref <- refs, do: assert_reply(ref, :ok, _, 1000)
+    list = envelopes_for(sara.device)
+    assert Enum.map(list, &Base.decode64!(&1.body)) == ["one", "two", "three"]
+    refute_envelopes(sara.device)
+  end
+
   test "an offline device gets everything, in order, when it comes back", ctx do
     %{ali: ali, sara: sara, chat: chat} = ctx
     Accounts.set_push_token(sara.device, %{push_token: "fcm-token", push_platform: "fcm"})
@@ -135,7 +152,7 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert Enum.map(list, & &1.seq) == [1, 2, 3]
   end
 
-  test "a connected phone that doesn't collect a message is pushed after 3 s", ctx do
+  test "a connected phone that doesn't collect a message is pushed after a second", ctx do
     %{ali: ali, sara: sara, chat: chat} = ctx
     Accounts.set_push_token(sara.device, %{push_token: "fcm-token", push_platform: "fcm"})
     a = online(ali.token, ali.device)
@@ -145,16 +162,50 @@ defmodule PakchatWeb.DeviceChannelTest do
     send_msg(a, chat.id, [sealed(sara, "are you there?")])
     [env] = envelopes_for(sara.device)
 
-    # Not now: it's connected. A check in a second instead.
+    # Not now: it's connected. Its connection watches for a second instead.
+    assert all_enqueued(worker: Pakchat.Push.Notify) == []
+    Process.sleep(Pakchat.Push.grace_ms() + 100)
+
+    # Still not collected (a dead connection): it asks for the push, which
+    # goes only if the message is still waiting then.
     assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
     assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => false}
-    assert DateTime.diff(job.scheduled_at, DateTime.utc_now(), :millisecond) in 0..1_000
-
-    # Still waiting then (a dead connection): it's pushed. Collected: it isn't.
     assert Relay.waiting?(sara.device.id, before)
     Relay.ack(sara.device, [env.id])
     refute Relay.waiting?(sara.device.id, before)
     assert :ok = perform_job(Pakchat.Push.Notify, job.args)
+  end
+
+  test "a connected phone that collects its message in time isn't pushed", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    Accounts.set_push_token(sara.device, %{push_token: "fcm-token", push_platform: "fcm"})
+    a = online(ali.token, ali.device)
+    s = online(sara.token, sara.device)
+
+    send_msg(a, chat.id, [sealed(sara, "hi")])
+    [env] = envelopes_for(sara.device)
+    ref = push(s, "ack", %{"ids" => [env.id]})
+    assert_reply ref, :ok
+
+    Process.sleep(Pakchat.Push.grace_ms() + 100)
+    assert all_enqueued(worker: Pakchat.Push.Notify) == []
+  end
+
+  test "a phone that disconnects before collecting is pushed straight away", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    Accounts.set_push_token(sara.device, %{push_token: "fcm-token", push_platform: "fcm"})
+    a = online(ali.token, ali.device)
+    s = online(sara.token, sara.device)
+
+    send_msg(a, chat.id, [sealed(sara, "hi")])
+    [_env] = envelopes_for(sara.device)
+    Process.unlink(s.channel_pid)
+    ref = Process.monitor(s.channel_pid)
+    close(s)
+    assert_receive {:DOWN, ^ref, _, _, _}
+
+    assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
+    assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => false}
   end
 
   test "ticks don't wake a closed app, and my own messages don't wake my other devices", ctx do
@@ -434,6 +485,43 @@ defmodule PakchatWeb.DeviceChannelTest do
     end
   end
 
+  test "ticks to a connected phone go live, unsaved, and are saved if it doesn't collect them",
+       ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    a = online(ali.token, ali.device)
+    s = online(sara.token, sara.device)
+    tick = %{"chat_id" => chat.id, "to" => ali.user.id, "status" => "delivered", "seqs" => [1]}
+
+    # Collected: nothing is ever saved, and the "I have it" costs no database work.
+    ref = push(s, "receipt", tick)
+    assert_reply ref, :ok
+    assert [%{id: id, kind: "receipt"}] = envelopes_for(ali.device)
+    assert id < 0
+    assert waiting(ali.device) == 0
+    ref = push(a, "ack", %{"ids" => [id]})
+    assert_reply ref, :ok
+
+    # Not collected before the connection closes: saved, and there when Ali is back.
+    ref = push(s, "receipt", %{tick | "seqs" => [2]})
+    assert_reply ref, :ok
+    assert [%{id: _}] = envelopes_for(ali.device)
+    offline(a)
+    assert waiting(ali.device) == 1
+
+    online(ali.token, ali.device)
+    assert [%{id: saved, data: %{"seqs" => [2]}}] = envelopes_for(ali.device)
+    assert saved > 0
+  end
+
+  test "an offline phone's ticks are saved straight away", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    s = online(sara.token, sara.device)
+    tick = %{"chat_id" => chat.id, "to" => ali.user.id, "status" => "delivered", "seqs" => [1]}
+    ref = push(s, "receipt", tick)
+    assert_reply ref, :ok
+    assert waiting(ali.device) == 1
+  end
+
   test "with read receipts off, no blue ticks either way, but my other devices know", ctx do
     %{ali: ali, sara: sara, chat: chat} = ctx
     sara_web = linked(sara.user)
@@ -452,6 +540,57 @@ defmodule PakchatWeb.DeviceChannelTest do
     ref = push(s, "receipt", %{read | "status" => "delivered"})
     assert_reply ref, :ok
     assert [%{data: %{"status" => "delivered"}}] = envelopes_for(ali.device)
+  end
+
+  test "no ticks between people who blocked each other, either way", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    a = online(ali.token, ali.device)
+    s = online(sara.token, sara.device)
+
+    tick = fn sock, to ->
+      %{"chat_id" => chat.id, "to" => to, "status" => "delivered", "seqs" => [1]}
+      |> then(&push(sock, "receipt", &1))
+    end
+
+    for {blocker, blocked} <- [{sara.user, ali.user}, {ali.user, sara.user}] do
+      :ok = Accounts.block(blocker, blocked)
+      ref = tick.(s, ali.user.id)
+      assert_reply ref, :ok
+      ref = tick.(a, sara.user.id)
+      assert_reply ref, :ok
+      refute_envelopes(ali.device)
+      refute_envelopes(sara.device)
+      :ok = Accounts.unblock(blocker, blocked.id)
+    end
+
+    ref = tick.(s, ali.user.id)
+    assert_reply ref, :ok
+    assert [%{data: %{"status" => "delivered"}}] = envelopes_for(ali.device)
+  end
+
+  test "someone not in the chat can't be sent ticks", ctx do
+    %{bilal: bilal, sara: sara, chat: chat} = ctx
+    s = online(sara.token, sara.device)
+
+    ref =
+      push(s, "receipt", %{
+        "chat_id" => chat.id,
+        "to" => bilal.user.id,
+        "status" => "delivered",
+        "seqs" => [1]
+      })
+
+    assert_reply ref, :error, %{reason: :not_found}
+
+    ref =
+      push(s, "receipt", %{
+        "chat_id" => "nope",
+        "to" => bilal.user.id,
+        "status" => "read",
+        "seqs" => [1]
+      })
+
+    assert_reply ref, :error, %{reason: :not_found}
   end
 
   test "receipts only for people in the chat", ctx do

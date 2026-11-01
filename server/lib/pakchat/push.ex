@@ -24,18 +24,20 @@ defmodule Pakchat.Push do
   alias Pakchat.Push.Notify
 
   # How long a connected phone has to collect a message before it's pushed anyway.
-  @grace_seconds 1
+  @grace_ms 1_000
+
+  @doc "How long a connected phone has to collect a message (ms) before it's pushed anyway."
+  def grace_ms, do: Application.get_env(:pakchat, :push_grace_ms, @grace_ms)
 
   @doc """
-  Queues an alert for each device that has a push token: now if it's offline,
-  in a second (only if the message is still waiting then) if it's connected.
-  `senders` maps each device id to who sent it something, so a person's own
-  messages don't wake their own other devices.
+  Which of these devices a message should wake, split by whether they are
+  connected right now: `{connected, offline}`, each a list of device ids.
+  Only devices with a push token, and never a device whose only sender is
+  its own person (my own messages don't wake my other devices).
+  `senders` maps each device id to who sent it something.
   """
-  def wake_offline(senders, opts \\ []) do
+  def wakeable(senders) do
     device_ids = Map.keys(senders)
-    # Always said, true or false: Oban's "unique" check matches on the keys given.
-    call = %{call: opts[:call] == true}
 
     Repo.all(
       from d in Device,
@@ -43,15 +45,42 @@ defmodule Pakchat.Push do
         select: {d.id, d.user_id}
     )
     |> Enum.reject(fn {id, user_id} -> senders[id] == [user_id] end)
-    |> Enum.each(fn {id, user_id} ->
-      if Presence.device_online?(user_id, id) do
-        %{device_id: id, if_waiting: true}
-        |> Map.merge(call)
-        |> Notify.new(schedule_in: @grace_seconds)
-        |> Oban.insert()
-      else
-        %{device_id: id} |> Map.merge(call) |> Notify.new() |> Oban.insert()
-      end
-    end)
+    |> Enum.split_with(fn {id, user_id} -> Presence.device_online?(user_id, id) end)
+    |> then(fn {on, off} -> {Enum.map(on, &elem(&1, 0)), Enum.map(off, &elem(&1, 0))} end)
+  end
+
+  @doc """
+  Queues an alert for each device that has a push token: now if it's offline,
+  in a second (only if the message is still waiting then) if it's connected.
+  Used for calls. Messages to a connected phone are checked by its own
+  connection instead (see `PakchatWeb.DeviceChannel`), which costs nothing
+  when the phone collects them, as it nearly always does.
+  """
+  def wake_offline(senders, opts \\ []) do
+    {connected, offline} = wakeable(senders)
+    call = opts[:call] == true
+    Enum.each(connected, &check_later(&1, call: call))
+    Enum.each(offline, &wake(&1, call: call))
+  end
+
+  @doc "Push this device now."
+  def wake(device_id, opts \\ []) do
+    # Always said, true or false: Oban's "unique" check matches on the keys given.
+    %{device_id: device_id, call: opts[:call] == true} |> Notify.new() |> Oban.insert()
+  end
+
+  @doc "Push this device in a second, but only if it still hasn't collected what came."
+  def check_later(device_id, opts \\ []) do
+    %{device_id: device_id, if_waiting: true, call: opts[:call] == true}
+    |> Notify.new(schedule_in: max(1, div(grace_ms(), 1000)))
+    |> Oban.insert()
+  end
+
+  @doc """
+  Push this device now if something that should wake it is still waiting
+  (a connected phone that didn't collect it in time: the connection was dead).
+  """
+  def wake_if_waiting(device_id) do
+    %{device_id: device_id, if_waiting: true, call: false} |> Notify.new() |> Oban.insert()
   end
 end
