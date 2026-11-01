@@ -3,7 +3,7 @@
 # next to it (when there is one). Run on the server from deploy/, after git pull:
 #   ./build-site.sh                      the website only
 #   ./build-site.sh ~/pakchat.apk 9 1.0.9   and a new APK: its file, build number and version
-# The APK's build number tells phones with the website's APK that there's an update (UpdateCard.tsx).
+# The APK's build number tells phones with the website's APK that there's an update (UpdatePopup.tsx).
 set -eu
 cd "$(dirname "$0")"
 . ./.env

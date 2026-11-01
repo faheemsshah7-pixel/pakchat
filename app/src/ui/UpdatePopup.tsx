@@ -1,4 +1,5 @@
-// UpdateCard.tsx: "Update PakChat" on the chat list, only in the APK people
+// UpdatePopup.tsx: an "Update PakChat" pop-up when PakChat opens (owner, 31 Oct:
+// "like an alert"; it was a card in the chat list before), only in the APK people
 // download from our website. A downloaded APK doesn't update itself, so this
 // checks the website for a newer one and opens its download in the browser,
 // which installs it over this one (same signing key, so chats stay).
@@ -8,14 +9,12 @@
 import Constants from 'expo-constants';
 import KV from 'expo-sqlite/kv-store';
 import { useEffect, useState } from 'react';
-import { AppState, Linking, Platform, View } from 'react-native';
+import { AppState, Linking, Platform } from 'react-native';
 
 import { fileModule } from '../../modules/pakchat-signal';
 import { serverUrl } from '../core/core';
 import { fill, useT } from '../i18n';
-import { useLook } from '../theme/ThemeProvider';
-import { Icon } from './icons';
-import { Button, Glass, Txt } from './kit';
+import { Dialog } from './overlays';
 
 const PLAY = 'com.android.vending';
 const LATER = 'update:laterUntil';
@@ -45,12 +44,11 @@ async function newer(mine: number): Promise<Newer | null> {
   return { versionCode: j.versionCode, versionName: typeof j.versionName === 'string' ? j.versionName : '', url: `${base}/pakchat.apk` };
 }
 
-export function UpdateCard() {
+export function UpdatePopup() {
   const t = useT();
-  const { theme } = useLook();
   const [found, setFound] = useState<Newer | null>(null);
 
-  // On opening PakChat, and on coming back to it.
+  // On opening PakChat, and on coming back to it. "Later" stops it for a day.
   useEffect(() => {
     const mine = websiteCopy();
     if (mine === null) return;
@@ -65,31 +63,28 @@ export function UpdateCard() {
     return () => sub.remove();
   }, []);
 
-  if (!found) return null;
+  const later = () => {
+    KV.setItemSync(LATER, String(Date.now() + DAY));
+    setFound(null);
+  };
   return (
-    <Glass style={{ marginHorizontal: 10, marginTop: 6, marginBottom: 8, padding: 14, gap: 10 }} testID="update-card">
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <Icon name="download" size={20} color={theme.accInk} />
-        <Txt size={15.5} weight="700">
-          {t.updateCardTitle}
-        </Txt>
-      </View>
-      <Txt size={13.5} color={theme.muted}>
-        {fill(t.updateCardText, { version: found.versionName || String(found.versionCode) })}
-      </Txt>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Button title={t.updateNow} style={{ flex: 1 }} onPress={() => void Linking.openURL(found.url)} testID="update-now" />
-        <Button
-          title={t.updateLater}
-          look="soft"
-          style={{ flex: 1 }}
-          onPress={() => {
-            KV.setItemSync(LATER, String(Date.now() + DAY));
+    <Dialog
+      visible={!!found}
+      onClose={later}
+      title={t.updateCardTitle}
+      text={found ? fill(t.updateCardText, { version: found.versionName || String(found.versionCode) }) : ''}
+      buttons={[
+        {
+          label: t.updateNow,
+          testID: 'update-now',
+          onPress: () => {
+            if (found) void Linking.openURL(found.url);
+            // Shown again next time PakChat opens, until the new one is installed.
             setFound(null);
-          }}
-          testID="update-later"
-        />
-      </View>
-    </Glass>
+          },
+        },
+        { label: t.updateLater, testID: 'update-later', onPress: later },
+      ]}
+    />
   );
 }

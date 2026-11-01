@@ -4,6 +4,7 @@
 // Phase 7's words are in phase7.ts, and phase 8's in phase8.ts.
 import { en7, ur7 } from './phase7';
 import { en8, ur8 } from './phase8';
+import { enSignIn, urSignIn } from './signin';
 
 export const en = {
   // Sign in
@@ -520,6 +521,7 @@ export const en = {
   fullScreenCardText: 'Allow PakChat to use full screen, so a call opens its answer screen on a locked phone, like WhatsApp.',
   ...en7,
   ...en8,
+  ...enSignIn,
 };
 
 export type Strings = typeof en;
@@ -1015,6 +1017,7 @@ export const ur: Strings = {
   fullScreenCardText: 'PakChat کو فل اسکرین کی اجازت دیں، تاکہ لاک فون پر کال آئے تو اٹھانے والی اسکرین کھلے، جیسے WhatsApp میں۔',
   ...ur7,
   ...ur8,
+  ...urSignIn,
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

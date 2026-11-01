@@ -54,16 +54,23 @@ const MIGRATIONS = [
 export class SqliteStorage implements Storage {
   private depth = 0;
 
-  private constructor(private db: Db) {}
+  /**
+   * `locked`: the database file is locked with this phone's own key (SQLCipher,
+   * see db.ts). Backups then need a different copy step (exportTo).
+   */
+  private constructor(
+    private db: Db,
+    private locked: boolean,
+  ) {}
 
   /** Opens the storage, creating or updating the tables first. */
-  static async open(db: Db): Promise<SqliteStorage> {
+  static async open(db: Db, options: { locked?: boolean } = {}): Promise<SqliteStorage> {
     await db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     const row = await db.first<{ user_version: number }>('PRAGMA user_version');
     for (let v = row?.user_version ?? 0; v < MIGRATIONS.length; v++) {
       await db.exec(`BEGIN; ${MIGRATIONS[v]} PRAGMA user_version = ${v + 1}; COMMIT;`);
     }
-    return new SqliteStorage(db);
+    return new SqliteStorage(db, options.locked === true);
   }
 
   // ---- Chats ----
@@ -308,10 +315,24 @@ export class SqliteStorage implements Storage {
 
   /** Writes a copy of the whole database to `path` (a file that mustn't exist yet), for a backup. */
   async exportTo(path: string) {
-    await this.db.run('VACUUM INTO ?', [path]);
+    if (this.locked) {
+      // A copy made with VACUUM INTO would be locked with this phone's own key, so
+      // no other phone could open it. So the copy is made unlocked (KEY ''); the
+      // backup file is then locked with the backup password instead (backup.ts).
+      const row = await this.db.first<{ user_version: number }>('PRAGMA user_version');
+      await this.db.run("ATTACH DATABASE ? AS b KEY ''", [path]);
+      try {
+        await this.db.exec(`SELECT sqlcipher_export('b'); PRAGMA b.user_version = ${Number(row?.user_version ?? 0)};`);
+      } catch (err) {
+        await this.db.exec('DETACH DATABASE b');
+        throw err;
+      }
+    } else {
+      await this.db.run('VACUUM INTO ?', [path]);
+      await this.db.run("ATTACH DATABASE ? AS b KEY ''", [path]);
+    }
     // A backup holds chats, messages and this phone's own notes (names, contacts, prefs),
     // never the sign-in, the outbox or anything else only this phone should have.
-    await this.db.run('ATTACH DATABASE ? AS b', [path]);
     try {
       await this.db.exec(`DELETE FROM b.kv WHERE key NOT LIKE 'app:%' OR key = 'app:lastUser'; DELETE FROM b.outbox; DELETE FROM b.seen;`);
       // Squeeze out the deleted rows, so nothing of them is left in the file.
@@ -328,7 +349,9 @@ export class SqliteStorage implements Storage {
    * so their places are forgotten (they download again while the server has them).
    */
   async importFrom(path: string) {
-    await this.db.run('ATTACH DATABASE ? AS b', [path]);
+    // Backups are unlocked inside (their password locks the whole file), so KEY '':
+    // without it, a locked phone database would try its own key on them and fail.
+    await this.db.run("ATTACH DATABASE ? AS b KEY ''", [path]);
     try {
       await this.transaction(async () => {
         // Messages that hadn't gone (waiting, or paused) stay behind: their files aren't in the backup.

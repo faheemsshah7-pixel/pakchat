@@ -5,9 +5,11 @@ defmodule PakchatWeb.WhatsAppController do
   For the app:
 
     * `GET /api/auth/whatsapp`: `{"on": true}` when it's switched on (404 when not).
-    * `POST /api/auth/whatsapp` with `{"purpose": "sign_in" | "link"}`: starts a check,
+    * `POST /api/auth/whatsapp` with `{"purpose": "sign_in" | "link", "phone"}`: starts a check,
       `{"id", "secret", "code", "text", "url", "expires_in"}`. The app opens `url`.
-    * `POST /api/auth/whatsapp/:id` with `{"secret"}`: `{"status": "waiting"}`, or
+      `phone` (optional, build 16 on) is the number typed; only it may send the code.
+    * `POST /api/auth/whatsapp/:id` with `{"secret"}`: `{"status": "waiting"}`,
+      `{"status": "wrong_number", "from": "+92..."}` (another number sent it), or
       `{"status": "done", "phone": "+92..."}`. The secret is then the code for
       `POST /api/auth/phone` (signing in) or `PUT /api/me/phone` (adding the number).
 
@@ -25,7 +27,7 @@ defmodule PakchatWeb.WhatsAppController do
 
   def start(conn, params) do
     with :ok <- RateLimit.hit(:whatsapp, ip(conn)),
-         {:ok, check} <- WhatsApp.start(params["purpose"] || "sign_in") do
+         {:ok, check} <- WhatsApp.start(params["purpose"] || "sign_in", params["phone"]) do
       json(conn, check)
     end
   end
@@ -34,6 +36,7 @@ defmodule PakchatWeb.WhatsAppController do
     with :ok <- RateLimit.hit(:whatsapp_claim, id) do
       case WhatsApp.claim(id, secret) do
         {:ok, :waiting} -> json(conn, %{status: "waiting"})
+        {:ok, {:wrong_number, from}} -> json(conn, %{status: "wrong_number", from: from})
         {:ok, phone} -> json(conn, %{status: "done", phone: phone})
         error -> error
       end

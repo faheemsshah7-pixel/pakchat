@@ -40,29 +40,33 @@ defmodule PakchatWeb.MeController do
     if Map.has_key?(from, key), do: Map.put(attrs, as, from[key]), else: attrs
   end
 
-  @doc "`PUT /api/me/google` with `{id_token}`: adds a Gmail to my account (I signed in by phone)."
-  def link_google(conn, %{"id_token" => id_token}) when is_binary(id_token) do
-    with {:ok, user} <- Accounts.link_google(conn.assigns.user, id_token) do
+  @doc """
+  `PUT /api/me/google` with `{id_token, move?}`: adds a Gmail to my account (I signed in
+  by phone). 409 `taken` if it has its own account; `move: true` moves it here.
+  """
+  def link_google(conn, %{"id_token" => id_token} = p) when is_binary(id_token) do
+    with {:ok, user} <- Accounts.link_google(conn.assigns.user, id_token, move: p["move"] == true) do
       json(conn, Wire.me(user))
     end
   end
 
   def link_google(_conn, _params), do: {:error, :bad_request}
 
-  @doc "`POST /api/me/phone/code` with `{phone}`: sends a code to a number I want to add."
-  def phone_code(conn, %{"phone" => phone}) when is_binary(phone) do
+  @doc "`POST /api/me/phone/code` with `{phone, move?}`: sends a code to a number I want to add."
+  def phone_code(conn, %{"phone" => phone} = p) when is_binary(phone) do
     with :ok <- RateLimit.hit(:sms, conn.assigns.user.id),
-         {:ok, info} <- Accounts.send_link_code(conn.assigns.user, phone) do
+         {:ok, info} <- Accounts.send_link_code(conn.assigns.user, phone, move: p["move"] == true) do
       json(conn, info)
     end
   end
 
   def phone_code(_conn, _params), do: {:error, :bad_request}
 
-  @doc "`PUT /api/me/phone` with `{phone, code}`: adds the number to my account."
-  def link_phone(conn, %{"phone" => phone, "code" => code})
+  @doc "`PUT /api/me/phone` with `{phone, code, move?}`: adds the number to my account."
+  def link_phone(conn, %{"phone" => phone, "code" => code} = p)
       when is_binary(phone) and is_binary(code) do
-    with {:ok, user} <- Accounts.link_phone(conn.assigns.user, phone, code) do
+    with {:ok, user} <-
+           Accounts.link_phone(conn.assigns.user, phone, code, move: p["move"] == true) do
       json(conn, Wire.me(user))
     end
   end

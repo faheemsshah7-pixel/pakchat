@@ -7,10 +7,10 @@
 // need to log out), and Log out.
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { core, reasonOf, serverUrl } from '../../core/core';
+import { core, onBuiltInServer, reasonOf, serverUrl } from '../../core/core';
 import { googleIdToken } from '../../core/google';
 import { useAuth } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
@@ -32,6 +32,10 @@ export default function Account() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [server, setServer] = useState<string | null>(null);
+  // A Gmail or number that has its own account: asked first, then moved here (owner, 31 Oct).
+  const [moving, setMoving] = useState<{ kind: 'google'; token: string } | { kind: 'sendCode' } | { kind: 'phone'; number: string; code: string } | null>(null);
+  /** Said yes to moving this number: its code is sent, and adding it moves it. */
+  const moveOk = useRef(false);
   const [leaving, setLeaving] = useState(false);
 
   async function saveServer() {
@@ -45,13 +49,14 @@ export default function Account() {
     }
   }
 
-  // A live server checks numbers with WhatsApp (free) instead of SMS codes.
-  const [waOn, setWaOn] = useState(false);
+  // A live server checks numbers with WhatsApp (free) instead of SMS codes. The live one always
+  // does (no SMS there), even before its answer comes; only a test server may say no.
+  const [waOn, setWaOn] = useState(onBuiltInServer);
   useEffect(() => {
     let alive = true;
     void core
       .whatsAppOn()
-      .then((on) => alive && setWaOn(on))
+      .then((on) => alive && setWaOn(on || onBuiltInServer()))
       .catch(() => {});
     return () => {
       alive = false;
@@ -61,7 +66,13 @@ export default function Account() {
   // WhatsApp proved the number: its one-time code adds it, exactly like an SMS code.
   const whatsAppAdd = useCallback(
     async (number: string, oneTime: string) => {
-      await core.linkPhone(number, oneTime);
+      try {
+        await core.linkPhone(number, oneTime);
+      } catch (err) {
+        if (reasonOf(err) !== 'taken') throw err;
+        setMoving({ kind: 'phone', number, code: oneTime });
+        return;
+      }
       setAdding(false);
       toast(t.linked2);
     },
@@ -69,6 +80,7 @@ export default function Account() {
   );
 
   function startAdding() {
+    moveOk.current = false;
     setSentTo('');
     setCode('');
     setError('');
@@ -79,7 +91,13 @@ export default function Account() {
     try {
       const token = await googleIdToken();
       if (!token) return;
-      await core.linkGoogle(token);
+      try {
+        await core.linkGoogle(token);
+      } catch (err) {
+        if (reasonOf(err) !== 'taken') throw err;
+        setMoving({ kind: 'google', token });
+        return;
+      }
       toast(t.linked2);
     } catch (err) {
       toast(reasonOf(err) === 'unknown' ? t.googleError : phoneError(t, err));
@@ -90,7 +108,14 @@ export default function Account() {
     setBusy(true);
     setError('');
     try {
-      const r = await core.sendLinkCode(phone);
+      let r;
+      try {
+        r = await core.sendLinkCode(phone, moveOk.current);
+      } catch (err) {
+        if (reasonOf(err) !== 'taken') throw err;
+        setMoving({ kind: 'sendCode' });
+        return;
+      }
       setSentTo(r.phone);
       if (await core.testSignInOn()) void core.testCode(r.phone).then(setCode).catch(() => {});
     } catch (err) {
@@ -104,13 +129,41 @@ export default function Account() {
     setBusy(true);
     setError('');
     try {
-      await core.linkPhone(sentTo, code);
+      try {
+        await core.linkPhone(sentTo, code, moveOk.current);
+      } catch (err) {
+        if (reasonOf(err) !== 'taken') throw err;
+        setMoving({ kind: 'phone', number: sentTo, code });
+        return;
+      }
       setAdding(false);
       toast(t.linked2);
     } catch (err) {
       setError(phoneError(t, err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Said yes on "Move it here": does what was refused, moving it. */
+  async function moveHere() {
+    const m = moving;
+    setMoving(null);
+    if (!m) return;
+    try {
+      if (m.kind === 'google') {
+        await core.linkGoogle(m.token, true);
+        toast(t.linked2);
+      } else if (m.kind === 'sendCode') {
+        moveOk.current = true;
+        await sendCode();
+      } else {
+        await core.linkPhone(m.number, m.code, true);
+        setAdding(false);
+        toast(t.linked2);
+      }
+    } catch (err) {
+      toast(m.kind === 'google' && reasonOf(err) === 'unknown' ? t.googleError : phoneError(t, err));
     }
   }
 
@@ -245,6 +298,18 @@ export default function Account() {
       </Sheet>
 
       <Dialog
+        visible={!!moving}
+        onClose={() => setMoving(null)}
+        title={moving?.kind === 'google' ? t.moveGoogleTitle : t.movePhoneTitle}
+        text={fill(t.moveText, {
+          what: !moving ? '' : moving.kind === 'google' ? emailIn(moving.token) : formatPhone(moving.kind === 'phone' ? moving.number : phone),
+        })}
+        buttons={[
+          { label: t.moveHere, danger: true, onPress: () => void moveHere(), testID: 'confirm-move' },
+          { label: t.cancel, onPress: () => setMoving(null) },
+        ]}
+      />
+      <Dialog
         visible={!!removing}
         onClose={() => setRemoving(null)}
         title={t.unlink}
@@ -256,4 +321,15 @@ export default function Account() {
       />
     </Screen>
   );
+}
+
+/** The Gmail address in Google's token (its middle part), to name it in "Move it here". */
+function emailIn(token: string): string {
+  try {
+    const part = token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const email = (JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, '='))) as { email?: unknown }).email;
+    return typeof email === 'string' ? email : 'Gmail';
+  } catch {
+    return 'Gmail';
+  }
 }

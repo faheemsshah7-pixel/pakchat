@@ -128,7 +128,21 @@ function sharedLoad<T>(topics: Topic[], load: () => Promise<T>, later?: () => nu
     if (!watchers.size) value = null;
   });
   const read = () => value;
-  return () => useSyncExternalStore(subscribe, read, read);
+  const useShared = () => useSyncExternalStore(subscribe, read, read);
+  /** Reads it once ahead of time (nobody showing it yet), so the first screen has it at once. */
+  const warm = async () => {
+    if (value !== null || running) return;
+    try {
+      const v = await load();
+      if (value === null) {
+        value = v;
+        watchers.forEach((w) => w());
+      }
+    } catch {
+      // Not signed in, or the database isn't open: the screen reads it itself.
+    }
+  };
+  return Object.assign(useShared, { warm });
 }
 
 // ---- Signing in ----
@@ -195,7 +209,17 @@ core.on('auth', () => chatCache.clear());
 const underChat = () => (core.viewing ? 300 : 0);
 
 /** Every chat with its newest message, pinned first, then newest. Chats in the Locked chats folder only show there (useLockedChats). */
-export const useChatList: () => ChatRow[] | null = sharedLoad(['chats', 'prefs', 'people', 'auth'], () => chatRows('list'), underChat);
+export const useChatList: (() => ChatRow[] | null) & { warm: () => Promise<void> } = sharedLoad(['chats', 'prefs', 'people', 'auth'], () => chatRows('list'), underChat);
+
+/**
+ * Starting PakChat: reads the chat list as soon as the database and keys are open, while React is
+ * still putting the first screens together, so the list is there the moment its screen draws.
+ */
+export function warmChatList() {
+  if (core.state !== 'signedIn') return;
+  console.log('[pakchat] start: reading the chat list');
+  void useChatList.warm().then(() => console.log('[pakchat] start: chat list read'));
+}
 
 /** The chats in the Locked chats folder (only once it's opened). */
 export const useLockedChats: () => ChatRow[] | null = sharedLoad(['chats', 'prefs', 'people', 'auth'], () => chatRows('folder'), underChat);
@@ -638,6 +662,8 @@ export function markListShown() {
   if (listShown) return;
   listShown = true;
   startWatchers.forEach((w) => w());
+  // The start's other work (names, missed chats, alerts…) waited for this, to keep the list quick.
+  core.listShown();
 }
 
 /**

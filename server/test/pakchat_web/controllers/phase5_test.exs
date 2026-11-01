@@ -176,7 +176,7 @@ defmodule PakchatWeb.Phase5Test do
       assert user.id == sara["user"]["id"]
     end
 
-    test "someone else's number or Gmail can't be added (joining accounts comes later)" do
+    test "someone else's number or Gmail can't be added without moving it" do
       ali = person("Ali")
       send_code("03007778899")
       phone_sign_in("03007778899") |> json_response(200)
@@ -193,6 +193,84 @@ defmodule PakchatWeb.Phase5Test do
 
       assert as(ali) |> put(~p"/api/me/google", %{"id_token" => token}) |> json_response(422) ==
                %{"error" => "taken"}
+    end
+
+    test "Move it here: a Gmail that was another account's only way in moves, and that account is deleted (owner, 31 Oct)" do
+      send_code("03001112233")
+      me = phone_sign_in("03001112233") |> json_response(200)
+      me_conn = fn -> as(%{token: me["token"]}) end
+      bilal = person("Bilal")
+      sara = person("Sara")
+      {:ok, group} = Chats.create_group(bilal.user, %{"title" => "Study"}, [sara.user.id])
+
+      token =
+        google_token("Bilal", %{"sub" => bilal.user.google_sub, "email" => bilal.user.email})
+
+      # Without asking to move: refused, nothing changes.
+      assert me_conn.() |> put(~p"/api/me/google", %{"id_token" => token}) |> json_response(422) ==
+               %{"error" => "taken"}
+
+      assert Pakchat.Repo.get(Pakchat.Accounts.User, bilal.user.id)
+
+      body =
+        me_conn.()
+        |> put(~p"/api/me/google", %{"id_token" => token, "move" => true})
+        |> json_response(200)
+
+      assert body["email"] == bilal.user.email
+      assert body["phone"] == "+923001112233"
+
+      # Bilal's old account is gone: signed out, out of the group, which keeps an admin.
+      refute Pakchat.Repo.get(Pakchat.Accounts.User, bilal.user.id)
+      assert as(bilal) |> get(~p"/api/me") |> response(401)
+      assert Chats.role(group.id, sara.user.id) == "admin"
+      assert Chats.role(group.id, bilal.user.id) == nil
+
+      # Google sign-in now opens my account.
+      {:ok, attrs} = PakchatWeb.Params.device(device_params())
+      {:ok, %{user: user}} = Accounts.sign_in_with_google(token, attrs)
+      assert user.id == me["user"]["id"]
+    end
+
+    test "Move it here: a number moves, and its old account keeps its Gmail" do
+      ali = person("Ali")
+      as(ali) |> post(~p"/api/me/phone/code", %{"phone" => "03002223344"})
+
+      as(ali)
+      |> put(~p"/api/me/phone", %{"phone" => "03002223344", "code" => code_for("03002223344")})
+      |> json_response(200)
+
+      bilal = person("Bilal")
+      age_codes()
+
+      assert as(bilal)
+             |> post(~p"/api/me/phone/code", %{"phone" => "03002223344"})
+             |> json_response(422) == %{"error" => "taken"}
+
+      as(bilal)
+      |> post(~p"/api/me/phone/code", %{"phone" => "03002223344", "move" => true})
+      |> json_response(200)
+
+      # A wrong code moves nothing.
+      as(bilal)
+      |> put(~p"/api/me/phone", %{"phone" => "03002223344", "code" => "000000", "move" => true})
+      |> json_response(422)
+
+      assert Pakchat.Repo.get(Pakchat.Accounts.User, ali.user.id).phone == "+923002223344"
+
+      me =
+        as(bilal)
+        |> put(~p"/api/me/phone", %{
+          "phone" => "03002223344",
+          "code" => code_for("03002223344"),
+          "move" => true
+        })
+        |> json_response(200)
+
+      assert me["phone"] == "+923002223344"
+      ali_now = Pakchat.Repo.get(Pakchat.Accounts.User, ali.user.id)
+      assert ali_now.phone == nil
+      assert ali_now.google_sub == ali.user.google_sub
     end
 
     test "unlinking is allowed only while another way to sign in stays" do

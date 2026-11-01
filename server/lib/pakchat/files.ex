@@ -220,6 +220,11 @@ defmodule Pakchat.Files do
     from(f in Stored, where: f.owner_id == ^me and f.kind == "backup") |> delete_all()
   end
 
+  @doc "Deletes everything an account uploaded, rows and bytes (deleting the account)."
+  def delete_owned(%User{id: me}) do
+    from(f in Stored, where: f.owner_id == ^me) |> delete_all()
+  end
+
   defp delete_older_backups(%Stored{} = keep) do
     from(f in Stored,
       where: f.owner_id == ^keep.owner_id and f.kind == "backup" and f.id != ^keep.id

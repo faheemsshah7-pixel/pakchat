@@ -18,7 +18,7 @@ import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useC
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
-import { UpdateCard } from '../../ui/UpdateCard';
+import { UpdatePopup } from '../../ui/UpdatePopup';
 import { ChatRow } from '../../ui/ChatRow';
 import { fromGallery } from '../../ui/chat/attachments';
 import { MuteSheet } from '../../ui/MuteSheet';
@@ -139,7 +139,14 @@ export default function Chats() {
     .join(',');
   useEffect(() => {
     if (!top) return;
-    const wait = setTimeout(() => warmChats(top.split(',')), 600);
+    const wait = setTimeout(() => {
+      warmChats(top.split(','));
+      // The chat screen's code is loaded ahead too. The first chat opened after
+      // starting was twice as slow as the rest (owner, 31 Oct): that's when the
+      // phone loaded the screen's code (the composer, emoji, voice, polls…). It's
+      // loaded once, so after this every chat opens as fast as the second one.
+      void import('../chat/[id]').catch(() => {});
+    }, 600);
     return () => clearTimeout(wait);
   }, [top]);
 
@@ -371,7 +378,6 @@ export default function Chats() {
               )}
               {/* Realme, Xiaomi and the like: turn on Autostart, or alerts don't come. */}
               {filter === 'all' && !selecting && <AlertsCard />}
-              {filter === 'all' && !selecting && <UpdateCard />}
               {archivedCount > 0 && filter === 'all' ? (
                 <Pressy onPress={() => router.push('/archived')} label={t.archived} scale={0.98} testID="open-archived">
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 14, height: 52 }}>
@@ -594,6 +600,8 @@ export default function Chats() {
         ]}
       />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => forPicked((r) => core.mute(r.chat.id, ms))} />
+      {/* A newer PakChat on the website: a pop-up, like an alert (owner, 31 Oct). */}
+      <UpdatePopup />
     </Screen>
   );
 }

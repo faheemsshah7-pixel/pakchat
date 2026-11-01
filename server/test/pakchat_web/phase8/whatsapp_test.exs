@@ -145,6 +145,34 @@ defmodule PakchatWeb.WhatsAppTest do
     assert sign_in("+923009999999", check["secret"]) |> json_response(422)
   end
 
+  test "with the number typed first (build 16), only that number's WhatsApp counts" do
+    check =
+      build_conn()
+      |> post(~p"/api/auth/whatsapp", %{"purpose" => "sign_in", "phone" => "0300 1234567"})
+      |> json_response(200)
+
+    # Sent from another WhatsApp: it doesn't count, and both sides are told.
+    deliver(meta_message("923009999999", "PakChat code: " <> check["code"]))
+    assert_receive {:replied, "923009999999", "This code is for a different number" <> _}
+
+    assert %{"status" => "wrong_number", "from" => "+923009999999"} =
+             claim(check) |> json_response(200)
+
+    # Then sent from the right one: signed in as the typed number.
+    deliver(meta_message("923001234567", "PakChat code: " <> check["code"]))
+    assert %{"status" => "done", "phone" => "+923001234567"} = claim(check) |> json_response(200)
+
+    assert %{"user" => %{"phone" => "+923001234567"}} =
+             sign_in("+923001234567", check["secret"]) |> json_response(200)
+  end
+
+  test "a typed number that isn't a number is refused" do
+    assert %{"error" => "bad_phone"} =
+             build_conn()
+             |> post(~p"/api/auth/whatsapp", %{"purpose" => "sign_in", "phone" => "12"})
+             |> json_response(422)
+  end
+
   test "adds a number to an account that signed in with Google" do
     ali = person("Ali")
     check = start("link")

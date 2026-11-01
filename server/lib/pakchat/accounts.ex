@@ -136,34 +136,100 @@ defmodule Pakchat.Accounts do
 
   @doc """
   Adds a Gmail to my account (I signed in by phone). Google's token proves
-  it's mine. Refused if that Gmail already has its own PakChat account.
+  it's mine. If that Gmail already has its own PakChat account, it's refused
+  (`:taken`) unless `move: true`: then it moves here (owner, 31 Oct, "Move it
+  here"), and that other account is deleted if the Gmail was its only way in.
   """
-  def link_google(%User{} = user, id_token) do
+  def link_google(%User{} = user, id_token, opts \\ []) do
+    move? = Keyword.get(opts, :move, false)
+
     with {:ok, claims} <- GoogleToken.verify(id_token),
-         :ok <- free(User, :google_sub, claims["sub"], user),
-         :ok <- free(User, :email, String.downcase(claims["email"] || ""), user) do
+         email = String.downcase(claims["email"] || ""),
+         :ok <- free_or_move(:google_sub, claims["sub"], user, move?, :google),
+         :ok <- free_or_move(:email, email, user, move?, :google) do
       user
       |> User.link_google_changeset(%{google_sub: claims["sub"], email: claims["email"]})
       |> Repo.update()
     end
   end
 
-  @doc "Sends a code to a number I want to add to my account."
-  def send_link_code(%User{} = user, phone) do
+  @doc "Sends a code to a number I want to add to my account (`move: true`: even if it has its own account)."
+  def send_link_code(%User{} = user, phone, opts \\ []) do
+    move? = Keyword.get(opts, :move, false)
+
     with {:ok, phone} <- Phone.normalize(phone),
-         :ok <- free(User, :phone, phone, user),
+         :ok <- if(move?, do: :ok, else: free(User, :phone, phone, user)),
          {:ok, info} <- PhoneCodes.send_code(phone, "link") do
       {:ok, Map.put(info, :phone, phone)}
     end
   end
 
-  @doc "Adds the number to my account, once the code proves it's mine."
-  def link_phone(%User{} = user, phone, code) do
+  @doc """
+  Adds the number to my account, once the code proves it's mine. With
+  `move: true` a number that has its own account moves here, as for a Gmail;
+  nothing is moved until the code checks out.
+  """
+  def link_phone(%User{} = user, phone, code, opts \\ []) do
+    move? = Keyword.get(opts, :move, false)
+
     with {:ok, phone} <- Phone.normalize(phone),
-         :ok <- free(User, :phone, phone, user),
-         :ok <- PhoneCodes.check(phone, "link", code) do
+         :ok <- if(move?, do: :ok, else: free(User, :phone, phone, user)),
+         :ok <- PhoneCodes.check(phone, "link", code),
+         :ok <- free_or_move(:phone, phone, user, move?, :phone) do
       user |> User.link_phone_changeset(%{phone: phone}) |> Repo.update()
     end
+  end
+
+  # The Gmail or number is free, or mine already: fine. Someone else's account:
+  # refused, or (moving) taken off that account, which is deleted if it was its only way in.
+  defp free_or_move(_field, value, _me, _move?, _what) when value in [nil, ""], do: :ok
+
+  defp free_or_move(field, value, %User{id: my_id}, move?, what) do
+    case Repo.get_by(User, [{field, value}]) do
+      nil -> :ok
+      %User{id: ^my_id} -> :ok
+      %User{} when not move? -> {:error, :taken}
+      %User{} = other -> release(other, what)
+    end
+  end
+
+  defp release(%User{phone: phone} = other, :google) when is_binary(phone) do
+    with {:ok, _} <- unlink(other, :google), do: :ok
+  end
+
+  defp release(%User{google_sub: sub} = other, :phone) when is_binary(sub) do
+    with {:ok, _} <- unlink(other, :phone), do: :ok
+  end
+
+  defp release(%User{} = other, _what), do: delete_account(other)
+
+  @doc """
+  Deletes an account for good, like WhatsApp's Delete account: it leaves its
+  communities and groups first (so the others see "left" and a group always
+  keeps an admin), then its files, devices (signed out at once), blocks and
+  everything else of it go with it.
+  """
+  def delete_account(%User{id: id} = user) do
+    for kind <- ["community", "group"], chat_id <- my_chats(id, kind) do
+      # Leaving a community already took it out of that community's groups.
+      _ = Pakchat.Chats.remove_member(user, chat_id, id)
+    end
+
+    Pakchat.Files.delete_owned(user)
+    devices = Repo.all(from d in Device, where: d.user_id == ^id, select: d.id)
+    Repo.delete_all(from u in User, where: u.id == ^id)
+    Enum.each(devices, &disconnect/1)
+    :ok
+  end
+
+  defp my_chats(user_id, kind) do
+    Repo.all(
+      from c in Pakchat.Chats.Chat,
+        join: m in Pakchat.Chats.Member,
+        on: m.chat_id == c.id and m.user_id == ^user_id,
+        where: c.kind == ^kind and not c.announcements,
+        select: c.id
+    )
   end
 
   @doc "Takes the Gmail or the number off my account, as long as the other stays."
@@ -176,8 +242,7 @@ defmodule Pakchat.Accounts do
   def unlink(%User{} = user, :phone),
     do: user |> User.link_phone_changeset(%{phone: nil}) |> Repo.update()
 
-  # The Gmail or number isn't someone else's account already. (Joining two
-  # accounts into one is a later decision; for now it's refused.)
+  # The Gmail or number isn't someone else's account already.
   defp free(schema, field, value, %User{id: my_id}) do
     case Repo.get_by(schema, [{field, value}]) do
       nil -> :ok

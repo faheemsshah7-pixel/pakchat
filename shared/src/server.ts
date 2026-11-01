@@ -320,12 +320,16 @@ export class HttpServer implements ServerApi {
 
   // ---- Checking a number with WhatsApp (instead of an SMS code) ----
 
-  /** Whether this server checks numbers with WhatsApp. */
+  /**
+   * Whether this server checks numbers with WhatsApp. Only a server that answers "no" (404) gives
+   * false; no answer at all (offline, slow) throws, so the app asks again rather than guess.
+   */
   async whatsAppOn(): Promise<boolean> {
     try {
       return (await this.call<{ on?: boolean }>('GET', '/auth/whatsapp')).on === true;
-    } catch {
-      return false;
+    } catch (err) {
+      if (err instanceof ServerError && err.status === 404) return false;
+      throw err;
     }
   }
 
@@ -333,15 +337,20 @@ export class HttpServer implements ServerApi {
    * Starts a check: open `url` (WhatsApp, with "PakChat code: …" ready to send to PakChat's number),
    * then keep asking `claimWhatsApp`. The secret then signs in (or adds) that number, like an SMS code.
    */
-  async startWhatsApp(purpose: 'sign_in' | 'link') {
-    const r = await this.call<{ id: string; secret: string; code: string; url: string; expires_in: number }>('POST', '/auth/whatsapp', { purpose });
+  async startWhatsApp(purpose: 'sign_in' | 'link', phone?: string) {
+    const r = await this.call<{ id: string; secret: string; code: string; url: string; expires_in: number }>('POST', '/auth/whatsapp', { purpose, ...(phone ? { phone } : {}) });
     return { id: r.id, secret: r.secret, code: r.code, url: r.url, expiresIn: r.expires_in };
   }
 
-  /** Null while the message hasn't arrived; the number that sent it once it has. */
-  async claimWhatsApp(id: string, secret: string): Promise<string | null> {
-    const r = await this.call<{ status: string; phone?: string }>('POST', `/auth/whatsapp/${encodeURIComponent(id)}`, { secret });
-    return r.status === 'done' && r.phone ? r.phone : null;
+  /**
+   * `{}` while the message hasn't arrived; `{ phone }` (the number that sent it) once it has;
+   * `{ wrongFrom }` while the only message came from another number than the one typed.
+   */
+  async claimWhatsApp(id: string, secret: string): Promise<{ phone?: string; wrongFrom?: string }> {
+    const r = await this.call<{ status: string; phone?: string; from?: string }>('POST', `/auth/whatsapp/${encodeURIComponent(id)}`, { secret });
+    if (r.status === 'done' && r.phone) return { phone: r.phone };
+    if (r.status === 'wrong_number' && r.from) return { wrongFrom: r.from };
+    return {};
   }
 
   /** Emulator tests only: the last code the Mac's server printed for a number. */
@@ -359,19 +368,23 @@ export class HttpServer implements ServerApi {
     return meFromWire(await this.call<WireMe>('PATCH', '/me', change));
   }
 
-  /** Adds a Gmail to my account. Google's token proves it's mine. */
-  async linkGoogle(idToken: string) {
-    return meFromWire(await this.call<WireMe>('PUT', '/me/google', { id_token: idToken }));
+  /**
+   * Adds a Gmail to my account. Google's token proves it's mine. If it has its own
+   * PakChat account the server answers "taken"; `move` moves it here (that account is
+   * deleted if the Gmail was its only way in).
+   */
+  async linkGoogle(idToken: string, move = false) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/google', { id_token: idToken, move }));
   }
 
-  /** Sends a code to a number I want to add to my account. */
-  async sendLinkCode(phone: string) {
-    const r = await this.call<{ phone: string; resend_after: number }>('POST', '/me/phone/code', { phone });
+  /** Sends a code to a number I want to add to my account (`move`: even one with its own account). */
+  async sendLinkCode(phone: string, move = false) {
+    const r = await this.call<{ phone: string; resend_after: number }>('POST', '/me/phone/code', { phone, move });
     return { phone: r.phone, resendAfter: r.resend_after };
   }
 
-  async linkPhone(phone: string, code: string) {
-    return meFromWire(await this.call<WireMe>('PUT', '/me/phone', { phone, code }));
+  async linkPhone(phone: string, code: string, move = false) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/phone', { phone, code, move }));
   }
 
   /** Takes the Gmail or the number off my account (the other must stay). */

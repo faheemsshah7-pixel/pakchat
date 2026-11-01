@@ -7,7 +7,7 @@ const path = require('path');
 
 module.exports = ({ config }) => {
   // Which copy this is: "website" (the APK on our website, which checks it for updates,
-  // see src/ui/UpdateCard.tsx) unless built for Google Play with PAKCHAT_CHANNEL=play.
+  // see src/ui/UpdatePopup.tsx) unless built for Google Play with PAKCHAT_CHANNEL=play.
   config = { ...config, extra: { ...config.extra, channel: process.env.PAKCHAT_CHANNEL === 'play' ? 'play' : 'website' } };
   const firebase = path.join(__dirname, 'google-services.json');
   if (!fs.existsSync(firebase)) return config;

@@ -15,7 +15,7 @@ import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
-import { useAppLocked, useAuth, useCall } from '../core/hooks';
+import { useAppLocked, useAuth, useCall, warmChatList } from '../core/hooks';
 import { LockScreen } from '../ui/LockScreen';
 import { calls, takeTappedCall, watchCallTaps } from '../core/calls';
 import { LIKE_ALERT, PLAN_ALERT, takeTapped, watchTaps } from '../core/push';
@@ -26,6 +26,13 @@ import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+// Start opening the database and keys now, while React is still drawing its first frame,
+// rather than after it (the effect below picks up the same start, and shows any problem).
+// The chat list is read as soon as that's done, so it's ready when its screen first draws.
+void core
+  .init()
+  .then(warmChatList)
+  .catch(() => {});
 
 export default function Root() {
   return (
@@ -208,6 +215,9 @@ function App() {
         </Stack.Protected>
         <Stack.Protected guard={state === 'signedOut'}>
           <Stack.Screen name="sign-in" options={{ animation: 'none' }} />
+          {/* Like WhatsApp: your number, then checking it, each its own screen. */}
+          <Stack.Screen name="sign-in-number" />
+          <Stack.Screen name="sign-in-verify" />
         </Stack.Protected>
       </Stack>
       {state === 'signedIn' && <CallBar />}

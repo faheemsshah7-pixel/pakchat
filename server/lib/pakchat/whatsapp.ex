@@ -42,9 +42,15 @@ defmodule Pakchat.WhatsApp do
   @doc """
   Starts a check. Answers the check's id, the secret the app keeps, the code,
   and the WhatsApp link that opens a chat with the message ready.
+
+  `typed` is the number the person typed in the app (build 16 on). The code then
+  only counts when it comes from that number. Apps before build 16 send none.
   """
-  def start(purpose) when purpose in @purposes do
-    if on?() do
+  def start(purpose, typed \\ nil)
+
+  def start(purpose, typed) when purpose in @purposes and (is_nil(typed) or is_binary(typed)) do
+    with true <- on?() || {:error, :not_found},
+         {:ok, typed_phone} <- typed_number(typed) do
       code = free_code()
       secret = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
       text = "PakChat code: #{code}"
@@ -54,6 +60,7 @@ defmodule Pakchat.WhatsApp do
           code: code,
           secret_hash: hash(secret),
           purpose: purpose,
+          typed_phone: typed_phone,
           expires_at: DateTime.add(DateTime.utc_now(), @lasts_minutes, :minute)
         })
 
@@ -66,17 +73,20 @@ defmodule Pakchat.WhatsApp do
          url: "https://wa.me/#{number()}?text=#{URI.encode_www_form(text)}",
          expires_in: @lasts_minutes * 60
        }}
-    else
-      {:error, :not_found}
     end
   end
 
-  def start(_), do: {:error, :bad_request}
+  def start(_, _), do: {:error, :bad_request}
+
+  defp typed_number(nil), do: {:ok, nil}
+  defp typed_number(""), do: {:ok, nil}
+  defp typed_number(text), do: Phone.normalize(text)
 
   @doc """
   A WhatsApp message reached PakChat's number. `from` is the sender's number
   as WhatsApp gives it (digits, with the country code). Answers `:checked`,
-  `:no_code` or `:expired`.
+  `:no_code`, `:expired`, or `:wrong_number` (the app asked for another number;
+  the code still works from the right one until it runs out).
   """
   def received(from, body) when is_binary(from) and is_binary(body) do
     now = DateTime.utc_now()
@@ -91,11 +101,17 @@ defmodule Pakchat.WhatsApp do
                order_by: [desc: c.inserted_at],
                limit: 1
            ) do
-      if DateTime.compare(check.expires_at, now) == :gt do
-        check |> Ecto.Changeset.change(phone: phone) |> Repo.update!()
-        :checked
-      else
-        :expired
+      cond do
+        DateTime.compare(check.expires_at, now) != :gt ->
+          :expired
+
+        check.typed_phone != nil and check.typed_phone != phone ->
+          check |> Ecto.Changeset.change(wrong_phone: phone) |> Repo.update!()
+          :wrong_number
+
+        true ->
+          check |> Ecto.Changeset.change(phone: phone) |> Repo.update!()
+          :checked
       end
     else
       _ -> :no_code
@@ -108,6 +124,8 @@ defmodule Pakchat.WhatsApp do
   The app asking "has my code arrived?". Answers `{:ok, :waiting}`, or, once the
   number has sent the code, `{:ok, phone}`: the secret is then also a one-time
   sign-in code for that number (Pakchat.PhoneCodes), and the check is gone.
+  `{:ok, {:wrong_number, phone}}` while the only code that came was sent from
+  another number than the one typed.
   """
   def claim(id, secret) when is_binary(id) and is_binary(secret) do
     now = DateTime.utc_now()
@@ -120,6 +138,9 @@ defmodule Pakchat.WhatsApp do
           Repo.delete!(check)
           PhoneCodes.allow(check.phone, check.purpose, secret)
           {:ok, check.phone}
+
+        DateTime.compare(check.expires_at, now) == :gt and check.wrong_phone != nil ->
+          {:ok, {:wrong_number, check.wrong_phone}}
 
         DateTime.compare(check.expires_at, now) == :gt ->
           {:ok, :waiting}
@@ -190,6 +211,9 @@ defmodule Pakchat.WhatsApp do
 
         :expired ->
           "⌛ That code has run out. Open PakChat and tap Continue with WhatsApp again."
+
+        :wrong_number ->
+          "This code is for a different number. Send it from the WhatsApp of the number you typed in PakChat."
 
         :no_code ->
           if String.contains?(String.downcase(body), "pakchat"),

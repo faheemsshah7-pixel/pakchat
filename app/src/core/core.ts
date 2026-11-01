@@ -202,6 +202,14 @@ export function serverUrl(): string {
   return extra.serverUrl ?? 'http://localhost:4000';
 }
 
+/**
+ * Whether the app talks to the live server it was built with (not a Mac on the Wi-Fi or the
+ * emulator's). Then the sign-in screens hide the address and only ever use WhatsApp.
+ */
+export function onBuiltInServer(): boolean {
+  return !!extra.serverUrl && serverUrl() === extra.serverUrl.replace(/\/+$/, '');
+}
+
 export function setServerUrl(url: string) {
   KV.setItemSync('serverUrl', url.trim().replace(/\/+$/, ''));
 }
@@ -275,10 +283,11 @@ class Core {
   step = 'starting';
 
   // Each step also goes to the phone's log (adb logcat, tag ReactNativeJS), so a
-  // stuck start can be traced even when nothing shows on screen.
+  // stuck start can be traced even when nothing shows on screen. Each line says how long
+  // after the app's code began it came, to find which step is slow on a real phone.
   private at(step: string) {
     this.step = step;
-    console.log(`[pakchat] start: ${step}`);
+    console.log(`[pakchat] start: ${step} (+${Math.round(performance.now())} ms)`);
   }
 
   /** Starting up failed: forget it, so init() tries again from the beginning. */
@@ -417,12 +426,8 @@ class Core {
   }
 
   private afterSignIn() {
+    // The live connection starts at once, so messages come in as soon as possible.
     this.client.start();
-    void this.client
-      .chats()
-      .then((all) => all.forEach((c) => this.notePhoto(c)))
-      .catch(() => {});
-    void startPush();
     if (!this.watchingApp) {
       this.watchingApp = true;
       AppState.addEventListener('change', (s) => this.appMoved(s));
@@ -430,14 +435,47 @@ class Core {
     // The daily backup, a little after starting so it doesn't slow the start.
     setTimeout(() => void backUpIfDue(), 30_000);
     setTimeout(() => void import('./linking').then((m) => m.resumeHistory()).catch(() => {}), 10_000);
-    // Fill in anything missed while signed out, and everyone's names.
-    void this.client
-      .syncChats()
-      .then(() => this.loadPeople())
-      .catch(() => {});
-    void this.loadPeople();
-    void import('./scheduled').then((m) => (void m.watchPlans(), m.sendDue())).catch(() => {});
-    void import('./live').then((m) => m.resumeLive()).catch(() => {});
+    // The rest waits until the chat list is on screen (or 2 seconds, when nothing is shown, like a
+    // wake in the background), so it doesn't hold up drawing the list.
+    this.afterList(() => {
+      void this.client
+        .chats()
+        .then((all) => all.forEach((c) => this.notePhoto(c)))
+        .catch(() => {});
+      void startPush();
+      // Fill in anything missed while signed out, and everyone's names.
+      void this.client
+        .syncChats()
+        .then(() => this.loadPeople())
+        .catch(() => {});
+      void this.loadPeople();
+      void import('./scheduled').then((m) => (void m.watchPlans(), m.sendDue())).catch(() => {});
+      void import('./live').then((m) => m.resumeLive()).catch(() => {});
+    });
+  }
+
+  private waitingForList: (() => void)[] = [];
+  private listIsShown = false;
+
+  /** Runs `fn` once the chat list has been drawn (at once if it already has), or after 2 s at most. */
+  private afterList(fn: () => void) {
+    if (this.listIsShown) return fn();
+    let done = false;
+    const once = () => {
+      if (done) return;
+      done = true;
+      fn();
+    };
+    this.waitingForList.push(once);
+    setTimeout(once, 2_000);
+  }
+
+  /** The chat list is on screen (hooks' markListShown): what waited for it goes now. */
+  listShown() {
+    this.listIsShown = true;
+    const waiting = this.waitingForList;
+    this.waitingForList = [];
+    waiting.forEach((fn) => fn());
   }
 
   private watchingApp = false;
@@ -513,8 +551,16 @@ class Core {
    * brings everything anyway.
    */
   async fromPush(json: string) {
+    // The grey "delivered" ticks should go as the alert shows (owner, 31 Oct). A locked
+    // phone has no line to the server, and making one (finding the server, the secure
+    // handshake) took most of a second. So both lines start now, while the messages
+    // are being opened: a tiny "are you there?" opens the line the ticks go down
+    // (the phone keeps it for reuse), and the live connection starts too. Whichever
+    // is ready first carries the ticks.
+    void fetch(`${serverUrl()}/api/health`).catch(() => {});
     await this.init();
     if (this.state !== 'signedIn') return;
+    this.client.start();
     let list: unknown;
     try {
       list = JSON.parse(json);
@@ -643,12 +689,12 @@ class Core {
   }
 
   /** Starts a WhatsApp number check, for signing in or for adding a number to my account. */
-  async startWhatsApp(purpose: 'sign_in' | 'link') {
+  async startWhatsApp(purpose: 'sign_in' | 'link', phone?: string) {
     await this.init();
-    return new HttpServer(serverUrl()).startWhatsApp(purpose);
+    return new HttpServer(serverUrl()).startWhatsApp(purpose, phone);
   }
 
-  /** Null until the person has sent the code from WhatsApp; then the number that sent it. */
+  /** `{}` until the person has sent the code from WhatsApp; then `{ phone }`, or `{ wrongFrom }` if another number sent it. */
   claimWhatsApp(id: string, secret: string) {
     return new HttpServer(serverUrl()).claimWhatsApp(id, secret);
   }
@@ -768,17 +814,20 @@ class Core {
 
   // ---- Ways to sign in: Gmail and phone number on one account ----
 
-  /** Adds a Gmail to my account (Google's token proves it's mine). Fails with "taken" if it has its own account. */
-  async linkGoogle(idToken: string) {
-    await this.saveMe(await this.server.linkGoogle(idToken));
+  /**
+   * Adds a Gmail to my account (Google's token proves it's mine). Fails with "taken" if
+   * it has its own account; `move` then moves it here (owner, 31 Oct, "Move it here").
+   */
+  async linkGoogle(idToken: string, move = false) {
+    await this.saveMe(await this.server.linkGoogle(idToken, move));
   }
 
-  sendLinkCode(phone: string) {
-    return this.server.sendLinkCode(phone);
+  sendLinkCode(phone: string, move = false) {
+    return this.server.sendLinkCode(phone, move);
   }
 
-  async linkPhone(phone: string, code: string) {
-    await this.saveMe(await this.server.linkPhone(phone, code));
+  async linkPhone(phone: string, code: string, move = false) {
+    await this.saveMe(await this.server.linkPhone(phone, code, move));
   }
 
   /** Takes the Gmail or number off my account. The server refuses if it's the last way in. */

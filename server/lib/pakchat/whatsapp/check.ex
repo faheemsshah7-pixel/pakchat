@@ -8,6 +8,8 @@ defmodule Pakchat.WhatsApp.Check do
     field :secret_hash, :binary, redact: true
     field :purpose, :string
     field :phone, :string
+    field :typed_phone, :string
+    field :wrong_phone, :string
     field :expires_at, :utc_datetime_usec
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end

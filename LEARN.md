@@ -2013,3 +2013,61 @@ menus and sheets just appeared with no motion.
 - Settings › Help › Speed check on the Realme and the Pixel, after opening a few chats.
 - Open ⋮, a sheet (Mute), and a question (Delete): each should come and go smoothly.
 - Hold a chat, then a message: the bar and ticks fade; type a word: mic to send.
+
+## Step 38: Phase 8, the website as a linked device, and PakChat on its own server
+
+### Why
+PakChat Web had to work like WhatsApp Web: link it with a QR code, see your chats, keep
+working when the phone is off. And everything had to move off test machines onto a real
+server that friends can reach.
+
+### The website (`web/`)
+- **Linking:** the website shows a QR code; the phone scans it (Settings › Linked devices)
+  and copies the chats across, locked end to end (`app/src/core/linking.ts`). Up to 4 linked
+  devices. You can also link with a phone number: the phone shows an 8-letter code to type.
+- **Its own device:** the website has its own keys (libsignal as WebAssembly in a Web Worker,
+  `web/src/core/signalWorker.ts`), so it sends and receives with the phone switched off.
+- **Everything else:** calls (ringing card, call window, screen share), voice notes, profile,
+  App lock and Lock chat, select chats, Urdu (right to left), and chat settings that stay the
+  same on the phone and the website both ways.
+
+### The server (`deploy/`)
+- One Oracle machine (free, in Mumbai) runs four parts with Docker: the Phoenix server, its
+  Postgres database, Caddy (the website, the APK and HTTPS) and coturn (the call relay).
+- `setup.sh` sets it up once; `backup.sh` copies the database every night.
+- `build-site.sh` puts the website and the newest APK (`/pakchat.apk`) in place.
+
+### Faster, like WhatsApp
+- An alert carries the newest locked messages itself, so they're opened and shown before
+  the phone even connects. The grey "delivered" ticks go back at once over HTTP
+  (`POST /api/receipts`).
+- The connection stays a minute after you leave the app, so a quick look elsewhere needs no
+  reconnecting.
+- Calls start connecting while they ring (one-to-one, from a saved contact).
+
+### Try it
+- Open pakchat.duckdns.org on a computer, scan with the phone, then put the phone in airplane
+  mode: the website still sends and receives.
+
+## Step 39: build 15, the deep-dive fixes (31 Oct)
+
+### Why
+A full recheck after Phase 8 found things the plan always asked for that had slipped.
+
+### What changed
+- **Chats on the phone are locked.** The phone's database (`chats.db`) is scrambled with
+  SQLCipher, using a random key that only this phone has, kept in Android's Keystore
+  (`app/src/core/db.ts`). An old unlocked database is moved in once. Backups are made
+  unlocked inside (`sqlcipher_export`) because their own password locks them, so a new phone
+  can still restore them.
+- **Our own signing key.** APKs used to be signed with React Native's public sample key,
+  which anyone can download. Now they're signed with PakChat's private key
+  (`app/plugins/withReleaseKey.js`; the key itself never goes in git). Phones with an older
+  build must uninstall once. Google sign-in needs the new key's SHA-1 in Google Cloud.
+- **Ticks:** when an alert arrives, the phone starts both of its lines to the server at once,
+  while it opens the message, so "delivered" goes back as the alert shows.
+- **First chat open:** the chat screen's code is loaded half a second after the chat list
+  shows, so the first chat opens as fast as the rest.
+- **Update pop-up:** a newer APK on the website shows as a pop-up (`ui/UpdatePopup.tsx`).
+- **Website safety:** HSTS (always the secure address) and a Content Security Policy (only
+  the website's own code may run) in `deploy/Caddyfile`.

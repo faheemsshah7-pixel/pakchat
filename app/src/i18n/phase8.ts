@@ -49,6 +49,15 @@ export const en8 = {
   linkWord: 'Link',
   wrongLinkCode: "That code didn't match a computer waiting for your number. Check it and try again.",
   noPhoneForLink: 'Your account has no phone number. Scan the QR code instead.',
+  verifyQrNote: 'Or scan the code on {name}\'s phone, on this same screen in their chat with you.',
+  verifyScanNote: "Point your phone at the code on {name}'s phone.",
+  verifyMatch: 'The codes match. Your chat with {name} is end-to-end encrypted.',
+  verifyNoMatch: "The codes don't match. Make sure you're scanning {name}'s code for this chat.",
+  verifyNotCode: "This isn't a PakChat security code.",
+  moveGoogleTitle: 'Move this Gmail here?',
+  movePhoneTitle: 'Move this number here?',
+  moveText: '{what} already has its own PakChat account. Moving it here takes it off that account. If it was that account\'s only way to sign in, that account is deleted, with its chats, groups and contacts. Your chats here stay as they are.',
+  moveHere: 'Move it here',
 };
 
 export const ur8: typeof en8 = {
@@ -99,4 +108,13 @@ export const ur8: typeof en8 = {
   linkWord: 'منسلک کریں',
   wrongLinkCode: 'یہ کوڈ آپ کے نمبر کے منتظر کسی کمپیوٹر سے نہیں ملا۔ اسے چیک کر کے دوبارہ کوشش کریں۔',
   noPhoneForLink: 'آپ کے اکاؤنٹ میں کوئی فون نمبر نہیں ہے۔ اس کی بجائے QR کوڈ اسکین کریں۔',
+  verifyQrNote: 'یا {name} کے فون پر یہ کوڈ اسکین کریں، آپ کے ساتھ ان کی چیٹ میں اسی اسکرین پر۔',
+  verifyScanNote: '{name} کے فون پر موجود کوڈ کی طرف اپنا فون کریں۔',
+  verifyMatch: 'کوڈ مل گئے۔ {name} کے ساتھ آپ کی چیٹ اینڈ ٹو اینڈ انکرپٹڈ ہے۔',
+  verifyNoMatch: 'کوڈ نہیں ملے۔ یقینی بنائیں کہ آپ اس چیٹ کے لیے {name} کا کوڈ اسکین کر رہے ہیں۔',
+  verifyNotCode: 'یہ پاک چیٹ کا سیکیورٹی کوڈ نہیں ہے۔',
+  moveGoogleTitle: 'یہ جی میل یہاں منتقل کریں؟',
+  movePhoneTitle: 'یہ نمبر یہاں منتقل کریں؟',
+  moveText: '{what} کا اپنا پاک چیٹ اکاؤنٹ پہلے سے ہے۔ اسے یہاں منتقل کرنے سے یہ اُس اکاؤنٹ سے ہٹ جائے گا۔ اگر اُس اکاؤنٹ میں سائن ان کا یہی واحد طریقہ تھا تو وہ اکاؤنٹ اپنی چیٹس، گروپس اور رابطوں سمیت ڈیلیٹ ہو جائے گا۔ یہاں آپ کی چیٹس ویسی ہی رہیں گی۔',
+  moveHere: 'یہاں منتقل کریں',
 };

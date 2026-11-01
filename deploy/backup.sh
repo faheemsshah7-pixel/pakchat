@@ -1,7 +1,7 @@
 #!/bin/sh
 # backup.sh: a copy of PakChat's database, made every night by cron (setup.sh adds it).
 # Keeps the last 14 here in deploy/backups. With BACKUP_BUCKET set in .env (Oracle Object
-# Storage, free up to 20 GB), each one is also copied off the server, so a lost server loses nothing.
+# Storage, free up to 10 GB), each one is also copied off the server, so a lost server loses nothing.
 # Messages are locked on the phones; the database holds accounts, chats and messages not yet delivered.
 set -eu
 cd "$(dirname "$0")"
@@ -30,7 +30,7 @@ if [ -n "${BACKUP_BUCKET:-}" ]; then
   rclone copy "/backups/$(basename "$name")" "oracle:$BACKUP_BUCKET/"
   rclone copy "/backups/$(basename "$photos")" "oracle:$BACKUP_BUCKET/"
   # People's chat backups too, when asked for (BACKUP_CHAT_BACKUPS=yes): only the ones that changed
-  # are sent. Oracle's free storage is 20 GB, so watch the bucket's size as people join.
+  # are sent. Oracle's free storage is 10 GB, so watch the bucket's size as people join.
   if [ "${BACKUP_CHAT_BACKUPS:-}" = "yes" ]; then
     docker compose exec -T db psql -U pakchat -d pakchat -Atc "select id from files where kind = 'backup' and uploaded" > backups/.backup-ids
     rclone sync /data/files "oracle:$BACKUP_BUCKET/chat-backups/" --files-from-raw /backups/.backup-ids

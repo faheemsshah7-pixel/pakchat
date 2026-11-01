@@ -1,37 +1,33 @@
-// sign-in.tsx: the first screen. Continue with Google, or with your phone number.
+// sign-in.tsx: the first screen, like WhatsApp's welcome. Continue with Google, or with
+// your phone number: that opens its own screens, like WhatsApp's (sign-in-number.tsx to type
+// it, then sign-in-verify.tsx, where WhatsApp proves it).
 //
 // Google sign-in on Android goes through the phone's Credential Manager: it
 // shows the Google accounts on the phone, you pick one, and Google gives the
 // app a signed "ID token". The server checks Google's signature on it, then
 // makes (or finds) your account. No password ever touches PakChat.
 //
-// With a phone number: on the live server, WhatsApp proves it (ui/WhatsAppCheck.tsx, free).
-// Otherwise the server sends a 6-digit code. Until PakChat goes live
-// the code isn't texted: it shows in the Mac's Terminal (server/README.md, "SMS").
-// On a test server the app fills it in by itself, for the emulator tests.
-//
-// Under the buttons is the server's address. On your phone that's your Mac's
-// address on the Wi-Fi (the commands in LEARN.md Step 26 show how to find it).
-// Tap it to change it right there on the screen.
+// The server's address only shows when the app isn't on its built-in live server (a Mac on
+// the Wi-Fi, for testing). On the live server it's hidden; long-press the logo to change it.
 //
 // The keyboard: Android draws the app behind it, so the screen makes room
 // itself (an empty space as tall as the keyboard at the bottom) and scrolls
 // down, so the box you're typing in is never hidden.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { Keyboard, ScrollView, View, type ScrollViewInstance } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
-import { formatPhone } from '@pakchat/shared';
-
-import { core, isOffline, serverUrl, setServerUrl } from '../core/core';
+import { core, isOffline, onBuiltInServer, serverUrl, setServerUrl } from '../core/core';
 import { googleIdToken } from '../core/google';
-import { fill, useT } from '../i18n';
+import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
-import { phoneError } from '../ui/format';
-import { WhatsAppCheck } from '../ui/WhatsAppCheck';
+
+const LOGO = require('../../assets/logo.png');
 
 /** Google's "G", in its four colours (Google asks for it on sign-in buttons). */
 function GoogleG() {
@@ -55,14 +51,8 @@ export default function SignIn() {
   const [draft, setDraft] = useState(server);
   const [testOn, setTestOn] = useState(false);
   const [testName, setTestName] = useState('');
-  // Signing in by phone: type the number, then the code.
-  const [step, setStep] = useState<'start' | 'number' | 'code' | 'whatsapp'>('start');
-  // A live server checks numbers with WhatsApp (free) instead of SMS codes.
-  const [waOn, setWaOn] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [sentTo, setSentTo] = useState('');
-  const [code, setCode] = useState('');
-  const [resendIn, setResendIn] = useState(0);
+  // The address shows on a test server; on the live one only after a long press on the logo.
+  const [showServer, setShowServer] = useState(() => !onBuiltInServer());
   const scroller = useRef<ScrollViewInstance>(null);
   const keyboard = useAnimatedKeyboard();
   const keyboardSpace = useAnimatedStyle(() => ({ height: keyboard.height.value }));
@@ -92,22 +82,6 @@ export default function SignIn() {
     };
   }, [server]);
 
-  useEffect(() => {
-    let alive = true;
-    void core
-      .whatsAppOn()
-      .then((on) => alive && setWaOn(on))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [server]);
-
-  // WhatsApp proved the number: its one-time code signs in, exactly like an SMS code.
-  const whatsAppSignIn = useCallback(async (number: string, oneTime: string) => {
-    await core.signInWithPhone(number, oneTime);
-  }, []);
-
   async function google() {
     setError('');
     setBusy(true);
@@ -130,43 +104,6 @@ export default function SignIn() {
     } catch (err) {
       // Google said yes, but our server couldn't be reached (wrong address, or it isn't running), or said no.
       setError(isOffline(err) ? t.serverError : t.signInRefused);
-    }
-  }
-
-  useEffect(() => {
-    if (resendIn <= 0) return;
-    const id = setTimeout(() => setResendIn((n) => n - 1), 1000);
-    return () => clearTimeout(id);
-  }, [resendIn]);
-
-  async function sendCode() {
-    if (!phone.trim() || busy) return;
-    setError('');
-    setBusy(true);
-    try {
-      const r = await core.sendPhoneCode(phone);
-      setSentTo(r.phone);
-      setResendIn(r.resendAfter);
-      setCode('');
-      setStep('code');
-      // A test server tells the app the code, so the emulator tests needn't read the Terminal.
-      if (testOn) void core.testCode(r.phone).then(setCode).catch(() => {});
-    } catch (err) {
-      setError(phoneError(t, err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function phoneSignIn(typed = code) {
-    if (typed.length < 6 || busy) return;
-    setError('');
-    setBusy(true);
-    try {
-      await core.signInWithPhone(sentTo, typed);
-    } catch (err) {
-      setError(phoneError(t, err));
-      setBusy(false);
     }
   }
 
@@ -208,21 +145,12 @@ export default function SignIn() {
         </View>
 
         <View style={{ alignItems: 'center', marginTop: 48, gap: 12 }}>
-          <View>
-            <View
-              style={{
-                width: 96,
-                height: 96,
-                borderRadius: 32,
-                backgroundColor: theme.acc,
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: `0 24px 50px -16px ${theme.acc}`,
-              }}
-            >
-              <Icon name="chat" size={46} color="#FFFFFF" stroke={2} />
+          {/* PakChat's own logo. A long press shows the server's address (for testing). */}
+          <Pressy onLongPress={() => setShowServer(true)} label={t.appName}>
+            <View style={{ width: 96, height: 96, borderRadius: 24, boxShadow: `0 24px 50px -16px ${theme.acc}` }}>
+              <Image source={LOGO} style={{ width: 96, height: 96 }} contentFit="contain" />
             </View>
-          </View>
+          </Pressy>
           <View>
             <Txt size={36} weight="800" align="center" style={{ marginTop: 10, letterSpacing: -1 }}>
               {t.appName}
@@ -265,8 +193,7 @@ export default function SignIn() {
         )}
 
         <Animated.View style={{ gap: 10 }}>
-          {step === 'start' && (
-            <>
+          <>
               <Pressy onPress={google} disabled={busy} label={t.continueGoogle} testID="google-sign-in">
                 <View
                   style={{
@@ -286,77 +213,10 @@ export default function SignIn() {
                   </Txt>
                 </View>
               </Pressy>
-              {waOn ? (
-                <Button title={t.continueWhatsApp} icon="send" onPress={() => (setError(''), setStep('whatsapp'))} testID="use-whatsapp" />
-              ) : (
-                <Button title={t.usePhone} icon="calls" onPress={() => (setError(''), setStep('number'))} testID="use-phone" />
-              )}
-            </>
-          )}
+              <Button title={t.continuePhone} icon="calls" onPress={() => (setError(''), router.push('/sign-in-number'))} testID="use-phone" />
+          </>
 
-          {step === 'whatsapp' && <WhatsAppCheck purpose="sign_in" onChecked={whatsAppSignIn} onBack={() => (setError(''), setStep('start'))} />}
-
-          {step === 'number' && (
-            <Animated.View style={{ gap: 8 }}>
-              <Txt size={13} color={theme.muted}>
-                {t.phoneHint}
-              </Txt>
-              <Field
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="0300 1234567"
-                keyboardType="phone-pad"
-                autoComplete="tel"
-                icon="calls"
-                autoFocus
-                testID="phone-field"
-                onFocus={showBottom}
-                returnKeyType="go"
-                onSubmitEditing={sendCode}
-              />
-              <Button title={t.sendCode} onPress={sendCode} busy={busy} disabled={!phone.trim()} testID="send-code" />
-              <Button title={t.back} look="soft" onPress={() => (setError(''), setStep('start'))} />
-            </Animated.View>
-          )}
-
-          {step === 'code' && (
-            <Animated.View style={{ gap: 8 }}>
-              <Txt size={14} color={theme.muted} align="center">
-                {fill(t.codeSentTo, { phone: formatPhone(sentTo) })}
-              </Txt>
-              <Field
-                value={code}
-                onChangeText={(v) => {
-                  const digits = v.replace(/\D/g, '').slice(0, 6);
-                  setCode(digits);
-                  if (digits.length === 6) void phoneSignIn(digits);
-                }}
-                placeholder="123456"
-                keyboardType="number-pad"
-                autoComplete="sms-otp"
-                textContentType="oneTimeCode"
-                maxLength={6}
-                autoFocus
-                testID="code-field"
-                onFocus={showBottom}
-              />
-              <Button title={busy ? t.signingIn : t.signInWord} onPress={() => phoneSignIn()} busy={busy} disabled={code.length < 6} testID="code-sign-in" />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Pressy onPress={() => (setError(''), setStep('number'))} label={t.changeNumber}>
-                  <Txt size={14} weight="600" color={theme.accInk} style={{ padding: 8 }}>
-                    {t.changeNumber}
-                  </Txt>
-                </Pressy>
-                <Pressy onPress={sendCode} disabled={resendIn > 0 || busy} label={t.resendCode}>
-                  <Txt size={14} weight="600" color={resendIn > 0 ? theme.muted : theme.accInk} style={{ padding: 8 }}>
-                    {resendIn > 0 ? fill(t.resendIn, { s: resendIn }) : t.resendCode}
-                  </Txt>
-                </Pressy>
-              </View>
-            </Animated.View>
-          )}
-
-          {testOn && step === 'start' && (
+          {testOn && (
             <Animated.View style={{ gap: 8, marginTop: 6 }}>
               <Txt size={13} weight="700" color={theme.sectionText}>
                 {t.testAccount}
@@ -366,7 +226,7 @@ export default function SignIn() {
             </Animated.View>
           )}
 
-          {editing ? (
+          {!showServer ? null : editing ? (
             <Animated.View style={{ gap: 8, marginTop: 6 }}>
               <Txt size={13} color={theme.muted}>
                 {t.serverAddressHint}

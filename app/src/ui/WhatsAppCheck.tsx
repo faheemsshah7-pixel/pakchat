@@ -5,11 +5,14 @@
 // proved which number sent it, so the server now knows the number is yours, and
 // this screen carries on by itself (it asks the server every 2 seconds while it waits).
 //
-// Used on the sign-in screen and in Settings > Account (adding a number).
+// Used on the sign-in screens (with the number typed first: only that number's
+// WhatsApp counts) and in Settings > Account (adding a number).
 import { useEffect, useRef, useState } from 'react';
+
+import { formatPhone } from '@pakchat/shared';
 import { ActivityIndicator, AppState, Linking, View } from 'react-native';
 import { core } from '../core/core';
-import { useT } from '../i18n';
+import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { phoneError } from './format';
 import { Button, Txt } from './kit';
@@ -18,19 +21,28 @@ type Check = { id: string; secret: string; url: string; until: number };
 
 export function WhatsAppCheck({
   purpose,
+  phone: typed,
+  quiet,
   onChecked,
   onBack,
 }: {
   purpose: 'sign_in' | 'link';
+  /** The number typed first ("+923001234567"). Then only that number's WhatsApp counts. */
+  phone?: string;
+  /** The screen explains the steps itself: only say something while waiting. */
+  quiet?: boolean;
   /** The number sent the code. `code` signs it in (or adds it) once, like an SMS code. */
   onChecked: (phone: string, code: string) => Promise<void>;
-  onBack: () => void;
+  /** Without it there's no Back button (the screen has its own). */
+  onBack?: () => void;
 }) {
   const t = useT();
   const { theme } = useLook();
   const [check, setCheck] = useState<Check | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Another number's WhatsApp sent the code: say so, and keep waiting for the right one.
+  const [wrongFrom, setWrongFrom] = useState('');
   const done = useRef(false);
 
   async function open() {
@@ -41,7 +53,7 @@ export function WhatsAppCheck({
       // A check lasts 10 minutes; reuse it if WhatsApp was just closed without sending.
       let c = check;
       if (!c || c.until < Date.now() + 30_000) {
-        const r = await core.startWhatsApp(purpose);
+        const r = await core.startWhatsApp(purpose, typed);
         c = { id: r.id, secret: r.secret, url: r.url, until: Date.now() + r.expiresIn * 1000 };
         setCheck(c);
       }
@@ -68,7 +80,8 @@ export function WhatsAppCheck({
       }
       asking = true;
       try {
-        const phone = await core.claimWhatsApp(check.id, check.secret);
+        const { phone, wrongFrom: other } = await core.claimWhatsApp(check.id, check.secret);
+        if (alive && other) setWrongFrom(other);
         if (phone && alive && !done.current) {
           done.current = true;
           setBusy(true);
@@ -99,23 +112,27 @@ export function WhatsAppCheck({
     };
   }, [check, onChecked, t]);
 
+  const say = error || (wrongFrom && typed ? fill(t.sentFromOther, { from: formatPhone(wrongFrom), phone: formatPhone(typed) }) : '');
+
   return (
     <View style={{ gap: 8 }}>
-      <Txt size={14} color={theme.muted} align="center">
-        {check ? t.waWaiting : t.waHint}
-      </Txt>
+      {(!quiet || check) && (
+        <Txt size={14} color={theme.muted} align="center">
+          {check ? t.waWaiting : t.waHint}
+        </Txt>
+      )}
       {check && !error ? (
         <View style={{ alignItems: 'center', paddingVertical: 6 }} testID="wa-waiting">
           <ActivityIndicator color={theme.accInk} />
         </View>
       ) : null}
-      {error ? (
-        <Txt size={14} weight="500" color={theme.danger} align="center">
-          {error}
+      {say ? (
+        <Txt size={14} weight="500" color={theme.danger} align="center" testID="wa-problem">
+          {say}
         </Txt>
       ) : null}
       <Button title={check ? t.waOpenAgain : t.waOpen} icon="send" onPress={open} busy={busy} testID="wa-open" />
-      <Button title={t.back} look="soft" onPress={onBack} testID="wa-back" />
+      {onBack && <Button title={t.back} look="soft" onPress={onBack} testID="wa-back" />}
     </View>
   );
 }

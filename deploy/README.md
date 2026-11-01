@@ -77,10 +77,13 @@ provider = Other
 access_key_id = <key>
 secret_access_key = <secret>
 endpoint = https://<namespace>.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+region = ap-mumbai-1
+force_path_style = true
+no_check_bucket = true
 ```
 and add `BACKUP_BUCKET=pakchat-backups` to `.env`. To also keep people's chat backups there,
-add `BACKUP_CHAT_BACKUPS=yes` (only changed ones are sent; the free storage is 20 GB, so
-check the bucket's size now and then).
+add `BACKUP_CHAT_BACKUPS=yes` (only changed ones are sent; the free Object Storage is 10 GB
+(Oracle's page, 31 Oct), so check the bucket's size now and then).
 
 Restore (on a fresh server, after step 7):
 ```sh
