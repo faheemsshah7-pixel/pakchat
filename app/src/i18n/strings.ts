@@ -4,6 +4,7 @@
 // Phase 7's words are in phase7.ts, and phase 8's in phase8.ts.
 import { en7, ur7 } from './phase7';
 import { en8, ur8 } from './phase8';
+import { en11, ur11 } from './phase11';
 import { enSignIn, urSignIn } from './signin';
 
 export const en = {
@@ -522,6 +523,7 @@ export const en = {
   ...en7,
   ...en8,
   ...enSignIn,
+  ...en11,
 };
 
 export type Strings = typeof en;
@@ -1018,6 +1020,7 @@ export const ur: Strings = {
   ...ur7,
   ...ur8,
   ...urSignIn,
+  ...ur11,
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

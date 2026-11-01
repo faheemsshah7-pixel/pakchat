@@ -206,8 +206,10 @@ defmodule Pakchat.Accounts do
   @doc """
   Deletes an account for good, like WhatsApp's Delete account: it leaves its
   communities and groups first (so the others see "left" and a group always
-  keeps an admin), then its files, devices (signed out at once), blocks and
-  everything else of it go with it.
+  keeps an admin), then its files (except a group photo it set, and files it
+  already sent, which stay with the others: see Pakchat.Files.delete_owned/1),
+  its status, devices (signed out at once), blocks and everything else of it
+  go with it.
   """
   def delete_account(%User{id: id} = user) do
     for kind <- ["community", "group"], chat_id <- my_chats(id, kind) do
@@ -216,11 +218,48 @@ defmodule Pakchat.Accounts do
     end
 
     Pakchat.Files.delete_owned(user)
+    Pakchat.Chats.delete_status(id)
     devices = Repo.all(from d in Device, where: d.user_id == ^id, select: d.id)
     Repo.delete_all(from u in User, where: u.id == ^id)
     Enum.each(devices, &disconnect/1)
     :ok
   end
+
+  @doc """
+  Settings › Account › Delete my account, from my phone. Like WhatsApp, I type my
+  number (or, with no number, my Gmail) first, so a wrong tap can't delete anything.
+  Answers `{:error, :wrong_confirm}` when what I typed isn't mine.
+  """
+  def delete_my_account(%User{} = user, typed) when is_binary(typed) do
+    if confirms?(user, typed), do: delete_account(user), else: {:error, :wrong_confirm}
+  end
+
+  def delete_my_account(_user, _typed), do: {:error, :wrong_confirm}
+
+  defp confirms?(%User{phone: phone}, typed) when is_binary(phone),
+    do: Phone.normalize(typed) == {:ok, phone}
+
+  defp confirms?(%User{email: email}, typed) when is_binary(email),
+    do: String.downcase(String.trim(typed)) == String.downcase(email)
+
+  defp confirms?(_user, _typed), do: false
+
+  @doc """
+  The Delete account web page (`/delete-account`, which Google Play asks for): WhatsApp
+  proved the number (Pakchat.WhatsApp, purpose "delete"), and its one-time code deletes
+  the account on it. `{:error, :no_account}` when no PakChat account has that number.
+  """
+  def delete_by_phone(phone, code) when is_binary(phone) and is_binary(code) do
+    with {:ok, phone} <- Phone.normalize(phone),
+         :ok <- PhoneCodes.check(phone, "delete", code) do
+      case Repo.get_by(User, phone: phone) do
+        nil -> {:error, :no_account}
+        %User{} = user -> delete_account(user)
+      end
+    end
+  end
+
+  def delete_by_phone(_phone, _code), do: {:error, :bad_request}
 
   defp my_chats(user_id, kind) do
     Repo.all(

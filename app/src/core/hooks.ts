@@ -78,7 +78,7 @@ function useLoaded<T>(topics: Topic[], load: () => Promise<T>, initial: T, deps:
  * once per change, not once each. It reads while anything shows it, and the last
  * answer stays for the next screen that asks, while it reads again.
  */
-function sharedLoad<T>(topics: Topic[], load: () => Promise<T>, later?: () => number) {
+function sharedLoad<T>(topics: Topic[], load: () => Promise<T>, later?: () => number, loadNow: () => Promise<T> = load) {
   let value: T | null = null;
   const watchers = new Set<() => void>();
   let offs: (() => void)[] = [];
@@ -129,11 +129,14 @@ function sharedLoad<T>(topics: Topic[], load: () => Promise<T>, later?: () => nu
   });
   const read = () => value;
   const useShared = () => useSyncExternalStore(subscribe, read, read);
-  /** Reads it once ahead of time (nobody showing it yet), so the first screen has it at once. */
+  /**
+   * Reads it once ahead of time (nobody showing it yet), so the first screen has it at once.
+   * `loadNow` may answer straight away (the chat list as PakChat starts).
+   */
   const warm = async () => {
     if (value !== null || running) return;
     try {
-      const v = await load();
+      const v = await loadNow();
       if (value === null) {
         value = v;
         watchers.forEach((w) => w());
@@ -157,7 +160,10 @@ export function useConnected() {
   return useCore(['connection'], () => core.connected);
 }
 
-/** How long the connection may take before the chat list says "Connecting…" (owner, 31 Oct). */
+/**
+ * How long the connection may take before it counts as slow (owner, 31 Oct). The chat list no
+ * longer shows "Connecting…" at all (owner, 1 Nov: it connects by itself, like WhatsApp).
+ */
 const CONNECTING_AFTER_MS = 4_000;
 
 /**
@@ -209,7 +215,14 @@ core.on('auth', () => chatCache.clear());
 const underChat = () => (core.viewing ? 300 : 0);
 
 /** Every chat with its newest message, pinned first, then newest. Chats in the Locked chats folder only show there (useLockedChats). */
-export const useChatList: (() => ChatRow[] | null) & { warm: () => Promise<void> } = sharedLoad(['chats', 'prefs', 'people', 'auth'], () => chatRows('list'), underChat);
+export const useChatList: (() => ChatRow[] | null) & { warm: () => Promise<void> } = sharedLoad(
+  ['chats', 'prefs', 'people', 'auth'],
+  () => chatRows('list'),
+  underChat,
+  // As PakChat starts, the database answers at once (it's small work), so the list is ready
+  // before the chat list screen first draws, not a moment after it (owner, 1 Nov: faster opening).
+  () => chatRows('list', true),
+);
 
 /**
  * Starting PakChat: reads the chat list as soon as the database and keys are open, while React is
@@ -237,10 +250,12 @@ function keepChat(chat: Chat) {
   return chat;
 }
 
-async function chatRows(which: 'list' | 'folder'): Promise<ChatRow[]> {
+async function chatRows(which: 'list' | 'folder', atOnce = false): Promise<ChatRow[]> {
   if (core.state !== 'signedIn') return [];
+  // `atOnce` (starting up): the same reads, answered straight away on this thread (sqliteStorage `now`).
+  const now = atOnce ? core.storage.now : null;
   // Every chat, and the newest message of each, in two reads (not one per chat).
-  const [chats, newest] = await Promise.all([core.client.chats(), core.storage.newestOfEach()]);
+  const [chats, newest] = now ? [now.chats(), now.newestOfEach()] : await Promise.all([core.client.chats(), core.storage.newestOfEach()]);
   const rows: ChatRow[] = [];
   for (const fresh of chats) {
     const chat = keepChat(fresh);
@@ -252,7 +267,10 @@ async function chatRows(which: 'list' | 'folder'): Promise<ChatRow[]> {
     // In a group, the unread ones too (up to 50), to see if any is for me. And if the
     // very newest is a disappearing message whose time is up, the few before it.
     const unread = chat.kind === 'group' ? Math.min(chat.unread, 50) : 0;
-    if (unread > 0 || (top && !recent.length)) recent = core.forgetExpired(await core.client.messages(chat.id, { limit: Math.max(5, unread) }));
+    if (unread > 0 || (top && !recent.length)) {
+      const limit = Math.max(5, unread);
+      recent = core.forgetExpired(now ? now.latest(chat.id, limit) : await core.client.messages(chat.id, { limit }));
+    }
     const last = recent.at(-1);
     const mentioned = unread > 0 && recent.slice(-unread).some((m) => m.author !== core.myId && !m.deleted && (m.mentions?.includes(core.myId) || m.replyTo?.author === core.myId));
     const prefs = core.prefs[chat.id] ?? {};

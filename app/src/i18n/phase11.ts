@@ -1,0 +1,47 @@
+// phase11.ts: the words added in Phase 11 (build 17): Delete my account, the Terms and
+// Privacy Policy links, and Help without the server's address. In English and Urdu;
+// strings.ts puts them in with the rest.
+
+export const en11 = {
+  deleteAccount: 'Delete my account',
+  deleteAccountTitle: 'Delete this account?',
+  deleteWillTitle: 'Deleting your account will:',
+  deleteWill1: 'Delete your account from PakChat, with your name, photo and about',
+  deleteWill2: 'Erase your message history on this phone, and your chat backup',
+  deleteWill3: 'Remove you from all your PakChat groups and communities',
+  deleteWill4: 'Log out every phone and computer linked to it',
+  deleteInsteadText: 'Only want to use another phone? You don\'t need to delete anything: back up your chats, then sign in on the new phone.',
+  deleteConfirmPhone: 'To delete your account, enter your phone number.',
+  deleteConfirmEmail: 'To delete your account, enter your Gmail address.',
+  deleteWrongPhone: "That isn't the number on this account. Check it and try again.",
+  deleteWrongEmail: "That isn't the Gmail on this account. Check it and try again.",
+  deleteSure: "This can't be undone. Your account and your chats on this phone will be deleted for good.",
+  deleteDone: 'Your account was deleted.',
+  deletingWord: 'Deleting…',
+  termsWord: 'Terms of Service',
+  privacyPolicyWord: 'Privacy Policy',
+  agreeText: 'By continuing, you agree to our {terms} and {privacy}.',
+  helpServerLive: 'PakChat\'s server only passes your locked messages along. It can\'t open them, and it deletes each one once it\'s delivered.',
+};
+
+export const ur11: typeof en11 = {
+  deleteAccount: 'میرا اکاؤنٹ ڈیلیٹ کریں',
+  deleteAccountTitle: 'یہ اکاؤنٹ ڈیلیٹ کریں؟',
+  deleteWillTitle: 'اکاؤنٹ ڈیلیٹ کرنے سے:',
+  deleteWill1: 'آپ کا اکاؤنٹ پاک چیٹ سے ڈیلیٹ ہو جائے گا، آپ کے نام، تصویر اور تعارف کے ساتھ',
+  deleteWill2: 'اس فون پر آپ کے پیغامات اور آپ کا چیٹ بیک اپ مٹ جائے گا',
+  deleteWill3: 'آپ پاک چیٹ کے تمام گروپس اور کمیونٹیز سے نکل جائیں گے',
+  deleteWill4: 'اس سے جڑے تمام فون اور کمپیوٹر لاگ آؤٹ ہو جائیں گے',
+  deleteInsteadText: 'صرف دوسرا فون استعمال کرنا ہے؟ کچھ ڈیلیٹ کرنے کی ضرورت نہیں: اپنی چیٹس کا بیک اپ لیں، پھر نئے فون پر سائن اِن کریں۔',
+  deleteConfirmPhone: 'اکاؤنٹ ڈیلیٹ کرنے کے لیے اپنا فون نمبر لکھیں۔',
+  deleteConfirmEmail: 'اکاؤنٹ ڈیلیٹ کرنے کے لیے اپنا Gmail ایڈریس لکھیں۔',
+  deleteWrongPhone: 'یہ اس اکاؤنٹ کا نمبر نہیں۔ چیک کر کے دوبارہ کوشش کریں۔',
+  deleteWrongEmail: 'یہ اس اکاؤنٹ کا Gmail نہیں۔ چیک کر کے دوبارہ کوشش کریں۔',
+  deleteSure: 'یہ واپس نہیں ہو سکتا۔ آپ کا اکاؤنٹ اور اس فون پر آپ کی چیٹس ہمیشہ کے لیے ڈیلیٹ ہو جائیں گی۔',
+  deleteDone: 'آپ کا اکاؤنٹ ڈیلیٹ ہو گیا۔',
+  deletingWord: 'ڈیلیٹ ہو رہا ہے…',
+  termsWord: 'شرائطِ استعمال',
+  privacyPolicyWord: 'پرائیویسی پالیسی',
+  agreeText: 'آگے بڑھ کر آپ ہماری {terms} اور {privacy} سے اتفاق کرتے ہیں۔',
+  helpServerLive: 'پاک چیٹ کا سرور آپ کے لاک پیغامات صرف آگے پہنچاتا ہے۔ وہ انہیں کھول نہیں سکتا، اور ہر پیغام پہنچتے ہی ڈیلیٹ کر دیتا ہے۔',
+};

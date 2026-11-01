@@ -27,6 +27,9 @@ function nodeDb(file = ':memory:'): Db {
     async first<T>(sql: string, params: SqlValue[] = []) {
       return (d.prepare(sql).get(...params) as T | undefined) ?? null;
     },
+    allNow<T>(sql: string, params: SqlValue[] = []) {
+      return d.prepare(sql).all(...params) as T[];
+    },
   };
 }
 
@@ -227,10 +230,11 @@ describe('media, links and docs', () => {
 });
 
 describe('the chat list', () => {
+  const chat = (id: string) => ({ id, kind: 'direct' as const, members: [], readUpTo: 0, unread: 0, lastActivity: 1 });
+  const msg = (chatId: string, id: string, order: number, sentAt: number) => ({ chatId, id, author: 'u1', authorDevice: 1, seq: null, order, sentAt, kind: 'text' as const, text: id });
+
   test('the newest message of each chat, in one read, is the one listMessages gives', async () => {
     const s = await SqliteStorage.open(nodeDb());
-    const chat = (id: string) => ({ id, kind: 'direct' as const, members: [], readUpTo: 0, unread: 0, lastActivity: 1 });
-    const msg = (chatId: string, id: string, order: number, sentAt: number) => ({ chatId, id, author: 'u1', authorDevice: 1, seq: null, order, sentAt, kind: 'text' as const, text: id });
     await s.putChat(chat('a'));
     await s.putChat(chat('b'));
     await s.putChat(chat('empty'));
@@ -245,6 +249,20 @@ describe('the chat list', () => {
     expect(newest.get('a')?.id).toBe('a2');
     expect(newest.get('b')?.id).toBe('b2');
     for (const id of ['a', 'b']) expect(newest.get(id)).toEqual((await s.listMessages(id, { limit: 1 }))[0]);
+  });
+
+  test('read at once as PakChat starts: exactly what the usual reads give', async () => {
+    const s = await SqliteStorage.open(nodeDb());
+    await s.putChat({ ...chat('a'), lastActivity: 1 });
+    await s.putChat({ ...chat('b'), lastActivity: 2 });
+    for (const [c, id, order, sentAt] of [['a', 'a1', 1, 10], ['a', 'a2', 2, 20], ['b', 'b1', 5, 30], ['b', 'b2', 5, 40], ['b', 'b0', 4, 99]] as const) await s.putMessage(msg(c, id, order, sentAt));
+    const now = s.now!;
+    expect(now.chats()).toEqual(await s.listChats());
+    expect(now.newestOfEach()).toEqual(await s.newestOfEach());
+    for (const id of ['a', 'b']) expect(now.latest(id, 5)).toEqual(await s.listMessages(id, { limit: 5 }));
+    // A database that can't answer at once (no allNow): the app reads the usual way.
+    const { allNow: _, ...plain } = nodeDb();
+    expect((await SqliteStorage.open(plain)).now).toBeNull();
   });
 });
 

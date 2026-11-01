@@ -18,7 +18,17 @@ export interface Db {
   run(sql: string, params?: SqlValue[]): Promise<void>;
   all<T>(sql: string, params?: SqlValue[]): Promise<T[]>;
   first<T>(sql: string, params?: SqlValue[]): Promise<T | null>;
+  /**
+   * The same as `all`, but answered at once on the JavaScript thread (expo-sqlite's sync call),
+   * without waiting for the database's own thread. Only for the chat list as PakChat starts.
+   */
+  allNow?<T>(sql: string, params?: SqlValue[]): T[];
 }
+
+const CHATS_SQL = 'SELECT json FROM chats ORDER BY last_activity DESC';
+const NEWEST_SQL =
+  'SELECT m.chat_id AS chat_id, m.json AS json FROM chats c JOIN messages m ON m.rowid = (SELECT rowid FROM messages WHERE chat_id = c.id ORDER BY ord DESC, sent_at DESC LIMIT 1)';
+const LATEST_SQL = 'SELECT json FROM messages WHERE chat_id = ? ORDER BY ord DESC, sent_at DESC LIMIT ?';
 
 /** The web addresses in some words ("www.x.pk" becomes "https://www.x.pk"). */
 export function linksIn(text: string): string[] {
@@ -85,8 +95,27 @@ export class SqliteStorage implements Storage {
   }
 
   async listChats() {
-    const rows = await this.db.all<{ json: string }>('SELECT json FROM chats ORDER BY last_activity DESC');
+    const rows = await this.db.all<{ json: string }>(CHATS_SQL);
     return rows.map((r) => JSON.parse(r.json) as Chat);
+  }
+
+  /**
+   * The chat list's three reads (listChats, newestOfEach and the newest messages of a chat),
+   * answered at once (`Db.allNow`), for the chat list as PakChat starts: it's then ready before
+   * the first screen draws, instead of waiting its turn while React builds the screens.
+   * Null when this database can't.
+   */
+  get now() {
+    const allNow = this.db.allNow?.bind(this.db);
+    if (!allNow) return null;
+    return {
+      chats: () => allNow<{ json: string }>(CHATS_SQL).map((r) => JSON.parse(r.json) as Chat),
+      newestOfEach: () => new Map(allNow<{ chat_id: string; json: string }>(NEWEST_SQL).map((r) => [r.chat_id, JSON.parse(r.json) as Message] as const)),
+      latest: (chatId: string, limit: number) =>
+        allNow<{ json: string }>(LATEST_SQL, [chatId, limit])
+          .reverse()
+          .map((r) => JSON.parse(r.json) as Message),
+    };
   }
 
   // ---- Messages ----
@@ -132,7 +161,7 @@ export class SqliteStorage implements Storage {
     const limit = options.limit ?? 50;
     const rows =
       options.beforeOrder === undefined
-        ? await this.db.all<{ json: string }>('SELECT json FROM messages WHERE chat_id = ? ORDER BY ord DESC, sent_at DESC LIMIT ?', [chatId, limit])
+        ? await this.db.all<{ json: string }>(LATEST_SQL, [chatId, limit])
         : await this.db.all<{ json: string }>('SELECT json FROM messages WHERE chat_id = ? AND ord < ? ORDER BY ord DESC, sent_at DESC LIMIT ?', [
             chatId,
             options.beforeOrder,
@@ -147,9 +176,7 @@ export class SqliteStorage implements Storage {
    * asking chat by chat.
    */
   async newestOfEach(): Promise<Map<string, Message>> {
-    const rows = await this.db.all<{ chat_id: string; json: string }>(
-      'SELECT m.chat_id AS chat_id, m.json AS json FROM chats c JOIN messages m ON m.rowid = (SELECT rowid FROM messages WHERE chat_id = c.id ORDER BY ord DESC, sent_at DESC LIMIT 1)',
-    );
+    const rows = await this.db.all<{ chat_id: string; json: string }>(NEWEST_SQL);
     return new Map(rows.map((r) => [r.chat_id, JSON.parse(r.json) as Message]));
   }
 

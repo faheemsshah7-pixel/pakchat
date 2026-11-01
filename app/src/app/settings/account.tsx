@@ -3,8 +3,8 @@
 // there. A Gmail or number that already has its own PakChat account can't be added
 // (later, its owner will be asked to agree).
 //
-// Also where the server is (change it when the Mac's Wi-Fi address changes, no
-// need to log out), and Log out.
+// Also where the server is (only on a test server: change it when the Mac's Wi-Fi address
+// changes, no need to log out), Log out, and Delete my account (settings/delete-account.tsx).
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -220,12 +220,17 @@ export default function Account() {
             {t.lastSignIn}
           </Txt>
         )}
-        <Glass>
-          {/* Where the server is. Change it here when the Mac's Wi-Fi address changes (no need to log out). */}
-          <SettingRow icon="server" title={t.serverAddress} sub={serverUrl().replace(/^https?:\/\//, '')} onPress={() => setServer(serverUrl())} testID="open-server" />
-        </Glass>
+        {/* Where the server is, only on a test server (a Mac on the Wi-Fi): change it here when the
+            Mac's Wi-Fi address changes (no need to log out). The live one never shows it (Phase 11). */}
+        {!onBuiltInServer() && (
+          <Glass>
+            <SettingRow icon="server" title={t.serverAddress} sub={serverUrl().replace(/^https?:\/\//, '')} onPress={() => setServer(serverUrl())} testID="open-server" />
+          </Glass>
+        )}
         <Glass>
           <SettingRow icon="logout" title={t.logOut} danger chevron={false} onPress={() => setLeaving(true)} testID="log-out" />
+          <Divider />
+          <SettingRow icon="trash" title={t.deleteAccount} danger onPress={() => router.push('/settings/delete-account')} testID="open-delete-account" />
         </Glass>
       </ScrollView>
 

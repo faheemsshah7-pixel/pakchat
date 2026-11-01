@@ -220,9 +220,50 @@ defmodule Pakchat.Files do
     from(f in Stored, where: f.owner_id == ^me and f.kind == "backup") |> delete_all()
   end
 
-  @doc "Deletes everything an account uploaded, rows and bytes (deleting the account)."
+  @doc """
+  Deleting an account: deletes what it uploaded, rows and bytes, except what
+  now belongs to other people, as on WhatsApp:
+
+    * a group's or community's photo it set, while that's still the photo
+      (else the group would lose its picture for everyone);
+    * photos, videos and documents it already sent in a chat, until their
+      30 days are up (the messages they belong to stay with the people who
+      got them).
+
+  Those are kept without an owner, while anyone else is still in the chat.
+  Its backup, its own profile photo, its status and anything it never
+  finished uploading are deleted.
+  """
   def delete_owned(%User{id: me}) do
-    from(f in Stored, where: f.owner_id == ^me) |> delete_all()
+    from(f in Stored, where: f.owner_id == ^me and f.id not in subquery(still_used(me)))
+    |> delete_all()
+
+    from(f in Stored, where: f.owner_id == ^me) |> Repo.update_all(set: [owner_id: nil])
+    :ok
+  end
+
+  # The ids of the files from `me` that other people still need (see delete_owned/1).
+  defp still_used(me) do
+    someone_else =
+      from m in Chats.Member,
+        where: m.chat_id == parent_as(:file).chat_id and m.user_id != ^me,
+        select: 1
+
+    from f in Stored,
+      as: :file,
+      join: c in Chats.Chat,
+      on: c.id == f.chat_id,
+      where: f.owner_id == ^me and f.uploaded and c.kind != "status",
+      # Nobody left in the chat: nobody needs them.
+      where: exists(someone_else),
+      where:
+        f.kind == "attachment" or
+          (f.kind == "photo" and
+             fragment(
+               "EXISTS (SELECT 1 FROM chats p WHERE p.photo LIKE 'pk1:' || ?::text || ':%')",
+               f.id
+             )),
+      select: f.id
   end
 
   defp delete_older_backups(%Stored{} = keep) do

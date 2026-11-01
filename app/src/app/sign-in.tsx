@@ -16,11 +16,11 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Keyboard, ScrollView, View, type ScrollViewInstance } from 'react-native';
+import { Keyboard, Linking, ScrollView, Text, View, type ScrollViewInstance } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
-import { core, isOffline, onBuiltInServer, serverUrl, setServerUrl } from '../core/core';
+import { core, isOffline, onBuiltInServer, pageUrl, serverUrl, setServerUrl } from '../core/core';
 import { googleIdToken } from '../core/google';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
@@ -214,6 +214,23 @@ export default function SignIn() {
                 </View>
               </Pressy>
               <Button title={t.continuePhone} icon="calls" onPress={() => (setError(''), router.push('/sign-in-number'))} testID="use-phone" />
+              {/* Like WhatsApp's welcome: continuing means agreeing to the Terms and the Privacy Policy (Phase 11). */}
+              <Txt size={12.5} color={theme.muted} align="center" style={{ marginTop: 4, paddingHorizontal: 8 }} testID="agree-text">
+                {t.agreeText.split(/(\{terms\}|\{privacy\})/).map((part, i) =>
+                  part === '{terms}' || part === '{privacy}' ? (
+                    <Text
+                      key={i}
+                      onPress={() => void Linking.openURL(pageUrl(part === '{terms}' ? 'terms' : 'privacy', lang)).catch(() => {})}
+                      style={{ color: theme.accInk, fontWeight: '700' }}
+                      testID={part === '{terms}' ? 'agree-terms' : 'agree-privacy'}
+                    >
+                      {part === '{terms}' ? t.termsWord : t.privacyPolicyWord}
+                    </Text>
+                  ) : (
+                    part
+                  ),
+                )}
+              </Txt>
           </>
 
           {testOn && (

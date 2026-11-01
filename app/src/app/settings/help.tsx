@@ -1,19 +1,21 @@
 // settings/help.tsx: Settings › Help. Which PakChat this is, how your chats
-// stay private, and how long things took on this phone (Speed check).
+// stay private, the Terms and the Privacy Policy (Phase 11), and how long things
+// took on this phone (Speed check).
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Linking, ScrollView, View } from 'react-native';
 
+import { onBuiltInServer, pageUrl } from '../../core/core';
 import { speedLog, type SpeedWhat } from '../../core/speed';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
-import { Glass, Screen, Section, TopBar, Txt } from '../../ui/kit';
+import { Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
 
 export default function Help() {
   const t = useT();
-  const { theme } = useLook();
+  const { theme, lang } = useLook();
   const version = Constants.expoConfig?.version ?? '';
   const [times] = useState(() => [...speedLog()]);
   return (
@@ -32,7 +34,8 @@ export default function Help() {
         <Glass style={{ marginTop: 14, padding: 16, gap: 14 }}>
           {[
             { icon: 'lock' as const, text: t.helpPrivate },
-            { icon: 'server' as const, text: t.helpServer },
+            // The live server is never named; a test server (a Mac on the Wi-Fi) says where to change it.
+            { icon: 'server' as const, text: onBuiltInServer() ? t.helpServerLive : t.helpServer },
           ].map((x) => (
             <View key={x.icon} style={{ flexDirection: 'row', gap: 12 }}>
               <Icon name={x.icon} size={22} color={theme.accInk} />
@@ -41,6 +44,12 @@ export default function Help() {
               </Txt>
             </View>
           ))}
+        </Glass>
+
+        <Glass style={{ marginTop: 14 }}>
+          <SettingRow icon="doc" title={t.termsWord} onPress={() => void Linking.openURL(pageUrl('terms', lang)).catch(() => {})} testID="open-terms" />
+          <Divider />
+          <SettingRow icon="shield" title={t.privacyPolicyWord} onPress={() => void Linking.openURL(pageUrl('privacy', lang)).catch(() => {})} testID="open-privacy" />
         </Glass>
 
         {/* How long things took on this phone (core/speed.ts), to compare an older phone with a newer one. */}

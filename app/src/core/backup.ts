@@ -38,6 +38,12 @@ export function setPassword(password: string) {
   SecureStore.setItem(PASSWORD(), password);
 }
 
+/** Forgets this account's backup password and its last backup time (its account was deleted). */
+export async function forgetBackup() {
+  await SecureStore.deleteItemAsync(PASSWORD()).catch(() => {});
+  KV.removeItemSync(LAST());
+}
+
 // ---- Settings ----
 
 export type BackupPrefs = { daily: boolean; wifiOnly: boolean };

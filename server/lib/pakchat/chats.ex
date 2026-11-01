@@ -440,6 +440,15 @@ defmodule Pakchat.Chats do
 
   defp status_key(user_id), do: "status:" <> user_id
 
+  @doc """
+  Deleting an account: its status goes with it, along with any of it still
+  waiting for the people allowed to see it.
+  """
+  def delete_status(user_id) do
+    Repo.delete_all(from c in Chat, where: c.direct_key == ^status_key(user_id))
+    :ok
+  end
+
   defp new_status(user_id) do
     Repo.insert!(%Chat{kind: "status", direct_key: status_key(user_id), created_by: user_id},
       on_conflict: :nothing,

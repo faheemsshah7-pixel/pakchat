@@ -26,13 +26,14 @@ import {
 import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import * as Device from 'expo-device';
+import { Directory, Paths } from 'expo-file-system';
 import KV from 'expo-sqlite/kv-store';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { fileModule, loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
 import { openStorage } from './db';
-import { backUpIfDue } from './backup';
+import { backUpIfDue, forgetBackup } from './backup';
 import { calls } from './calls';
 import { forgetFile, maybeDownload, uploader } from './files';
 import { alertFor, alertReaction, startPush, words } from './push';
@@ -208,6 +209,15 @@ export function serverUrl(): string {
  */
 export function onBuiltInServer(): boolean {
   return !!extra.serverUrl && serverUrl() === extra.serverUrl.replace(/\/+$/, '');
+}
+
+/**
+ * The address of one of PakChat's web pages (the Terms, the Privacy Policy), in the app's
+ * language: always on the live website, since a test server (a Mac) doesn't serve them.
+ */
+export function pageUrl(page: 'terms' | 'privacy', lang: string): string {
+  const site = (extra.serverUrl ?? 'https://pakchat.duckdns.org').replace(/\/+$/, '');
+  return `${site}/${page}${lang === 'ur' ? '-ur' : ''}.html`;
 }
 
 export function setServerUrl(url: string) {
@@ -714,20 +724,8 @@ class Core {
     const session = await signIn();
     // Someone else on this phone: start with a clean slate.
     if (previous && previous !== session.userId) {
-      await this.storage.wipe();
+      await this.forgetEverything();
       await this.storage.setValue('session', session);
-      this.people = {};
-      this.contacts = {};
-      this.prefs = {};
-      this.chatPhotos = {};
-      this.directWith = {};
-      this.settings = DEFAULT_SETTINGS;
-      this.starred = {};
-      this.lists = [];
-      this.ways = {};
-      this.blocked = null;
-      this.presence = {};
-      this.typing = {};
     }
     // Signing in on a phone that didn't have this account: offer its backup (index.tsx).
     if (previous !== session.userId) KV.setItemSync(`offerRestore:${session.userId}`, '1');
@@ -758,6 +756,59 @@ class Core {
     this.connected = false;
     this.emit('auth');
     this.emit('connection');
+  }
+
+  /** Forgets everything of the account on this phone: its chats and settings, and what's kept in memory. */
+  private async forgetEverything() {
+    await this.storage.wipe();
+    this.people = {};
+    this.contacts = {};
+    this.prefs = {};
+    this.chatPhotos = {};
+    this.directWith = {};
+    this.settings = DEFAULT_SETTINGS;
+    this.starred = {};
+    this.lists = [];
+    this.ways = {};
+    this.blocked = null;
+    this.presence = {};
+    this.typing = {};
+  }
+
+  /**
+   * Settings › Account › Delete my account (Phase 11, like WhatsApp's). `confirm` is the number
+   * (or, with no number, the Gmail) the person typed; the server checks it's theirs and deletes
+   * the account, its backup and its devices. Then this phone forgets the chats and files too and
+   * goes back to the sign-in screen. Throws `wrong_confirm` (nothing deleted) or offline.
+   */
+  async deleteAccount(confirm: string) {
+    try {
+      await this.call<void>('DELETE', '/me', { confirm });
+    } catch (err) {
+      // Its reason ("wrong_confirm") for reasonOf(); offline stays offline.
+      throw err instanceof OfflineError ? err : new ServerError(err instanceof Error ? err.message : 'unknown');
+    }
+    // The account is gone on the server: from here on nothing may stop the phone forgetting it.
+    await forgetBackup().catch(() => {});
+    await this.signOut().catch(() => {});
+    await this.forgetEverything().catch(() => {});
+    for (const [where, name] of [
+      [Paths.document, 'files'],
+      [Paths.document, 'stickers'],
+      [Paths.cache, 'photos'],
+      [Paths.cache, 'voice'],
+      [Paths.cache, 'gifs'],
+    ] as const) {
+      try {
+        const d = new Directory(where, name);
+        if (d.exists) d.delete();
+      } catch {
+        // A file in use: it goes with the app's other leftovers.
+      }
+    }
+    await import('expo-notifications').then((n) => n.dismissAllNotificationsAsync()).catch(() => {});
+    this.emit('auth');
+    this.emit('chats');
   }
 
   // ---- My own profile and privacy ----

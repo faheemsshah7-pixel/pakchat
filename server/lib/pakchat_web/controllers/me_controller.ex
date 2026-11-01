@@ -82,6 +82,22 @@ defmodule PakchatWeb.MeController do
 
   def unlink(_conn, _params), do: {:error, :not_found}
 
+  @doc """
+  `DELETE /api/me` with `{confirm}`: deletes my account for good (Settings › Account ›
+  Delete my account). Only from the phone, like WhatsApp (a linked website can't), and
+  only when `confirm` is my number (or my Gmail, when I have no number):
+  422 `wrong_confirm` otherwise. Every device is signed out at once.
+  """
+  def delete(conn, params) do
+    if conn.assigns.device.device_id == 1 do
+      with :ok <- Accounts.delete_my_account(conn.assigns.user, params["confirm"]) do
+        send_resp(conn, 204, "")
+      end
+    else
+      {:error, :forbidden}
+    end
+  end
+
   @doc ~s(`PUT /api/me/push` with `{token, platform: "fcm" | "apns"}`, for alerts when the app is closed.)
   def push(conn, params) do
     attrs = %{push_token: params["token"], push_platform: params["platform"]}

@@ -130,6 +130,25 @@ defmodule PakchatWeb.AuthController do
     if Application.get_env(:pakchat, :test_sign_in, false), do: :ok, else: {:error, :not_found}
   end
 
+  @doc """
+  `POST /api/account/delete` with `{phone, code}`, from the Delete account web page: the
+  code is the secret of a WhatsApp check with purpose "delete" that number has sent
+  (Pakchat.WhatsApp). Deletes that number's account: 204, or 404 `no_account` when
+  no PakChat account has it, 422 `wrong_code` when the code doesn't fit.
+  """
+  def delete_account(conn, %{"phone" => phone, "code" => code})
+      when is_binary(phone) and is_binary(code) do
+    with :ok <- RateLimit.hit(:sign_in, ip(conn)) do
+      case Accounts.delete_by_phone(phone, code) do
+        :ok -> send_resp(conn, 204, "")
+        {:error, :no_account} -> conn |> put_status(404) |> json(%{error: "no_account"})
+        error -> error
+      end
+    end
+  end
+
+  def delete_account(_conn, _params), do: {:error, :bad_request}
+
   @doc "Signs this device out. Signing out the phone signs out its linked devices too."
   def sign_out(conn, _params) do
     :ok = Accounts.sign_out(conn.assigns.device)

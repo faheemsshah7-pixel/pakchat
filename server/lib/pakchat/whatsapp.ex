@@ -34,7 +34,7 @@ defmodule Pakchat.WhatsApp do
   @lasts_minutes 10
   # No 0/O, 1/I/L, so a code read aloud or retyped can't go wrong.
   @alphabet ~c"ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-  @purposes ["sign_in", "link"]
+  @purposes ["sign_in", "link", "delete"]
 
   @doc "Whether WhatsApp checks are switched on."
   def on?, do: Enum.all?([number(), app_secret(), verify_token()], &(is_binary(&1) and &1 != ""))

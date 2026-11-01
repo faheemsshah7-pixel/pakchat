@@ -14,7 +14,7 @@ import { findBackup } from '../../core/backup';
 import { handOffMedia, type Picked } from '../../core/files';
 import { chatOpen, FOLDER, leftFolder, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
-import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useCore, useSlowConnecting, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
+import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
@@ -51,7 +51,6 @@ export default function Chats() {
   const typing = useAllTyping();
   const presence = useAllPresence();
   // "Connecting…" only when it takes a while (a quick connect stays quiet, like WhatsApp).
-  const connecting = useSlowConnecting();
   const [filter, setFilter] = useState<Filter>('all');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState(false);
@@ -334,15 +333,6 @@ export default function Chats() {
         {/* ＋ makes a new list, like WhatsApp's Lists. */}
         <Chip label={t.newList} icon="plus" on={false} onPress={() => router.push('/list')} testID="new-list" />
       </ScrollView>
-
-      {connecting && (
-        <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginBottom: 8 }}>
-          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint }} />
-          <Txt size={12.5} weight="500" color={theme.muted} testID="connecting">
-            {t.connecting}
-          </Txt>
-        </Animated.View>
-      )}
 
       {/* The chats run edge to edge, like WhatsApp, so they line up with the tab bar below. */}
       <View style={{ flex: 1, paddingHorizontal: 4 }}>

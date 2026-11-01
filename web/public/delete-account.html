@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png?v=2" />
+    <meta name="description" content="Delete your PakChat account and its data, with or without the app." />
+    <title>Delete your PakChat account</title>
+    <style>
+      @font-face { font-family: 'Roboto Flex'; src: url('/fonts/roboto-flex.woff2') format('woff2'); font-display: swap; }
+      :root { --bg: #F7F5F3; --card: #FFFFFF; --text: #1B1C1F; --muted: #5E6168; --line: #E6E2DD; --acc: #2F6BEA; --soft: #EAF0FD; --danger: #DC2626; --dangerSoft: #FEE2E2; --ok: #15803D; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #0F1013; --card: #17191D; --text: #ECEDEF; --muted: #A2A6AE; --line: #2A2D33; --acc: #7FA6FF; --soft: #1C2436; --danger: #F87171; --dangerSoft: #3A1D1D; --ok: #4ADE80; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 'Roboto Flex', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
+      header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+      header img { width: 44px; height: 44px; border-radius: 12px; }
+      h1 { font-size: 28px; line-height: 1.2; margin: 0; letter-spacing: -0.5px; flex: 1; }
+      h2 { font-size: 19px; margin: 0 0 8px; }
+      .muted { color: var(--muted); }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin: 16px 0; }
+      .soft { background: var(--soft); border-color: transparent; }
+      ul, ol { padding-left: 22px; margin: 8px 0; }
+      li { margin: 4px 0; }
+      a { color: var(--acc); }
+      label { display: block; font-weight: 600; margin: 4px 0 8px; }
+      input { width: 100%; font: inherit; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+      button, .button { display: inline-block; width: 100%; margin-top: 12px; font: inherit; font-weight: 700; padding: 13px 16px; border-radius: 14px; border: 0; cursor: pointer; text-align: center; text-decoration: none; background: var(--acc); color: #fff; }
+      button.danger { background: var(--danger); }
+      button.plain { background: transparent; color: var(--acc); border: 1px solid var(--line); }
+      button:disabled { opacity: .6; cursor: default; }
+      .code { font-size: 26px; font-weight: 800; letter-spacing: 4px; text-align: center; margin: 8px 0; }
+      .error { color: var(--danger); font-weight: 600; }
+      .done { color: var(--ok); font-weight: 700; }
+      .lang { font: inherit; width: auto; margin: 0; padding: 6px 12px; background: var(--soft); color: var(--acc); border-radius: 10px; }
+      [hidden] { display: none !important; }
+      [dir="rtl"] ul, [dir="rtl"] ol { padding-left: 0; padding-right: 22px; }
+      [dir="rtl"] input { direction: ltr; text-align: right; }
+      footer { margin-top: 40px; color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="/icon-192.png" alt="" />
+        <h1 data-t="title">Delete your PakChat account</h1>
+        <button class="lang" id="lang" type="button">اردو</button>
+      </header>
+
+      <div class="card soft">
+        <h2 data-t="inAppTitle">In the app (the quickest way)</h2>
+        <p data-t="inAppText">Open PakChat on your phone, then go to Settings › Account › Delete my account, and type your phone number.</p>
+      </div>
+
+      <div class="card">
+        <h2 data-t="whatTitle">What gets deleted</h2>
+        <ul>
+          <li data-t="what1">Your account: your name, photo, about, phone number and Gmail.</li>
+          <li data-t="what2">Your chat backup on our server, your devices and their keys.</li>
+          <li data-t="what3">You leave all your groups and communities.</li>
+          <li data-t="what4">Messages and files still waiting to be delivered to you.</li>
+        </ul>
+        <p class="muted" data-t="whatKept">Messages you already sent stay on the phones of the people who got them, as with any messaging app. Photos and files you already sent stay for them until their usual 30 days are up, and a group photo you set stays with the group. Our nightly safety copies of the server are deleted within 14 days.</p>
+      </div>
+
+      <div class="card">
+        <h2 data-t="webTitle">No app? Delete it here</h2>
+
+        <!-- Step 1: the number -->
+        <form id="step-number">
+          <label for="phone" data-t="phoneLabel">Your PakChat phone number</label>
+          <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0300 1234567" required />
+          <p class="muted" data-t="phoneHint">We check the number is yours with WhatsApp, the same way PakChat signs you in. It's free.</p>
+          <button type="submit" id="start" data-t="next">Next</button>
+        </form>
+
+        <!-- Step 2: send the code from WhatsApp -->
+        <div id="step-whatsapp" hidden>
+          <ol>
+            <li data-t="wa1">Tap Open WhatsApp. It opens with a short message to PakChat.</li>
+            <li data-t="wa2">Press Send. Send it from the WhatsApp on the number you typed.</li>
+            <li data-t="wa3">Come back to this page. It carries on by itself.</li>
+          </ol>
+          <div class="code" id="code"></div>
+          <a class="button" id="open-wa" href="#" target="_blank" rel="noopener" data-t="openWa">Open WhatsApp</a>
+          <p class="muted" id="waiting" data-t="waiting">Waiting for your message…</p>
+          <button type="button" class="plain" id="back" data-t="back">Change the number</button>
+        </div>
+
+        <!-- Step 3: confirm -->
+        <div id="step-confirm" hidden>
+          <p><strong id="confirm-text"></strong></p>
+          <p data-t="cantUndo">This can't be undone.</p>
+          <button type="button" class="danger" id="delete" data-t="deleteBtn">Delete my account</button>
+        </div>
+
+        <p class="done" id="done" hidden></p>
+        <p class="error" id="error" hidden></p>
+      </div>
+
+      <div class="card">
+        <h2 data-t="gmailTitle">Signed in only with Gmail?</h2>
+        <p data-t="gmailText">Delete it in the app (Settings › Account › Delete my account), or email us from that Gmail and we'll delete it within 30 days:</p>
+        <p><a href="mailto:pakchat.support@gmail.com?subject=Delete%20my%20PakChat%20account">pakchat.support@gmail.com</a></p>
+      </div>
+
+      <footer>© 2026 PakChat · <a href="/privacy.html" id="privacy-link" data-t="privacy">Privacy Policy</a> · <a href="/terms.html" id="terms-link" data-t="terms">Terms of Service</a></footer>
+    </main>
+    <script src="/delete-account.js"></script>
+  </body>
+</html>

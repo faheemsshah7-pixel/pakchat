@@ -40,6 +40,8 @@ defmodule PakchatWeb.Router do
     get "/auth/whatsapp", WhatsAppController, :show
     post "/auth/whatsapp", WhatsAppController, :start
     post "/auth/whatsapp/:id", WhatsAppController, :claim
+    # The Delete account web page (no app needed): a number WhatsApp proved deletes its account.
+    post "/account/delete", AuthController, :delete_account
     # Meta telling us about messages to PakChat's WhatsApp number.
     get "/whatsapp/webhook", WhatsAppController, :verify
     post "/whatsapp/webhook", WhatsAppController, :webhook
@@ -68,6 +70,7 @@ defmodule PakchatWeb.Router do
     put "/me/google", MeController, :link_google
     post "/me/phone/code", MeController, :phone_code
     put "/me/phone", MeController, :link_phone
+    delete "/me", MeController, :delete
     delete "/me/:what", MeController, :unlink
 
     # The phone approving a QR code, and its linked devices.

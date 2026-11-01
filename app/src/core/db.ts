@@ -74,6 +74,7 @@ export async function openStorage(): Promise<SqliteStorage> {
     },
     all: <T,>(sql: string, params: SqlValue[] = []) => sqlite.getAllAsync<T>(sql, params),
     first: <T,>(sql: string, params: SqlValue[] = []) => sqlite.getFirstAsync<T>(sql, params),
+    allNow: <T,>(sql: string, params: SqlValue[] = []) => sqlite.getAllSync<T>(sql, params),
   };
   return SqliteStorage.open(db, { locked: true });
 }

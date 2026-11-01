@@ -21,7 +21,14 @@ test('every word must match; nothing typed finds nothing', () => {
 
 test('Theme is under Chats, like WhatsApp', () => {
   expect(settingsMatching('theme', en)[0]).toMatchObject({ where: en.chatsWord, to: '/settings/chats' });
-  expect(settingsMatching('server', en)[0]).toMatchObject({ where: en.accountWord, to: '/settings/account' });
+  expect(settingsMatching('server', en, true)[0]).toMatchObject({ where: en.accountWord, to: '/settings/account' });
+});
+
+test("the server's address only shows on a test server; Delete my account is always there", () => {
+  expect(titles('server')).toEqual([]);
+  expect(settingsMatching('delete account', en)[0]).toMatchObject({ where: en.accountWord, to: '/settings/delete-account' });
+  expect(titles('terms')).toEqual([en.termsWord]);
+  expect(titles('privacy policy')).toEqual([en.privacyPolicyWord]);
 });
 
 test('works in Urdu too', () => {

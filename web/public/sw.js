@@ -2,7 +2,7 @@
 // It's what lets you install PakChat as an app, and it keeps a copy of the app's files
 // so PakChat still opens when the internet is slow or down. (Messages still need the internet.)
 // Only files from PakChat's own website are kept. Messages and photos are never stored here.
-const CACHE = 'pakchat-web-v2'
+const CACHE = 'pakchat-web-v3'
 
 self.addEventListener('install', () => self.skipWaiting()) // use a new version straight away
 // Drop copies kept by older versions (like the old website's).
@@ -19,6 +19,9 @@ self.addEventListener('fetch', (event) => {
   const request = event.request
   const url = new URL(request.url)
   if (request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/__/') || url.pathname.endsWith('.apk')) return
+  // The website's own pages (Terms, Privacy Policy, Delete account) aren't PakChat Web: leave them
+  // to the browser, so one of them is never saved as the copy of PakChat Web that opens offline.
+  if (url.pathname.endsWith('.html') && url.pathname !== '/index.html') return
 
   if (request.mode === 'navigate') {
     // The page itself: always try the internet first (so you get updates), else the saved copy.

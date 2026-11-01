@@ -7,8 +7,8 @@ import type { IconName } from '../ui/icons';
 
 export type Entry = { title: string; where: string; icon: IconName; to: Href | null };
 
-/** Every setting, and the page it's on. */
-function entries(t: Strings): Entry[] {
+/** Every setting, and the page it's on. The server's address only on a test server (`showServer`). */
+function entries(t: Strings, showServer: boolean): Entry[] {
   const privacy = { where: t.privacy, to: '/settings/privacy' as const };
   const notifications = { where: t.notifications, to: '/settings/notifications' as const };
   const storage = { where: t.storage, to: '/settings/storage' as const };
@@ -41,8 +41,9 @@ function entries(t: Strings): Entry[] {
     { title: t.signInWays, icon: 'key', ...account },
     { title: t.linkGoogle, icon: 'globe', ...account },
     { title: t.linkPhone, icon: 'calls', ...account },
-    { title: t.serverAddress, icon: 'server', ...account },
+    ...(showServer ? [{ title: t.serverAddress, icon: 'server' as const, ...account }] : []),
     { title: t.logOut, icon: 'logout', ...account },
+    { title: t.deleteAccount, icon: 'trash', where: t.accountWord, to: '/settings/delete-account' },
     { title: t.profileWord, icon: 'user', where: t.settings, to: '/settings/profile' },
     { title: t.about, icon: 'info', where: t.profileWord, to: '/settings/profile' },
     { title: t.qrCode, icon: 'qr', where: t.settings, to: '/qr' },
@@ -51,6 +52,8 @@ function entries(t: Strings): Entry[] {
     { title: t.manageStorage, icon: 'doc', where: t.storage, to: '/settings/manage-storage' },
     { title: t.helpWord, icon: 'info', where: t.settings, to: '/settings/help' },
     { title: t.appInfo, icon: 'info', where: t.helpWord, to: '/settings/help' },
+    { title: t.termsWord, icon: 'doc', where: t.helpWord, to: '/settings/help' },
+    { title: t.privacyPolicyWord, icon: 'shield', where: t.helpWord, to: '/settings/help' },
     { title: t.chatsWord, icon: 'chat', ...chats },
     { title: t.themeWord, icon: 'palette', ...chats },
     { title: t.accentColour, icon: 'palette', ...chats },
@@ -66,10 +69,10 @@ function entries(t: Strings): Entry[] {
 /** Lower case, without accents, for matching: "Last seen" matches "last", "seen", "las". */
 const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-export function settingsMatching(query: string, t: Strings): Entry[] {
+export function settingsMatching(query: string, t: Strings, showServer = false): Entry[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  return entries(t).filter((e) => {
+  return entries(t, showServer).filter((e) => {
     const text = fold(`${e.title} ${e.where}`);
     return words.every((w) => text.includes(w));
   });

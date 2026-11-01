@@ -4,6 +4,7 @@
 import { router } from 'expo-router';
 import { FlatList, View } from 'react-native';
 
+import { onBuiltInServer } from '../core/core';
 import { settingsMatching } from '../core/settingsIndex';
 import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
@@ -14,7 +15,7 @@ import { Divider, Empty, Pressy, Txt } from './kit';
 export function SettingsResults({ query, onHere }: { query: string; onHere: () => void }) {
   const t = useT();
   const { theme } = useLook();
-  const found = settingsMatching(query, t);
+  const found = settingsMatching(query, t, !onBuiltInServer());
   if (!query.trim()) return null;
   return (
     <FlatList
