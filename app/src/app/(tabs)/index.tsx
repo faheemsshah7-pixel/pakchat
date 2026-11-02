@@ -144,7 +144,45 @@ export default function Chats() {
       // starting was twice as slow as the rest (owner, 31 Oct): that's when the
       // phone loaded the screen's code (the composer, emoji, voice, polls…). It's
       // loaded once, so after this every chat opens as fast as the second one.
-      void import('../chat/[id]').catch(() => {});
+      // Its parts too, one at a time so a tap meanwhile isn't kept waiting: with code loaded when
+      // first used, the first chat opened still had to load the bubbles, the typing bar and the
+      // rest as it drew (owner's speed check, 2 Nov: the first chat was the slowest).
+      void (async () => {
+        const parts = [
+          () => import('../chat/[id]'),
+          () => import('../../ui/chat/Bubble'),
+          () => import('../../ui/chat/RichText'),
+          () => import('../../ui/chat/FileBody'),
+          () => import('../../ui/chat/MoreBodies'),
+          () => import('../../ui/chat/Album'),
+          () => import('../../ui/chat/VoiceBody'),
+          () => import('../../ui/chat/Composer'),
+          () => import('../../ui/chat/ScheduledBar'),
+          () => import('../../ui/chat/Backdrop'),
+          // Then the screens opened most after a chat, and what they draw: someone's info, Settings,
+          // a contact, a profile photo (owner's speed check, 2 Nov: each was slow the first time).
+          () => import('../info/[id]'),
+          () => import('../../ui/ExportSheet'),
+          () => import('../../ui/TonePicker'),
+          () => import('../../ui/ReportSheet'),
+          () => import('../../ui/PhotoSheet'),
+          () => import('../settings/index'),
+          () => import('../../ui/SettingsSearch'),
+          () => import('../contact'),
+          () => import('../../core/phoneBook'),
+          () => import('../photo'),
+          () => import('../../ui/SwipeToClose'),
+          () => import('../../ui/Zoomable'),
+        ];
+        for (const part of parts) {
+          try {
+            await part();
+          } catch {
+            return;
+          }
+          await new Promise((go) => setTimeout(go, 16));
+        }
+      })();
     }, 600);
     return () => clearTimeout(wait);
   }, [top]);

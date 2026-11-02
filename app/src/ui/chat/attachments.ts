@@ -31,6 +31,11 @@ export async function fromGallery(many = true): Promise<Picked[]> {
     const got = await openGallery(GALLERY_MAX);
     if (got !== 'system') return got;
   }
+  return fromPhoneGallery(many);
+}
+
+/** The phone's own gallery picker. Empty if you closed it. */
+export async function fromPhoneGallery(many = true): Promise<Picked[]> {
   const r = await outsideFor(() =>
     ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: many, selectionLimit: many ? GALLERY_MAX : 1, quality: 1 }),
   );

@@ -9,9 +9,10 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, BackHandler, FlatList, Keyboard, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
-import Animated, { FadeIn, FadeOut, KeyboardState, LayoutAnimationConfig, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { AppState, BackHandler, FlatList, Keyboard, Pressable, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
+import Animated, { Easing, FadeIn, FadeOut, KeyboardState, LayoutAnimationConfig, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { core, MESSAGE_TEXT } from '../../core/core';
 import { haveFile, loadLimits, sendPicked, takeHandOff, TooBig, type Picked } from '../../core/files';
@@ -38,7 +39,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Bubble, DayLabel, TypingDots } from '../../ui/chat/Bubble';
 import { startCall } from '../../ui/CallBar';
 import { albumsIn } from '../../ui/chat/albums';
-import { AttachMenu, type AttachKind } from '../../ui/chat/AttachMenu';
+import { ATTACH_HEIGHT, AttachMenu, type AttachKind } from '../../ui/chat/AttachMenu';
 import { CameraSheet } from '../../ui/chat/CameraSheet';
 import { EmojiPicker } from '../../ui/chat/EmojiPicker';
 import { LinkSheetHost } from '../../ui/chat/RichText';
@@ -171,27 +172,69 @@ function ChatScreen() {
   // could inherit a keyboard height left over from before, which left a big
   // empty gap under the typing bar with no keyboard there (owner, 31 Oct).
   const shown = useSharedValue(Keyboard.isVisible());
+  // The keyboard's height as the phone tells it (said again whenever it changes while up). Switching
+  // the keyboard to its emoji panel makes it taller without a slide, and that new height didn't
+  // always reach the chat, so the typing bar stayed behind the emojis (owner, 1 Nov). The taller
+  // of the two is used once the keyboard is up.
+  const told = useSharedValue(0);
   useEffect(() => {
     shown.value = Keyboard.isVisible();
-    const up = Keyboard.addListener('keyboardDidShow', () => (shown.value = true));
+    const up = Keyboard.addListener('keyboardDidShow', (e) => {
+      shown.value = true;
+      told.value = e.endCoordinates.height;
+    });
     // (Gone: the reaction below then settles the space under the chat back to none.)
-    const down = Keyboard.addListener('keyboardDidHide', () => (shown.value = false));
+    const down = Keyboard.addListener('keyboardDidHide', () => {
+      shown.value = false;
+      told.value = 0;
+    });
     return () => {
       up.remove();
       down.remove();
     };
-  }, [shown]);
+  }, [shown, told]);
   useAnimatedReaction(
-    () => (keyboard.state.value === KeyboardState.CLOSED ? 0 : keyboard.state.value === KeyboardState.OPEN ? (shown.value ? keyboard.height.value : 0) : -1),
+    () =>
+      keyboard.state.value === KeyboardState.CLOSED
+        ? 0
+        : keyboard.state.value === KeyboardState.OPEN
+          ? shown.value
+            ? Math.max(keyboard.height.value, told.value)
+            : 0
+          : -1,
     (h) => {
       if (h >= 0) rest.value = h;
     },
   );
+  // The 📎 panel takes the keyboard's place under the typing bar, like WhatsApp's: the bar
+  // rides up on top of it the same way (only shifted while it moves; the space set once).
+  const attachUp = useSharedValue(0);
+  const attachRest = useSharedValue(0);
+  const attachFull = ATTACH_HEIGHT + insets.bottom;
+  useEffect(() => {
+    if (attach) {
+      Keyboard.dismiss();
+      attachRest.value = attachFull;
+      attachUp.value = withTiming(attachFull, { duration: 240, easing: Easing.out(Easing.cubic) });
+    } else if (attachUp.value > 0) {
+      attachUp.value = withTiming(0, { duration: 190, easing: Easing.in(Easing.quad) }, (done) => {
+        'worklet';
+        if (done) attachRest.value = 0;
+      });
+    }
+  }, [attach, attachFull, attachUp, attachRest]);
+  // Starting to type closes it (the keyboard comes up in its place).
+  useAnimatedReaction(
+    () => keyboard.state.value === KeyboardState.OPENING || keyboard.state.value === KeyboardState.OPEN,
+    (opening, was) => {
+      if (opening && !was && attachRest.value > 0) scheduleOnRN(setAttach, false);
+    },
+  );
   const lift = useAnimatedStyle(() => {
     const moving = keyboard.state.value === KeyboardState.OPENING || keyboard.state.value === KeyboardState.CLOSING;
-    const height = moving || shown.value ? keyboard.height.value : 0;
-    const now = Math.max(height, insets.bottom);
-    const settledAt = Math.max(rest.value, insets.bottom);
+    const height = moving ? keyboard.height.value : shown.value ? Math.max(keyboard.height.value, told.value) : 0;
+    const now = Math.max(height, insets.bottom, attachUp.value);
+    const settledAt = Math.max(rest.value, insets.bottom, attachRest.value);
     return { paddingBottom: settledAt, transform: [{ translateY: settledAt - now }] };
   });
 
@@ -254,8 +297,13 @@ function ChatScreen() {
 
   // Back first cancels picking, replying or editing.
   useEffect(() => {
-    if (!selecting && !replyTo && !editing && !searching) return;
+    if (!selecting && !replyTo && !editing && !searching && !attach) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // The 📎 panel goes first, on its own.
+      if (attach) {
+        setAttach(false);
+        return true;
+      }
       setSearching(false);
       setSearchText('');
       setPicked(new Map());
@@ -264,7 +312,7 @@ function ChatScreen() {
       return true;
     });
     return () => sub.remove();
-  }, [selecting, replyTo, editing, searching]);
+  }, [selecting, replyTo, editing, searching, attach]);
 
   // A disappearing message goes when its time is up, even if nothing else changes on screen.
   useEffect(() => {
@@ -728,7 +776,8 @@ function ChatScreen() {
     requestAnimationFrame(() => stopTimer('send', 'send'));
   }, [list]);
   const composerSchedule = useStable(askSchedule);
-  const composerAttach = useStable(() => setAttach(true));
+  // (Again: closes it, like WhatsApp's.)
+  const composerAttach = useStable(() => setAttach((a) => !a));
   const composerCamera = useStable(() => setCameraOpen(true));
   const composerRound = useStable(sendRound);
   const composerVoice = useStable(sendVoiceNote);
@@ -1038,6 +1087,8 @@ function ChatScreen() {
               </Pressy>
             </Animated.View>
           )}
+          {/* A tap on the messages closes the 📎 panel. */}
+          {attach && <Pressable style={StyleSheet.absoluteFill} onPress={() => setAttach(false)} accessibilityLabel={t.close} />}
         </View>
 
         {chat &&
@@ -1315,8 +1366,8 @@ function ChatScreen() {
         ]}
       />
 
-      {/* 📎: things to send. */}
-      <AttachMenu visible={attach} onClose={() => setAttach(false)} onPick={attachPicked} />
+      {/* 📎: things to send, under the typing bar. */}
+      <AttachMenu up={attachUp} onPick={attachPicked} />
 
       <CameraSheet
         visible={cameraOpen}

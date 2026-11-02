@@ -4,8 +4,9 @@
 //   ✕ and ⚡ at the top        close, and the flash (round, over the picture)
 //   The row of squares        your newest photos and videos: tap to pick (each
 //                             shows its number), then the green Send takes them
-//                             to the editor. Swipe it up (or tap the — above it)
-//                             for the whole gallery.
+//                             to the editor. Swipe up anywhere (or tap the — above
+//                             it) and the whole gallery follows your finger up over
+//                             the camera, like WhatsApp's; down (or back) for the camera.
 //   The bar under it          the gallery, the white button, the other camera
 //   Video · Photo · Video note   the modes: tap one, or swipe the picture sideways
 //
@@ -18,10 +19,10 @@ import { CameraView, type CameraType } from 'expo-camera';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library/legacy';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { FlatList, Linking, Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { GestureDetector, GestureHandlerRootView, usePanGesture, usePinchGesture, useSimultaneousGestures } from 'react-native-gesture-handler';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -36,7 +37,8 @@ import { duration } from '../format';
 import { Icon, type IconName } from '../icons';
 import { Pressy, Txt } from '../kit';
 import { fadeIn, fadeOut, quick, thud, tick } from '../motion';
-import { pickedOf } from './Gallery';
+import { fromPhoneGallery } from './attachments';
+import { GALLERY_MAX, GalleryScreen, pickedOf, type GalleryAsk } from './Gallery';
 import type { RoundVideo } from './RoundRecorder';
 import { toast, whenOpened } from '../overlays';
 
@@ -81,22 +83,38 @@ export const CameraSheet = whenOpened(function CameraSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // Back with the gallery pulled up goes back to the camera first.
+  const back = useRef<(() => boolean) | null>(null);
   return (
-    // It fades in over the chat, like WhatsApp's camera.
-    <Modal visible={visible} animationType="fade" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
+    // It slides up from the bottom over the chat, and back down when closed, like WhatsApp's camera (owner, 1 Nov).
+    <Modal visible={visible} animationType="slide" onRequestClose={() => {
+      if (!back.current?.()) onClose();
+    }} statusBarTranslucent navigationBarTranslucent>
       {/* Swipes inside a Modal need their own gesture root on Android. */}
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
-        {visible && ok && <Camera onClose={onClose} onTaken={onTaken} onGallery={onGallery} onRound={onRound} />}
+        {visible && ok && <Camera onClose={onClose} onTaken={onTaken} onGallery={onGallery} onRound={onRound} back={back} />}
       </GestureHandlerRootView>
     </Modal>
   );
 });
 
-function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void; onTaken: (p: Picked[]) => void; onGallery: () => void; onRound?: (v: RoundVideo) => void }) {
+function Camera({
+  onClose,
+  onTaken,
+  onGallery,
+  onRound,
+  back,
+}: {
+  onClose: () => void;
+  onTaken: (p: Picked[]) => void;
+  onGallery: () => void;
+  onRound?: (v: RoundVideo) => void;
+  back: RefObject<(() => boolean) | null>;
+}) {
   const t = useT();
   const { rtl } = useLook();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const cam = useRef<CameraView>(null);
   const kinds: Kind[] = onRound ? ['video', 'photo', 'note'] : ['video', 'photo'];
   const [kind, setKind] = useState<Kind>('photo');
@@ -129,8 +147,8 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
     if (filming || k === kind) return;
     tick();
     // A video note is of you, so it starts on the front camera, like WhatsApp.
-    if (k === 'note') setFacing('front');
-    else if (kind === 'note') setFacing('back');
+    if (k === 'note') face('front');
+    else if (kind === 'note') face('back');
     setKind(k);
   }
 
@@ -140,8 +158,33 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
     const next = kinds[kinds.indexOf(kind) + step];
     if (next) choose(next);
   }
+  // Pinch to zoom in and out, like WhatsApp's (owner, 1 Nov). 0 is not zoomed, 1 is as far as it goes.
+  const [zoom, setZoom] = useState(0);
+  const zoomNow = useSharedValue(0);
+  const zoomFrom = useSharedValue(0);
+  /** The other camera: it starts not zoomed. */
+  function face(f: CameraType) {
+    setFacing(f);
+    setZoom(0);
+    zoomNow.value = 0;
+  }
+  const pinch = usePinchGesture({
+    onBegin: () => {
+      'worklet';
+      zoomFrom.value = zoomNow.value;
+    },
+    onUpdate: (e) => {
+      'worklet';
+      const z = Math.max(0, Math.min(1, zoomFrom.value + (e.scale - 1) * 0.4));
+      if (Math.abs(z - zoomNow.value) < 0.005) return;
+      zoomNow.value = z;
+      scheduleOnRN(setZoom, Math.round(z * 1000) / 1000);
+    },
+  });
   const swipe = usePanGesture({
     enabled: !filming,
+    // One finger only: two are a pinch (zoom), not a swipe to another mode.
+    maxPointers: 1,
     activeOffsetX: [-30, 30],
     failOffsetY: [-25, 25],
     onDeactivate: (e) => {
@@ -149,6 +192,76 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
       if (Math.abs(e.translationX) > 60) scheduleOnRN(swiped, e.translationX);
     },
   });
+
+  // The gallery, pulled up over the camera with a finger, like WhatsApp's (owner, 2 Nov). It's
+  // there (out of sight below) once the gallery may be read; until then a swipe up opens the
+  // gallery the old way. `pull` is how far up it is, 0 to the screen's height.
+  const [canPull, setCanPull] = useState(false);
+  const canPullNow = useSharedValue(false);
+  const [galleryUp, setGalleryUp] = useState(false);
+  const pull = useSharedValue(0);
+  const allowed = () => {
+    // A moment after the camera has started, so it doesn't slow the camera opening.
+    setTimeout(() => {
+      setCanPull(true);
+      canPullNow.value = true;
+    }, 400);
+  };
+  const OPEN_T = { duration: 260, easing: Easing.out(Easing.cubic) };
+  function gallery(up: boolean) {
+    if (up && !canPull) return onGallery();
+    if (up) tick();
+    pull.value = withTiming(up ? height : 0, OPEN_T);
+    setGalleryUp(up);
+  }
+  back.current = () => {
+    if (!galleryUp) return false;
+    gallery(false);
+    return true;
+  };
+  const pullConfig = {
+    enabled: !filming && !galleryUp,
+    maxPointers: 1,
+    activeOffsetY: [-16, 1000] as [number, number],
+    failOffsetX: [-20, 20] as [number, number],
+    onUpdate: (e: { translationY: number }) => {
+      'worklet';
+      if (canPullNow.value) pull.value = Math.min(height, Math.max(0, -e.translationY));
+    },
+    onDeactivate: (e: { translationY: number; velocityY: number }) => {
+      'worklet';
+      const up = -e.translationY > height * 0.2 || (e.velocityY < -700 && e.translationY < -30);
+      if (!canPullNow.value) {
+        if (e.translationY < -40) scheduleOnRN(onGallery);
+        return;
+      }
+      pull.value = withTiming(up ? height : 0, OPEN_T);
+      if (up) scheduleOnRN(setGalleryUp, true);
+    },
+  };
+  const pullPicture = usePanGesture(pullConfig);
+  const pullStrip = usePanGesture(pullConfig);
+  const galleryStyle = useAnimatedStyle(() => ({ transform: [{ translateY: height - pull.value }] }));
+  const dimStyle = useAnimatedStyle(() => ({ opacity: (pull.value / height) * 0.7 }));
+  const ask = useMemo<GalleryAsk>(
+    () => ({
+      id: 1,
+      max: GALLERY_MAX,
+      done: (p) => {
+        if (p === 'system') {
+          void fromPhoneGallery().then((list) => list.length && onTaken(list));
+          return;
+        }
+        if (p.length) onTaken(p);
+        else gallery(false);
+      },
+    }),
+    // (onTaken and the gallery's own state don't change while the camera is open.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const pinchOrSwipe = useSimultaneousGestures(swipe, pinch, pullPicture);
 
   async function photo() {
     if (busy.current || !cam.current) return;
@@ -259,6 +372,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
       enableTorch={flash && !note && (kind === 'video' || holding)}
       videoQuality={note ? '720p' : '1080p'}
       mirror={facing === 'front'}
+      zoom={zoom}
       onCameraReady={ready}
       animateShutter={false}
       testID="camera-view"
@@ -269,7 +383,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
     <View style={{ flex: 1, paddingTop: insets.top }}>
       {/* The picture, with everything over it. */}
       <View style={{ flex: 1, overflow: 'hidden' }}>
-        <GestureDetector gesture={swipe}>
+        <GestureDetector gesture={pinchOrSwipe}>
           <View style={StyleSheet.absoluteFill}>
             {note ? (
               // A video note: what the front camera sees, in a circle, like WhatsApp.
@@ -303,7 +417,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
 
         {/* The bottom: the newest photos, then the gallery, the button and the other camera. */}
         <View style={{ position: 'absolute', start: 0, end: 0, bottom: 0 }}>
-          {!filming && !note && <Recent onPick={onTaken} onGallery={onGallery} />}
+          {!filming && !note && <Recent onPick={onTaken} onGallery={() => gallery(true)} pull={pullStrip} onAllowed={allowed} />}
           {note && !filming && (
             <Txt size={14} weight="600" color="#FFFFFF" align="center" style={{ marginBottom: 12, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 3 }}>
               {t.tapToRecord}
@@ -311,7 +425,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
           )}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, backgroundColor: 'rgba(0,0,0,0.3)' }}>
             <View style={{ opacity: filming ? 0 : 1 }} pointerEvents={filming ? 'none' : 'auto'}>
-              <Round icon="photo" size={52} label={t.gallery} onPress={onGallery} testID="camera-gallery" />
+              <Round icon="photo" size={52} label={t.gallery} onPress={() => gallery(true)} testID="camera-gallery" />
             </View>
             <Pressable
               onPressIn={pressIn}
@@ -326,7 +440,7 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
               </View>
             </Pressable>
             <View style={{ opacity: filming ? 0 : 1 }} pointerEvents={filming ? 'none' : 'auto'}>
-              <Round icon="flipCamera" size={52} label={t.flipCamera} onPress={() => setFacing(facing === 'back' ? 'front' : 'back')} testID="camera-flip" />
+              <Round icon="flipCamera" size={52} label={t.flipCamera} onPress={() => face(facing === 'back' ? 'front' : 'back')} testID="camera-flip" />
             </View>
           </View>
         </View>
@@ -336,6 +450,16 @@ function Camera({ onClose, onTaken, onGallery, onRound }: { onClose: () => void;
       <View style={{ paddingTop: 12, paddingBottom: insets.bottom + 14, opacity: filming ? 0 : 1 }} pointerEvents={filming ? 'none' : 'auto'}>
         <Modes kinds={kinds} kind={kind} onPick={choose} />
       </View>
+
+      {/* The gallery, coming up over the camera as it's pulled (the camera darkens under it). */}
+      {canPull && (
+        <>
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, dimStyle]} />
+          <Animated.View pointerEvents={galleryUp ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, galleryStyle]} testID="camera-gallery-panel">
+            <GalleryScreen ask={ask} />
+          </Animated.View>
+        </>
+      )}
     </View>
   );
 }
@@ -413,7 +537,7 @@ const TILE = 66;
  * Your newest photos and videos, in a row of squares edge to edge, like WhatsApp's.
  * Tap to pick (or unpick); Send takes the picked ones to the editor. Swipe up for the gallery.
  */
-function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGallery: () => void }) {
+function Recent({ onPick, onGallery, pull, onAllowed }: { onPick: (p: Picked[]) => void; onGallery: () => void; pull: ReturnType<typeof usePanGesture>; onAllowed: () => void }) {
   const t = useT();
   const { theme } = useLook();
   const [items, setItems] = useState<MediaLibrary.Asset[]>([]);
@@ -426,6 +550,7 @@ function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGaller
         const now = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video']);
         const ok = now.granted || (now.canAskAgain && (await outsideFor(() => MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']))).granted);
         if (!ok) return;
+        if (alive) onAllowed();
         const page = await MediaLibrary.getAssetsAsync({ first: STRIP, mediaType: ['photo', 'video'], sortBy: [['creationTime', false]] });
         if (alive) setItems(page.assets);
       } catch {
@@ -435,6 +560,8 @@ function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGaller
     return () => {
       alive = false;
     };
+    // (Once, as the row appears.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggle = (id: string) => (tick(), setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])));
@@ -446,15 +573,7 @@ function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGaller
         .map(pickedOf),
     );
 
-  // Pulling the row (or the handle) up opens the whole gallery; sideways it scrolls.
-  const up = usePanGesture({
-    activeOffsetY: [-18, 1000],
-    failOffsetX: [-14, 14],
-    onDeactivate: (e) => {
-      'worklet';
-      if (e.translationY < -40) scheduleOnRN(onGallery);
-    },
-  });
+  // Pulling the row (or the handle) up brings the whole gallery up (`pull`, from the camera); sideways it scrolls.
 
   return (
     <View>
@@ -470,7 +589,7 @@ function Recent({ onPick, onGallery }: { onPick: (p: Picked[]) => void; onGaller
           </Pressy>
         </Animated.View>
       )}
-      <GestureDetector gesture={up}>
+      <GestureDetector gesture={pull}>
         <View>
           <Pressable onPress={onGallery} accessibilityRole="button" accessibilityLabel={t.swipeUpGallery} hitSlop={10} style={{ alignSelf: 'center', paddingVertical: 8 }} testID="camera-handle">
             <View style={{ width: 28, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.9)' }} />

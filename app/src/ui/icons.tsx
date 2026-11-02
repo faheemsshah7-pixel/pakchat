@@ -1,11 +1,18 @@
-// icons.tsx: every icon in the app, drawn with lines (SVG), the same as in the design.
+// icons.tsx: every icon in the app, drawn with lines, the same as in the design.
 // <Icon name="search" size={20} color={theme.muted} />
+//
+// The lines are kept here (and drawn as SVG for the wallpaper's doodles), but <Icon> draws each
+// one as a letter of a font made from them (scripts/make-icon-font.py, iconFont.ts). Android
+// draws a letter natively and at once; a little SVG picture per icon made screens slow to open
+// on low-end phones (owner, 2 Nov). Run the script again after adding or changing an icon.
 //
 // Icons that point a way (back, send, reply) are turned around in Urdu, because
 // right-to-left screens read the other way. Pass `flip` for those.
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { Text } from 'react-native';
+import { Circle, Path, Rect } from 'react-native-svg';
 
 import { useLook } from '../theme/ThemeProvider';
+import { ICON_FONTS, ICON_LETTERS } from './iconFont';
 
 type Shape = { d?: string[]; fill?: string[]; circles?: [number, number, number][]; dots?: [number, number, number][]; rects?: [number, number, number, number, number][] };
 
@@ -149,10 +156,32 @@ export function Icon({
 }) {
   const { rtl } = useLook();
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" style={flip && rtl ? { transform: [{ scaleX: -1 }] } : undefined}>
-      <IconPaths name={name} color={color} stroke={stroke} />
-    </Svg>
+    <Text
+      allowFontScaling={false}
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        fontFamily: fontFor(stroke),
+        fontSize: size,
+        lineHeight: size,
+        width: size,
+        height: size,
+        color,
+        includeFontPadding: false,
+        textAlign: 'center',
+        transform: flip && rtl ? [{ scaleX: -1 }] : undefined,
+      }}
+    >
+      {ICON_LETTERS[name]}
+    </Text>
   );
+}
+
+/** The font drawn with the nearest line width to `stroke`. */
+export function fontFor(stroke: number) {
+  let best = ICON_FONTS[0];
+  for (const f of ICON_FONTS) if (Math.abs(f[0] - stroke) < Math.abs(best[0] - stroke)) best = f;
+  return best[1];
 }
 
 /** An icon's lines alone, to draw inside another picture (the wallpaper's doodles). */

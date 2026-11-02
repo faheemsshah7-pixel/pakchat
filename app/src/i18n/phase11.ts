@@ -1,5 +1,6 @@
 // phase11.ts: the words added in Phase 11 (build 17): Delete my account, the Terms and
-// Privacy Policy links, and Help without the server's address. In English and Urdu;
+// Privacy Policy links, and Help without the server's address. Build 18: the gallery
+// without photo access, and the menu for a phone number in a message. In English and Urdu;
 // strings.ts puts them in with the rest.
 
 export const en11 = {
@@ -22,6 +23,13 @@ export const en11 = {
   privacyPolicyWord: 'Privacy Policy',
   agreeText: 'By continuing, you agree to our {terms} and {privacy}.',
   helpServerLive: 'PakChat\'s server only passes your locked messages along. It can\'t open them, and it deletes each one once it\'s delivered.',
+  galleryNoAccess: 'PakChat can\'t see your photos and videos yet.',
+  galleryAllow: 'Allow access',
+  numberChecking: 'Checking if they\'re on PakChat…',
+  numberNotOn: 'Not on PakChat',
+  addToContacts: 'Add to contacts',
+  inviteToPakChat: 'Invite to PakChat',
+  inviteText: 'Let\'s chat on PakChat! It\'s free and private. Get it here: {link}',
 };
 
 export const ur11: typeof en11 = {
@@ -44,4 +52,11 @@ export const ur11: typeof en11 = {
   privacyPolicyWord: 'پرائیویسی پالیسی',
   agreeText: 'آگے بڑھ کر آپ ہماری {terms} اور {privacy} سے اتفاق کرتے ہیں۔',
   helpServerLive: 'پاک چیٹ کا سرور آپ کے لاک پیغامات صرف آگے پہنچاتا ہے۔ وہ انہیں کھول نہیں سکتا، اور ہر پیغام پہنچتے ہی ڈیلیٹ کر دیتا ہے۔',
+  galleryNoAccess: 'پاک چیٹ ابھی آپ کی تصویریں اور ویڈیوز نہیں دیکھ سکتا۔',
+  galleryAllow: 'اجازت دیں',
+  numberChecking: 'دیکھ رہے ہیں کہ یہ پاک چیٹ پر ہیں یا نہیں…',
+  numberNotOn: 'پاک چیٹ پر نہیں',
+  addToContacts: 'رابطوں میں شامل کریں',
+  inviteToPakChat: 'پاک چیٹ پر بلائیں',
+  inviteText: 'آئیں پاک چیٹ پر بات کریں! یہ مفت اور محفوظ ہے۔ یہاں سے لیں: {link}',
 };

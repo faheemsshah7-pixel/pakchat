@@ -9,4 +9,10 @@ const config = getDefaultConfig(__dirname);
 config.watchFolders = [path.resolve(__dirname, '../shared')];
 config.resolver.nodeModulesPaths = [path.resolve(__dirname, 'node_modules')];
 
+// Load each piece of code the first time it's used, not all of it when the app opens.
+// Code that must run at start (index.ts's `import './...'` lines) still runs first.
+config.transformer.getTransformOptions = async () => ({
+  transform: { experimentalImportSupport: true, inlineRequires: true },
+});
+
 module.exports = config;

@@ -9,7 +9,7 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, type ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -252,7 +252,15 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           />
         )}
         {above}
-        <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center' }}>
+        {/* The whole row answers a hold (and, while picking, a tap), not only the bubble, like
+            WhatsApp: holding the empty space beside a message picks it too. The bubble's own
+            press comes first where the finger is on it. */}
+        <Pressable
+          onLongPress={() => onLongPress(m)}
+          onPress={selecting ? () => onPress(m) : undefined}
+          accessible={false}
+          style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center'}}
+        >
           {/* The reply arrow, waiting behind the bubble. */}
           <Animated.View style={[{ position: 'absolute' }, mine ? { end: 4 } : { start: 4 }, arrow]}>
             <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
@@ -269,7 +277,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 testID={`msg-${m.text ?? m.id}`}
               >
                 {bare ? (
-                  <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18, borderWidth: selected ? 2 : 0, borderColor: theme.acc, padding: selected ? 4 : 0 }}>
+                  <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18 }}>
                     {!!name && (
                       <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: theme.glass }}>
                         <Txt size={12.5} weight="700" color={theme.accInk} lines={1}>
@@ -301,14 +309,14 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 ) : mine && (slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]) ? (
                   // One plain colour: on a slower phone (the colour fade and its clipping cost a lot
                   // there), and in the dark look, whose "fade" is one colour anyway.
-                  <View style={[radius, { backgroundColor: middle(theme.bubbleMine), borderWidth: selected ? 2 : 0, borderColor: theme.acc }]}>{body}</View>
+                  <View style={[radius, { backgroundColor: middle(theme.bubbleMine) }]}>{body}</View>
                 ) : mine ? (
                   // The gradient can't round its own corners one by one on Android (it came
                   // out square), so a plain View with the corners clips it instead.
                   <View
                     style={[
                       radius,
-                      { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}`, borderWidth: selected ? 2 : 0, borderColor: theme.acc },
+                      { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}` },
                     ]}
                   >
                     <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
@@ -318,7 +326,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                   <View
                     style={[
                       radius,
-                      { backgroundColor: theme.bubbleIn, boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)', borderWidth: selected ? 2 : 0, borderColor: theme.acc },
+                      { backgroundColor: theme.bubbleIn, boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)' },
                     ]}
                   >
                     {body}
@@ -333,7 +341,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
             </Animated.View>
           </GestureDetector>
-        </View>
+        </Pressable>
       </View>
     </LayoutAnimationConfig>
   );

@@ -18,6 +18,7 @@ import { core } from '../core/core';
 import { useAppLocked, useAuth, useCall, warmChatList } from '../core/hooks';
 import { LockScreen } from '../ui/LockScreen';
 import { calls, takeTappedCall, watchCallTaps } from '../core/calls';
+import { screenMoved, screenMoving, watchBackButton, watchRouter } from '../core/speed';
 import { LIKE_ALERT, PLAN_ALERT, takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { CallBar } from '../ui/CallBar';
@@ -26,6 +27,8 @@ import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+// Settings › Help › Speed check times opening screens and going back from the app's own taps.
+watchRouter(router);
 // Start opening the database and keys now, while React is still drawing its first frame,
 // rather than after it (the effect below picks up the same start, and shows any problem).
 // The chat list is read as soon as that's done, so it's ready when its screen first draws.
@@ -68,6 +71,13 @@ function App() {
   }, []);
 
   const stuck = state === 'loading' && (problem !== null || slow);
+
+  // Speed check: the back button's clock, added after navigation's own back handling is set up.
+  useEffect(() => {
+    if (state !== 'signedIn') return;
+    const id = setTimeout(watchBackButton, 1000);
+    return () => clearTimeout(id);
+  }, [state]);
 
   useEffect(() => {
     console.log(`[pakchat] screen: ${state}${stuck ? ' (stuck)' : ''}${problem ? ` ${problem}` : ''}`);
@@ -144,12 +154,22 @@ function App() {
       <Stack
         screenOptions={{
           headerShown: false,
-          // Like WhatsApp: the new screen slides in quickly from the side (a fifth of a
-          // second) while the one under it moves back a little. Android's own way took
-          // almost half a second and only faded in, which felt slow next to WhatsApp.
+          // The new screen slides in from the side as the one under it moves a little the
+          // other way, and going back slides it out again (plugins/withScreenSlide.js sets
+          // how). Android's own way took almost half a second, which felt slow next to WhatsApp.
           animation: rtl ? 'ios_from_left' : 'ios_from_right',
           contentStyle: { backgroundColor: theme.bg },
         }}
+        // Speed check: when each screen starts and stops moving (core/speed.ts).
+        screenListeners={({ navigation, route }) => ({
+          transitionStart: (e: { data?: { closing?: boolean } }) => screenMoving(route.name, !!e.data?.closing),
+          transitionEnd: (e: { data?: { closing?: boolean } }) => {
+            const s = navigation.getState() as { routes: { name: string; key: string }[]; index: number } | undefined;
+            // (A screen still there under the top one was covered by a new screen, not closed.)
+            const at = s ? s.routes.findIndex((r) => r.key === route.key) : -1;
+            screenMoved(route.name, !!e.data?.closing, s?.routes[s.index]?.name ?? '', !!s && at >= 0 && at < s.index);
+          },
+        })}
       >
         <Stack.Protected guard={state === 'signedIn'}>
           {/* The chat list is the first screen: it appears straight after the logo, like

@@ -10,9 +10,8 @@
 // the app replaces its own (Android 13 and newer still use its originals,
 // which can also stretch the edges, something older phones can't do).
 //
-// Opening a chat (the stack's "ios_from_right" slide, _layout.tsx): its own
-// starts slowly and speeds up, so for the first moment after a tap nothing
-// seems to move. Like WhatsApp's, ours moves at once and slows into place.
+// Opening a chat (the stack's "ios_from_right", _layout.tsx) zooms in like
+// WhatsApp's: see `zoom` below.
 const fs = require('fs');
 const path = require('path');
 const { withDangerousMod } = require('expo/config-plugins');
@@ -42,24 +41,45 @@ const FILES = {
   'rns_default_exit_out.xml': anim({ fromAlpha: 1, toAlpha: 0, alphaStart: 35, alphaMs: 83, fromX: '0', toX: '10%' }),
 };
 
-/** A screen sliding in: quick at first, slowing into place, in a fifth of a second. Both screens move together. */
-function slideIn(fromX, toX) {
+/**
+ * Opening a chat (the stack's "ios_from_right", _layout.tsx), like WhatsApp's (owner's video,
+ * 1 Nov): the new screen grows the last bit into place from a little smaller as it fades in,
+ * over the screen under it, which stays put. Going back is the same, backwards: it shrinks a
+ * little as it fades away. Before, it slid in from the side, and the end looked off.
+ * Urdu (from the left) is the same, since a zoom has no side.
+ */
+function zoom({ fromScale, toScale, fromAlpha, toAlpha, ms, alphaMs, ease }) {
+  const fill = 'android:fillEnabled="true" android:fillBefore="true" android:fillAfter="true"';
   return `<?xml version="1.0" encoding="utf-8"?>
 <!-- Made by plugins/withScreenSlide.js: change it there. -->
-<translate xmlns:android="http://schemas.android.com/apk/res/android"
-    android:duration="@android:integer/config_shortAnimTime"
-    android:interpolator="@android:interpolator/decelerate_cubic"
-    android:fromXDelta="${fromX}"
-    android:toXDelta="${toX}" />
+<set xmlns:android="http://schemas.android.com/apk/res/android" android:shareInterpolator="false">
+    <alpha android:fromAlpha="${fromAlpha}" android:toAlpha="${toAlpha}" ${fill}
+        android:interpolator="@android:interpolator/linear" android:duration="${alphaMs}" />
+    <scale android:fromXScale="${fromScale}" android:toXScale="${toScale}" android:fromYScale="${fromScale}" android:toYScale="${toScale}"
+        android:pivotX="50%" android:pivotY="50%" ${fill}
+        android:interpolator="${ease}" android:duration="${ms}" />
+</set>
 `;
 }
-Object.assign(FILES, {
-  'rns_ios_from_right_foreground_open.xml': slideIn('100%', '0%'),
-  'rns_ios_from_right_background_open.xml': slideIn('0%', '-30%'),
-  // Urdu: the same from the other side.
-  'rns_ios_from_left_foreground_open.xml': slideIn('-100%', '0%'),
-  'rns_ios_from_left_background_open.xml': slideIn('0%', '30%'),
-});
+/** The screen underneath: it stays as it is (shown the whole time the other one moves). */
+function stay(ms) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<!-- Made by plugins/withScreenSlide.js: change it there. -->
+<alpha xmlns:android="http://schemas.android.com/apk/res/android" android:fromAlpha="1" android:toAlpha="1" android:duration="${ms}" />
+`;
+}
+const OPEN_MS = 220;
+const CLOSE_MS = 180;
+const open = zoom({ fromScale: 0.9, toScale: 1, fromAlpha: 0, toAlpha: 1, ms: OPEN_MS, alphaMs: 120, ease: '@android:interpolator/decelerate_cubic' });
+const close = zoom({ fromScale: 1, toScale: 0.9, fromAlpha: 1, toAlpha: 0, ms: CLOSE_MS, alphaMs: CLOSE_MS, ease: '@android:interpolator/accelerate_cubic' });
+for (const side of ['right', 'left']) {
+  Object.assign(FILES, {
+    [`rns_ios_from_${side}_foreground_open.xml`]: open,
+    [`rns_ios_from_${side}_background_open.xml`]: stay(OPEN_MS),
+    [`rns_ios_from_${side}_foreground_close.xml`]: close,
+    [`rns_ios_from_${side}_background_close.xml`]: stay(CLOSE_MS),
+  });
+}
 
 module.exports = function withScreenSlide(config) {
   return withDangerousMod(config, [
@@ -72,3 +92,4 @@ module.exports = function withScreenSlide(config) {
     },
   ]);
 };
+module.exports.FILES = FILES;

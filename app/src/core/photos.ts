@@ -1,7 +1,6 @@
 // photos.ts: pictures of people, groups and communities, like WhatsApp's.
 //
-// A `photo` value (on a person, or on a group or community) is a web address
-// (the Gmail picture from signing in with Google), or `pk1:<id>:<key>:<digest>`:
+// A `photo` value (on a person, or on a group or community) is `pk1:<id>:<key>:<digest>`:
 // a file on PakChat's server, locked with that key. Each one is fetched once
 // and kept in the phone's cache; Avatar shows it, and the letters until then.
 // Like WhatsApp's, photos aren't end-to-end locked: the server shows the value
@@ -35,7 +34,9 @@ const failedAt = new Map<string, number>();
 /** Something to show for a photo value now: a web address or a file on the phone, or null (letters) while it comes. */
 export function photoUri(value?: string | null): string | null {
   if (!value) return null;
-  if (value.startsWith('https://')) return value;
+  // An old Gmail picture (from signing in with Google): not shown any more, the first
+  // letter is, as for a number (owner, 1 Nov). It also showed an empty circle when it didn't load.
+  if (value.startsWith('https://')) return null;
   const p = parse(value);
   if (!p) return null;
   const known = here.get(p.id);

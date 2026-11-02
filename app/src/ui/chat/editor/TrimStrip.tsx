@@ -18,7 +18,7 @@ const HANDLE = 16;
 /** The shortest part you can keep. */
 const MIN_MS = 1000;
 
-export function TrimStrip({ p, length, onChange }: { p: Picked; length: number; onChange: (trim: { start: number; end: number }) => void }) {
+export function TrimStrip({ p, length, max, onChange }: { p: Picked; length: number; max?: number; onChange: (trim: { start: number; end: number }) => void }) {
   const t = useT();
   const { theme } = useLook();
   const [width, setWidth] = useState(0);
@@ -57,7 +57,8 @@ export function TrimStrip({ p, length, onChange }: { p: Picked; length: number; 
     onBegin: () => (base.current = { start, end }),
     onUpdate: (e) => {
       const next = Math.max(0, Math.min(base.current.end - MIN_MS, base.current.start + e.translationX * msPerPt));
-      onChange({ start: Math.round(next), end: base.current.end });
+      // Never more than `max` kept: the other end follows along.
+      onChange({ start: Math.round(next), end: max ? Math.min(base.current.end, Math.round(next) + max) : base.current.end });
     },
   });
   const right = usePanGesture({
@@ -66,7 +67,7 @@ export function TrimStrip({ p, length, onChange }: { p: Picked; length: number; 
     onBegin: () => (base.current = { start, end }),
     onUpdate: (e) => {
       const next = Math.min(length, Math.max(base.current.start + MIN_MS, base.current.end + e.translationX * msPerPt));
-      onChange({ start: base.current.start, end: Math.round(next) });
+      onChange({ start: max ? Math.max(base.current.start, Math.round(next) - max) : base.current.start, end: Math.round(next) });
     },
   });
 

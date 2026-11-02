@@ -310,7 +310,13 @@ class Core {
   private async start() {
     this.at('opening the database');
     this.storage = await openStorage();
-    this.at('reading saved names and settings');
+    // The encryption keys open at the same time as the names and settings are read, not after
+    // them, so the chat list comes sooner. PakChat still only counts as signed in (and so can
+    // send, open a chat or decrypt) once the keys are open: see `signedIn` below.
+    this.at('reading saved names and settings, and opening your keys');
+    this.makeClient();
+    const keys = this.client.load();
+    keys.catch(() => {}); // (a problem is still thrown where it's awaited below)
     // All asked for at once, so the start doesn't wait on each in turn.
     const s = this.storage;
     const [people, contacts, ways, prefs, settings, starred, lists] = await Promise.all([
@@ -335,10 +341,7 @@ class Core {
     void s.setValue('app:lockCode', this.settings.secretCode ?? null);
     this.starred = starred ?? {};
     this.lists = lists ?? [];
-    this.at('loading the encryption');
-    this.makeClient();
-    this.at('opening your keys');
-    const signedIn = await this.client.load();
+    const signedIn = await keys;
     this.at('ready');
     if (signedIn) {
       this.state = 'signedIn';

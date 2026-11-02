@@ -77,7 +77,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "postinstall": "node scripts/fix-webrtc.js"
+    "postinstall": "node scripts/fix-webrtc.js && node scripts/fix-rn-start.js"
   },
   "private": true
 }

@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.17",
+    "version": "1.0.21",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
-      "versionCode": 17,
+      "versionCode": 21,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -38,6 +38,7 @@
       "./plugins/withScreenShare",
       "./plugins/withNativeKeeps",
       "./plugins/withReleaseKey",
+      "./plugins/withFastScreen",
       "expo-router",
       [
         "expo-splash-screen",
@@ -96,6 +97,60 @@
                   {
                     "path": "./node_modules/@expo-google-fonts/noto-nastaliq-urdu/700Bold/NotoNastaliqUrdu_700Bold.ttf",
                     "weight": 700
+                  }
+                ]
+              },
+              {
+                "fontFamily": "PakIcons16",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/icons/PakIcons16.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "PakIcons19",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/icons/PakIcons19.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "PakIcons22",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/icons/PakIcons22.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "PakIcons24",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/icons/PakIcons24.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "PakIcons26",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/icons/PakIcons26.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "PakIcons30",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/icons/PakIcons30.ttf",
+                    "weight": 400
                   }
                 ]
               }

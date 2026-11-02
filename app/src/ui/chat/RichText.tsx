@@ -2,17 +2,26 @@
 //
 // *bold*, _italic_, ~strike~ and `code`, bullets, numbered lines and quotes,
 // @mentions in the accent colour, and tappable web addresses, emails and phone
-// numbers. Tap a web address or an email to open it; tap a phone number (or hold
-// any link) for a little sheet: Call, Open, Copy. Long messages show their start
-// and "Read more". The reading itself is in core/richText.ts.
+// numbers. Tap a web address or an email to open it; hold any link for a little
+// sheet: Open, Copy. Tap a phone number and, like WhatsApp, PakChat checks whether
+// that number is on PakChat: then Message, Voice call, Video call (and Add to
+// contacts if they aren't saved); if not, Call, Add to contacts and Invite to
+// PakChat. Copy is always there. Long messages show their start and "Read more".
+// The reading itself is in core/richText.ts.
+import { normalizePhone } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
-import { Fragment, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Linking, Text, View } from 'react-native';
+import { presentFormAsync } from 'expo-contacts/legacy';
+import { router } from 'expo-router';
+import { Fragment, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ActivityIndicator, Linking, Text, View } from 'react-native';
 
-import { core } from '../../core/core';
+import { core, serverUrl } from '../../core/core';
 import { parseRich, readMoreCut, type LinkKind, type Span } from '../../core/richText';
+import { defaultTimer } from '../../core/timer';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
+import { startCall } from '../CallBar';
+import { Txt } from '../kit';
 import { MenuItem, Sheet, toast } from '../overlays';
 
 type Link = { kind: LinkKind; target: string; text: string };
@@ -39,6 +48,7 @@ function tapLink(link: Link) {
 /** Put this once on a screen that shows messages: the sheet for a held link or a tapped phone number. */
 export function LinkSheetHost() {
   const t = useT();
+  const { theme } = useLook();
   const link = useSyncExternalStore(
     (l) => {
       listeners.add(l);
@@ -55,9 +65,74 @@ export function LinkSheetHost() {
     close();
     work();
   };
+
+  // A phone number: is it on PakChat? (undefined while checking, null if not, or who it is.)
+  // (From what's shown, so the menu stays the same while the sheet slides away.)
+  const number = shown?.kind === 'phone' ? normalizePhone(shown.target.replace(/^tel:/, '')) : null;
+  const [who, setWho] = useState<{ number: string; person: { id: string; name: string } | null } | undefined>(undefined);
+  useEffect(() => {
+    if (!number) return;
+    let live = true;
+    core
+      .lookup(number)
+      .then((p) => live && setWho({ number, person: p && p.id !== core.myId ? { id: p.id, name: p.name } : null }))
+      .catch(() => live && setWho({ number, person: null }));
+    return () => {
+      live = false;
+    };
+  }, [number]);
+  const found = who && who.number === number ? who : undefined;
+  const person = found?.person ?? null;
+  const name = person ? core.name(person.id) || person.name : '';
+
+  async function chatWith(userId: string, then: (chatId: string) => void) {
+    try {
+      const chat = await core.client.openDirect(userId, defaultTimer());
+      then(chat.id);
+    } catch {
+      toast(t.couldNot);
+    }
+  }
+  function addToPhone(phone: string) {
+    presentFormAsync(null, { contactType: 'person', name: '', phoneNumbers: [{ label: 'mobile', number: phone }] } as never).catch(() => toast(t.couldNot));
+  }
+  function invite(phone: string) {
+    const body = fill(t.inviteText, { link: serverUrl() });
+    Linking.openURL(`sms:${phone}?body=${encodeURIComponent(body)}`).catch(() => toast(t.couldNot));
+  }
+
   return (
     <Sheet visible={!!link} onClose={close} title={shown?.text}>
-      {shown?.kind === 'phone' && <MenuItem icon="calls" label={fill(t.callNumber, { number: shown.text })} onPress={act(() => open(shown))} testID="link-call" />}
+      {shown?.kind === 'phone' && number && !found && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 12 }} testID="link-checking">
+          <ActivityIndicator color={theme.acc} />
+          <Txt size={14} color={theme.muted}>
+            {t.numberChecking}
+          </Txt>
+        </View>
+      )}
+      {shown?.kind === 'phone' && person && (
+        <>
+          <MenuItem icon="chat" label={fill(t.messageName, { name })} onPress={act(() => void chatWith(person.id, (id) => router.push({ pathname: '/chat/[id]', params: { id } })))} testID="link-message" />
+          <MenuItem icon="calls" label={t.voiceCall} onPress={act(() => void chatWith(person.id, (id) => void startCall(id, false, t)))} testID="link-voice" />
+          <MenuItem icon="video" label={t.videoCall} onPress={act(() => void chatWith(person.id, (id) => void startCall(id, true, t)))} testID="link-video" />
+          {!core.isContact(person.id) && (
+            <MenuItem icon="userPlus" label={t.addToContacts} onPress={act(() => router.push({ pathname: '/contact', params: { id: person.id, phone: number ?? '' } }))} testID="link-add" />
+          )}
+        </>
+      )}
+      {shown?.kind === 'phone' && (!number || (found && !person)) && (
+        <>
+          {!!number && (
+            <Txt size={13} color={theme.muted} style={{ paddingHorizontal: 20, paddingBottom: 4 }} testID="link-not-on">
+              {t.numberNotOn}
+            </Txt>
+          )}
+          <MenuItem icon="calls" label={fill(t.callNumber, { number: shown.text })} onPress={act(() => open(shown))} testID="link-call" />
+          {!!number && <MenuItem icon="userPlus" label={t.addToContacts} onPress={act(() => addToPhone(number))} testID="link-add" />}
+          {!!number && <MenuItem icon="send" label={t.inviteToPakChat} onPress={act(() => invite(number))} testID="link-invite" />}
+        </>
+      )}
       {shown?.kind === 'url' && <MenuItem icon="globe" label={t.openLink} onPress={act(() => open(shown))} testID="link-open" />}
       {shown?.kind === 'email' && <MenuItem icon="send" label={t.sendEmail} onPress={act(() => open(shown))} testID="link-open" />}
       {shown && (

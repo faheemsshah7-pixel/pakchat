@@ -21,6 +21,24 @@ import { Sheet, toast } from '../ui/overlays';
 
 const PAKCHAT_ONLY = 'pakchat';
 
+/** A new contact's number starts with Pakistan's +92 already there, like WhatsApp's. */
+const COUNTRY = '+92 ';
+
+/**
+ * The number as it's typed, the WhatsApp way: a 0 typed (or pasted) after +92, or a local
+ * number starting with 0 (0300…), loses the 0 and gets +92 in front: "+92 300…".
+ */
+export function typedPhone(text: string) {
+  const t = text.replace(/^\s+/, '');
+  if (/^0(?!0)/.test(t)) return COUNTRY + t.slice(1);
+  const after = /^\+92\s*0+(.*)$/.exec(t);
+  if (after) return COUNTRY + after[1];
+  return t;
+}
+
+/** Only "+92" there: nothing typed yet. */
+const blank = (phone: string) => phone.trim() === COUNTRY.trim() || !phone.trim();
+
 export default function SaveContact() {
   const t = useT();
   const { theme } = useLook();
@@ -31,7 +49,7 @@ export default function SaveContact() {
   const startName = (saved?.name ?? (id ? core.plainName(id) : (givenName ?? ''))).trim();
   const [first, setFirst] = useState(startName.split(/\s+/)[0] ?? '');
   const [last, setLast] = useState(startName.split(/\s+/).slice(1).join(' '));
-  const [phone, setPhone] = useState(saved?.phone ? formatPhone(saved.phone) : (givenPhone ?? ''));
+  const [phone, setPhone] = useState(saved?.phone ? formatPhone(saved.phone) : givenPhone ? typedPhone(givenPhone) : id ? '' : COUNTRY);
   const [email, setEmail] = useState(saved?.email ?? givenEmail ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -90,7 +108,7 @@ export default function SaveContact() {
       let who = id ?? null;
       // Each number or Gmail typed must be this person's (or, for a new contact, someone's) on PakChat.
       for (const [typed, kind] of [
-        [phone.trim(), 'phone'],
+        [blank(phone) ? '' : phone.trim(), 'phone'],
         [email.trim().toLowerCase(), 'email'],
       ] as const) {
         if (!typed) continue;
@@ -151,7 +169,7 @@ export default function SaveContact() {
         </View>
         <Field value={first} onChangeText={setFirst} placeholder={t.firstName} icon="you" autoCapitalize="words" maxLength={30} testID="contact-name" autoFocus={!id} />
         <Field value={last} onChangeText={setLast} placeholder={t.lastName} autoCapitalize="words" maxLength={30} testID="contact-last-name" style={{ marginStart: 29 }} />
-        <Field value={phone} onChangeText={setPhone} placeholder={t.contactPhone} icon="calls" keyboardType="phone-pad" testID="contact-phone" />
+        <Field value={phone} onChangeText={(x) => setPhone(typedPhone(x))} placeholder={t.contactPhone} icon="calls" keyboardType="phone-pad" testID="contact-phone" />
         <Field value={email} onChangeText={setEmail} placeholder={t.contactEmail} icon="globe" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} testID="contact-email" />
 
         {!saved && (
@@ -185,7 +203,7 @@ export default function SaveContact() {
             </Txt>
           </View>
         )}
-        <Button title={t.save} onPress={save} busy={busy} disabled={!name || (!id && !phone.trim() && !email.trim())} testID="contact-save" />
+        <Button title={t.save} onPress={save} busy={busy} disabled={!name || (!id && blank(phone) && !email.trim())} testID="contact-save" />
         {saved && <Button title={t.removeContact} look="danger" onPress={remove} testID="contact-remove" />}
       </ScrollView>
 

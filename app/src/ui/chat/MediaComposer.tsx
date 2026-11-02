@@ -47,9 +47,15 @@ const COLORS = ['#FFFFFF', '#111111', '#E5484D', '#F5A524', '#FFE14D', '#30C76F'
 const editable = (p: Picked) => p.kind === 'image' && p.mime !== 'image/gif';
 const squeezable = (p: Picked) => (p.kind === 'image' && p.mime !== 'image/gif') || (p.kind === 'video' && !p.gif);
 
+/** A video longer than this (a status: a minute, like WhatsApp's) starts cut to it, and can't be kept longer. */
+const capped = (p: Picked, max?: number): Picked =>
+  max && p.kind === 'video' && !p.gif && p.duration && p.duration > max && !p.trim ? { ...p, trim: { start: 0, end: max } } : p;
+
 export function MediaComposer({
   items,
   to,
+  maxVideoMs,
+  noOnce,
   onClose,
   onMore,
   onSend,
@@ -57,6 +63,10 @@ export function MediaComposer({
   items: Picked[];
   /** Who it goes to ("→ Ayesha"). */
   to: string;
+  /** The longest a video can be (a status: a minute). */
+  maxVideoMs?: number;
+  /** No "view once" (a status). */
+  noOnce?: boolean;
   onClose: () => void;
   /** + : more from the gallery. */
   onMore: () => Promise<Picked[]>;
@@ -65,7 +75,7 @@ export function MediaComposer({
   const t = useT();
   const { theme, lang } = useLook();
   const insets = useSafeAreaInsets();
-  const [drafts, setDrafts] = useState<Draft[]>(() => items.map((p) => ({ key: core.newId(), p, caption: '', strokes: [], layers: [] })));
+  const [drafts, setDrafts] = useState<Draft[]>(() => items.map((p) => ({ key: core.newId(), p: capped(p, maxVideoMs), caption: '', strokes: [], layers: [] })));
   const [at, setAt] = useState(0);
   const [hd, setHd] = useState(false);
   const [once, setOnce] = useState(false);
@@ -156,7 +166,7 @@ export function MediaComposer({
     const more = await onMore().catch(() => []);
     if (!more.length) return;
     if (d) await flatten(d).catch(() => d);
-    setDrafts((all) => [...all, ...more.map((m) => ({ key: core.newId(), p: m, caption: '', strokes: [], layers: [] }))].slice(0, GALLERY_MAX));
+    setDrafts((all) => [...all, ...more.map((m) => ({ key: core.newId(), p: capped(m, maxVideoMs), caption: '', strokes: [], layers: [] }))].slice(0, GALLERY_MAX));
     setAt(drafts.length);
     setTool(null);
   }
@@ -197,7 +207,7 @@ export function MediaComposer({
 
   if (!d) return null;
   const box = p.kind === 'image' ? fit(size, area) : { w: 0, h: 0 };
-  const canOnce = drafts.length === 1 && squeezable(p);
+  const canOnce = !noOnce && drafts.length === 1 && squeezable(p);
   const canHd = drafts.some((x) => squeezable(x.p));
 
   const top: { icon: IconName; label: string; on: () => void; active?: boolean; id: string }[] = editable(p)
@@ -275,7 +285,13 @@ export function MediaComposer({
           ) : p.kind === 'image' ? (
             <Image source={{ uri: p.uri }} style={{ width: '100%', height: '100%' }} contentFit="contain" />
           ) : p.kind === 'video' ? (
-            <VideoPart key={d.key} p={p} onTrim={(trim) => changeP(d.key, { trim })} onLength={(ms) => !p.duration && changeP(d.key, { duration: ms })} />
+            <VideoPart
+              key={d.key}
+              p={p}
+              max={maxVideoMs}
+              onTrim={(trim) => changeP(d.key, { trim })}
+              onLength={(ms) => !p.duration && setDrafts((all) => all.map((x) => (x.key === d.key ? { ...x, p: capped({ ...x.p, duration: ms }, maxVideoMs) } : x)))}
+            />
           ) : (
             <View style={{ alignItems: 'center', gap: 12 }}>
               <Icon name={p.kind === 'audio' ? 'music' : 'doc'} size={64} color="#FFFFFF" />
@@ -476,7 +492,7 @@ function StickerPicker({ visible, onClose, onPick }: { visible: boolean; onClose
 }
 
 /** A video playing over and over (only the part that's kept), with the trim strip under it. */
-function VideoPart({ p, onTrim, onLength }: { p: Picked; onTrim: (trim: { start: number; end: number }) => void; onLength: (ms: number) => void }) {
+function VideoPart({ p, max, onTrim, onLength }: { p: Picked; max?: number; onTrim: (trim: { start: number; end: number }) => void; onLength: (ms: number) => void }) {
   const t = useT();
   const player = useVideoPlayer({ uri: p.uri }, (pl) => {
     pl.loop = true;
@@ -520,6 +536,7 @@ function VideoPart({ p, onTrim, onLength }: { p: Picked; onTrim: (trim: { start:
           <TrimStrip
             p={p}
             length={length}
+            max={max}
             onChange={(trim) => {
               onTrim(trim);
               player.seekBy(trim.start / 1000 - player.currentTime);

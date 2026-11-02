@@ -4,12 +4,14 @@
 // (each shows its number), then ✓ takes them to the editor.
 //
 // It reads the phone's gallery (asked once, like WhatsApp). Without that, or
-// from the ⋯ at the top, the phone's own picker opens instead.
+// from the folder at the top, the phone's own picker opens instead. If the phone
+// let PakChat see only some photos (or none of them), an empty gallery says so,
+// with "Allow access" and the phone's own gallery, instead of "Nothing here yet".
 import type { Picked } from '../../core/files';
 import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, FlatList, Modal, ScrollView, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Linking, Modal, ScrollView, useWindowDimensions, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -18,7 +20,7 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon } from '../icons';
-import { Chip, IconButton, Pressy, Txt } from '../kit';
+import { Button, Chip, IconButton, Pressy, Txt } from '../kit';
 import { popIn, popOut, tick } from '../motion';
 import { toast } from '../overlays';
 
@@ -64,7 +66,8 @@ export async function galleryAllowed() {
 }
 
 // One gallery at a time, opened from anywhere (attachments.ts) and shown by GalleryHost.
-type Ask = { id: number; max: number; done: (p: Picked[] | 'system') => void };
+export type GalleryAsk = { id: number; max: number; done: (p: Picked[] | 'system') => void };
+type Ask = GalleryAsk;
 let seq = 0;
 let asking: Ask | null = null;
 const listeners = new Set<() => void>();
@@ -103,7 +106,8 @@ export function GalleryHost() {
   );
 }
 
-function GalleryScreen({ ask }: { ask: Ask }) {
+/** The gallery itself (also inside the camera, pulled up from it: CameraSheet.tsx). */
+export function GalleryScreen({ ask }: { ask: Ask }) {
   const t = useT();
   const { theme } = useLook();
   const insets = useSafeAreaInsets();
@@ -113,6 +117,28 @@ function GalleryScreen({ ask }: { ask: Ask }) {
   const [items, setItems] = useState<MediaLibrary.Asset[] | null>(null);
   const [picked, setPicked] = useState<MediaLibrary.Asset[]>([]);
   const more = useRef<{ after?: string; done: boolean; busy: boolean }>({ done: false, busy: false });
+  // Only some photos allowed (Android's "Select photos"), or none: an empty gallery says so.
+  const [limited, setLimited] = useState(false);
+  useEffect(() => {
+    void MediaLibrary.getPermissionsAsync(false, ['photo', 'video'])
+      .then((p) => setLimited(!p.granted || p.accessPrivileges === 'limited'))
+      .catch(() => {});
+  }, []);
+
+  async function allow() {
+    try {
+      const now = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video']);
+      if (now.granted && now.accessPrivileges === 'limited') await outsideFor(() => MediaLibrary.presentPermissionsPickerAsync(['photo', 'video']));
+      else if (now.canAskAgain) await outsideFor(() => MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']));
+      else await Linking.openSettings();
+      const after = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video']);
+      setLimited(!after.granted || after.accessPrivileges === 'limited');
+      more.current = { done: false, busy: false };
+      void load(true);
+    } catch {
+      void Linking.openSettings().catch(() => {});
+    }
+  }
   const size = Math.floor((width - (COLS - 1) * 2) / COLS);
 
   useEffect(() => {
@@ -188,9 +214,20 @@ function GalleryScreen({ ask }: { ask: Ask }) {
           initialNumToRender={32}
           windowSize={7}
           ListEmptyComponent={
-            <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 50 }}>
-              {t.nothingHere}
-            </Txt>
+            limited && album === null ? (
+              <View style={{ marginTop: 50, paddingHorizontal: 32, gap: 14, alignItems: 'center' }} testID="gallery-no-access">
+                <Icon name="photo" size={40} color={theme.muted} />
+                <Txt size={15} color={theme.muted} align="center">
+                  {t.galleryNoAccess}
+                </Txt>
+                <Button title={t.galleryAllow} onPress={() => void allow()} testID="gallery-allow" />
+                <Button title={t.otherGallery} look="soft" onPress={() => ask.done('system')} testID="gallery-phone" />
+              </View>
+            ) : (
+              <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 50 }}>
+                {t.nothingHere}
+              </Txt>
+            )
           }
           renderItem={({ item }) => {
             const n = picked.findIndex((p) => p.id === item.id);

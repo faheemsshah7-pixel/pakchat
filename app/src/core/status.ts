@@ -18,9 +18,9 @@ import { core } from './core';
 /** The colours a status in words can have (the message carries the number). */
 export const STATUS_BG = ['#2F6BF0', '#7C3AED', '#DB2777', '#E11D48', '#EA580C', '#B45309', '#16A34A', '#0D9488', '#0891B2', '#4F46E5', '#334155', '#9333EA'];
 
-/** How long a photo or words show before moving on (videos play to their end, up to 30 s). */
+/** How long a photo or words show before moving on (videos play to their end, up to a minute, like WhatsApp's). */
 export const STATUS_SHOW_MS = 5_000;
-export const STATUS_VIDEO_MAX_MS = 30_000;
+export const STATUS_VIDEO_MAX_MS = 60_000;
 
 /** Who sees my status: all my contacts, my contacts except some, or only some. */
 export type StatusPrivacy = { mode: 'contacts' | 'except' | 'only'; ids: string[] };

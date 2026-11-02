@@ -1,7 +1,7 @@
 // status/[id].tsx: watching statuses, one person after another.
 //
 // Bars at the top fill as each status shows (words and photos for 5 seconds,
-// a video to its end, up to 30). Tap the right side for the next, the left
+// a video to its end, up to a minute). Tap the right side for the next, the left
 // for the one before; hold to pause (everything over it fades away); swipe
 // down to close. After someone's last status comes the next person's.
 //
@@ -431,5 +431,11 @@ function StatusVideo({ uri, playing, onReady }: { uri: string; playing: boolean;
     if (playing) player.play();
     else player.pause();
   }, [playing, player]);
-  return <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} />;
+  // The video itself never takes the touch, so holding pauses it (and hides
+  // everything over it) just like a photo: Android's video view kept it before.
+  return (
+    <View pointerEvents="none" style={{ flex: 1 }}>
+      <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} />
+    </View>
+  );
 }

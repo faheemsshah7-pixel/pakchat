@@ -153,6 +153,8 @@ type Live = Omit<CallView, 'peers' | 'local' | 'waiting'> & {
   fromDevice: number;
   peers: Map<string, Peer>;
   localStream: MediaStream | null;
+  /** Answering: the mic (and camera) opening; a connection made meanwhile waits for it, so my sound is on it. */
+  mediaReady: Promise<boolean> | null;
   /** My screen, while I share it (sent instead of my camera). */
   screenStream: MediaStream | null;
   /** I'm in it (I started it, or answered). */
@@ -281,7 +283,7 @@ class Calls {
   view(): CallView | null {
     const c = this.call;
     if (!c) return null;
-    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, early: _e, ...rest } = c;
+    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, early: _e, mediaReady: _mr, ...rest } = c;
     const w = this.waiting;
     return {
       ...rest,
@@ -368,6 +370,7 @@ class Calls {
       startedAt: null,
       peers: new Map(),
       localStream: null,
+      mediaReady: null,
       screenStream: null,
       sharing: false,
       muted: false,
@@ -470,18 +473,23 @@ class Calls {
     c.joined = true;
     this.emit();
     stopAll();
-    // The mic (and camera) start while we make sure we're connected: both at once, not one after the other.
-    const online = this.connected();
-    if (!(await this.media(c))) return this.end(c, 'permission');
+    // Like WhatsApp: the moment you tap answer, the caller is told, while the mic (and camera)
+    // open and we make sure we're connected, all at once. Waiting for the mic before saying
+    // "joined" is what made our answer slower to connect than WhatsApp's.
     fileModule().callAudioStart(c.video);
-    this.watchAudio(c);
-    // Connected while it rang: my mic (and camera) go on that connection now.
+    const online = this.connected();
+    const media = this.media(c);
+    c.mediaReady = media;
+    // Connected (or half connected) while it rang: kept, and my mic (and camera) go on it.
     const early = this.keepEarly(c);
     if (!(await online)) return this.end(c, 'offline');
     if (c.done) return;
-    // Tell everyone (the caller, others in a group, and my other phones), and meanwhile put my
-    // mic (and camera) on the connection made while it rang, so the sound flows the moment they hear.
+    // Tell everyone (the caller, others in a group, and my other phones). A new connection to
+    // them waits for the mic (connection()), so it always carries my sound.
     const joined = this.send(c, { op: 'join', video: c.camera, audio: true, ...(early ? { early: true } : {}) }, undefined, true);
+    if (!(await media)) return this.end(c, 'permission');
+    if (c.done) return;
+    this.watchAudio(c);
     if (early) {
       await this.sendTracks(c, early);
       if (!c.done && early.pc?.connectionState === 'connected') this.connectionChanged(c, early);
@@ -888,7 +896,9 @@ class Calls {
     const e = c.early;
     if (e && e.userId === from.userId) {
       c.early = null;
-      if (e.key === key && s.early && e.pc?.remoteDescription) {
+      // Kept even if their answer to it hasn't arrived yet (it's on its way); only a failed one starts over.
+      const state = e.pc?.connectionState;
+      if (e.key === key && s.early && e.pc && state !== 'failed' && state !== 'closed') {
         early = e;
         c.peers.set(key, e);
       } else this.closePeer(e);
@@ -961,7 +971,11 @@ class Calls {
     c.early = null;
     // Through the relay only (a non-contact's call): kept only if it really got through.
     const through = !e.relayOnly || e.pc?.connectionState === 'connected';
-    if (e.pc?.remoteDescription && e.pc.localDescription && through) {
+    // Half done (answered fast, or the phone was waking up) is kept too: it finishes connecting
+    // instead of starting over. Only a connection that failed is dropped. My answer may still
+    // be on its way (gotOffer); it goes out saying I send too, since this one stays early.
+    const state = e.pc?.connectionState;
+    if (e.pc?.remoteDescription && state !== 'failed' && state !== 'closed' && through) {
       c.peers.set(e.key, e);
       return e;
     }
@@ -1027,7 +1041,12 @@ class Calls {
 
   private async connection(c: Live, p: Peer) {
     if (p.pc) return p.pc;
+    // Just answered: the mic (and camera) are still opening; wait, so they go on this connection.
+    if (c.mediaReady && !c.localStream) await c.mediaReady;
+    if (p.pc) return p.pc;
     const iceServers = await this.iceServers();
+    // The call ended while waiting (the mic was refused, or hung up): no connection for it.
+    if (c.done) throw new Error('call ended');
     // Protect IP address in calls (Settings › Privacy): only through our relay, so the
     // other phone never learns my address. Only when there is a relay to go through.
     const hasRelay = iceServers.some((x) => [x.urls].flat().some((u) => /^turns?:/i.test(u)));
@@ -1111,7 +1130,7 @@ class Calls {
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
     await this.flushIce(p);
     // Ringing: say I'll send too (my mic isn't on yet; sendTracks puts it on when I answer).
-    if (p.early && c.early === p) for (const t of pc.getTransceivers()) if (t.direction === 'recvonly') t.direction = 'sendrecv';
+    if (p.early) for (const t of pc.getTransceivers()) if (t.direction === 'recvonly') t.direction = 'sendrecv';
     const made = (await pc.createAnswer()) as { sdp: string; type: 'answer' };
     const answer = { type: 'answer' as const, sdp: tuneSdp(made.sdp) };
     await pc.setLocalDescription(new RTCSessionDescription(answer));
