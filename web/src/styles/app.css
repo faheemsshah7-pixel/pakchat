@@ -64,6 +64,10 @@ kbd { font: inherit; }
 .bub.in .tail { left: -8px; color: var(--bubInSolid); }
 .bub.out .tail { right: -8px; color: var(--bubOutSolid); }
 .meta { float: right; display: inline-flex; align-items: center; gap: 3px; margin: 7px 0 -6px 10px; font-size: 11px; line-height: 15px; color: var(--metaC); font-weight: var(--metaW); white-space: nowrap; position: relative; top: 1px; }
+/* In a bubble the time sits in the bottom corner, beside a short message on the same line like WhatsApp:
+   a hidden copy at the end of the text keeps its room, and wraps to a line of its own only when it must. */
+.bub > .meta:not(.over):not(.mghost) { position: absolute; right: 7px; bottom: 4px; float: none; margin: 0; top: auto; }
+.bub > .mghost { visibility: hidden; float: none; position: static; display: inline-flex; vertical-align: top; margin: 0 0 0 12px; height: 15px; }
 .bub.out .meta { color: var(--metaOutC); }
 .bub.out .tk.read { color: var(--readOnOut); }
 .meta .st { color: var(--metaC); }
@@ -362,3 +366,12 @@ kbd { font: inherit; }
 
 /* Sync banner (used by d2/d3; d1 shows the loading screen instead) */
 .syncb { display: flex; gap: 12px; margin: 4px 12px 8px; padding: 14px 16px; border-radius: 16px; background: var(--accSoft); }
+
+/* Someone typing: three dots in a bubble under the last message, like WhatsApp's (owner, 1 Nov). */
+.typingrow { align-items: flex-end; gap: 6px; animation: arrive .18s cubic-bezier(.33,1,.68,1); }
+.typingb { display: flex; align-items: center; gap: 4px; padding: 12px 14px; }
+.typingb span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .4; animation: typingDot 1.2s infinite ease-in-out; }
+.typingb span:nth-child(2) { animation-delay: .15s; }
+.typingb span:nth-child(3) { animation-delay: .3s; }
+@keyframes typingDot { 0%, 60%, 100% { opacity: .4; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .typingb span { animation: none; } }

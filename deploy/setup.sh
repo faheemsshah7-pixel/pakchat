@@ -45,7 +45,15 @@ open -p udp --dport 443
 open -p tcp --dport 3478
 open -p udp --dport 3478
 open -p udp --dport 49160:51159
+# SSH on 2222 as well as 22: some internet companies (the owner's home one) block port 22.
+open -p tcp --dport 2222
 netfilter-persistent save
+printf 'Port 22\nPort 2222\n' > /etc/ssh/sshd_config.d/10-ports.conf
+if sshd -t; then
+  systemctl daemon-reload
+  systemctl restart ssh.socket 2>/dev/null || true
+  systemctl restart ssh
+fi
 
 echo "5/6 Secrets"
 [ -f .env ] || cp .env.example .env

@@ -41,6 +41,8 @@ export type Grow = {
   back: boolean;
   /** Fully open. */
   onOpened?: () => void;
+  /** The spot is a circle (a profile photo): it grows from round to square, and back. */
+  round?: boolean;
 };
 
 export function SwipeToClose({
@@ -48,9 +50,12 @@ export function SwipeToClose({
   onClose,
   onDrag,
   grow,
+  locked,
   ref,
 }: {
   children: ReactNode;
+  /** True while the photo is zoomed in (Zoomable.tsx): a drag then moves the photo instead. */
+  locked?: boolean;
   onClose: () => void;
   onDrag?: (dragging: boolean) => void;
   grow?: Grow;
@@ -120,6 +125,9 @@ export function SwipeToClose({
   useImperativeHandle(ref, () => ({ close: () => shut(0) }));
 
   const pan = usePanGesture({
+    enabled: !locked,
+    // One finger: two are a pinch (zoom).
+    maxPointers: 1,
     activeOffsetY: [-14, 14],
     failOffsetX: [-14, 14],
     onActivate: () => {
@@ -144,6 +152,7 @@ export function SwipeToClose({
 
   // The frame the picture shows in: the spot at first, the whole screen once grown.
   const aspect = grow?.aspect ?? (spot ? spot.h / spot.w : 1);
+  const corner = spot && grow?.round ? Math.min(spot.w, spot.h) / 2 : CORNER;
   const frame = useAnimatedStyle(() => {
     const drag = Math.min(1, Math.abs(y.value) / (H.value * 0.5));
     const moved = [{ translateY: y.value }, { scale: 1 - drag * 0.12 }];
@@ -155,7 +164,7 @@ export function SwipeToClose({
       top: spot.y * (1 - g),
       width: spot.w + (W.value - spot.w) * g,
       height: spot.h + (H.value - spot.h) * g,
-      borderRadius: CORNER * (1 - g),
+      borderRadius: corner * (1 - g),
       overflow: 'hidden',
       transform: moved,
     };

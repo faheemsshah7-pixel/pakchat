@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 
 import { onBuiltInServer, pageUrl } from '../../core/core';
-import { speedLog, type SpeedWhat } from '../../core/speed';
+import { SPEED_OK, speedLog, type SpeedWhat } from '../../core/speed';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
@@ -59,11 +59,11 @@ export default function Help() {
             {times.length ? t.speedNote : t.speedNone}
           </Txt>
           {times.map((x) => (
-            <View key={`${x.at}-${x.what}`} style={{ flexDirection: 'row', gap: 12 }}>
+            <View key={`${x.at}-${x.what}-${x.ms}`} style={{ flexDirection: 'row', gap: 12 }}>
               <Txt size={14} color={theme.sectionText} style={{ flex: 1 }}>
-                {speedWords(x.what, t)}
+                {fill(speedWords(x.what, t), { where: place(x.where, t) })}
               </Txt>
-              <Txt size={14} weight="700" color={x.ms > 400 ? theme.danger : theme.accInk}>
+              <Txt size={14} weight="700" color={x.ms > SPEED_OK[x.what] ? theme.danger : theme.accInk}>
                 {`${x.ms} ms`}
               </Txt>
             </View>
@@ -86,5 +86,23 @@ function speedWords(what: SpeedWhat, t: Strings) {
       return t.speedTab;
     case 'send':
       return t.speedSend;
+    case 'pageMoving':
+      return t.speedPageMoving;
+    case 'pageIn':
+      return t.speedPageIn;
+    case 'back':
+      return t.speedBack;
+    case 'busy':
+      return t.speedBusy;
   }
+}
+
+/** A screen's name in a few plain words (its address in the app, tidied): "settings › privacy". */
+function place(where: string | undefined, t: Strings) {
+  if (!where || where === '(tabs)') return t.speedChatList;
+  return where
+    .replace(/\/\[[a-z]+\]$/, '')
+    .replace(/\/index$/, '')
+    .replace(/\//g, ' › ')
+    .replace(/-/g, ' ');
 }

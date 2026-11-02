@@ -197,7 +197,7 @@ body { user-select: none; -webkit-user-select: none; }
 .img .ferr { position: absolute; inset: auto 0 40% 0; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
 .meta.over { position: absolute; right: 6px; bottom: 4px; margin: 0; float: none; padding: 12px 4px 0 24px; color: #fff; background: radial-gradient(at bottom right, rgba(0,0,0,.35), transparent 70%); }
 .meta.over .tk, .meta.over .tk.read { color: #fff; }
-.bub.media .meta:not(.over) { margin-right: 4px; }
+.bub.media > .meta:not(.over):not(.mghost) { right: 11px; }
 .bub.media > .txt { display: inline; padding: 0 4px; }
 .bub.media .txt { padding: 5px 4px 0 6px; display: inline-block; }
 .bub.stk { background: none; box-shadow: none; padding: 0; }
@@ -222,7 +222,7 @@ body { user-select: none; -webkit-user-select: none; }
 .spd { height: 24px; min-width: 40px; padding: 0 8px; border-radius: 12px; background: var(--muted); color: var(--panel); font-size: 12px; font-weight: 600; }
 .vico { color: var(--acc); }
 .vlen2 { position: absolute; left: 52px; bottom: 6px; font-size: 11px; color: var(--metaC); }
-.bub .voice + .meta { margin-top: 10px; }
+.bub .voice + .mghost { margin-top: 10px; }
 
 /* Polls, places, contacts, events, link cards */
 .poll { width: 300px; max-width: 100%; }
@@ -321,6 +321,10 @@ body { user-select: none; -webkit-user-select: none; }
 .vstrip button { width: 52px; height: 52px; overflow: hidden; border-radius: 4px; opacity: .55; display: grid; place-items: center; background: var(--viewerBtn); color: var(--viewerIcon); }
 .vstrip button.on { opacity: 1; outline: 3px solid var(--viewerSel); outline-offset: -3px; }
 .vstrip img { width: 100%; height: 100%; object-fit: cover; }
+/* Click a photo to zoom in where you clicked; the mouse moves around it; click again to zoom out. */
+.vimg { overflow: hidden; }
+.vimg img { cursor: zoom-in; transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+.vimg img.zoomed { transform: scale(2.5); cursor: zoom-out; }
 
 /* ---- Drawers ---- */
 .drawer { animation: slideL .2s ease-out; position: relative; }
@@ -623,5 +627,5 @@ a.drow small { display: block; }
 .lhd .lang { margin-inline-start: auto; font-size: 16px; color: #1D1F1F; }
 
 /* Urdu: right to left (i18n/index.ts). Names and messages take their own direction, so English stays readable. */
-html[lang='ur'] { --font: 'Roboto Flex', Roboto, 'Noto Nastaliq Urdu', 'Helvetica Neue', Helvetica, 'Noto Color Emoji', sans-serif; }
+html[lang='ur'] { --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Nastaliq Urdu', 'Helvetica Neue', Helvetica, Roboto, 'Noto Color Emoji', sans-serif; }
 html[lang='ur'] :is(.nm, .pv, .txt, .ttl, input, textarea, [contenteditable]) { unicode-bidi: plaintext; }

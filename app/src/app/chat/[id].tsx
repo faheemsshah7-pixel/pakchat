@@ -156,10 +156,14 @@ function ChatScreen() {
   const wasAtBottom = useRef(true);
   // Only messages newer than opening the chat rise into place (not the ones already there).
   const [openedAt] = useState(Date.now);
-  const now = useNow(15_000);
   const listRef = useRef<FlatList<Item>>(null);
   const focused = useRef(true);
   const selecting = picked.size > 0;
+  // The chat's clock (pins and disappearing messages running out, what picked messages allow) runs
+  // only when something here needs it: ticking redraws the whole chat, which on a slower phone
+  // could make scrolling stutter every few seconds for nothing.
+  const timed = useMemo(() => !!list?.some((m) => m.expiresAt || m.pinnedUntil), [list]);
+  const now = useNow(15_000, timed || selecting);
 
   // The keyboard pushes the messages and the typing bar up as it slides in.
   // While it moves they're only shifted (cheap, nothing is measured again); the
@@ -1366,8 +1370,9 @@ function ChatScreen() {
         ]}
       />
 
-      {/* 📎: things to send, under the typing bar. */}
-      <AttachMenu up={attachUp} onPick={attachPicked} />
+      {/* 📎: things to send, under the typing bar. Made only once the chat has slid in, so it
+          adds nothing to the first draw (opening a chat was slower in 19, owner 2 Nov). */}
+      {(settled || attach) && <AttachMenu up={attachUp} onPick={attachPicked} />}
 
       <CameraSheet
         visible={cameraOpen}

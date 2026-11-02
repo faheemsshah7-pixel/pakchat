@@ -392,8 +392,17 @@ defmodule Pakchat.Relay do
   end
 
   # Envelopes sent live (never saved) get a negative id: unique, and never
-  # mixed up with a saved one, which are all positive.
-  defp live_id, do: -System.unique_integer([:positive, :monotonic])
+  # mixed up with a saved one, which are all positive. Phones remember every
+  # id they've seen for good, so ids mustn't start again after a restart:
+  # they count up from the time the server started (in microseconds).
+  defp live_id do
+    -(:persistent_term.get({__MODULE__, :live_base}) +
+        System.unique_integer([:positive, :monotonic]))
+  end
+
+  @doc "Notes when the server started, for `live_id/0`. Called once as the app starts."
+  def init_live_ids,
+    do: :persistent_term.put({__MODULE__, :live_base}, System.os_time(:microsecond))
 
   @doc """
   Saves live envelopes a device didn't collect in time (or whose connection
@@ -526,9 +535,12 @@ defmodule Pakchat.Relay do
         where:
           e.device_id == ^device_id and e.kind in ["message", "reaction", "call"] and
             e.sent_at >= ^since and e.expires_at > ^now,
-        order_by: e.id,
+        # The newest ten (then oldest first again): in a busy chat the alert
+        # must show the latest message, not ten older ones.
+        order_by: [desc: e.id],
         limit: 10
     )
+    |> Enum.reverse()
     |> Enum.map(&PakchatWeb.Wire.envelope/1)
   end
 
@@ -625,8 +637,19 @@ defmodule Pakchat.Relay do
           {:ok, {connected, offline}} ->
             broadcast(by_device, MapSet.new(connected), kind)
 
-            if busy_safe(fn -> Enum.each(offline, &Push.wake/1) end) == :busy,
-              do: wake_later(Map.take(senders, offline))
+            # Queued beside the send, not in it: in a big group with many
+            # phones closed, the sender shouldn't wait for every alert to queue.
+            if offline != [] do
+              queue = fn ->
+                if busy_safe(fn -> Enum.each(offline, &Push.wake/1) end) == :busy,
+                  do: wake_later(Map.take(senders, offline))
+              end
+
+              # (Tests queue them in step, to check them straight after.)
+              if Application.get_env(:pakchat, :push_in_step, false),
+                do: queue.(),
+                else: Task.start(queue)
+            end
 
           :busy ->
             # The database is too busy to look up who needs a push. The

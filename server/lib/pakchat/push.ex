@@ -80,7 +80,17 @@ defmodule Pakchat.Push do
   Push this device now if something that should wake it is still waiting
   (a connected phone that didn't collect it in time: the connection was dead).
   """
-  def wake_if_waiting(device_id) do
-    %{device_id: device_id, if_waiting: true, call: false} |> Notify.new() |> Oban.insert()
+  def wake_if_waiting(device_id, opts \\ []) do
+    args = %{device_id: device_id, if_waiting: true, call: false}
+
+    # `since`: the oldest message it's about, when that's older than the job
+    # (the database was busy, so queuing it waited).
+    args =
+      case opts[:since] do
+        %DateTime{} = t -> Map.put(args, :since, DateTime.to_unix(t))
+        _ -> args
+      end
+
+    args |> Notify.new() |> Oban.insert()
   end
 end

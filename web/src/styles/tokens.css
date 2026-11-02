@@ -1,7 +1,8 @@
 /* tokens.css: design 1 ("Like WhatsApp Web"), WhatsApp Web's measured look with PakChat's blue.
    Copied from the approved mockup (designs/web/screens/source/d1.css). WEB-RULEBOOK.md has the numbers. */
 :root {
-  --font: 'Roboto Flex', Roboto, 'Helvetica Neue', Helvetica, 'Noto Color Emoji', sans-serif;
+  /* The computer's own font, like WhatsApp: SF on a Mac, Segoe UI on Windows, Roboto on Android (owner, 2 Nov). */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Roboto, 'Roboto Flex', 'Noto Color Emoji', sans-serif;
   --app: #F7F5F3; --panel: #FFFFFF; --rail: #F7F5F3; --wash: #F7F5F3;
   --text: #0A0A0A; --muted: rgba(0,0,0,.6); --icon: rgba(0,0,0,.6); --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.2);
   --acc: #2563EB; --accSoft: #DBEAFE; --accInk: #1E40AF; --link: #1D4ED8; --onAcc: #FFFFFF;
@@ -9,7 +10,7 @@
   --badge: #2563EB; --badgeMuted: #C2BDB8; --draft: #2563EB; --online: #22C55E; --red: #D42A3C; --read: #0A84FF; --readOnOut: #0A84FF;
   --av1: #DCE9FF; --avT1: #1E3A8A; --av2: #D9F0FF; --avT2: #0B4A75; --av3: #E3E2FF; --avT3: #3730A3;
   --rowR: 12px; --nameW: 400; --metaW: 420;
-  --wall: #F5F1EB; --wallSolid: #F5F1EB; --doodle: #E2D6C6; --doodleOp: .6; --gutter: 9%;
+  --wall: #F5F1EB; --wallSolid: #F5F1EB; --doodle: #E2D6C6; --doodleOp: .6; --gutter: clamp(14px, 2.5%, 40px);
   --bubIn: #FFFFFF; --bubInSolid: #FFFFFF; --bubInText: #0A0A0A; --bubOut: #DBEAFE; --bubOutSolid: #DBEAFE; --bubOutText: #0A0A0A;
   --bubR: 7.5px; --tailCorner: 0; --tailShow: block; --bubShadow: 0 1px .5px rgba(11,20,26,.13); --bubMax: 65%; --msgSize: 14.2px;
   --bubHoverFilter: none; --metaC: rgba(0,0,0,.6); --metaOutC: rgba(0,0,0,.6);

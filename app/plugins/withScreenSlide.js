@@ -10,8 +10,8 @@
 // the app replaces its own (Android 13 and newer still use its originals,
 // which can also stretch the edges, something older phones can't do).
 //
-// Opening a chat (the stack's "ios_from_right", _layout.tsx) zooms in like
-// WhatsApp's: see `zoom` below.
+// Opening any screen (the stack's "ios_from_right", _layout.tsx: chats, contact info,
+// settings pages...) slides it in from the side, like build 17: see `slide` below.
 const fs = require('fs');
 const path = require('path');
 const { withDangerousMod } = require('expo/config-plugins');
@@ -42,42 +42,38 @@ const FILES = {
 };
 
 /**
- * Opening a chat (the stack's "ios_from_right", _layout.tsx), like WhatsApp's (owner's video,
- * 1 Nov): the new screen grows the last bit into place from a little smaller as it fades in,
- * over the screen under it, which stays put. Going back is the same, backwards: it shrinks a
- * little as it fades away. Before, it slid in from the side, and the end looked off.
- * Urdu (from the left) is the same, since a zoom has no side.
+ * Opening any screen (the stack's "ios_from_right", _layout.tsx): the new screen slides in from
+ * the side while the one under it moves a little the other way, like build 17's (the owner
+ * liked it better than build 18's zoom, 2 Nov). Polished: it moves the moment you tap and
+ * slows smoothly into place, and BOTH screens use the same timing and curve, so they stay
+ * together to the end (before, the screen underneath had Android's own curve and fell out of
+ * step at the end, which looked off). Going back is the same slide, backwards, just as quick.
+ * Urdu slides from the other side.
  */
-function zoom({ fromScale, toScale, fromAlpha, toAlpha, ms, alphaMs, ease }) {
-  const fill = 'android:fillEnabled="true" android:fillBefore="true" android:fillAfter="true"';
+function slide(fromX, toX, ms) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <!-- Made by plugins/withScreenSlide.js: change it there. -->
-<set xmlns:android="http://schemas.android.com/apk/res/android" android:shareInterpolator="false">
-    <alpha android:fromAlpha="${fromAlpha}" android:toAlpha="${toAlpha}" ${fill}
-        android:interpolator="@android:interpolator/linear" android:duration="${alphaMs}" />
-    <scale android:fromXScale="${fromScale}" android:toXScale="${toScale}" android:fromYScale="${fromScale}" android:toYScale="${toScale}"
-        android:pivotX="50%" android:pivotY="50%" ${fill}
-        android:interpolator="${ease}" android:duration="${ms}" />
-</set>
+<translate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/decelerate_cubic"
+    android:duration="${ms}"
+    android:fromXDelta="${fromX}"
+    android:toXDelta="${toX}" />
 `;
 }
-/** The screen underneath: it stays as it is (shown the whole time the other one moves). */
-function stay(ms) {
-  return `<?xml version="1.0" encoding="utf-8"?>
-<!-- Made by plugins/withScreenSlide.js: change it there. -->
-<alpha xmlns:android="http://schemas.android.com/apk/res/android" android:fromAlpha="1" android:toAlpha="1" android:duration="${ms}" />
-`;
-}
-const OPEN_MS = 220;
-const CLOSE_MS = 180;
-const open = zoom({ fromScale: 0.9, toScale: 1, fromAlpha: 0, toAlpha: 1, ms: OPEN_MS, alphaMs: 120, ease: '@android:interpolator/decelerate_cubic' });
-const close = zoom({ fromScale: 1, toScale: 0.9, fromAlpha: 1, toAlpha: 0, ms: CLOSE_MS, alphaMs: CLOSE_MS, ease: '@android:interpolator/accelerate_cubic' });
-for (const side of ['right', 'left']) {
+// Build 17's length (Android's own short time, a fifth of a second) and its 30%: 19 had it a
+// little longer, and opening a chat felt slower (owner's speed check, 2 Nov).
+const OPEN_MS = 200;
+const CLOSE_MS = 200;
+/** How far the screen underneath moves (the new one covers it). */
+const UNDER = 30;
+for (const [side, dir] of [['right', 1], ['left', -1]]) {
+  const away = `${dir * 100}%`;
+  const under = `${-dir * UNDER}%`;
   Object.assign(FILES, {
-    [`rns_ios_from_${side}_foreground_open.xml`]: open,
-    [`rns_ios_from_${side}_background_open.xml`]: stay(OPEN_MS),
-    [`rns_ios_from_${side}_foreground_close.xml`]: close,
-    [`rns_ios_from_${side}_background_close.xml`]: stay(CLOSE_MS),
+    [`rns_ios_from_${side}_foreground_open.xml`]: slide(away, '0%', OPEN_MS),
+    [`rns_ios_from_${side}_background_open.xml`]: slide('0%', under, OPEN_MS),
+    [`rns_ios_from_${side}_foreground_close.xml`]: slide('0%', away, CLOSE_MS),
+    [`rns_ios_from_${side}_background_close.xml`]: slide(under, '0%', CLOSE_MS),
   });
 }
 

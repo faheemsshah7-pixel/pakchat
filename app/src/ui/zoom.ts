@@ -40,6 +40,16 @@ export async function openViewer(m: Message, from?: HostInstance | null) {
   router.push({ pathname: '/viewer', params: { chat: m.chatId, author: m.author, id: m.id, ...(spot ? { spot: spotParam(spot) } : {}) } });
 }
 
+/**
+ * Opens someone's profile photo (or a group's) full screen, growing out of `from` (the picture
+ * tapped) and shrinking back into it, like a chat photo does (owner, 2 Nov). `round`: the
+ * picture tapped is a circle.
+ */
+export async function openPhoto(id: string, title: string, from?: HostInstance | null, round?: boolean) {
+  const spot = await spotOf(from);
+  router.push({ pathname: '/photo', params: { id, title, ...(spot ? { spot: spotParam(spot) } : {}), ...(spot && round ? { round: '1' } : {}) } });
+}
+
 /** Takes the handed message, if it's this one. */
 export function takeHanded(chatId: string, author: string, id: string): Message | null {
   const m = handed;

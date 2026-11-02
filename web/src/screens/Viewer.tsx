@@ -1,9 +1,10 @@
 // Viewer.tsx: the photo and video viewer, over everything. ← and → go
 // through the chat's photos and videos, Esc closes; the strip at the bottom
-// shows the ones around it.
+// shows the ones around it. Click a photo to zoom in on that spot, and move the
+// mouse to look around it; click again to zoom out (like WhatsApp Web).
 
 import type { Chat, Message } from '@pakchat/shared';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 
 import { core } from '../core/core';
@@ -100,8 +101,11 @@ function Big({ m }: { m: Message }) {
   const f = m.file!;
   const [url, setUrl] = useState<string | null>(() => core.knownFile(f.id));
   const [failed, setFailed] = useState(false);
+  // Zoomed in: where the mouse is over the photo, in % of it (null: not zoomed).
+  const [zoom, setZoom] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
     setFailed(false);
+    setZoom(null);
     setUrl(core.knownFile(f.id));
     let alive = true;
     core
@@ -114,5 +118,24 @@ function Big({ m }: { m: Message }) {
   }, [f]);
   if (failed) return <div className="vimg msg">{tr('This file is no longer on the server. Ask the sender to send it again.')}</div>;
   if (!url) return <div className="vimg">{f.thumb ? <img className="blur" src={`data:image/jpeg;base64,${f.thumb}`} alt="" /> : null}<span className="spin over" /></div>;
-  return <div className="vimg">{f.kind === 'video' ? <video src={url} controls autoPlay loop={!!f.gif} muted={!!f.gif} /> : <img src={url} alt="" />}</div>;
+  const at = (e: MouseEvent<HTMLImageElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { x: Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)), y: Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100)) };
+  };
+  return (
+    <div className="vimg">
+      {f.kind === 'video' ? (
+        <video src={url} controls autoPlay loop={!!f.gif} muted={!!f.gif} />
+      ) : (
+        <img
+          src={url}
+          alt=""
+          className={zoom ? 'zoomed' : undefined}
+          style={zoom ? { transformOrigin: `${zoom.x}% ${zoom.y}%` } : undefined}
+          onClick={(e) => setZoom(zoom ? null : at(e))}
+          onMouseMove={(e) => zoom && setZoom(at(e))}
+        />
+      )}
+    </div>
+  );
 }

@@ -16,7 +16,6 @@
 //
 // What you take or pick goes to the editor (MediaComposer.tsx) before it's sent.
 import { CameraView, type CameraType } from 'expo-camera';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
@@ -39,6 +38,7 @@ import { Pressy, Txt } from '../kit';
 import { fadeIn, fadeOut, quick, thud, tick } from '../motion';
 import { fromPhoneGallery } from './attachments';
 import { GALLERY_MAX, GalleryScreen, pickedOf, type GalleryAsk } from './Gallery';
+import { GalleryThumb } from './GalleryThumb';
 import type { RoundVideo } from './RoundRecorder';
 import { toast, whenOpened } from '../overlays';
 
@@ -193,24 +193,27 @@ function Camera({
     },
   });
 
-  // The gallery, pulled up over the camera with a finger, like WhatsApp's (owner, 2 Nov). It's
-  // there (out of sight below) once the gallery may be read; until then a swipe up opens the
-  // gallery the old way. `pull` is how far up it is, 0 to the screen's height.
+  // The gallery, pulled up over the camera with a finger, like WhatsApp's (owner, 2 Nov). Once
+  // the gallery may be read it can be pulled up; until then a swipe up opens the gallery the old
+  // way. It's only made when you start pulling (or tap the handle), never just because the camera
+  // opened: loading it behind the camera every time took a lot of memory (owner, 2 Nov).
+  // `pull` is how far up it is, 0 to the screen's height.
   const [canPull, setCanPull] = useState(false);
   const canPullNow = useSharedValue(false);
+  const [galleryMade, setGalleryMade] = useState(false);
   const [galleryUp, setGalleryUp] = useState(false);
   const pull = useSharedValue(0);
   const allowed = () => {
-    // A moment after the camera has started, so it doesn't slow the camera opening.
-    setTimeout(() => {
-      setCanPull(true);
-      canPullNow.value = true;
-    }, 400);
+    setCanPull(true);
+    canPullNow.value = true;
   };
   const OPEN_T = { duration: 260, easing: Easing.out(Easing.cubic) };
   function gallery(up: boolean) {
     if (up && !canPull) return onGallery();
-    if (up) tick();
+    if (up) {
+      tick();
+      setGalleryMade(true);
+    }
     pull.value = withTiming(up ? height : 0, OPEN_T);
     setGalleryUp(up);
   }
@@ -224,6 +227,10 @@ function Camera({
     maxPointers: 1,
     activeOffsetY: [-16, 1000] as [number, number],
     failOffsetX: [-20, 20] as [number, number],
+    onActivate: () => {
+      'worklet';
+      if (canPullNow.value) scheduleOnRN(setGalleryMade, true);
+    },
     onUpdate: (e: { translationY: number }) => {
       'worklet';
       if (canPullNow.value) pull.value = Math.min(height, Math.max(0, -e.translationY));
@@ -452,7 +459,7 @@ function Camera({
       </View>
 
       {/* The gallery, coming up over the camera as it's pulled (the camera darkens under it). */}
-      {canPull && (
+      {galleryMade && (
         <>
           <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, dimStyle]} />
           <Animated.View pointerEvents={galleryUp ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, galleryStyle]} testID="camera-gallery-panel">
@@ -612,7 +619,7 @@ function Recent({ onPick, onGallery, pull, onAllowed }: { onPick: (p: Picked[]) 
                     testID="camera-recent"
                   >
                     <View style={{ width: TILE, height: TILE, backgroundColor: '#222' }}>
-                      <Image source={{ uri: item.uri }} style={{ flex: 1 }} contentFit="cover" recyclingKey={item.id} />
+                      <GalleryThumb asset={item} size={TILE} bg="#222" />
                       {item.mediaType === 'video' && (
                         <View style={{ position: 'absolute', start: 5, bottom: 4 }}>
                           <Icon name="video" size={15} color="#FFFFFF" />

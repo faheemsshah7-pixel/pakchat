@@ -40,7 +40,7 @@ server's public IP. HTTPS needs a name; Caddy gets the certificate by itself.
 
 ## 4. Oracle's firewall
 Networking › the server's subnet › Security list › Add ingress rules, source `0.0.0.0/0`:
-TCP 80, TCP 443, UDP 443, TCP 3478, UDP 3478, UDP 49160-51159.
+TCP 80, TCP 443, UDP 443, TCP 3478, UDP 3478, UDP 49160-51159, and TCP 2222 (SSH, for internet connections that block port 22).
 
 ## 5. Set up
 ```sh

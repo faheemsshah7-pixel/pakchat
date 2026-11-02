@@ -41,6 +41,7 @@ config :phoenix,
 config :pakchat, Oban, testing: :manual
 # A connected phone gets a short time to collect a message before it is pushed (1 s live).
 config :pakchat, :push_grace_ms, 200
+config :pakchat, :push_in_step, true
 
 # Tests sign their own pretend Google tokens (see test/support/google_fake.ex).
 config :pakchat, :google_keys, Pakchat.GoogleFake

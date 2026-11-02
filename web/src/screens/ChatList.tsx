@@ -16,7 +16,7 @@ import { msgKey, setView, toggleChatPick, useView } from '../ui/view';
 import { archiveMany, chatMenu, deleteMany, favouriteMany, isMuted, markManyRead, muteMany, pinMany } from './chatActions';
 import { appLockSetting, closeFolder, isFolderOpen, lockApp, openFolder, rightCode } from '../core/lock';
 import { askSecretCode } from './LockScreen';
-import { NewChat, NewGroup } from './NewChat';
+import { NewChat, NewContact, NewGroup } from './NewChat';
 import { Starred } from './Starred';
 import { tr } from '../i18n';
 
@@ -30,6 +30,7 @@ export function ChatList({ rows }: { rows: ChatRow[] | null }) {
   const view = useView();
   if (view.side === 'newChat') return <NewChat />;
   if (view.side === 'newGroup') return <NewGroup />;
+  if (view.side === 'newContact') return <NewContact phone={view.contactPhone} />;
   if (view.side === 'starred') return <Starred />;
   if (view.side === 'locked') return <LockedChats />;
   return <Chats rows={rows} archived={view.side === 'archived'} />;

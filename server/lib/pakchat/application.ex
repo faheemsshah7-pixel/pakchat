@@ -7,6 +7,8 @@ defmodule Pakchat.Application do
 
   @impl true
   def start(_type, _args) do
+    Pakchat.Relay.init_live_ids()
+
     children = [
       PakchatWeb.Telemetry,
       Pakchat.Repo,
@@ -14,6 +16,8 @@ defmodule Pakchat.Application do
       {Phoenix.PubSub, name: Pakchat.PubSub},
       # Who's online.
       Pakchat.Presence,
+      # The connections to Google's push service (see `Pakchat.Push.Fcm`).
+      {Finch, name: Pakchat.Push.Finch, pools: Pakchat.Push.Fcm.finch_pools()},
       # Background jobs: push alerts and the hourly clean-up.
       {Oban, Application.fetch_env!(:pakchat, Oban)},
       # Counts for the rate limits.

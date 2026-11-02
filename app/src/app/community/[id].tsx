@@ -13,8 +13,8 @@
 // deactivate it: its groups go on, on their own.
 import { REQUESTED, type CommunityGroup, type GroupSuggestion } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, View, type HostInstance } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { core, isOffline } from '../../core/core';
@@ -30,6 +30,7 @@ import { thud } from '../../ui/motion';
 import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
+import { openPhoto } from '../../ui/zoom';
 
 /** How many members show before "View all". */
 const SOME = 6;
@@ -60,6 +61,8 @@ export default function Community() {
   const [deactivating, setDeactivating] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
+  // The photo at the top, for the full-screen one to grow out of.
+  const photoRef = useRef<HostInstance>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   // Its groups and the suggestions waiting, from the server (unchanged while
@@ -250,8 +253,10 @@ export default function Community() {
               <CameraBadge size={30} />
             </Pressy>
           ) : (
-            <Pressy onPress={() => router.push({ pathname: '/photo', params: { id, title: name } })} label={t.profilePhoto} scale={0.95} testID="community-photo-view">
-              <Avatar id={id} name={name} size={88} group square />
+            <Pressy onPress={() => void openPhoto(id, name, photoRef.current)} label={t.profilePhoto} scale={0.95} testID="community-photo-view">
+              <View ref={photoRef} collapsable={false}>
+                <Avatar id={id} name={name} size={88} group square />
+              </View>
             </Pressy>
           )}
           <Txt size={22} weight="800" align="center" testID="community-name">

@@ -8,8 +8,8 @@
 // you're both in, and Add to Favourites and Add to list, like WhatsApp's.
 import { formatPhone, roleOf } from '@pakchat/shared';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { View, type HostInstance } from 'react-native';
 import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
@@ -30,6 +30,7 @@ import { ReportSheet } from '../../ui/ReportSheet';
 import { LeftGroupChoices } from '../../ui/DeleteChats';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
 import { MuteSheet, mutedLine } from '../../ui/MuteSheet';
+import { openPhoto } from '../../ui/zoom';
 
 export default function Info() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -53,8 +54,11 @@ export default function Info() {
   const [timerOpen, setTimerOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
+  // The photo at the top, for the full-screen one to grow out of.
+  const photoRef = useRef<HostInstance>(null);
   const [muting, setMuting] = useState(false);
   const [listOpen, setListOpen] = useState(false);
+  const [allMembers, setAllMembers] = useState(false);
   const [requests, setRequests] = useState<{ userId: string; at: number }[]>([]);
   const community = useChat(chat?.communityId ?? '');
   const rows = useChatList();
@@ -129,6 +133,9 @@ export default function Info() {
     (a, b) => Number(b.userId === core.myId) - Number(a.userId === core.myId) || Number(b.role === 'admin') - Number(a.role === 'admin') || core.name(a.userId).localeCompare(core.name(b.userId)),
   );
   const picked = member ? chat.members.find((m) => m.userId === member) : null;
+  // A big group shows its first few members, and "View all" for the rest, like WhatsApp (drawing
+  // hundreds at once made the page slow to open).
+  const shownMembers = allMembers ? members : members.slice(0, SOME_MEMBERS);
 
   return (
     <Screen>
@@ -152,8 +159,11 @@ export default function Info() {
             </Pressy>
           ) : (
             // Tap to see it full screen, or "No profile photo", like WhatsApp.
-            <Pressy onPress={() => router.push({ pathname: '/photo', params: { id, title } })} label={t.profilePhoto} scale={0.95} testID="info-photo">
-              <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+            // It grows out of the photo here, and shrinks back into it (owner, 2 Nov).
+            <Pressy onPress={() => void openPhoto(id, title, photoRef.current, true)} label={t.profilePhoto} scale={0.95} testID="info-photo">
+              <View ref={photoRef} collapsable={false}>
+                <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+              </View>
             </Pressy>
           )}
           <Txt size={24} weight="800" align="center" style={{ marginTop: 10 }} testID="info-title">
@@ -378,7 +388,7 @@ export default function Info() {
                   <Divider />
                 </>
               )}
-              {members.map((mb, i) => (
+              {shownMembers.map((mb, i) => (
                 <Animated.View key={mb.userId}>
                   {i > 0 && <Divider />}
                   <Pressy onPress={() => mb.userId !== core.myId && setMember(mb.userId)} label={core.name(mb.userId)} scale={0.98} testID={`member-${core.name(mb.userId)}`}>
@@ -400,6 +410,12 @@ export default function Info() {
                   </Pressy>
                 </Animated.View>
               ))}
+              {members.length > SOME_MEMBERS && !allMembers && (
+                <>
+                  <Divider />
+                  <SettingRow title={t.viewAll} onPress={() => setAllMembers(true)} testID="info-all-members" />
+                </>
+              )}
             </Glass>
           </>
         )}
@@ -565,3 +581,6 @@ export default function Info() {
     </Screen>
   );
 }
+
+/** How many members a group's info shows before "View all". */
+const SOME_MEMBERS = 12;

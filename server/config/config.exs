@@ -23,7 +23,7 @@ config :pakchat, Pakchat.Repo,
 config :pakchat, Oban,
   engine: Oban.Engines.Basic,
   repo: Pakchat.Repo,
-  queues: [default: 10, push: 20],
+  queues: [default: 10, push: 100],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 86_400},
     {Oban.Plugins.Cron,

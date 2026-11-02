@@ -97,7 +97,12 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
             </div>
           )}
           <Body m={m} openViewer={openViewer} big={big} />
-          {(!media || !!m.text) && !sticker && <Meta m={m} />}
+          {(!media || !!m.text) && !sticker && (
+            <>
+              <Meta m={m} ghost />
+              <Meta m={m} />
+            </>
+          )}
           {!m.deleted && (
             <button
               className="mchev"
@@ -130,9 +135,9 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
 });
 
 /** The time, "Edited", a star, and my ticks, in the bubble's corner. */
-function Meta({ m, over }: { m: Message; over?: boolean }) {
+function Meta({ m, over, ghost }: { m: Message; over?: boolean; ghost?: boolean }) {
   return (
-    <span className={`meta ${over ? 'over' : ''}`}>
+    <span className={`meta ${over ? 'over' : ''} ${ghost ? 'mghost' : ''}`} aria-hidden={ghost || undefined}>
       {m.pinnedUntil && m.pinnedUntil > Date.now() && <Icon name="pin" size={12} />}
       {core.starred[msgKey(m)] && <Icon name="starFilled" size={12} />}
       {m.keptBy && !m.deleted && <span className="ed">{tr('Kept')}</span>}

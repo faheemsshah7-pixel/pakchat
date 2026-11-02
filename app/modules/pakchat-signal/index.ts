@@ -67,6 +67,8 @@ export type FileModule = {
   shrinkVideo(input: string, output: string, startMs: number, endMs: number, hd: boolean): Promise<{ uri: string; size: number; width: number; height: number }>;
   /** What made PakChat close by mistake since last asked (a crash's details), or null. Each is told once. */
   lastCrash(): string | null;
+  /** A gallery item's small preview (by its media library id), as a file address; null if the phone has none (GalleryThumbs.kt). */
+  galleryThumb(id: string, video: boolean, px: number, stamp: number): Promise<string | null>;
   /** This copy of PakChat: build number, version, and the app that installed it (Play: "com.android.vending"). */
   appInstall(): { versionCode: number; versionName: string; installer: string | null };
   /** Picture-in-picture is wanted now: leaving PakChat shrinks it to a small window (Android 8+). */

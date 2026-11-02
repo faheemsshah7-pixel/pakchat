@@ -28,7 +28,8 @@ defmodule Pakchat.Push.Notify do
       %{push_token: token} when is_binary(token) and is_map_key(args, "if_waiting") ->
         # Only messages from about when this was queued: an old one that's
         # stuck shouldn't wake the phone again and again.
-        since = DateTime.add(job.inserted_at || DateTime.utc_now(), -5, :second)
+        from = if args["since"], do: DateTime.from_unix!(args["since"]), else: job.inserted_at
+        since = DateTime.add(from || DateTime.utc_now(), -5, :second)
         # (A like on a status wakes the phone too, see `Relay.send_message/3`.)
         kind = if args["call"], do: "call", else: ["message", "reaction"]
 

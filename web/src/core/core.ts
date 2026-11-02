@@ -26,6 +26,7 @@ import {
   type Ref,
   SYNCED_PREFS,
   type SyncChange,
+  normalizePhone,
 } from '@pakchat/shared';
 import { lockFile, unlockFile } from '@pakchat/shared/web';
 
@@ -557,6 +558,34 @@ class WebCore {
     return !!this.contacts[userId];
   }
 
+  /**
+   * Who has this number (03xx… or +92…) or Gmail on PakChat, as the phone app's New chat
+   * checks it (owner, 1 Nov). Null if nobody, or it isn't a number or Gmail.
+   */
+  async lookup(typed: string): Promise<{ id: string; name: string } | null> {
+    const q = typed.trim().toLowerCase();
+    if (!q) return null;
+    const looksLikeNumber = /^[+0-9][0-9\s\-()]{6,}$/.test(q);
+    const phone = looksLikeNumber ? normalizePhone(q) : null;
+    if (looksLikeNumber && !phone) return null;
+    const found = phone ? await this.server.lookup(phone, 'phone') : await this.server.lookup(q.includes('@') ? q : `${q}@gmail.com`);
+    if (found && !this.people[found.id]?.name) {
+      this.people = { ...this.people, [found.id]: { ...this.people[found.id], ...found } };
+      void this.storage.setValue('app:people', this.people);
+      this.emit('people');
+    }
+    return found;
+  }
+
+  /** Saves someone under my own name for them; the phone (and my other devices) get it too. */
+  saveContact(userId: string, contact: Contact) {
+    this.contacts = { ...this.contacts, [userId]: contact };
+    void this.storage.setValue('app:contacts', this.contacts);
+    this.emit('people');
+    this.emit('chats');
+    this.share({ key: 'app:contacts', set: { [userId]: { name: contact.name, ...(contact.phone ? { phone: contact.phone } : {}), ...(contact.email ? { email: contact.email } : {}) } } });
+  }
+
   private asking = new Set<string>();
   private namesTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -731,10 +760,11 @@ class WebCore {
     return local ? (this.sentFiles.get(local) ?? null) : null;
   }
 
-  /** Profile, group and community photos (`pk1:<id>:<key>:<digest>`, or a web address). */
+  /** Profile, group and community photos (`pk1:<id>:<key>:<digest>`). */
   photoUrl(value?: string | null): string | null {
     if (!value) return null;
-    if (value.startsWith('https://')) return value;
+    // An old Gmail picture (from signing in with Google): the first letter instead, as for a number (owner, 1 Nov).
+    if (value.startsWith('https://')) return null;
     const [tag, id, key, digest] = value.split(':');
     if (tag !== 'pk1' || !id || !key || !digest) return null;
     const known = this.fileUrls.get(id);

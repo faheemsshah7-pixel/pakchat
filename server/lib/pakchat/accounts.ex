@@ -118,8 +118,9 @@ defmodule Pakchat.Accounts do
         |> User.signup_changeset(%{
           google_sub: sub,
           email: claims["email"],
-          name: String.slice(name, 0, 25),
-          photo: claims["picture"]
+          # No photo from the Google account (owner, 1 Nov): like signing in by number,
+          # everyone shows their first letter until they pick their own photo.
+          name: String.slice(name, 0, 25)
         })
         |> insert_new()
     end

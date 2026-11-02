@@ -143,14 +143,29 @@ defmodule PakchatWeb.Phase6Test do
       assert [%{"id" => id, "kind" => "call"}] = Jason.decode!(data.env)
       assert id == wire.id
 
-      # More than fits: only what fits goes; the rest comes over the connection.
+      # More than fits: the NEWEST that fit go, oldest first; the rest comes
+      # over the connection (1 Nov: it used to keep the oldest).
       big = for i <- 1..20, do: %{id: i, body: String.duplicate("x", 400)}
       %{data: data} = Fcm.alert(false, big)
       assert byte_size(data.env) <= 3_200
-      assert [%{"id" => 1} | _] = Jason.decode!(data.env)
+      ids = data.env |> Jason.decode!() |> Enum.map(& &1["id"])
+      assert List.last(ids) == 20
+      assert ids == Enum.sort(ids)
+      assert length(ids) > 1
 
       # Nothing waiting: just the wake-up, as before.
       refute Map.has_key?(Fcm.alert(false, []).data, :env)
+    end
+
+    test "with many messages waiting, the push carries the newest ten (1 Nov)", ctx do
+      %{ali: ali, sara: sara, chat: chat} = ctx
+      a = online(ali.token, ali.device)
+      for i <- 1..12, do: assert({:ok, _} = send_msg(a, chat.id, [sealed(sara, "m#{i}")]))
+
+      bodies = Enum.map(Relay.for_push(sara.device), &Base.decode64!(&1.body))
+      assert length(bodies) == 10
+      assert List.last(bodies) =~ "m12"
+      assert hd(bodies) =~ "m3"
     end
 
     test "a phone woken by a push says delivered without connecting (owner, 31 Oct)", ctx do

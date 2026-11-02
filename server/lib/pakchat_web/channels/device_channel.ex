@@ -55,7 +55,7 @@ defmodule PakchatWeb.DeviceChannel do
        socket
        |> assign(:watching, MapSet.new())
        |> assign(:active, active)
-       |> assign(:uncollected, MapSet.new())
+       |> assign(:uncollected, %{})
        |> assign(:outgoing, [])
        |> assign(:outgoing_watch, [])
        |> assign(:live, %{})}
@@ -137,22 +137,22 @@ defmodule PakchatWeb.DeviceChannel do
       {:noreply, socket}
     else
       Process.send_after(self(), {:collected?, watch}, Push.grace_ms())
-
-      {:noreply,
-       assign(socket, :uncollected, MapSet.union(socket.assigns.uncollected, MapSet.new(watch)))}
+      {:noreply, assign(socket, :uncollected, watching(socket.assigns.uncollected, watch))}
     end
   end
 
   def handle_info({:collected?, ids}, socket) do
     uncollected = socket.assigns.uncollected
-    still = Enum.filter(ids, &MapSet.member?(uncollected, &1))
+    still = Map.take(uncollected, ids)
 
-    if still != [] and not busy_safe(fn -> Push.wake_if_waiting(socket.assigns.device.id) end) do
-      # The database is too busy to queue the push right now: ask again shortly.
-      Process.send_after(self(), {:collected?, still}, 1_000)
+    if still == %{} or busy_safe(fn -> wake(socket, still) end) do
+      {:noreply, assign(socket, :uncollected, Map.drop(uncollected, ids))}
+    else
+      # The database is too busy to queue the push right now: ask again shortly
+      # (still watched, so a connection closing meanwhile wakes the phone too).
+      Process.send_after(self(), {:collected?, Map.keys(still)}, 1_000)
+      {:noreply, socket}
     end
-
-    {:noreply, assign(socket, :uncollected, MapSet.difference(uncollected, MapSet.new(ids)))}
   end
 
   def handle_info({:typing, payload}, socket) do
@@ -215,8 +215,7 @@ defmodule PakchatWeb.DeviceChannel do
   defp do_handle_in("ack", %{"ids" => ids}, socket) when is_list(ids) do
     Relay.ack(socket.assigns.device, ids)
     socket = assign(socket, :live, Map.drop(socket.assigns.live, ids))
-    uncollected = MapSet.difference(socket.assigns.uncollected, MapSet.new(ids))
-    {:reply, :ok, assign(socket, :uncollected, uncollected)}
+    {:reply, :ok, assign(socket, :uncollected, Map.drop(socket.assigns.uncollected, ids))}
   end
 
   defp do_handle_in("sync", %{"after" => upto}, socket) when is_map(upto) do
@@ -287,17 +286,49 @@ defmodule PakchatWeb.DeviceChannel do
   @impl true
   def terminate(_reason, socket) do
     # Live ticks it never collected: saved, so it gets them when it's back.
-    Relay.save_live(Map.values(socket.assigns[:live] || %{}))
+    live = Map.values(socket.assigns[:live] || %{})
+    if live != [], do: on_close(fn -> Relay.save_live(live) end)
 
-    # Gone before collecting what came in its last second: wake the phone.
-    if MapSet.size(socket.assigns[:uncollected] || MapSet.new()) > 0,
-      do: Push.wake_if_waiting(socket.assigns.device.id)
+    # Gone before collecting what came in its last second (or before it was
+    # even sent on): wake the phone.
+    waiting = watching(socket.assigns[:uncollected] || %{}, socket.assigns[:outgoing_watch] || [])
+    if waiting != %{}, do: on_close(fn -> wake(socket, waiting) end)
 
-    if socket.assigns[:active] != false,
-      do: Accounts.touch_last_seen(socket.assigns.device.user_id)
+    device = socket.assigns.device
 
-    Accounts.touch_device(socket.assigns.device.id)
+    on_close(fn ->
+      if socket.assigns[:active] != false, do: Accounts.touch_last_seen(device.user_id)
+      Accounts.touch_device(device.id)
+    end)
+
     :ok
+  end
+
+  # Messages this connection is watching, each with when it started watching.
+  defp watching(uncollected, ids) do
+    now = DateTime.utc_now()
+    Enum.reduce(ids, uncollected, &Map.put_new(&2, &1, now))
+  end
+
+  # Push the phone if any of these is still waiting for it.
+  defp wake(socket, watched) do
+    since = watched |> Map.values() |> Enum.min(DateTime)
+    Push.wake_if_waiting(socket.assigns.device.id, since: since)
+  end
+
+  # The connection is closing, so there's no later: if the database is too
+  # busy right now, keep trying for a while on the side.
+  defp on_close(fun) do
+    unless busy_safe(fun) do
+      Task.start(fn -> retry_busy(fun, 30) end)
+    end
+  end
+
+  defp retry_busy(_fun, 0), do: :ok
+
+  defp retry_busy(fun, tries) do
+    Process.sleep(1_000)
+    unless busy_safe(fun), do: retry_busy(fun, tries - 1)
   end
 
   defp gather(socket, envelopes, watch) do

@@ -6,7 +6,7 @@
 // sheet: Open, Copy. Tap a phone number and, like WhatsApp, PakChat checks whether
 // that number is on PakChat: then Message, Voice call, Video call (and Add to
 // contacts if they aren't saved); if not, Call, Add to contacts and Invite to
-// PakChat. Copy is always there. Long messages show their start and "Read more".
+// PakChat; your own number says so, with Message yourself. Copy is always there. Long messages show their start and "Read more".
 // The reading itself is in core/richText.ts.
 import { normalizePhone } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
@@ -69,20 +69,25 @@ export function LinkSheetHost() {
   // A phone number: is it on PakChat? (undefined while checking, null if not, or who it is.)
   // (From what's shown, so the menu stays the same while the sheet slides away.)
   const number = shown?.kind === 'phone' ? normalizePhone(shown.target.replace(/^tel:/, '')) : null;
-  const [who, setWho] = useState<{ number: string; person: { id: string; name: string } | null } | undefined>(undefined);
+  // `self`: it's my own number (then it says so, with Message yourself, like WhatsApp).
+  // My own number is known here already (no need to ask the server, and it works offline too).
+  const myPhone = core.me?.phone ? normalizePhone(core.me.phone) : null;
+  const ownNumber = !!number && number === myPhone;
+  const [who, setWho] = useState<{ number: string; person: { id: string; name: string } | null; self?: boolean } | undefined>(undefined);
   useEffect(() => {
-    if (!number) return;
+    if (!number || ownNumber) return;
     let live = true;
     core
       .lookup(number)
-      .then((p) => live && setWho({ number, person: p && p.id !== core.myId ? { id: p.id, name: p.name } : null }))
+      .then((p) => live && setWho({ number, person: p && p.id !== core.myId ? { id: p.id, name: p.name } : null, self: !!p && p.id === core.myId }))
       .catch(() => live && setWho({ number, person: null }));
     return () => {
       live = false;
     };
-  }, [number]);
-  const found = who && who.number === number ? who : undefined;
+  }, [number, ownNumber]);
+  const found = ownNumber ? { number, person: null, self: true } : who && who.number === number ? who : undefined;
   const person = found?.person ?? null;
+  const mine = !!found?.self;
   const name = person ? core.name(person.id) || person.name : '';
 
   async function chatWith(userId: string, then: (chatId: string) => void) {
@@ -121,7 +126,15 @@ export function LinkSheetHost() {
           )}
         </>
       )}
-      {shown?.kind === 'phone' && (!number || (found && !person)) && (
+      {shown?.kind === 'phone' && mine && (
+        <>
+          <Txt size={13} color={theme.muted} style={{ paddingHorizontal: 20, paddingBottom: 4 }} testID="link-is-you">
+            {t.numberIsYou}
+          </Txt>
+          <MenuItem icon="chat" label={t.messageYourself} onPress={act(() => void chatWith(core.myId, (id) => router.push({ pathname: '/chat/[id]', params: { id } })))} testID="link-message-yourself" />
+        </>
+      )}
+      {shown?.kind === 'phone' && (!number || (found && !person && !mine)) && (
         <>
           {!!number && (
             <Txt size={13} color={theme.muted} style={{ paddingHorizontal: 20, paddingBottom: 4 }} testID="link-not-on">

@@ -22,8 +22,10 @@ export function CallBar() {
   const call = useCall();
   const insets = useSafeAreaInsets();
   const chat = useChat(call?.chatId ?? '');
-  const now = useNow(1000);
-  if (!call || call.state === 'ended' || calls.screenOpen) return null;
+  // The clock only runs during a call (it used to tick every second all the time, redrawing this for nothing).
+  const shown = !!call && call.state !== 'ended' && !calls.screenOpen;
+  const now = useNow(1000, shown && call?.state === 'active');
+  if (!call || !shown) return null;
   // Someone was added to a one-to-one call: everyone's names.
   const others = chat ? chat.members.map((m) => m.userId).filter((u) => u !== core.myId) : [];
   const title = call.extra.length ? [...new Set([...others, ...call.extra])].map((u) => core.name(u) || '…').join(', ') : chat ? core.chatTitle(chat) : '';

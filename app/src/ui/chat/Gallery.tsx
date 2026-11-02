@@ -8,7 +8,6 @@
 // let PakChat see only some photos (or none of them), an empty gallery says so,
 // with "Allow access" and the phone's own gallery, instead of "Nothing here yet".
 import type { Picked } from '../../core/files';
-import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, FlatList, Linking, Modal, ScrollView, useWindowDimensions, View } from 'react-native';
@@ -23,6 +22,7 @@ import { Icon } from '../icons';
 import { Button, Chip, IconButton, Pressy, Txt } from '../kit';
 import { popIn, popOut, tick } from '../motion';
 import { toast } from '../overlays';
+import { GalleryThumb } from './GalleryThumb';
 
 /** The most you can pick at once, as on WhatsApp. */
 export const GALLERY_MAX = 100;
@@ -234,7 +234,7 @@ export function GalleryScreen({ ask }: { ask: Ask }) {
             return (
               <Pressy onPress={() => toggle(item)} label={item.mediaType === 'video' ? t.videoLabel : t.photoLabel} scale={0.94} testID="gallery-item">
                 <View style={{ width: size, height: size, backgroundColor: theme.glass }}>
-                  <Image source={{ uri: item.uri }} style={{ flex: 1 }} contentFit="cover" recyclingKey={item.id} />
+                  <GalleryThumb asset={item} size={size} bg={theme.glass} />
                   {item.mediaType === 'video' && (
                     <View style={{ position: 'absolute', start: 5, bottom: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <Icon name="video" size={13} color="#FFFFFF" />

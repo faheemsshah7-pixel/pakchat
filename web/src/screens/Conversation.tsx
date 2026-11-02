@@ -3,7 +3,7 @@
 // loads older ones as you scroll up, and marks what you see as read.
 
 import { MAX_CALL_PEOPLE, type Chat, type Message } from '@pakchat/shared';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 
 import { core } from '../core/core';
 import { isChatOpen, openLockedChat } from '../core/lock';
@@ -169,6 +169,41 @@ function Header({ chat }: { chat: Chat }) {
 }
 
 type Item = { kind: 'day'; at: number; key: string } | { kind: 'unread'; n: number; key: string } | { kind: 'msg'; m: Message; first: boolean; key: string };
+
+/**
+ * Someone typing: a bubble with three moving dots under the last message, like WhatsApp's
+ * (the phone app's TypingDots). In a group, with the photo of who's typing. It keeps the
+ * chat at the bottom if you were already there (owner, 1 Nov).
+ */
+function TypingBubble({ chat, scroller, atBottom }: { chat: Chat; scroller: RefObject<HTMLDivElement | null>; atBottom: boolean }) {
+  const typing = useTyping(chat.id);
+  const who = Object.entries(typing ?? {}).filter(([id, at]) => id !== core.myId && Date.now() - at < 6000);
+  const first = who[0]?.[0] ?? null;
+  // Typing stops showing after a few quiet seconds, even if "stopped" never comes.
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    if (!first) return;
+    const id = setTimeout(() => redraw((n) => n + 1), 6200);
+    return () => clearTimeout(id);
+  }, [first, typing]);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (first && el && atBottom) el.scrollTop = el.scrollHeight;
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [first]);
+  if (!first) return null;
+  const group = chat.kind === 'group';
+  return (
+    <div className="mrow first typingrow" aria-label={tr('typing…')}>
+      {group && <Avatar id={first} name={memberName(first)} photo={photoOf(first)} size={28} />}
+      <div className="bub in typingb">
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
 
 function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
   const { messages, all, more } = useMessages(chat.id);
@@ -342,6 +377,7 @@ function Messages({ chat, canSend }: { chat: Chat; canSend: boolean }) {
             />
           ),
         )}
+        <TypingBubble chat={chat} scroller={scroller} atBottom={atBottom} />
         {messages?.length === 0 && isSelfChat(chat) && (
           <div className="e2e">
             <span>{tr('Message yourself: notes, links and files you want on all your devices.')}</span>

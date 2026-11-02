@@ -10,7 +10,9 @@
 // Like WhatsApp, it grows out of its spot in the chat when it opens, and
 // shrinks back into it when it closes (SwipeToClose.tsx, zoom.ts).
 // Along the top, like WhatsApp: Star, Forward, and ⋮ with Reply, Show in chat,
-// All media, Share and Delete.
+// All media, Share and Delete. The bars sit on a dim strip, top and bottom, and
+// along the bottom are Reply and two quick reactions, like WhatsApp's.
+// Pinch a photo (or double tap it) to zoom in (Zoomable.tsx).
 import type { Message } from '@pakchat/shared';
 import { UNSEND_HOURS } from '@pakchat/shared';
 import { Image } from 'expo-image';
@@ -20,7 +22,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, FlatList, Pressable, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, BackHandler, FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -37,19 +39,34 @@ import { Dialog, MenuItem, Popup, toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
 import { SwipeToClose, type Closer } from '../ui/SwipeToClose';
 import { parseSpot, takeHanded } from '../ui/zoom';
+import { Zoomable } from '../ui/Zoomable';
 
 const keyOf = (m: Message) => `${m.author}/${m.id}`;
+
+/** The two quick reactions along the bottom, like WhatsApp's. */
+const QUICK = ['❤️', '🙏'];
+/** How dim the strips behind the bars are. */
+const DIM = 'rgba(0,0,0,0.4)';
+/** The height of the Reply row along the bottom. */
+const REPLY_ROW = 60;
 
 export default function Viewer() {
   const { chat, author, id, spot: spotParam } = useLocalSearchParams<{ chat: string; author: string; id: string; spot?: string }>();
   const t = useT();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height: winH } = useWindowDimensions();
+  // The height of a page (the whole screen), measured.
+  const [pageH, setPageH] = useState(winH);
   const [all, setAll] = useState<Message[] | null>(null);
   // The one tapped, handed over by the chat so it shows at once; the rest are read once it has grown open.
   const [tapped] = useState(() => takeHanded(chat, author, id));
   const [spot] = useState(() => parseSpot(spotParam));
   const [opened, setOpened] = useState(false);
+  // The one tapped stays on top, on its own, until the list of all of them is showing it too:
+  // swapping straight from one to the other left a black frame (owner's video, 2 Nov).
+  const [swapped, setSwapped] = useState(!tapped);
+  // A photo being zoomed or pinched: no swiping to the next one or dragging to close meanwhile.
+  const [zoomed, setZoomed] = useState(false);
   const closer = useRef<Closer>(null);
   const close = useCallback(() => (closer.current ? closer.current.close() : router.back()), []);
   // Where it opened (the one tapped), and where it is now.
@@ -90,6 +107,17 @@ export default function Viewer() {
     };
   }, [chat, author, id, tapped, opened]);
 
+  // The list's page for the one tapped is showing: let it through (two frames later, so it's
+  // surely on screen). If it never says so (a photo that won't load), after a moment anyway.
+  const reveal = useCallback(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => setSwapped(true)));
+  }, []);
+  useEffect(() => {
+    if (!all || swapped) return;
+    const late = setTimeout(() => setSwapped(true), 700);
+    return () => clearTimeout(late);
+  }, [all, swapped]);
+
   // Back shrinks it into its spot too.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -111,6 +139,12 @@ export default function Viewer() {
   const isStarred = !!m && !!starred[`${m.chatId}/${m.author}/${m.id}`];
   const amAdmin = chatInfo?.kind === 'group' && chatInfo.members.some((mb) => mb.userId === core.myId && mb.role === 'admin');
   const canUnsend = !!m && m.seq !== null && (amAdmin || (m.author === core.myId && now - m.sentAt < UNSEND_HOURS * 3_600_000));
+  const canReply = !!m && !chatInfo?.left;
+  const myReaction = m?.reactions?.[core.myId];
+  const react = (emoji: string) => {
+    if (!m) return;
+    void core.client.react(chat, { author: m.author, id: m.id }, myReaction === emoji ? null : emoji).catch(() => toast(t.couldNot));
+  };
   const key = m ? `${m.author}/${m.id}` : '';
   // Back to the chat, at this message (and replying to it).
   const toChat = (params: { jump?: string; reply?: string }) => router.dismissTo({ pathname: '/chat/[id]', params: { id: chat, ...params } });
@@ -139,37 +173,64 @@ export default function Viewer() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1 }} onLayout={(e) => setPageH(e.nativeEvent.layout.height)}>
       <StatusBar style="light" hidden={!chrome} />
       <SwipeToClose
         ref={closer}
+        locked={zoomed}
         onClose={() => router.back()}
         onDrag={setDragging}
         grow={{ spot, aspect: tapped?.file?.width && tapped.file.height ? tapped.file.height / tapped.file.width : null, back: index === start, onOpened: () => setOpened(true) }}
       >
-        <FlatList
-          // Just the one tapped while it grows open, then all of them, starting at it.
-          key={all ? 'all' : 'one'}
-          ref={pager}
-          style={{ flex: 1 }}
-          data={list}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={keyOf}
-          initialScrollIndex={start}
-          getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
-          // Which page it settled on after a swipe (in Urdu the pages run the other way, and so does x).
-          onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(list.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
-          windowSize={3}
-          initialNumToRender={1}
-          renderItem={({ item, index: i }) => <Page m={item} width={width} active={i === index} chrome={bars} onTap={() => setChrome((c) => !c)} />}
-        />
+        <View style={{ flex: 1 }}>
+          {all && (
+            <FlatList
+              ref={pager}
+              style={{ flex: 1 }}
+              data={all}
+              horizontal
+              pagingEnabled
+              scrollEnabled={!zoomed}
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={keyOf}
+              initialScrollIndex={start}
+              getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+              // Which page it settled on after a swipe (in Urdu the pages run the other way, and so does x).
+              onMomentumScrollEnd={(e) => setIndex(Math.max(0, Math.min(all.length - 1, Math.round(Math.abs(e.nativeEvent.contentOffset.x) / width))))}
+              windowSize={3}
+              initialNumToRender={1}
+              renderItem={({ item, index: i }) => (
+                <Page
+                  m={item}
+                  width={width}
+                  height={pageH}
+                  active={swapped && i === index}
+                  chrome={bars}
+                  lift={canReply ? insets.bottom + REPLY_ROW : 0}
+                  onTap={() => setChrome((c) => !c)}
+                  onZoomed={setZoomed}
+                  onShown={!swapped && i === start ? reveal : undefined}
+                />
+              )}
+            />
+          )}
+          {/* The one tapped, alone: while it grows open, and until the list shows it too. */}
+          {!swapped && tapped && (
+            <View style={[StyleSheet.absoluteFill, all ? { backgroundColor: '#000000' } : null]}>
+              {/* (It doesn't zoom: it's about to be swapped for the list's page, which does.) */}
+              <Page m={tapped} width={width} height={pageH} active zoom={false} chrome={bars} lift={canReply ? insets.bottom + REPLY_ROW : 0} onTap={() => setChrome((c) => !c)} />
+            </View>
+          )}
+        </View>
       </SwipeToClose>
 
       {/* A tap hides and shows the bars; they fade, like WhatsApp's. */}
       {bars && (
-        <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', top: insets.top + 6, start: 8, end: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Animated.View
+          entering={fadeIn}
+          exiting={fadeOut}
+          style={{ position: 'absolute', top: 0, start: 0, end: 0, paddingTop: insets.top + 6, paddingBottom: 6, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: DIM }}
+        >
           <IconButton icon="back" label={t.back} onPress={close} flip look="onAccent" size={42} testID="viewer-back" />
           <View style={{ flex: 1 }}>
             <Txt size={16} weight="700" color="#FFFFFF" lines={1}>
@@ -218,29 +279,93 @@ export default function Viewer() {
         ]}
       />
 
-      {/* The caption (above a video's controls). */}
+      {/* The caption (above a video's controls, and the Reply row). */}
       {bars && !!m?.text && (
         <Animated.View
           entering={fadeIn}
           exiting={fadeOut}
           pointerEvents="none"
-          style={{ position: 'absolute', start: 0, end: 0, bottom: insets.bottom + (f?.kind === 'video' && haveFile(m) ? VIDEO_BAR : 0), paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' }}
+          style={{
+            position: 'absolute',
+            start: 0,
+            end: 0,
+            bottom: (canReply ? insets.bottom + REPLY_ROW : insets.bottom) + (f?.kind === 'video' && haveFile(m) ? VIDEO_BAR : 0),
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            backgroundColor: DIM,
+          }}
         >
           <Txt size={15} color="#FFFFFF" lines={4}>
             {m.text}
           </Txt>
         </Animated.View>
       )}
+
+      {/* Along the bottom, like WhatsApp: Reply (back in the chat, replying to it), and two quick reactions. */}
+      {bars && canReply && (
+        <Animated.View
+          entering={fadeIn}
+          exiting={fadeOut}
+          style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: REPLY_ROW + insets.bottom, paddingBottom: insets.bottom, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: DIM }}
+        >
+          <Pressy onPress={() => toChat({ jump: key, reply: key })} label={t.reply} scale={0.98} testID="viewer-reply-bar" style={{ flex: 1 }}>
+            <View style={{ height: 42, borderRadius: 21, paddingHorizontal: 18, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' }}>
+              <Txt size={15} color="rgba(255,255,255,0.8)">
+                {t.reply}
+              </Txt>
+            </View>
+          </Pressy>
+          {QUICK.map((e) => (
+            <Pressy key={e} onPress={() => react(e)} label={e} scale={0.85} testID={`viewer-react-${e}`}>
+              <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: myReaction === e ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
+                <Txt size={24} align="center">
+                  {e}
+                </Txt>
+              </View>
+            </Pressy>
+          ))}
+        </Animated.View>
+      )}
     </View>
   );
 }
 
-/** One photo or video, the width of the screen. */
-function Page({ m, width, active, chrome, onTap }: { m: Message; width: number; active: boolean; chrome: boolean; onTap: () => void }) {
+/** One photo or video, the size of the screen. */
+function Page({
+  m,
+  width,
+  height,
+  active,
+  zoom = true,
+  chrome,
+  lift,
+  onTap,
+  onZoomed,
+  onShown,
+}: {
+  m: Message;
+  width: number;
+  height: number;
+  active: boolean;
+  /** False: a photo can't be zoomed. */
+  zoom?: boolean;
+  chrome: boolean;
+  /** How far up from the bottom a video's controls sit (over the Reply row). */
+  lift: number;
+  onTap: () => void;
+  onZoomed?: (zoomed: boolean) => void;
+  /** Called once it's on screen (for a photo: once the photo itself shows). */
+  onShown?: () => void;
+}) {
   const t = useT();
   const f = m.file!;
   const here = haveFile(m);
   const progress = useFileProgress(tagOf(m.chatId, m));
+  const photo = here && f.kind !== 'video';
+  // Anything but a photo is on screen as soon as it's made.
+  useEffect(() => {
+    if (!photo) onShown?.();
+  }, [photo, onShown]);
 
   async function get() {
     if (progress !== undefined) return;
@@ -252,20 +377,27 @@ function Page({ m, width, active, chrome, onTap }: { m: Message; width: number; 
     }
   }
 
+  // How big the photo shows, fitted inside the screen (so a zoomed one never moves past its own edges).
+  const aspect = f.width && f.height ? f.height / f.width : null;
+  const shownW = aspect ? Math.min(width, height / aspect) : width;
+  const shownH = aspect ? shownW * aspect : height;
+
   return (
     <View style={{ width, flex: 1 }}>
       {here && f.kind === 'video' ? (
         // Only the one on screen has a player (they're heavy), and it stops when you swipe away.
         active ? (
-          <Video uri={f.local!} chrome={chrome} onTap={onTap} />
+          <Video uri={f.local!} chrome={chrome} lift={lift} onTap={onTap} />
         ) : (
           <Pressable style={{ flex: 1 }} onPress={onTap} />
         )
       ) : here ? (
-        <Pressable style={{ flex: 1 }} onPress={onTap}>
+        // Pinch anywhere on the screen to zoom; a tap shows and hides the bars. Only the one on
+        // screen zooms, and swiping away from it puts it back.
+        <Zoomable width={width} height={height} viewport={{ width, height }} picture={{ width: shownW, height: shownH }} enabled={active && zoom} onZoomed={onZoomed} onTap={onTap}>
           {/* Kept in memory, so it shows at once when the pages swap in after opening. */}
-          <Image source={{ uri: f.local }} style={{ flex: 1 }} contentFit="contain" cachePolicy="memory-disk" testID="viewer-image" />
-        </Pressable>
+          <Image source={{ uri: f.local }} style={{ width, height }} contentFit="contain" cachePolicy="memory-disk" onDisplay={onShown} testID="viewer-image" />
+        </Zoomable>
       ) : (
         <Pressable style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onPress={onTap}>
           {f.thumb && <Image source={{ uri: `data:image/jpeg;base64,${f.thumb}` }} style={{ position: 'absolute', width: '100%', height: '100%' }} contentFit="contain" blurRadius={8} />}
@@ -292,7 +424,7 @@ function muteVideo(player: VideoPlayer, muted: boolean) {
 const VIDEO_BAR = 64;
 
 /** A video, playing, with WhatsApp-like controls that hide and show with a tap. */
-function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: () => void }) {
+function Video({ uri, chrome, lift, onTap }: { uri: string; chrome: boolean; lift: number; onTap: () => void }) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const player = useVideoPlayer(uri, (p) => {
@@ -336,7 +468,20 @@ function Video({ uri, chrome, onTap }: { uri: string; chrome: boolean; onTap: ()
         <Animated.View
           entering={fadeIn}
           exiting={fadeOut}
-          style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: VIDEO_BAR + insets.bottom, paddingBottom: insets.bottom, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.45)' }}
+          // Over the Reply row (`lift`), or at the very bottom when there's none.
+          style={{
+            position: 'absolute',
+            start: 0,
+            end: 0,
+            bottom: lift,
+            height: VIDEO_BAR + (lift ? 0 : insets.bottom),
+            paddingBottom: lift ? 0 : insets.bottom,
+            paddingHorizontal: 14,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            backgroundColor: DIM,
+          }}
         >
           <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>
             {duration(shown * length * 1000)}

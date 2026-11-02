@@ -500,12 +500,19 @@ export function useSearch(query: string): Found[] {
 }
 
 /** A clock that ticks every `ms`, for "last seen 5 minutes ago" and disappearing messages. */
-export function useNow(ms = 30_000) {
+export function useNow(ms = 30_000, on = true) {
   const [now, setNow] = useState(Date.now);
+  // Only while it's needed (`on`): a clock nobody looks at still redraws its whole screen each
+  // time. Turned on, it's set to the time at once (then every `ms`).
   useEffect(() => {
+    if (!on) return;
+    const first = setTimeout(() => setNow(Date.now()), 0);
     const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, [ms, on]);
   return now;
 }
 

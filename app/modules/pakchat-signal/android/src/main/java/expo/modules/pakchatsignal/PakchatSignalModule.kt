@@ -196,6 +196,17 @@ class PakchatSignalModule : Module() {
       }
     }
 
+    /** A gallery item's small preview, saved in the cache (GalleryThumbs). Null if the phone has none. */
+    AsyncFunction("galleryThumb") { id: String, video: Boolean, px: Int, stamp: Double, promise: Promise ->
+      GalleryThumbs.run {
+        try {
+          promise.resolve(GalleryThumbs.get(context(), id, video, px, stamp.toLong()))
+        } catch (e: Exception) {
+          promise.resolve(null)
+        }
+      }
+    }
+
     // ---- Message alerts (see ChatAlerts) ----
 
     /** Shows or updates one chat's alert. What to show comes as JSON (see push.ts). */

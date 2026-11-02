@@ -169,7 +169,15 @@ defmodule PakchatWeb.DeviceChannelTest do
     # Still not collected (a dead connection): it asks for the push, which
     # goes only if the message is still waiting then.
     assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
-    assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => false}
+
+    assert Map.delete(job.args, "since") == %{
+             "device_id" => sara.device.id,
+             "if_waiting" => true,
+             "call" => false
+           }
+
+    # From when the message came, even if queuing the push had to wait.
+    assert job.args["since"] <= DateTime.to_unix(DateTime.utc_now())
     assert Relay.waiting?(sara.device.id, before)
     Relay.ack(sara.device, [env.id])
     refute Relay.waiting?(sara.device.id, before)
@@ -205,7 +213,15 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert_receive {:DOWN, ^ref, _, _, _}
 
     assert [job] = all_enqueued(worker: Pakchat.Push.Notify)
-    assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => false}
+
+    assert Map.delete(job.args, "since") == %{
+             "device_id" => sara.device.id,
+             "if_waiting" => true,
+             "call" => false
+           }
+
+    # From when the message came, even if queuing the push had to wait.
+    assert job.args["since"] <= DateTime.to_unix(DateTime.utc_now())
   end
 
   test "ticks don't wake a closed app, and my own messages don't wake my other devices", ctx do

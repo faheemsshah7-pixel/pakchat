@@ -13,7 +13,9 @@ export type View = {
   tab: Tab;
   drawer: Drawer;
   /** The chat list's own pages: archived chats, or starting a new chat. */
-  side: null | 'archived' | 'locked' | 'newChat' | 'newGroup' | 'starred';
+  side: null | 'archived' | 'locked' | 'newChat' | 'newGroup' | 'newContact' | 'starred';
+  /** "New contact" opened for a number already typed in New chat. */
+  contactPhone: string | null;
   /** Replying to, or editing, one message (cleared when the chat changes). */
   replyTo: Message | null;
   editing: Message | null;
@@ -31,7 +33,7 @@ export type View = {
   chatPicks: string[] | null;
 };
 
-let view: View = { tab: 'chats', drawer: null, side: null, replyTo: null, editing: null, jumpTo: null, files: null, info: null, selecting: null, privateReply: null, chatPicks: null };
+let view: View = { tab: 'chats', drawer: null, side: null, contactPhone: null, replyTo: null, editing: null, jumpTo: null, files: null, info: null, selecting: null, privateReply: null, chatPicks: null };
 const subs = new Set<() => void>();
 
 export function setView(change: Partial<View>) {
