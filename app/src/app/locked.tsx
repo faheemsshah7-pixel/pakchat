@@ -4,7 +4,7 @@
 // locks again once you leave it.
 import { router } from 'expo-router';
 import { useEffect } from 'react';
-import { FlatList } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 
 import { core } from '../core/core';
 import { useAllPresence, useAllTyping, useCore, useLockedChats, useStable, type ChatRow as Row } from '../core/hooks';
@@ -40,7 +40,9 @@ function Folder() {
       <Txt size={13} color={theme.muted} style={{ paddingHorizontal: 22, paddingVertical: 8 }}>
         {t.lockedChatsNote}
       </Txt>
-      <FlatList
+      {/* A recycling list: rows that scroll away are reused for the ones coming in. */}
+      <FlashList
+        maintainVisibleContentPosition={{ disabled: true }}
         data={rows ?? []}
         keyExtractor={(r) => r.chat.id}
         contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 40 }}

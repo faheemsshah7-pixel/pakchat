@@ -132,7 +132,9 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
           {f.gif && here ? (
             <GifView uri={f.local!} />
           ) : (
-            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} />
+            // Drawn at the size it shows (not the photo's full size), and kept in memory once
+            // drawn, so scrolling back to it doesn't read and shrink the whole photo again.
+            source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} cachePolicy="memory-disk" />
           )}
           {badge && (
             <View

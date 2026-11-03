@@ -5,7 +5,7 @@
 // picked): a new message in one chat doesn't redraw every row in the list.
 import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import Animated, { LayoutAnimationConfig } from 'react-native-reanimated';
 
 import { core } from '../core/core';
 import { plainText } from '../core/richText';
@@ -100,11 +100,16 @@ function ChatRowView({
               }}
             >
               {/* Picked: the row tints and a tick pops onto the photo, like WhatsApp's. */}
-              {selected && <Animated.View entering={fadeIn} exiting={fadeOut} style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }]} />}
+              {/* The list reuses a row that scrolled away for another chat: keyed by the chat, so a
+                  reused row's tint and tick just show (or go), and only a tap fades or pops them. */}
+              <LayoutAnimationConfig key={chat.id} skipEntering skipExiting>
+                {selected && <Animated.View entering={fadeIn} exiting={fadeOut} style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }]} />}
+              </LayoutAnimationConfig>
               <View>
                 <Pressy onPress={onAvatar && (() => onAvatar(row))} disabled={!onAvatar || selecting} label={t.profilePhoto} scale={0.92} testID={`avatar-${title}`}>
                   <Avatar id={chat.id} name={title} size={50} online={online} group={chat.kind === 'group'} />
                 </Pressy>
+                <LayoutAnimationConfig key={chat.id} skipEntering skipExiting>
                 {selected && (
                   <Animated.View
                     entering={popIn}
@@ -126,6 +131,7 @@ function ChatRowView({
                     <Icon name="check" size={13} color="#FFFFFF" stroke={3} />
                   </Animated.View>
                 )}
+                </LayoutAnimationConfig>
               </View>
               <View style={{ flex: 1, gap: 3 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { core } from '../core/core';
+import { screenDrawn } from '../core/speed';
 import { useCore } from '../core/hooks';
 import { photoUri } from '../core/photos';
 import { useT } from '../i18n';
@@ -132,6 +133,8 @@ export function useKeyboardLift(base = 24) {
 export function Screen({ children, style, bottom = true, backdrop }: { children: ReactNode; style?: StyleProp<ViewStyle>; bottom?: boolean; backdrop?: ReactNode }) {
   const insets = useSafeAreaInsets();
   const { rtl } = useLook();
+  // Speed check: when a screen just opened is first drawn.
+  useEffect(screenDrawn, []);
   return (
     <View style={[{ flex: 1, direction: rtl ? 'rtl' : 'ltr' }]}>
       <SkyBackground />
@@ -365,7 +368,9 @@ export function Avatar({
   return (
     <View style={{ width: size, height: size }}>
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: radius, backgroundColor: a }} contentFit="cover" />
+        // recyclingKey: in a list that reuses rows, someone else's photo never shows for a moment
+        // while this one loads. Kept in memory once shown, so scrolling back doesn't decode it again.
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: radius, backgroundColor: a }} contentFit="cover" recyclingKey={uri} cachePolicy="memory-disk" />
       ) : (
         <LinearGradient
           colors={[a, b]}

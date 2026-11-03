@@ -4,11 +4,11 @@
 // splash screen up until we know whether you're signed in, and then shows
 // either the sign-in screens or the app. Screens slide in from the right
 // (from the left in Urdu, which reads right to left).
-import { router, SplashScreen, Stack, useRootNavigationState, type ErrorBoundaryProps } from 'expo-router';
+import { router, SplashScreen, Stack, useNavigationContainerRef, type ErrorBoundaryProps } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
@@ -83,18 +83,33 @@ function App() {
     console.log(`[pakchat] screen: ${state}${stuck ? ' (stuck)' : ''}${problem ? ` ${problem}` : ''}`);
   }, [state, stuck, problem]);
 
+  // The logo fades away once there's something finished to show. Signed in, that's the chat list
+  // with its chats drawn ((tabs)/index.tsx hides it then), not an empty frame a moment before
+  // (owner, 3 Nov: the opening looked lifeless). This is only in case the list never says so.
   useEffect(() => {
-    if (state !== 'loading' || stuck) void SplashScreen.hideAsync().catch(() => {});
+    if (state === 'loading' && !stuck) return;
+    if (state === 'signedIn' && !stuck) {
+      const id = setTimeout(() => void SplashScreen.hideAsync().catch(() => {}), 1500);
+      return () => clearTimeout(id);
+    }
+    void SplashScreen.hideAsync().catch(() => {});
   }, [state, stuck]);
 
   // Tapping a message alert opens its chat, even when the tap started PakChat.
   const tappedPlain = Notifications.useLastNotificationResponse();
-  const nav = useRootNavigationState();
+  // Whether navigation is ready (to open a tapped alert's chat). Only that: reading the whole
+  // navigation state redrew this root, with every screen's settings, each time any screen opened
+  // or closed, just when the new screen needed the phone (owner's speed check, 3 Nov).
+  const navRef = useNavigationContainerRef();
+  const navReady = useSyncExternalStore(
+    useCallback((changed: () => void) => navRef.addListener('state', changed), [navRef]),
+    () => navRef.isReady(),
+  );
   const [taps, setTaps] = useState(0);
   useEffect(() => watchTaps(() => setTaps((n) => n + 1)), []);
   useEffect(() => watchCallTaps(() => setTaps((n) => n + 1)), []);
   useEffect(() => {
-    if (state !== 'signedIn' || !nav?.key) return;
+    if (state !== 'signedIn' || !navReady) return;
     // The plain "New message" alert just opens PakChat; "liked your status" opens the Status tab, a reaction its chat.
     if (tappedPlain) {
       Notifications.clearLastNotificationResponse();
@@ -126,7 +141,7 @@ function App() {
     if (!chatId || chatId === core.viewing) return;
     const go = core.viewing ? router.replace : router.push;
     go({ pathname: '/chat/[id]', params: { id: chatId } });
-  }, [taps, tappedPlain, state, nav?.key]);
+  }, [taps, tappedPlain, state, navReady]);
 
   // The window behind the screens matches the look, so nothing flashes white in Graphite.
   useEffect(() => {

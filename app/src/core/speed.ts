@@ -14,7 +14,7 @@ import { AppState, BackHandler } from 'react-native';
 export type Timed = { what: SpeedWhat; ms: number; at: number; where?: string };
 
 /** What was timed (words for it are in i18n: speedStart, speedChatDrawn, …). */
-export type SpeedWhat = 'start' | 'chatDrawn' | 'chatIn' | 'tab' | 'send' | 'pageMoving' | 'pageIn' | 'back' | 'busy';
+export type SpeedWhat = 'start' | 'chatDrawn' | 'chatIn' | 'tab' | 'send' | 'pageDrawn' | 'pageMoving' | 'pageIn' | 'back' | 'busy';
 
 /** How long is fine for each (more shows in red). A slide itself takes a fifth of a second. */
 export const SPEED_OK: Record<SpeedWhat, number> = {
@@ -23,6 +23,7 @@ export const SPEED_OK: Record<SpeedWhat, number> = {
   chatIn: 400,
   tab: 150,
   send: 150,
+  pageDrawn: 120,
   pageMoving: 150,
   pageIn: 400,
   back: 350,
@@ -56,6 +57,10 @@ export function timing(name: string) {
 }
 
 function note(what: SpeedWhat, ms: number, where?: string) {
+  if (what === 'start' && !up) {
+    up = true;
+    watchBusy(AppState.currentState === 'active');
+  }
   log.unshift({ what, ms: Math.round(ms), at: Date.now(), ...(where ? { where } : {}) });
   if (log.length > KEEP) log.length = KEEP;
   console.log(`[pakchat] speed: ${what}${where ? ` (${where})` : ''} ${Math.round(ms)} ms`);
@@ -98,11 +103,11 @@ function stopFresh(name: string, what: SpeedWhat, where: string) {
  */
 export function watchRouter(router: object) {
   const r = router as Record<string, unknown>;
-  const watch = (key: string, before: () => void) => {
+  const watch = (key: string, before: (to: unknown) => void) => {
     const wrap = (fn: unknown) =>
       typeof fn === 'function'
         ? (...args: unknown[]) => {
-            before();
+            before(args[0]);
             return (fn as (...a: unknown[]) => unknown)(...args);
           }
         : fn;
@@ -118,7 +123,7 @@ export function watchRouter(router: object) {
       },
     });
   };
-  for (const key of ['push', 'navigate', 'replace']) watch(key, opening);
+  for (const key of ['push', 'navigate', 'replace']) watch(key, (to) => opening(routeOf(to)));
   for (const key of ['back', 'dismiss', 'dismissTo', 'dismissAll']) watch(key, goingBack);
 }
 
@@ -137,9 +142,31 @@ export function watchBackButton() {
   });
 }
 
+/** The screen being opened ("settings", "info/[id]"), for its "drawn" time. */
+let opened = '';
+
 /** A tap that opens a screen (any but a chat, which starts its own clock): starts its clock. */
-export function opening() {
+export function opening(route = '') {
+  opened = route;
   startTimer('page');
+}
+
+/** Where router.push and the like go, as a route's name: '/settings' → "settings", { pathname: '/info/[id]' } → "info/[id]". */
+function routeOf(to: unknown) {
+  const path = typeof to === 'string' ? to : to && typeof to === 'object' && 'pathname' in to ? String((to as { pathname: unknown }).pathname) : '';
+  return path.replace(/^\//, '').replace(/[?#].*$/, '');
+}
+
+/**
+ * A screen has been drawn (Screen in kit.tsx, as it first appears): how long since the tap. Next to
+ * "starts moving", it says whether a slow opening was PakChat drawing the screen or the phone
+ * getting ready to slide it in. A chat has its own ("Opening a chat: drawn").
+ */
+export function screenDrawn() {
+  if (!timing('page') || !opened || opened.startsWith('chat/') || opened === '(tabs)') return;
+  const where = opened;
+  opened = '';
+  requestAnimationFrame(() => lapTimer('page', 'pageDrawn', where));
 }
 
 /** Back (the phone's button, a back arrow): starts the going-back clock. */
@@ -159,13 +186,15 @@ function tick() {
   // (Far too late means the phone paused us, not that we were busy.)
   if (late > 250 && late < 10_000) note('busy', late, current || undefined);
 }
+// Only once PakChat has started: while it starts (the logo still showing) it's meant to be busy,
+// and that was noted as the chat list being stuck (owner's speed check, 3 Nov).
+let up = false;
 function watchBusy(on: boolean) {
   if (ticking) clearInterval(ticking);
   ticking = null;
   last = performance.now();
-  if (on) ticking = setInterval(tick, TICK);
+  if (on && up) ticking = setInterval(tick, TICK);
 }
-watchBusy(AppState.currentState === 'active');
 AppState.addEventListener('change', (s) => watchBusy(s === 'active'));
 
 /** The times kept, newest first. */

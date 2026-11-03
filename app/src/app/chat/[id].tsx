@@ -9,7 +9,8 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, BackHandler, FlatList, Keyboard, Pressable, StyleSheet, TextInput, View, type ListViewToken } from 'react-native';
+import { AppState, BackHandler, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import Animated, { Easing, FadeIn, FadeOut, KeyboardState, LayoutAnimationConfig, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -65,6 +66,8 @@ import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 type Item = { key: string; kind: 'msg'; m: Message; first: boolean; album?: Message[] } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
 
 const keyOf = (m: Pick<Message, 'author' | 'id'>) => `${m.author}/${m.id}`;
+/** Counts as seen (for the date pill and "at the newest") once a tenth of it shows. */
+const VIEWABLE = { itemVisiblePercentThreshold: 10 };
 const quoteKind = (m: Message): ChatQuote['kind'] =>
   m.kind === 'text' ? 'text' : m.kind === 'poll' ? 'poll' : m.kind !== 'file' || !m.file ? 'other' : m.file.kind === 'image' ? 'image' : m.file.kind === 'video' ? 'video' : m.file.kind === 'voice' ? 'voice' : 'file';
 /** The height of the bar across the top. */
@@ -156,7 +159,14 @@ function ChatScreen() {
   const wasAtBottom = useRef(true);
   // Only messages newer than opening the chat rise into place (not the ones already there).
   const [openedAt] = useState(Date.now);
-  const listRef = useRef<FlatList<Item>>(null);
+  // The messages that have already risen into place (below).
+  const arrived = useRef(new Set<string>());
+  // The kinds of row the list keeps apart, so a row is only reused for one built the same way.
+  const itemType = useCallback(
+    (it: Item) => (it.kind !== 'msg' ? it.kind : it.m.kind === 'system' ? 'system' : `${it.m.author === core.myId ? 'mine' : 'theirs'}${it.m.sentAt > openedAt ? '-new' : ''}`),
+    [openedAt],
+  );
+  const listRef = useRef<FlashListRef<Item>>(null);
   const focused = useRef(true);
   const selecting = picked.size > 0;
   // The chat's clock (pins and disappearing messages running out, what picked messages allow) runs
@@ -377,8 +387,8 @@ function ChatScreen() {
   useEffect(() => {
     tRef.current = t;
   }, [t]);
-  const onViewable = useCallback(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
-    const top = viewableItems.reduce<ListViewToken | null>((a, v) => (v.index != null && (!a || (a.index ?? 0) < v.index) ? v : a), null)?.item as Item | undefined;
+  const onViewable = useCallback(({ viewableItems }: { viewableItems: ViewToken<Item>[] }) => {
+    const top = viewableItems.reduce<ViewToken<Item> | null>((a, v) => (v.index != null && (!a || (a.index ?? 0) < v.index) ? v : a), null)?.item as Item | undefined;
     if (top?.kind === 'msg') pill.setText(dayLabel(top.m.sentAt, tRef.current));
     else if (top?.kind === 'day') pill.setText(top.text);
     const bottom = viewableItems.some((v) => v.index === 0 || v.index === 1);
@@ -424,7 +434,7 @@ function ChatScreen() {
       setJumping(null);
       if (index < 0) return;
       setFlash(jumping);
-      listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
     }, 0);
     return () => clearTimeout(go);
   }, [jumping, items, list, hasMore, more]);
@@ -440,7 +450,7 @@ function ChatScreen() {
     if (startedAtUnread.current || !unreadKey || jump) return;
     startedAtUnread.current = true;
     const index = items.findIndex((it) => it.kind === 'unread');
-    if (index > 8) setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false }), 60);
+    if (index > 8) setTimeout(() => void listRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false }), 60);
   }, [unreadKey, items, jump]);
 
   // ---- Searching this chat (⋮ › Search): the box in the bar, with up and down through what's found ----
@@ -970,11 +980,22 @@ function ChatScreen() {
         )}
 
         <View style={{ flex: 1 }}>
-          <FlatList
+          {/* A recycling list (like WhatsApp's): bubbles that scroll away are reused for the ones
+              coming in, instead of being thrown away and made again, so scrolling stays light.
+              Each kind of row is reused only for its own kind (see itemType), and a bubble starts
+              fresh for each message (Bubble.tsx). */}
+          <FlashList
             ref={listRef}
             inverted
             data={items}
             keyExtractor={(it) => it.key}
+            getItemType={itemType}
+            // Like before: a new message at the bottom shows when you're there, and the list
+            // doesn't hold its place when one comes in.
+            maintainVisibleContentPosition={{ disabled: true }}
+            // Upside down, Android would put the scroll bar on the left. This is React Native's own
+            // fix for upside-down lists (its FlatList sets it): the bar goes back on the right, like WhatsApp.
+            overrideProps={{ isInvertedVirtualizedList: true }}
             contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 10 }}
             onEndReached={more}
             onEndReachedThreshold={0.4}
@@ -982,16 +1003,11 @@ function ChatScreen() {
             onScrollBeginDrag={pill.show}
             onScrollEndDrag={pill.hideSoon}
             onMomentumScrollEnd={pill.hideSoon}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
+            viewabilityConfig={VIEWABLE}
             keyboardShouldPersistTaps="handled"
-            // Draws only what fills the screen first, so the chat opens quickly; the rest follows.
-            initialNumToRender={11}
-            maxToRenderPerBatch={slowPhone ? 5 : 8}
-            updateCellsBatchingPeriod={30}
-            // Until the chat has slid in, nothing past the screen is drawn, so the slide
-            // stays smooth; the messages further up follow straight after.
-            windowSize={settled ? (slowPhone ? 7 : 9) : 1}
-            onScrollToIndexFailed={(info) => setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5 }), 250)}
+            // Until the chat has slid in, nothing past the screen is drawn, so the slide stays
+            // smooth; then a little more above and below, ready for scrolling.
+            drawDistance={settled ? (slowPhone ? 250 : 500) : 0}
             ListFooterComponent={
               list && !hasMore ? (
                 <View>
@@ -1045,8 +1061,12 @@ function ChatScreen() {
                     above={showBar ? <ReactionBar mine={m.author === core.myId} current={m.reactions?.[core.myId]} onPick={(e) => react(m, e)} onMore={() => setReactingTo(m)} /> : undefined}
                   />
               );
-              // One sent or come in while the chat is open rises into place, like WhatsApp's (not the ones already there).
-              return m.sentAt > openedAt ? <Animated.View entering={arrive}>{bubble}</Animated.View> : bubble;
+              // One sent or come in while the chat is open rises into place, like WhatsApp's (not the ones already
+              // there), only the first time it shows: not again when it's scrolled away and back.
+              if (m.sentAt <= openedAt) return bubble;
+              const fresh = !arrived.current.has(k);
+              if (fresh) arrived.current.add(k);
+              return <Animated.View entering={fresh ? arrive : undefined}>{bubble}</Animated.View>;
             }}
           />
 

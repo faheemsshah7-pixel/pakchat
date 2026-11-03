@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.21",
+    "version": "1.0.22",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
-      "versionCode": 21,
+      "versionCode": 22,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -39,15 +39,16 @@
       "./plugins/withNativeKeeps",
       "./plugins/withReleaseKey",
       "./plugins/withFastScreen",
+      "./plugins/withSplashBars",
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.png",
-          "imageWidth": 110,
-          "backgroundColor": "#EAF2FE",
+          "image": "./assets/splash-mark.png",
+          "imageWidth": 120,
+          "backgroundColor": "#2F6BF0",
           "dark": {
-            "backgroundColor": "#111214"
+            "backgroundColor": "#1E4BC4"
           }
         }
       ],
@@ -62,23 +63,23 @@
                 "fontFamily": "Inter",
                 "fontDefinitions": [
                   {
-                    "path": "./node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf",
+                    "path": "./assets/fonts/inter/Inter_400Regular.ttf",
                     "weight": 400
                   },
                   {
-                    "path": "./node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf",
+                    "path": "./assets/fonts/inter/Inter_500Medium.ttf",
                     "weight": 500
                   },
                   {
-                    "path": "./node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf",
+                    "path": "./assets/fonts/inter/Inter_600SemiBold.ttf",
                     "weight": 600
                   },
                   {
-                    "path": "./node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf",
+                    "path": "./assets/fonts/inter/Inter_700Bold.ttf",
                     "weight": 700
                   },
                   {
-                    "path": "./node_modules/@expo-google-fonts/inter/800ExtraBold/Inter_800ExtraBold.ttf",
+                    "path": "./assets/fonts/inter/Inter_800ExtraBold.ttf",
                     "weight": 800
                   }
                 ]
@@ -89,10 +90,6 @@
                   {
                     "path": "./node_modules/@expo-google-fonts/noto-nastaliq-urdu/400Regular/NotoNastaliqUrdu_400Regular.ttf",
                     "weight": 400
-                  },
-                  {
-                    "path": "./node_modules/@expo-google-fonts/noto-nastaliq-urdu/600SemiBold/NotoNastaliqUrdu_600SemiBold.ttf",
-                    "weight": 600
                   },
                   {
                     "path": "./node_modules/@expo-google-fonts/noto-nastaliq-urdu/700Bold/NotoNastaliqUrdu_700Bold.ttf",

@@ -4,9 +4,10 @@
 // shows instantly, even with no internet. Hold a chat to pick several (then pin,
 // archive, …); swiping sideways goes to the next tab, like WhatsApp.
 import KV from 'expo-sqlite/kv-store';
-import { router, useFocusEffect } from 'expo-router';
+import { router, SplashScreen, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, FlatList, ScrollView, View } from 'react-native';
+import { BackHandler, ScrollView, View } from 'react-native';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Animated, { LayoutAnimationConfig } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -31,7 +32,7 @@ import { fadeIn, fadeOut, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 import { AddToListSheet } from '../../ui/AddToListSheet';
 import { ChatLockSheet } from '../../ui/ChatLockSheet';
-import { startTimer, stopTimer } from '../../core/speed';
+import { startTimer, stopTimer, timing } from '../../core/speed';
 
 // The chips above the chats. `list:<id>` is one of your own lists.
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
@@ -78,7 +79,7 @@ export default function Chats() {
   // WhatsApp: pulling the list down slides it into view. The list is always at
   // least a row taller than the screen, so there's room to hide it.
   const lockedRow = lockedCount > 0 && !settings.lockedHidden && filter === 'all' && !selecting;
-  const list = useRef<FlatList<Row>>(null);
+  const list = useRef<FlashListRef<Item>>(null);
   const [listHeight, setListHeight] = useState(0);
   const scrolled = useRef(0);
   // Only near the top: coming back to a list scrolled further down leaves it where it was.
@@ -126,8 +127,11 @@ export default function Chats() {
     if (!shown) return;
     requestAnimationFrame(() => {
       stopTimer('start', 'start');
-      // Then the other tabs draw (useAfterStart).
-      setTimeout(markListShown, 50);
+      // The chats are drawn: now the logo fades into them.
+      void SplashScreen.hideAsync().catch(() => {});
+      // Then the other tabs draw (useAfterStart), once the logo has faded, so that work
+      // doesn't make the fade stutter.
+      setTimeout(markListShown, 450);
     });
   }, [shown]);
 
@@ -174,13 +178,18 @@ export default function Chats() {
           () => import('../../ui/SwipeToClose'),
           () => import('../../ui/Zoomable'),
         ];
+        // One at a time with a pause between, and never while a screen is opening or closing, so
+        // it can't hold up a tap (owner's speed check, 3 Nov: loading them close together right
+        // after starting could keep PakChat busy for a moment).
+        const pause = (ms: number) => new Promise((go) => setTimeout(go, ms));
         for (const part of parts) {
+          for (let waited = 0; waited < 3000 && (timing('page') || timing('chat') || timing('back')); waited += 250) await pause(250);
           try {
             await part();
           } catch {
             return;
           }
-          await new Promise((go) => setTimeout(go, 16));
+          await pause(120);
         }
       })();
     }, 600);
@@ -374,8 +383,13 @@ export default function Chats() {
 
       {/* The chats run edge to edge, like WhatsApp, so they line up with the tab bar below. */}
       <View style={{ flex: 1, paddingHorizontal: 4 }}>
-        <Animated.FlatList
+        {/* A recycling list (like WhatsApp's): rows that scroll away are reused for the ones coming
+            in, instead of being thrown away and made again, so scrolling stays light. */}
+        <FlashList
           data={items}
+          getItemType={(it) => it.kind}
+          // Like before: a chat that moves to the top shows there, the list doesn't hold its place.
+          maintainVisibleContentPosition={{ disabled: true }}
           extraData={[picked, typing, presence]}
           keyExtractor={(it) => (it.kind === 'row' ? it.row.chat.id : `community-${it.id}`)}
           ref={list}

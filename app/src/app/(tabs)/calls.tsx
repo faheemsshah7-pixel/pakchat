@@ -14,7 +14,8 @@
 import { router, useFocusEffect } from 'expo-router';
 import type { Chat } from '@pakchat/shared';
 import { useCallback, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 
 import { clearCallLog, type CallLogEntry } from '../../core/calls';
 import { grouped, type CallGroup } from '../../core/callGroups';
@@ -96,7 +97,9 @@ function Calls() {
         <IconButton icon="calendar" label={t.scheduleCall} onPress={() => setPlanning(true)} color={theme.muted} testID="schedule-call" />
         {!!list?.length && <IconButton icon="trash" label={t.clearCallLog} onPress={() => setClearing(true)} color={theme.muted} testID="clear-calls" />}
       </View>
-      <FlatList
+      {/* A recycling list: rows that scroll away are reused for the ones coming in. */}
+      <FlashList
+        maintainVisibleContentPosition={{ disabled: true }}
         data={groups}
         keyExtractor={(g) => g.key}
         ListHeaderComponent={

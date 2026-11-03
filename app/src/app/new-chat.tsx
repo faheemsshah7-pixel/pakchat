@@ -3,7 +3,8 @@
 // or someone you already chat with. Your phone's contacts can be checked too.
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 
 import { core, isOffline } from '../core/core';
 import { defaultTimer } from '../core/timer';
@@ -144,7 +145,9 @@ export default function NewChat() {
       </Glass>
 
       {(known.length > 0 || showMe) && <Section title={t.contacts} />}
-      <FlatList
+      {/* A recycling list: rows that scroll away are reused for the ones coming in. */}
+      <FlashList
+        maintainVisibleContentPosition={{ disabled: true }}
         data={known}
         keyExtractor={(p) => p.id}
         keyboardShouldPersistTaps="handled"

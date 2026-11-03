@@ -86,6 +86,8 @@ function speedWords(what: SpeedWhat, t: Strings) {
       return t.speedTab;
     case 'send':
       return t.speedSend;
+    case 'pageDrawn':
+      return t.speedPageDrawn;
     case 'pageMoving':
       return t.speedPageMoving;
     case 'pageIn':

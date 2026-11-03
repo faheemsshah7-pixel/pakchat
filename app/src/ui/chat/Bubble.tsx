@@ -8,10 +8,10 @@ import { forwardedMany, type Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { memo, useEffect, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
@@ -67,6 +67,22 @@ export const Bubble = memo(function Bubble(p: Props) {
   return <ChatBubble {...p} />;
 });
 
+/** The reply arrow behind a bubble being pulled: it fades and grows in as the bubble moves. */
+function ReplyArrow({ x, mine }: { x: SharedValue<number>; mine: boolean }) {
+  const { theme } = useLook();
+  const arrow = useAnimatedStyle(() => {
+    const pull = Math.abs(x.value);
+    return { opacity: interpolate(pull, [10, PULL], [0, 1], 'clamp'), transform: [{ scale: interpolate(pull, [0, PULL], [0.5, 1], 'clamp') }] };
+  });
+  return (
+    <Animated.View style={[{ position: 'absolute' }, mine ? { end: 4 } : { start: 4 }, arrow]}>
+      <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="reply" size={17} color={theme.accInk} flip />
+      </View>
+    </Animated.View>
+  );
+}
+
 function SystemNote({ m }: { m: Message }) {
   const t = useT();
   const { theme } = useLook();
@@ -85,8 +101,17 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   const t = useT();
   const { theme, rtl, lang } = useLook();
   const mine = m.author === core.myId;
+  // In a long chat the list reuses a bubble that scrolled away for one coming into view (it's
+  // quicker than making a new one). Everything that belongs to one message (the words, the photo,
+  // a voice note, a poll…) hangs off this key, so it all starts fresh for the new message and
+  // nothing is left over from the old one. Only the bubble's frame is reused.
+  const k = `${m.author}/${m.id}`;
   const x = useSharedValue(0);
   const over = useSharedValue(0);
+  // The reply arrow behind the bubble is only made once it's first pulled: a chat opens with
+  // a dozen bubbles at once, and each one's waiting arrow slowed that down (owner, 3 Nov).
+  const [pulled, setPulled] = useState(false);
+  const armed = useSharedValue(0);
 
   // Towards the middle of the screen: right for theirs, left for mine (the other way round in Urdu).
   const dir = (mine ? -1 : 1) * (rtl ? -1 : 1);
@@ -97,6 +122,10 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
     onUpdate: (e) => {
       'worklet';
       const pull = Math.max(0, e.translationX * dir);
+      if (!armed.value && pull > 0) {
+        armed.value = 1;
+        scheduleOnRN(setPulled, true);
+      }
       // Harder to pull the further it goes, so it never flies off.
       x.value = dir * (pull < PULL ? pull : PULL + (pull - PULL) * 0.25);
       const now = pull > PULL ? 1 : 0;
@@ -114,10 +143,6 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   });
 
   const slide = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
-  const arrow = useAnimatedStyle(() => {
-    const pull = Math.abs(x.value);
-    return { opacity: interpolate(pull, [10, PULL], [0, 1], 'clamp'), transform: [{ scale: interpolate(pull, [0, PULL], [0.5, 1], 'clamp') }] };
-  });
 
   const name = group && !mine && first ? core.name(m.author) || '…' : '';
   const urdu = !!m.text && hasUrdu(m.text);
@@ -136,7 +161,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   const bare = big > 0 || (!m.deleted && m.kind === 'file' && (m.file?.kind === 'sticker' || (!!m.file?.round && !m.file.once)));
 
   const body = (
-    <View style={{ paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
+    <View key={k} style={{ paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
       {!!name && (
         <Txt size={13} weight="700" color={theme.accInk} lines={1}>
           {name}
@@ -243,14 +268,17 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
       <View style={{ marginTop: first ? 6 : 2 }}>
         {/* The picked-message tint; and the same, for a moment, on a message just jumped to (the chat
             turns `flash` off, and it fades slowly away, like WhatsApp's). */}
-        {(selected || flash) && (
-          <Animated.View
-            entering={fadeIn}
-            exiting={flash ? FadeOut.duration(600) : fadeOut}
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }]}
-          />
-        )}
+        {/* (Keyed too: a reused bubble's tint shows or goes at once, without fading.) */}
+        <LayoutAnimationConfig key={k} skipEntering skipExiting>
+          {(selected || flash) && (
+            <Animated.View
+              entering={fadeIn}
+              exiting={flash ? FadeOut.duration(600) : fadeOut}
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, { marginHorizontal: -14, marginVertical: -2, backgroundColor: theme.selected }]}
+            />
+          )}
+        </LayoutAnimationConfig>
         {above}
         {/* The whole row answers a hold (and, while picking, a tap), not only the bubble, like
             WhatsApp: holding the empty space beside a message picks it too. The bubble's own
@@ -261,12 +289,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           accessible={false}
           style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center'}}
         >
-          {/* The reply arrow, waiting behind the bubble. */}
-          <Animated.View style={[{ position: 'absolute' }, mine ? { end: 4 } : { start: 4 }, arrow]}>
-            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="reply" size={17} color={theme.accInk} flip />
-            </View>
-          </Animated.View>
+          {/* The reply arrow, behind the bubble (made the first time it's pulled). */}
+          {pulled && <ReplyArrow x={x} mine={mine} />}
           <GestureDetector gesture={pan}>
             <Animated.View style={[{ maxWidth: '80%' }, slide]}>
               <Pressy
@@ -277,7 +301,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 testID={`msg-${m.text ?? m.id}`}
               >
                 {bare ? (
-                  <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18 }}>
+                  <View key={k} style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18 }}>
                     {!!name && (
                       <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: theme.glass }}>
                         <Txt size={12.5} weight="700" color={theme.accInk} lines={1}>
@@ -338,7 +362,10 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                   {t.notSent}
                 </Txt>
               )}
-              {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
+              {/* A reused bubble's reactions just show (or go); one added or taken away pops. */}
+              <LayoutAnimationConfig key={k} skipEntering skipExiting>
+                {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
+              </LayoutAnimationConfig>
             </Animated.View>
           </GestureDetector>
         </Pressable>

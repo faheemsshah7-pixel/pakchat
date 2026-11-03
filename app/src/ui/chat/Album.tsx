@@ -97,7 +97,7 @@ export function AlbumTile({
     >
       <View ref={spot} collapsable={false} style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden', backgroundColor: theme.glass }}>
         {source && (
-          <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} recyclingKey={m.id} />
+          <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={(here && f.kind === 'image') || sharp ? 0 : 6} recyclingKey={m.id} cachePolicy="memory-disk" />
         )}
         {more > 0 ? (
           <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>

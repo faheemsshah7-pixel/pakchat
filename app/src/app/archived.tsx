@@ -6,7 +6,8 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { BackHandler, FlatList, View } from 'react-native';
+import { BackHandler, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import Animated from 'react-native-reanimated';
 
 import { core } from '../core/core';
@@ -97,7 +98,9 @@ export default function Archived() {
   return (
     <Screen>
       <View style={{ minHeight: 62 }}>{header}</View>
-      <FlatList
+      {/* A recycling list: rows that scroll away are reused for the ones coming in. */}
+      <FlashList
+        maintainVisibleContentPosition={{ disabled: true }}
         data={rows}
         keyExtractor={(r) => r.chat.id}
         extraData={[picked, typing]}
