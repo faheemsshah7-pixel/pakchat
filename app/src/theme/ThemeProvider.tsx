@@ -1,4 +1,4 @@
-// ThemeProvider.tsx: the look (Sky or Graphite), the accent colour and the language,
+// ThemeProvider.tsx: the look (Sky or Graphite, following the phone), the accent colour and the language,
 // saved on the phone so the app opens the same way next time.
 //
 // Any screen can call useTheme() to get the colours, and useT() (src/i18n) for the words.
@@ -49,8 +49,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ThemeState>(() => {
-    // "Auto" follows the phone: dark mode on the phone means Graphite.
-    const mode = prefs.mode === 'auto' ? (system === 'dark' ? 'graphite' : 'sky') : prefs.mode;
+    // Light or dark follows the phone, like WhatsApp (owner, 3 Nov: no choice in Settings any more,
+    // and a look picked there before is no longer used): dark mode on the phone means Graphite.
+    const mode = system === 'dark' ? 'graphite' : 'sky';
     return {
       ...prefs,
       theme: makeTheme(mode, prefs.accent),

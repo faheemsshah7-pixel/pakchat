@@ -2,7 +2,7 @@
 // they ask the theme (useTheme) for one of these names.
 //
 // There are two looks, picked by the owner on 21 Oct:
-//   Sky       the light look: light-blue glass on a soft blue sky
+//   Sky       the light look: plain white like WhatsApp's (it was light-blue glass on a soft sky)
 //   Graphite  the dark look: plain charcoal
 // and six accent colours that colour the buttons, the "All" chip, unread badges and your own bubbles.
 
@@ -63,25 +63,27 @@ const ACC: Record<Accent, [string, string, string, string, string, string, strin
 };
 
 const sky: Omit<Theme, 'acc' | 'accInk' | 'accSoft' | 'grad' | 'bubbleMine'> = {
+  // The light look, like WhatsApp's (owner, 3 Nov): plain white, flat light-gray fields and
+  // chips, no lines between chats, gray letters. It was a soft blue sky with glass cards.
   mode: 'sky',
   dark: false,
-  bg: '#EAF2FE',
-  glows: ['#CFE2FF', '#DCEBFF', '#D3E5FF'],
-  glass: 'rgba(255,255,255,0.75)',
-  glassLine: 'rgba(255,255,255,0.95)',
-  glassStrong: 'rgba(255,255,255,0.9)',
-  shadow: 'rgba(30,64,140,0.4)',
-  text: '#0B1B36',
-  muted: '#52627C',
-  faint: '#A9B8CF',
-  sectionText: '#3F5A86',
+  bg: '#FFFFFF',
+  glows: ['transparent', 'transparent', 'transparent'],
+  glass: '#F0F2F5',
+  glassLine: 'transparent',
+  glassStrong: 'rgba(255,255,255,0.97)',
+  shadow: 'rgba(11,20,26,0.28)',
+  text: '#111B21',
+  muted: '#667781',
+  faint: '#AEBAC1',
+  sectionText: '#54656F',
   onAcc: '#FFFFFF',
   bubbleIn: '#FFFFFF',
-  bubbleMineText: '#0B1B36',
-  avatar: ['#DCE9FF', '#C5D9FD'],
-  avatarText: '#1E3A8A',
-  tile: '#E3EDFF',
-  divider: '#EDF2F9',
+  bubbleMineText: '#111B21',
+  avatar: ['#E9EDEF', '#DFE5E7'],
+  avatarText: '#54656F',
+  tile: '#F0F2F5',
+  divider: '#F0F2F5',
   online: '#22C55E',
   danger: '#DC2626',
   dangerSoft: '#FEE2E2',

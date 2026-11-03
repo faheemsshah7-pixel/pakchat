@@ -146,6 +146,10 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
 
   const name = group && !mine && first ? core.name(m.author) || '…' : '';
   const urdu = !!m.text && hasUrdu(m.text);
+  // The time (and ticks) sit on the text's last line when there's room, like WhatsApp: "Hi 10:01 am",
+  // not "Hi" with the time on a line of its own (owner, 3 Nov). The text ends with an invisible copy
+  // of them, so a line too full for it pushes the time onto the next line by itself.
+  const inline = !m.deleted && m.kind === 'text' && !!m.text && !m.link && !urdu && !rtl;
   const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
   const corner = 6;
   const radius = {
@@ -237,10 +241,28 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
             ]}
           >
             <RichWords text={m.text ?? ''} mentions={m.mentions} color={mine ? theme.bubbleMineText : theme.text} mine={mine} />
+            {inline && (
+              <Text style={{ fontSize: 11, color: 'transparent' }}>
+                {'\u2002\u2002' +
+                  (starred ? '\u2003\u2009' : '') +
+                  (m.pinnedUntil && m.pinnedUntil > now ? '\u2003\u2009' : '') +
+                  (m.expiresAt ? '\u2003\u2009' : '') +
+                  (m.keptBy ? `${t.keptWord} ` : '') +
+                  (m.editedAt ? `${t.edited} ` : '') +
+                  clock(m.sentAt) +
+                  (mine ? '\u2009\u2003\u2002' : '')}
+              </Text>
+            )}
           </Text>
         </>
       )}
-      <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 2 }}>
+      <View
+        style={
+          inline
+            ? { position: 'absolute', end: 12, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }
+            : { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 2 }
+        }
+      >
         {starred && <Icon name="starFilled" size={11} color={meta} />}
         {!!m.pinnedUntil && m.pinnedUntil > now && <Icon name="pin" size={11} color={meta} />}
         {!!m.expiresAt && <Icon name="timer" size={11} color={meta} />}

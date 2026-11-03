@@ -4,7 +4,7 @@
 // only admins post) and the groups of it I'm in, each with its latest message.
 // Tap the name for the whole community (every group in it, and the ones I can
 // join); tap a group to open it. "New community" sits at the top.
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
@@ -18,9 +18,9 @@ import { Avatar, Empty, Glass, Pressy, Screen, Txt } from '../../ui/kit';
 /** How many of a community's groups its card shows (the rest: "View all"). */
 const SHOWN = 3;
 
-/** Drawn once the chat list has shown after starting (useAfterStart), so starting up draws that first. */
+/** Drawn once the chat list has shown after starting (useAfterStart): its turn is 3 of 3, or at once if you go to it first. */
 export default function CommunitiesTab() {
-  return useAfterStart() ? <Communities /> : null;
+  return useAfterStart(3, useIsFocused()) ? <Communities /> : null;
 }
 
 function Communities() {

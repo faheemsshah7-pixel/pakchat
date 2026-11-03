@@ -177,7 +177,7 @@ function ChatScreen() {
 
   // The keyboard pushes the messages and the typing bar up as it slides in.
   // While it moves they're only shifted (cheap, nothing is measured again); the
-  // space under them changes once, when it has stopped. Changing that space
+  // space under them changes once (when it's fully up, or as it starts down). Changing that space
   // every frame made the whole chat lay itself out again 60 times a second,
   // which is what made the keyboard feel slow on some phones.
   const keyboard = useAnimatedKeyboard();
@@ -207,9 +207,13 @@ function ChatScreen() {
       down.remove();
     };
   }, [shown, told]);
+  // Closing, the space goes at once, as the keyboard starts down, not when it's gone: the chat
+  // is then already its full height (its top tucked under the bar at the top) and just slides
+  // down with the keyboard. Waiting until the keyboard was gone slid the whole chat down first,
+  // which showed an empty strip at the top that filled in at the end, like a refresh (owner, 3 Nov).
   useAnimatedReaction(
     () =>
-      keyboard.state.value === KeyboardState.CLOSED
+      keyboard.state.value === KeyboardState.CLOSED || keyboard.state.value === KeyboardState.CLOSING
         ? 0
         : keyboard.state.value === KeyboardState.OPEN
           ? shown.value

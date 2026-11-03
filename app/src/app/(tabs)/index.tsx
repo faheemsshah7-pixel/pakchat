@@ -15,7 +15,7 @@ import { findBackup } from '../../core/backup';
 import { handOffMedia, type Picked } from '../../core/files';
 import { chatOpen, FOLDER, leftFolder, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
-import { markListShown, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
+import { markListShown, TABS_DRAWN_AFTER, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
@@ -42,6 +42,8 @@ type Item = { kind: 'row'; row: Row } | { kind: 'community'; id: string; title: 
 
 /** The "Locked chats" row's height: the list starts scrolled down this much, hiding it. */
 const LOCKED_ROW = 52;
+/** How long after the chats are drawn the start's other work begins: once the logo has faded. */
+const LIST_SHOWN_AFTER = 250;
 
 export default function Chats() {
   const t = useT();
@@ -131,7 +133,7 @@ export default function Chats() {
       void SplashScreen.hideAsync().catch(() => {});
       // Then the other tabs draw (useAfterStart), once the logo has faded, so that work
       // doesn't make the fade stutter.
-      setTimeout(markListShown, 450);
+      setTimeout(markListShown, LIST_SHOWN_AFTER);
     });
   }, [shown]);
 
@@ -183,7 +185,7 @@ export default function Chats() {
         // after starting could keep PakChat busy for a moment).
         const pause = (ms: number) => new Promise((go) => setTimeout(go, ms));
         for (const part of parts) {
-          for (let waited = 0; waited < 3000 && (timing('page') || timing('chat') || timing('back')); waited += 250) await pause(250);
+          for (let waited = 0; waited < 3000 && (timing('page') || timing('chat') || timing('back') || timing('tab')); waited += 250) await pause(250);
           try {
             await part();
           } catch {
@@ -192,7 +194,8 @@ export default function Chats() {
           await pause(120);
         }
       })();
-    }, 600);
+      // After the other tabs have drawn (markListShown), so a slower phone does one thing at a time.
+    }, LIST_SHOWN_AFTER + TABS_DRAWN_AFTER);
     return () => clearTimeout(wait);
   }, [top]);
 

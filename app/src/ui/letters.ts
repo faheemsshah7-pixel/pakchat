@@ -8,10 +8,11 @@ const URDU = /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/;
 /** True when the words have Urdu (or Arabic) letters in them. */
 export const hasUrdu = (s: string) => URDU.test(s);
 
+// Light: soft grays, like WhatsApp's (and like the dark look's); they were light blues.
 export const TINTS_SKY: [string, string, string][] = [
-  ['#DCE9FF', '#C5D9FD', '#1E3A8A'],
-  ['#D9F0FF', '#C0E3FB', '#0B4A75'],
-  ['#E3E2FF', '#CFCDFB', '#3730A3'],
+  ['#E9EDEF', '#E9EDEF', '#54656F'],
+  ['#E6EAED', '#E6EAED', '#4B5B66'],
+  ['#ECEFF1', '#ECEFF1', '#5B6770'],
 ];
 export const TINTS_DARK: [string, string, string][] = [
   ['#24262C', '#24262C', '#C9D3E6'],

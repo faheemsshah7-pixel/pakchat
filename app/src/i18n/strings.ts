@@ -173,7 +173,7 @@ export const en = {
   noResults: 'Nothing found.',
   // You and settings
   appearance: 'Appearance',
-  sky: 'Sky',
+  sky: 'Light',
   graphite: 'Graphite',
   auto: 'Auto',
   accentColour: 'Accent colour',
@@ -680,7 +680,7 @@ export const ur: Strings = {
   messages: 'پیغامات',
   noResults: 'کچھ نہیں ملا۔',
   appearance: 'شکل',
-  sky: 'آسمانی',
+  sky: 'روشن',
   graphite: 'گریفائٹ',
   auto: 'خودکار',
   accentColour: 'خاص رنگ',

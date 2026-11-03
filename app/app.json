@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.22",
+    "version": "1.0.24",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
-      "versionCode": 22,
+      "versionCode": 24,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -44,11 +44,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-mark.png",
-          "imageWidth": 120,
-          "backgroundColor": "#2F6BF0",
+          "image": "./assets/splash-mark-light.png",
+          "imageWidth": 90,
+          "backgroundColor": "#F1F2F4",
           "dark": {
-            "backgroundColor": "#1E4BC4"
+            "image": "./assets/splash-mark-dark.png",
+            "backgroundColor": "#111214"
           }
         }
       ],
@@ -59,31 +60,6 @@
         {
           "android": {
             "fonts": [
-              {
-                "fontFamily": "Inter",
-                "fontDefinitions": [
-                  {
-                    "path": "./assets/fonts/inter/Inter_400Regular.ttf",
-                    "weight": 400
-                  },
-                  {
-                    "path": "./assets/fonts/inter/Inter_500Medium.ttf",
-                    "weight": 500
-                  },
-                  {
-                    "path": "./assets/fonts/inter/Inter_600SemiBold.ttf",
-                    "weight": 600
-                  },
-                  {
-                    "path": "./assets/fonts/inter/Inter_700Bold.ttf",
-                    "weight": 700
-                  },
-                  {
-                    "path": "./assets/fonts/inter/Inter_800ExtraBold.ttf",
-                    "weight": 800
-                  }
-                ]
-              },
               {
                 "fontFamily": "NotoNastaliqUrdu",
                 "fontDefinitions": [

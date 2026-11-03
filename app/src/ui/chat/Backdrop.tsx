@@ -49,7 +49,14 @@ export function Backdrop({ wp }: { wp?: Wallpaper }) {
   } else if (kind === 'photo' && typeof wp?.value === 'string') {
     base = <Image source={{ uri: wp.value }} style={FILL} contentFit="cover" />;
   } else {
-    base = <Doodles tile={theme.dark ? TILES.dark : TILES.light} />;
+    // Light: WhatsApp's warm paper colour with gray doodles, so white bubbles stand out on it.
+    base = theme.dark ? (
+      <Doodles tile={TILES.dark} />
+    ) : (
+      <View style={[FILL, { backgroundColor: LIGHT_PAPER }]}>
+        <Doodles tile={TILES.colourLight} />
+      </View>
+    );
   }
   return (
     <View pointerEvents="none" style={FILL}>
@@ -60,6 +67,8 @@ export function Backdrop({ wp }: { wp?: Wallpaper }) {
 }
 
 const FILL = { position: 'absolute' as const, top: 0, start: 0, end: 0, bottom: 0 };
+/** Behind a chat in the light look, under the doodles (like WhatsApp's). */
+const LIGHT_PAPER = '#F5F2EC';
 
 /**
  * The doodles, one square of them in each tint (drawn by scripts/make-doodles.js): a

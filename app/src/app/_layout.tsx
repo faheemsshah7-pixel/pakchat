@@ -5,6 +5,7 @@
 // either the sign-in screens or the app. Screens slide in from the right
 // (from the left in Urdu, which reads right to left).
 import { router, SplashScreen, Stack, useNavigationContainerRef, type ErrorBoundaryProps } from 'expo-router';
+import { setOptions as setSplashOptions } from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
@@ -27,6 +28,8 @@ import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+// The logo fades into the chats quickly, like WhatsApp's, not slowly (owner, 3 Nov).
+setSplashOptions({ duration: 200, fade: true });
 // Settings › Help › Speed check times opening screens and going back from the app's own taps.
 watchRouter(router);
 // Start opening the database and keys now, while React is still drawing its first frame,

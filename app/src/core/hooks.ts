@@ -680,30 +680,45 @@ export function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...ar
 // ---- Starting up ----
 
 let listShown = false;
+/** How many of the other three tabs may draw yet (see markListShown). */
+let tabsReady = 0;
 const startWatchers = new Set<() => void>();
+const TAB_GAP = 300;
 
-/** The chat list is on screen: the other tabs may draw now (useAfterStart). */
+/**
+ * The chat list is on screen: the start's other work goes now, then the other tabs draw, one at a
+ * time with a pause between. All of it at once kept a slower phone busy just as the list appeared,
+ * so a tap then waited (owner's Realme speed check, 3 Nov: "stuck for a moment" twice after starting).
+ */
 export function markListShown() {
   if (listShown) return;
   listShown = true;
-  startWatchers.forEach((w) => w());
   // The start's other work (names, missed chats, alerts…) waited for this, to keep the list quick.
   core.listShown();
+  const next = () => {
+    tabsReady += 1;
+    startWatchers.forEach((w) => w());
+    if (tabsReady < 3) setTimeout(next, TAB_GAP);
+  };
+  setTimeout(next, TAB_GAP);
 }
 
+/** Roughly when the other tabs have all drawn after the list shows (for later start-up work). */
+export const TABS_DRAWN_AFTER = TAB_GAP * 4;
+
 /**
- * False until the chat list has shown after PakChat starts. The other tabs wait
- * for it, so starting up draws the chat list first and the rest just after
- * (they're all ready before you can get to them).
+ * False until it's this tab's `turn` (1 to 3) to draw after PakChat starts, so starting up draws the
+ * chat list first and the rest just after, one by one. A tab you go to before its turn draws at once.
  */
-export function useAfterStart() {
-  return useSyncExternalStore(
+export function useAfterStart(turn: number, focused: boolean) {
+  const ready = useSyncExternalStore(
     (w) => {
       startWatchers.add(w);
       return () => startWatchers.delete(w);
     },
-    () => listShown,
+    () => tabsReady >= turn,
   );
+  return ready || focused;
 }
 
 /** My phone and its linked devices (null while loading or offline), and which are being sent chats. */

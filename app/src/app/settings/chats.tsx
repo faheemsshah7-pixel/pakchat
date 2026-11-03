@@ -1,7 +1,7 @@
-// settings/chats.tsx: Settings › Chats, like WhatsApp's. Theme (Sky, Graphite or
-// Auto, which follows the phone, and one of six accent colours: the whole app
-// changes at once, and remembers it), wallpaper, font size (how big messages'
-// words are), link previews, archived chats and chat backup.
+// settings/chats.tsx: Settings › Chats, like WhatsApp's. Theme (one of six accent colours: the
+// whole app changes at once, and remembers it; light or dark just follows the phone, like
+// WhatsApp, owner 3 Nov), wallpaper, font size (how big messages' words are), link previews,
+// archived chats and chat backup.
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
@@ -13,7 +13,7 @@ import { useChatList, useSettings } from '../../core/hooks';
 import { outsideFor } from '../../core/lock';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { ACCENTS, accentGradient, makeTheme, type ModeChoice } from '../../theme/palette';
+import { ACCENTS, accentGradient } from '../../theme/palette';
 import { Icon } from '../../ui/icons';
 import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { tick } from '../../ui/motion';
@@ -21,7 +21,7 @@ import { Dialog, Sheet, toast } from '../../ui/overlays';
 
 export default function ChatsSettings() {
   const t = useT();
-  const { theme, mode, accent, setPrefs } = useLook();
+  const { theme, accent, setPrefs } = useLook();
   const settings = useSettings();
 
   // Media visibility needs the gallery: asked when it's turned on.
@@ -39,23 +39,12 @@ export default function ChatsSettings() {
   ];
   const size = settings.fontSize ?? 'medium';
 
-  const modes: { key: ModeChoice; label: string }[] = [
-    { key: 'sky', label: t.sky },
-    { key: 'graphite', label: t.graphite },
-    { key: 'auto', label: t.auto },
-  ];
-
   return (
     <Screen>
       <TopBar title={t.chatsWord} onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 30 }}>
         <Section title={t.themeWord} />
         <Glass style={{ padding: 12, gap: 14 }}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {modes.map((m) => (
-              <ModeCard key={m.key} choice={m.key} label={m.label} on={mode === m.key} onPress={() => (tick(), setPrefs({ mode: m.key }))} />
-            ))}
-          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <View style={{ flex: 1 }}>
               <Txt size={14} weight="600">
@@ -194,40 +183,5 @@ export default function ChatsSettings() {
         ]}
       />
     </Screen>
-  );
-}
-
-/** A small picture of the look: its background, a white or dark card, and two bubbles. */
-function ModeCard({ choice, label, on, onPress }: { choice: ModeChoice; label: string; on: boolean; onPress: () => void }) {
-  const { theme, accent } = useLook();
-  const preview = (m: 'sky' | 'graphite') => {
-    const p = makeTheme(m, accent);
-    return (
-      <View style={{ flex: 1, backgroundColor: p.bg, padding: 6, gap: 4, justifyContent: 'flex-end' }}>
-        <View style={{ width: '70%', height: 10, borderRadius: 5, backgroundColor: p.bubbleIn }} />
-        <View style={{ width: '60%', height: 10, borderRadius: 5, backgroundColor: p.bubbleMine[1], alignSelf: 'flex-end' }} />
-      </View>
-    );
-  };
-  return (
-    <View style={{ flex: 1 }}>
-      <Pressy onPress={onPress} label={label} scale={0.95} testID={`mode-${choice}`}>
-        <View style={{ borderRadius: 16, padding: 5, gap: 6, alignItems: 'center', borderWidth: 2, borderColor: on ? theme.acc : theme.glassLine, backgroundColor: theme.glass }}>
-          <View style={{ height: 58, alignSelf: 'stretch', borderRadius: 11, overflow: 'hidden', flexDirection: 'row' }}>
-            {choice === 'auto' ? (
-              <>
-                {preview('sky')}
-                {preview('graphite')}
-              </>
-            ) : (
-              preview(choice)
-            )}
-          </View>
-          <Txt size={12.5} weight="700" color={on ? theme.accInk : theme.text} align="center">
-            {label}
-          </Txt>
-        </View>
-      </Pressy>
-    </View>
   );
 }

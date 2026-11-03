@@ -264,7 +264,8 @@ export const Composer = memo(function Composer({
         )}
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginHorizontal: 10, marginTop: 10, marginBottom: 10 }}>
-          <Glass style={{ flex: 1, padding: 4, borderRadius: 24 }}>
+          {/* White on the light look's paper-coloured chat, like WhatsApp's. */}
+          <Glass style={{ flex: 1, padding: 4, borderRadius: 24, ...(theme.dark ? null : { backgroundColor: '#FFFFFF' }) }}>
             {banner && !recording && (
               <Animated.View entering={riseIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }}>
                 <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>

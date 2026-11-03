@@ -11,9 +11,9 @@
 // and my call links (a call anyone with the link can join, which rings
 // nobody). The 🔗 and 📅 at the top make them; the button at the bottom starts
 // a new call, to a contact or to a number.
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import type { Chat } from '@pakchat/shared';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 
@@ -32,9 +32,9 @@ import { Dialog, Sheet, toast } from '../../ui/overlays';
 import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
 import { isOffline } from '../../core/core';
 
-/** Drawn once the chat list has shown after starting (useAfterStart), so starting up draws that first. */
+/** Drawn once the chat list has shown after starting (useAfterStart): its turn is 2 of 3, or at once if you go to it first. */
 export default function CallsTab() {
-  return useAfterStart() ? <Calls /> : null;
+  return useAfterStart(2, useIsFocused()) ? <Calls /> : null;
 }
 
 function Calls() {
@@ -55,12 +55,29 @@ function Calls() {
   const favs = useFavouriteChats();
   const groups = grouped(list ?? []);
 
-  // Looking at Calls clears the missed-calls number on its tab.
+  // Looking at Calls clears the missed-calls number on its tab. Only when there's a missed call it
+  // hasn't counted: saving the settings redraws every screen that reads them (the chat list too), and
+  // doing that each time you went to Calls and back held up the tab switch (owner, 3 Nov).
+  const latest = useRef(list);
+  const onCalls = useRef(false);
+  const seeMissed = useCallback(() => {
+    const seen = core.settings.callsSeenAt ?? 0;
+    if ((latest.current ?? []).some((e) => e.missed && e.direction === 'in' && e.at > seen)) core.setSettings({ callsSeenAt: Date.now() });
+  }, []);
+  useEffect(() => {
+    latest.current = list;
+    // One missed while you're looking at Calls is seen too.
+    if (onCalls.current) seeMissed();
+  }, [list, seeMissed]);
   useFocusEffect(
     useCallback(() => {
-      core.setSettings({ callsSeenAt: Date.now() });
-      return () => core.setSettings({ callsSeenAt: Date.now() });
-    }, []),
+      onCalls.current = true;
+      seeMissed();
+      return () => {
+        onCalls.current = false;
+        seeMissed();
+      };
+    }, [seeMissed]),
   );
 
   async function makeLink() {

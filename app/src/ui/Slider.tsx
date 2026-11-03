@@ -49,7 +49,7 @@ export function Slider({ value, onChange, onDone, label, testID }: { value: numb
         style={{ height: 40, justifyContent: 'center', direction: 'ltr' }}
         testID={testID}
       >
-        <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.glassLine, marginHorizontal: THUMB / 2 }}>
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.dark ? theme.glassLine : '#DCE0E4', marginHorizontal: THUMB / 2 }}>
           <View style={{ position: 'absolute', top: 0, bottom: 0, [rtl ? 'right' : 'left']: 0, width: left, borderRadius: 3, backgroundColor: theme.acc }} />
         </View>
         <View

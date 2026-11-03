@@ -1,7 +1,7 @@
 // kit.tsx: the building blocks every screen is made of, so they all look and move the same.
 //
 //   Screen       the sky (or graphite) background, safe from the notch, right-to-left in Urdu
-//   Txt          words, in Inter (English) or Noto Nastaliq (Urdu), picked by the words themselves
+//   Txt          words, in the phone's own font (Roboto, like WhatsApp) or Noto Nastaliq (Urdu), picked by the words themselves
 //   Glass        a frosted card
 //   Pressy       anything you can tap: it dims under your finger
 //   IconButton   a round-cornered button with an icon
@@ -36,14 +36,15 @@ export { avatarTint, hasUrdu, initials } from './letters';
 
 export type Weight = '400' | '500' | '600' | '700' | '800';
 
-/** The font for some words: Nastaliq for Urdu letters, Inter for everything else. */
+/** The font for some words: Nastaliq for Urdu letters, the phone's own font (Roboto on most
+ * Android phones, as in WhatsApp) for everything else. */
 export function fontStyle(text: string | null, lang: 'en' | 'ur', size: number, weight: Weight): TextStyle {
   const urdu = text === null ? lang === 'ur' : hasUrdu(text);
   if (urdu) {
     // Nastaliq is tall and leans down to the left, so it needs much more room between lines.
     return { fontFamily: 'NotoNastaliqUrdu', fontWeight: weight >= '600' ? '700' : '400', fontSize: size, lineHeight: Math.round(size * 2.05) };
   }
-  return { fontFamily: 'Inter', fontWeight: weight, fontSize: size, lineHeight: Math.round(size * 1.38), includeFontPadding: false };
+  return { fontWeight: weight, fontSize: size, lineHeight: Math.round(size * 1.38), includeFontPadding: false };
 }
 
 function plainText(children: ReactNode): string | null {
@@ -92,11 +93,11 @@ export function Txt({
 
 // ---- The background ----
 
-/** The soft sky behind everything: a light blue with three glows (Sky), or plain charcoal (Graphite). */
+/** Behind everything: the look's plain colour (white, or charcoal), with soft glows if a look has them. */
 export function SkyBackground() {
   const theme = useTheme();
   const { width, height } = useWindowDimensions();
-  if (theme.dark) return <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg }]} />;
+  if (theme.dark || theme.glows.every((g) => g === 'transparent')) return <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg }]} />;
   const glow = (id: string, cx: number, cy: number, rx: number, ry: number, color: string) => (
     <>
       <Defs>

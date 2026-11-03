@@ -5,7 +5,7 @@
 // ring, then the ones I've seen, then the ones I muted (faded; hold one to
 // mute or unmute). Tap to watch. The pencil (words on a colour) and camera
 // (a photo or video) at the top add one too.
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -23,9 +23,9 @@ import { MenuItem, Sheet } from '../../ui/overlays';
 const PHOTO = 60;
 const CELL = 76;
 
-/** Drawn once the chat list has shown after starting (useAfterStart), so starting up draws that first. */
+/** Drawn once the chat list has shown after starting (useAfterStart): its turn is 1 of 3, or at once if you go to it first. */
 export default function StatusTab() {
-  return useAfterStart() ? <Status /> : null;
+  return useAfterStart(1, useIsFocused()) ? <Status /> : null;
 }
 
 function Status() {
