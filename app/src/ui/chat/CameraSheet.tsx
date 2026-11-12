@@ -10,7 +10,8 @@
 //   The bar under it          the gallery, the white button, the other camera
 //   Video · Photo · Video note   the modes: tap one, or swipe the picture sideways
 //
-//   Photo        tap for a photo; hold for a video while you hold (up to 2 minutes)
+//   Photo        tap for a photo; hold for a video while you hold (up to 2 minutes);
+//                while holding, slide the finger up to zoom in
 //   Video        tap to start filming, tap again to stop
 //   Video note   a round video with the front camera (up to a minute), sent as it is
 //
@@ -338,8 +339,20 @@ function Camera({
     else onTaken([{ uri: r.uri, mime: 'video/mp4', kind: 'video', duration: Math.min(MAX_VIDEO_S * 1000, took) }]);
   }
 
-  function pressIn() {
+  // Holding the button to film: sliding the finger up zooms in, and back down zooms out, like WhatsApp's.
+  const slideFrom = useRef<{ y: number; z: number } | null>(null);
+  function slide(pageY: number) {
+    const from = slideFrom.current;
+    if (!from || !held.current) return;
+    const z = Math.max(0, Math.min(1, from.z + (from.y - pageY) / 350));
+    if (Math.abs(z - zoomNow.value) < 0.005) return;
+    zoomNow.value = z;
+    setZoom(Math.round(z * 1000) / 1000);
+  }
+
+  function pressIn(pageY: number) {
     if (kind !== 'photo') return;
+    slideFrom.current = { y: pageY, z: zoomNow.value };
     held.current = true;
     holdTimer.current = setTimeout(() => {
       holdTimer.current = null;
@@ -435,8 +448,14 @@ function Camera({
               <Round icon="photo" size={52} label={t.gallery} onPress={() => gallery(true)} testID="camera-gallery" />
             </View>
             <Pressable
-              onPressIn={pressIn}
-              onPressOut={() => void pressOut()}
+              onPressIn={(e) => pressIn(e.nativeEvent.pageY)}
+              onPressOut={() => {
+                slideFrom.current = null;
+                void pressOut();
+              }}
+              onTouchMove={(e) => slide(e.nativeEvent.pageY)}
+              // The finger may slide far up the screen (to zoom) without letting go of the button.
+              pressRetentionOffset={{ top: 2000, bottom: 2000, left: 2000, right: 2000 }}
               accessibilityRole="button"
               accessibilityLabel={kind === 'photo' ? t.takePhoto : filming ? t.stopWord : kind === 'note' ? t.videoNote : t.videoLabel}
               accessibilityHint={kind === 'photo' ? t.tapPhotoHoldVideo : t.tapToRecord}

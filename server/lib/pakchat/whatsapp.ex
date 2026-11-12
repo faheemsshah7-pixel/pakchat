@@ -185,21 +185,74 @@ defmodule Pakchat.WhatsApp do
 
   def signed?(_, _), do: false
 
-  @doc "Handles everything in one webhook delivery from Meta (it may hold several messages)."
+  @doc """
+  Handles everything in one webhook delivery from Meta (it may hold several messages).
+
+  People who take a WhatsApp username (from 2026) can hide their number from
+  businesses. Meta then sends a business-scoped user id (`from_user_id`, and
+  `user_id` in `contacts`) and may leave the number out of `from`. The number is
+  what we check, so: the number from `from`, else from the sender's contact
+  (`wa_id`); with no number at all the code can't count (`:hidden_number`) and
+  we answer by the user id, telling them to continue with Google.
+  """
   def handle_webhook(%{"entry" => entries}) when is_list(entries) do
     for %{"changes" => changes} <- entries,
         is_list(changes),
-        %{"value" => %{"messages" => messages}} <- changes,
+        %{"value" => %{"messages" => messages} = value} <- changes,
         is_list(messages),
-        %{"from" => from, "type" => "text", "text" => %{"body" => body}} <- messages do
-      result = received(from, body)
-      Logger.info("whatsapp: a code from ...#{String.slice(from, -4, 4)}: #{result}")
-      answer(from, body, result)
+        %{"type" => "text", "text" => %{"body" => body}} = message <- messages,
+        is_binary(body) do
+      {phone, user_id} = sender(message, value["contacts"])
+
+      result = if phone, do: received(phone, body), else: hidden(body)
+      who = if phone, do: "..." <> String.slice(phone, -4, 4), else: "a hidden number"
+      Logger.info("whatsapp: a code from #{who}: #{result}")
+      answer(phone || {:user_id, user_id}, body, result)
       result
     end
   end
 
   def handle_webhook(_), do: []
+
+  # The sender's number (digits only) and Meta's user id for them, either may be nil.
+  defp sender(message, contacts) do
+    user_id = text_or_nil(message["from_user_id"])
+    contact = contact(message, user_id, contacts)
+    phone = digits(message["from"]) || digits(contact["wa_id"])
+    {phone, user_id || text_or_nil(contact["user_id"])}
+  end
+
+  # The contact Meta sent with the message: by user id, by number, or the only one.
+  defp contact(message, user_id, contacts) when is_list(contacts) do
+    contacts = Enum.filter(contacts, &is_map/1)
+
+    Enum.find(contacts, &(user_id != nil and &1["user_id"] == user_id)) ||
+      Enum.find(contacts, &(&1["wa_id"] != nil and &1["wa_id"] == message["from"])) ||
+      if(match?([_], contacts), do: hd(contacts), else: %{})
+  end
+
+  defp contact(_, _, _), do: %{}
+
+  defp digits(text) when is_binary(text), do: if(text =~ ~r/^\d{6,15}$/, do: text)
+  defp digits(_), do: nil
+
+  defp text_or_nil(text) when is_binary(text) and text != "", do: text
+  defp text_or_nil(_), do: nil
+
+  # A code came but WhatsApp didn't say from which number. It can't count.
+  defp hidden(body) do
+    codes = codes_in(body)
+    now = DateTime.utc_now()
+
+    open? =
+      codes != [] and
+        Repo.exists?(
+          from c in Check,
+            where: c.code in ^codes and is_nil(c.phone) and c.expires_at > ^now
+        )
+
+    if open?, do: :hidden_number, else: :no_code
+  end
 
   # Tells the person how it went, when we can send messages back. Replies inside
   # the 24 hours after their message are free. Random chats to the number get no answer.
@@ -215,17 +268,24 @@ defmodule Pakchat.WhatsApp do
         :wrong_number ->
           "This code is for a different number. Send it from the WhatsApp of the number you typed in PakChat."
 
+        :hidden_number ->
+          "Your WhatsApp username is hiding your number, so we can't check it this way. Go back to PakChat and continue with Google."
+
         :no_code ->
           if String.contains?(String.downcase(body), "pakchat"),
             do:
               "That code didn't work. Open PakChat and tap Continue with WhatsApp to get a new one."
       end
 
-    if text, do: send_text(from, text)
+    if text && from != {:user_id, nil}, do: send_text(from, text)
     :ok
   end
 
-  @doc "Sends a WhatsApp text from PakChat's number (only once the token and number id are set)."
+  @doc """
+  Sends a WhatsApp text from PakChat's number (only once the token and number id
+  are set). `to` is a number (digits), or `{:user_id, id}` for someone whose
+  number WhatsApp hides.
+  """
   def send_text(to, text) do
     sender = Application.get_env(:pakchat, :whatsapp_send, &post_text/2)
     c = config()
@@ -242,7 +302,11 @@ defmodule Pakchat.WhatsApp do
     c = config()
 
     case Req.post("https://graph.facebook.com/v21.0/#{c[:phone_number_id]}/messages",
-           json: %{messaging_product: "whatsapp", to: to, type: "text", text: %{body: text}},
+           json:
+             Map.merge(
+               %{messaging_product: "whatsapp", type: "text", text: %{body: text}},
+               address(to)
+             ),
            auth: {:bearer, c[:token]},
            retry: false
          ) do
@@ -252,6 +316,10 @@ defmodule Pakchat.WhatsApp do
   end
 
   ## Helpers
+
+  # Meta wants `to` for a number and `recipient` for a user id, never both.
+  defp address({:user_id, id}), do: %{recipient: id}
+  defp address(number), do: %{to: number}
 
   # Every word of 6 letters/digits in the message, as a code would look.
   defp codes_in(body) do

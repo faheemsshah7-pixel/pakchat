@@ -31,6 +31,7 @@ import { Cancelled, download, FileBroken, FileGone, haveFile, tagOf } from '../c
 import { useChat, useFileProgress, useNow, useStarred } from '../core/hooks';
 import { outsideFor } from '../core/lock';
 import { useT } from '../i18n';
+import { useLook } from '../theme/ThemeProvider';
 import { clock, dayLabel, duration, fileSize } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
@@ -78,6 +79,20 @@ export default function Viewer() {
   const [dragging, setDragging] = useState(false);
   const bars = chrome && !dragging && opened;
   const pager = useRef<FlatList<Message>>(null);
+  const { rtl } = useLook();
+  // Zoomed in and dragged on past the photo's edge: on to the next (or previous) one, like WhatsApp.
+  // A finger going left shows the one to the right (in Urdu the pages run the other way).
+  const edgeSwipe = useCallback(
+    (dir: -1 | 1) => {
+      if (!all) return;
+      const to = index + ((rtl ? dir > 0 : dir < 0) ? 1 : -1);
+      if (to < 0 || to >= all.length) return;
+      setZoomed(false);
+      setIndex(to);
+      pager.current?.scrollToIndex({ index: to, animated: true });
+    },
+    [all, index, rtl],
+  );
 
   // Every photo and video in the chat, oldest first (so swiping left goes to newer ones).
   useEffect(() => {
@@ -209,6 +224,7 @@ export default function Viewer() {
                   lift={canReply ? insets.bottom + REPLY_ROW : 0}
                   onTap={() => setChrome((c) => !c)}
                   onZoomed={setZoomed}
+                  onEdgeSwipe={edgeSwipe}
                   onShown={!swapped && i === start ? reveal : undefined}
                 />
               )}
@@ -341,6 +357,7 @@ function Page({
   lift,
   onTap,
   onZoomed,
+  onEdgeSwipe,
   onShown,
 }: {
   m: Message;
@@ -354,6 +371,8 @@ function Page({
   lift: number;
   onTap: () => void;
   onZoomed?: (zoomed: boolean) => void;
+  /** Zoomed in and dragged on past an edge: the next or previous photo (Zoomable.tsx). */
+  onEdgeSwipe?: (dir: -1 | 1) => void;
   /** Called once it's on screen (for a photo: once the photo itself shows). */
   onShown?: () => void;
 }) {
@@ -362,6 +381,16 @@ function Page({
   const here = haveFile(m);
   const progress = useFileProgress(tagOf(m.chatId, m));
   const photo = here && f.kind !== 'video';
+  // Zoomed in: the photo at its full size on top, so the detail is sharp (on screen it's drawn
+  // only as big as the screen, which looks soft when zoomed). Only while zoomed: it takes memory.
+  const [sharp, setSharp] = useState(false);
+  const zoomedHere = useCallback(
+    (z: boolean) => {
+      setSharp(z);
+      onZoomed?.(z);
+    },
+    [onZoomed],
+  );
   // Anything but a photo is on screen as soon as it's made.
   useEffect(() => {
     if (!photo) onShown?.();
@@ -394,9 +423,10 @@ function Page({
       ) : here ? (
         // Pinch anywhere on the screen to zoom; a tap shows and hides the bars. Only the one on
         // screen zooms, and swiping away from it puts it back.
-        <Zoomable width={width} height={height} viewport={{ width, height }} picture={{ width: shownW, height: shownH }} enabled={active && zoom} onZoomed={onZoomed} onTap={onTap}>
+        <Zoomable width={width} height={height} viewport={{ width, height }} picture={{ width: shownW, height: shownH }} enabled={active && zoom} onZoomed={zoomedHere} onTap={onTap} onEdgeSwipe={onEdgeSwipe}>
           {/* Kept in memory, so it shows at once when the pages swap in after opening. */}
           <Image source={{ uri: f.local }} style={{ width, height }} contentFit="contain" cachePolicy="memory-disk" onDisplay={onShown} testID="viewer-image" />
+          {sharp && <Image source={{ uri: f.local }} style={StyleSheet.absoluteFill} contentFit="contain" allowDownscaling={false} transition={120} testID="viewer-image-sharp" />}
         </Zoomable>
       ) : (
         <Pressable style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onPress={onTap}>

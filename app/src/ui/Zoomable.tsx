@@ -13,15 +13,24 @@
 // a single tap (it waits to be sure it isn't a double tap, like WhatsApp). With `fill`, the box is
 // as big as what holds it (PhotoPeek.tsx grows it); `enabled` false turns zooming off and puts it
 // back to its normal size, without making a new one (a new one would flash). Taps still work.
+//
+// Like WhatsApp's, a zoomed photo dragged and let go keeps gliding and slows to a stop; pulled
+// past its edge it gives a little and springs back. With `onEdgeSwipe`, carrying on past an edge
+// it was already at goes to the next (or previous) photo, as WhatsApp's viewer does.
 import { useEffect, useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { GestureDetector, usePanGesture, usePinchGesture, useSimultaneousGestures, useTapGesture } from 'react-native-gesture-handler';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDecay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets';
 
 const MAX = 4;
 const DOUBLE = 2.5;
 const SETTLE = { duration: 220, easing: Easing.out(Easing.cubic) };
+/** How much a photo gives when pulled past its edge (a third of the finger's movement). */
+const GIVE = 0.35;
+/** How far past an edge (or how fast) a drag must go to move on to the next photo. */
+const EDGE_PULL = 70;
+const EDGE_FLING = 900;
 
 export function Zoomable({
   width,
@@ -30,6 +39,7 @@ export function Zoomable({
   picture,
   onZoomed,
   onTap,
+  onEdgeSwipe,
   fill,
   enabled = true,
   children,
@@ -40,6 +50,8 @@ export function Zoomable({
   picture?: { width: number; height: number };
   onZoomed?: (zoomed: boolean) => void;
   onTap?: () => void;
+  /** Dragged on past an edge it was already at: -1 the finger went left, 1 right. */
+  onEdgeSwipe?: (dir: -1 | 1) => void;
   fill?: boolean;
   enabled?: boolean;
   children: ReactNode;
@@ -49,6 +61,8 @@ export function Zoomable({
   const y = useSharedValue(0);
   // Where each gesture started: scale, position, and (for a pinch) the point between the fingers.
   const from = useSharedValue({ s: 1, x: 0, y: 0, fx: 0, fy: 0 });
+  // Which side edges were already showing when a one-finger drag started (left, right).
+  const edge = useSharedValue({ l: false, r: false });
   const [zoomed, setZoomed] = useState(false);
   const isZoomed = useSharedValue(false);
 
@@ -129,19 +143,39 @@ export function Zoomable({
     },
   });
 
-  // One finger moves it, only while zoomed in (otherwise a drag is for closing it).
+  // One finger moves it, only while zoomed in (otherwise a drag is for closing it). Past an edge
+  // it gives a little; let go, it glides on and slows down, never past an edge.
+  const edgeSwipe = (dir: -1 | 1) => onEdgeSwipe?.(dir);
   const pan = usePanGesture({
     enabled: enabled && zoomed,
     maxPointers: 1,
     onActivate: () => {
       'worklet';
       from.set({ ...from.value, x: x.value, y: y.value });
+      const r = room(s.value);
+      edge.set({ l: x.value >= r.x - 1, r: x.value <= -r.x + 1 });
     },
     onUpdate: (e) => {
       'worklet';
       const r = room(s.value);
-      x.set(clamp(from.value.x + e.translationX, r.x));
-      y.set(clamp(from.value.y + e.translationY, r.y));
+      const give = (v: number, lim: number) => (v > lim ? lim + (v - lim) * GIVE : v < -lim ? -lim + (v + lim) * GIVE : v);
+      x.set(give(from.value.x + e.translationX, r.x));
+      y.set(give(from.value.y + e.translationY, r.y));
+    },
+    onDeactivate: (e) => {
+      'worklet';
+      const r = room(s.value);
+      // Already at an edge and pulled on past it: the next photo (zoom goes back to normal).
+      const past = from.value.x + e.translationX;
+      const right = edge.value.l && past - r.x > 0 && (past - r.x > EDGE_PULL || e.velocityX > EDGE_FLING);
+      const left = edge.value.r && past + r.x < 0 && (-r.x - past > EDGE_PULL || -e.velocityX > EDGE_FLING);
+      if (onEdgeSwipe && (left || right)) {
+        reset();
+        scheduleOnRN(edgeSwipe, left ? -1 : 1);
+        return;
+      }
+      x.set(withDecay({ velocity: e.velocityX, clamp: [-r.x, r.x], rubberBandEffect: true, rubberBandFactor: 0.6 }));
+      y.set(withDecay({ velocity: e.velocityY, clamp: [-r.y, r.y], rubberBandEffect: true, rubberBandFactor: 0.6 }));
     },
   });
 

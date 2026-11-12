@@ -245,6 +245,63 @@ defmodule PakchatWeb.WhatsAppTest do
     assert build_conn() |> get(~p"/api/whatsapp/webhook", wrong) |> response(403)
   end
 
+  # What Meta sends for someone with a WhatsApp username (2026 on): a user id,
+  # and the number only if WhatsApp shares it.
+  defp username_message(user_id, number, text) do
+    msg = meta_message(number, text)
+    [entry] = msg["entry"]
+    [change] = entry["changes"]
+    value = change["value"]
+    [m] = value["messages"]
+
+    m =
+      m
+      |> Map.put("from_user_id", user_id)
+      |> then(&if(number, do: &1, else: Map.delete(&1, "from")))
+
+    contact = %{"profile" => %{"username" => "@ali"}, "user_id" => user_id}
+    contact = if number, do: Map.put(contact, "wa_id", number), else: contact
+    value = %{value | "messages" => [m], "contacts" => [contact]}
+    %{msg | "entry" => [%{entry | "changes" => [%{change | "value" => value}]}]}
+  end
+
+  test "someone with a WhatsApp username whose number still comes signs in as before" do
+    check = start()
+    deliver(username_message("PK.123456", "923001234567", "PakChat code: " <> check["code"]))
+    assert_receive {:replied, "923001234567", "✅ Done!" <> _}
+    assert %{"phone" => "+923001234567"} = claim(check) |> json_response(200)
+  end
+
+  test "the number can come in the contact only" do
+    check = start()
+    msg = username_message("PK.123456", "923001234567", "PakChat code: " <> check["code"])
+
+    msg =
+      update_in(
+        msg,
+        ["entry", Access.at(0), "changes", Access.at(0), "value", "messages", Access.at(0)],
+        &Map.delete(&1, "from")
+      )
+
+    deliver(msg)
+    assert_receive {:replied, "923001234567", "✅ Done!" <> _}
+    assert %{"phone" => "+923001234567"} = claim(check) |> json_response(200)
+  end
+
+  test "a hidden number can't count, and is told to continue with Google" do
+    check = start()
+
+    assert deliver(username_message("PK.123456", nil, "PakChat code: " <> check["code"]))
+           |> response(200)
+
+    assert_receive {:replied, {:user_id, "PK.123456"}, "Your WhatsApp username is hiding" <> _}
+    assert %{"status" => "waiting"} = claim(check) |> json_response(200)
+
+    # A random chat from a hidden number gets no answer.
+    deliver(username_message("PK.123456", nil, "hello"))
+    refute_receive {:replied, _, _}, 100
+  end
+
   test "delivery reports and other things Meta sends are fine" do
     report = %{
       "entry" => [

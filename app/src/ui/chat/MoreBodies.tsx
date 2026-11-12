@@ -1,6 +1,7 @@
 // MoreBodies.tsx: the newer kinds of message inside a bubble.
 //
-//   OnceBody       ① a view once photo, video or voice message (once.tsx opens it)
+//   OnceBody       ① a view once photo or video (once.tsx opens it); a view once
+//                  voice message plays right in its bubble, like WhatsApp's
 //   RoundBody      a round video message, played in its circle
 //   LocationBody   a little map; a live one moves, and says until when
 //   ContactBody    contact cards, with Message and Add
@@ -11,14 +12,14 @@ import type { LinkPreview, Message, SharedContact } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, View } from 'react-native';
 
 import { core, isOffline } from '../../core/core';
-import { Cancelled, cancelDownload, download, FileBroken, FileGone, haveFile, tagOf } from '../../core/files';
+import { Cancelled, cancelDownload, download, FileBroken, FileGone, forgetFile, haveFile, tagOf } from '../../core/files';
 import { useChat, useFileProgress, useNow } from '../../core/hooks';
 import { stopLive } from '../../core/live';
-import { stopAll } from '../../core/player';
+import { nextSpeed, pause, play, playerState, stopAll, useVoicePlayer } from '../../core/player';
 import { defaultTimer } from '../../core/timer';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -47,6 +48,13 @@ export function OnceBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
   const progress = useFileProgress(tagOf(m.chatId, m));
   const opened = mine ? !!m.openedBy?.length : !!m.opened;
   const what = f.kind === 'image' ? t.photoLabel : f.kind === 'video' ? t.videoLabel : t.voiceNote;
+  const [listening, setListening] = useState(false);
+
+  // Someone else's view once voice message plays here, in the bubble (not on a
+  // black screen of its own), and is gone once it has played.
+  if (!mine && (f.kind === 'voice' || f.kind === 'audio') && (!opened || listening)) {
+    return <OnceVoice m={m} selecting={selecting} onPick={onPick} onListening={setListening} />;
+  }
 
   function tap() {
     if (selecting) return onPick();
@@ -74,6 +82,112 @@ export function OnceBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
         </Pressy>
       )}
     </Pressy>
+  );
+}
+
+/**
+ * A view once voice message from someone else, played in its bubble like WhatsApp's:
+ * the view once mark on the play button, a line that fills as it plays, and its length.
+ * The first play tells the sender it was opened; when it ends (or the chat is left,
+ * or something else starts playing) the file is deleted and the bubble says "Opened".
+ */
+function OnceVoice({ m, selecting, onPick, onListening }: { m: Message; selecting: boolean; onPick: () => void; onListening: (on: boolean) => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const f = m.file!;
+  const key = `once:${m.chatId}/${m.author}/${m.id}`;
+  const now = useVoicePlayer(key);
+  const progress = useFileProgress(tagOf(m.chatId, m));
+  const [started, setStarted] = useState(false);
+  const heard = useRef(false);
+  const told = useRef(false);
+
+  function finish() {
+    if (!started) return;
+    setStarted(false);
+    onListening(false);
+    heard.current = false;
+    if (playerState().key === key) stopAll();
+    void forgetFile(m).then(() => core.emit(`messages:${m.chatId}`));
+  }
+
+  // Ended, or something else took the player: it's gone.
+  useEffect(() => {
+    if (!started) return;
+    if (now?.playing) heard.current = true;
+    if (heard.current && (!now || (!now.playing && now.position === 0))) finish();
+  });
+  // Leaving the chat while it's playing (or paused) counts as heard.
+  const latest = useRef(finish);
+  useEffect(() => {
+    latest.current = finish;
+  });
+  useEffect(() => () => latest.current(), []);
+
+  async function tap() {
+    if (selecting) return onPick();
+    if (progress !== undefined) return cancelDownload(m);
+    if (started) return now?.playing ? pause() : play(key, f.local!);
+    let local = haveFile(m) ? f.local : undefined;
+    if (!local) {
+      try {
+        await download(m);
+        local = (await core.storage.getMessage(m.chatId, m.author, m.id))?.file?.local;
+      } catch (err) {
+        return problem(err, t);
+      }
+    }
+    if (!local) return toast(t.couldNot);
+    setStarted(true);
+    onListening(true);
+    play(key, local);
+    if (!told.current) {
+      told.current = true;
+      void core.client.opened(m.chatId, { author: m.author, id: m.id }).catch(() => {});
+    }
+  }
+
+  const playing = !!now?.playing;
+  const length = now?.duration || f.duration || 0;
+  const at = started && now ? now.position : 0;
+  const done = length ? Math.min(1, at / length) : 0;
+  const ink = theme.accInk;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, minWidth: WIDE, marginBottom: 2 }} testID="once-voice">
+      <Pressy onPress={() => void tap()} onLongPress={onPick} label={playing ? t.pause : `${t.viewOnce}, ${t.voiceNote}`} scale={0.9} testID="once-voice-play">
+        <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
+          {progress !== undefined ? (
+            <ActivityIndicator size="small" color={ink} />
+          ) : started ? (
+            <Icon name={playing ? 'pause' : 'play'} size={20} color={ink} />
+          ) : (
+            <Icon name="once" size={24} color={ink} stroke={2} />
+          )}
+        </View>
+      </Pressy>
+      <View style={{ flex: 1 }}>
+        <View style={{ height: 30, justifyContent: 'center' }}>
+          <View style={{ height: 3, borderRadius: 2, backgroundColor: theme.muted, opacity: 0.35 }} />
+          <View style={{ position: 'absolute', start: 0, width: `${done * 100}%`, height: 3, borderRadius: 2, backgroundColor: theme.acc }} />
+          <View style={{ position: 'absolute', start: `${done * 100}%`, marginStart: -6, width: 12, height: 12, borderRadius: 6, backgroundColor: theme.acc }} />
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+          <Txt size={11.5} color={theme.muted}>
+            {duration(started && at > 0 ? at : length)}
+          </Txt>
+          {started && now && (
+            <Pressy onPress={nextSpeed} label={t.speed} scale={0.9} testID="once-voice-speed">
+              <View style={{ paddingHorizontal: 7, height: 18, borderRadius: 9, backgroundColor: theme.accSoft, justifyContent: 'center' }}>
+                <Txt size={11} weight="700" color={theme.text}>{`${now.speed}×`}</Txt>
+              </View>
+            </Pressy>
+          )}
+          <Txt size={11.5} color={theme.muted} lines={1} style={{ flex: 1 }}>
+            {t.viewOnce}
+          </Txt>
+        </View>
+      </View>
+    </View>
   );
 }
 
