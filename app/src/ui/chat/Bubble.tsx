@@ -242,7 +242,10 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           >
             <RichWords text={m.text ?? ''} mentions={m.mentions} color={mine ? theme.bubbleMineText : theme.text} mine={mine} />
             {inline && (
-              <Text style={{ fontSize: 11, color: 'transparent' }}>
+              // Not 'transparent': React Native reads a fully clear colour as "no colour" and gives
+              // the words the message's colour instead (the time showed twice on build 24). One step
+              // above clear is still invisible.
+              <Text style={{ fontSize: 11, color: 'rgba(0,0,0,0.004)' }}>
                 {'\u2002\u2002' +
                   (starred ? '\u2003\u2009' : '') +
                   (m.pinnedUntil && m.pinnedUntil > now ? '\u2003\u2009' : '') +
