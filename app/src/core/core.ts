@@ -216,7 +216,7 @@ export function onBuiltInServer(): boolean {
  * language: always on the live website, since a test server (a Mac) doesn't serve them.
  */
 export function pageUrl(page: 'terms' | 'privacy', lang: string): string {
-  const site = (extra.serverUrl ?? 'https://pakchat.duckdns.org').replace(/\/+$/, '');
+  const site = (extra.serverUrl ?? 'https://pakchatapp.com').replace(/\/+$/, '');
   return `${site}/${page}${lang === 'ur' ? '-ur' : ''}.html`;
 }
 

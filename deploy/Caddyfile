@@ -7,32 +7,41 @@
 		protocols h1 h2
 	}
 }
-{$PAKCHAT_DOMAIN} {
+# The server: the app's and website's API, live connections, and the invite and
+# call-link pages (with their own small styles and pictures).
+(server) {
 	encode zstd gzip
 	# Browsers always use the secure address for a year, even when someone types http://.
 	header Strict-Transport-Security "max-age=31536000"
-
-	# The server: the app's and website's API, live connections, and the invite and
-	# call-link pages (with their own small styles and pictures).
 	@server path /api/* /socket/* /link/* /live/* /join/* /calllink/* /assets/default.css /assets/css/* /assets/js/* /images/*
 	handle @server {
 		reverse_proxy app:4000
 	}
+}
+
+# The APK and what its newest version is, which apps check for updates.
+(apk) {
+	# Must always be fresh.
+	header /pakchat-apk.json Cache-Control "no-store"
+	header /pakchat.apk Content-Type "application/vnd.android.package-archive"
+	# Never an older copy from the phone's own browser (which can't install over a newer
+	# PakChat: "Can't install app"), and always saved as a file.
+	header /pakchat.apk Cache-Control "no-store"
+	header /pakchat.apk Content-Disposition `attachment; filename="PakChat.apk"`
+}
+
+{$PAKCHAT_DOMAIN} {
+	import server
 
 	# Everything else is the website (and the APK).
 	handle {
 		root * /srv/site
 		# Built files have a fingerprint in their name, so they're kept for a year.
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"
-		# These must always be fresh: the page itself, its helper, and what the newest APK is.
+		# These must always be fresh: the page itself and its helper.
 		header /index.html Cache-Control "no-cache"
 		header /sw.js Cache-Control "no-cache"
-		header /pakchat-apk.json Cache-Control "no-store"
-		header /pakchat.apk Content-Type "application/vnd.android.package-archive"
-		# Never an older copy from the phone's own browser (which can't install over a newer
-		# PakChat: "Can't install app"), and always saved as a file.
-		header /pakchat.apk Cache-Control "no-store"
-		header /pakchat.apk Content-Disposition `attachment; filename="PakChat.apk"`
+		import apk
 		header {
 			X-Content-Type-Options "nosniff"
 			Referrer-Policy "same-origin"
@@ -44,5 +53,25 @@
 		}
 		try_files {path} /index.html
 		file_server
+	}
+}
+
+# www.pakchatapp.com goes to pakchatapp.com.
+www.{$PAKCHAT_DOMAIN} {
+	redir https://{$PAKCHAT_DOMAIN}{uri} permanent
+}
+
+# The old address (pakchat.duckdns.org). PakChat up to build 24 talks to it, so its server
+# part and the APK update check keep working there; the website itself has moved.
+{$PAKCHAT_OLD_DOMAIN} {
+	import server
+	@apk path /pakchat.apk /pakchat-apk.json
+	handle @apk {
+		root * /srv/site
+		import apk
+		file_server
+	}
+	handle {
+		redir https://{$PAKCHAT_DOMAIN}{uri} permanent
 	}
 }

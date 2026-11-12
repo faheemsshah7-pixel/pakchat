@@ -206,7 +206,7 @@
     ],
     "extra": {
       "googleWebClientId": "459861530466-6clhf90r8bfd2urbikjsqicvkcndbel9.apps.googleusercontent.com",
-      "serverUrl": "https://pakchat.duckdns.org"
+      "serverUrl": "https://pakchatapp.com"
     },
     "scheme": "pakchat",
     "experiments": {

@@ -61,6 +61,8 @@ services:
       - "443:443/udp"
     environment:
       PAKCHAT_DOMAIN: ${PAKCHAT_DOMAIN}
+      # The address PakChat had before (apps up to build 24 still use it).
+      PAKCHAT_OLD_DOMAIN: ${PAKCHAT_OLD_DOMAIN:-pakchat.duckdns.org}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # The website (web/dist) plus pakchat.apk and pakchat-apk.json: see build-site.sh.
