@@ -60,18 +60,3 @@
 www.{$PAKCHAT_DOMAIN} {
 	redir https://{$PAKCHAT_DOMAIN}{uri} permanent
 }
-
-# The old address (pakchat.duckdns.org). PakChat up to build 24 talks to it, so its server
-# part and the APK update check keep working there; the website itself has moved.
-{$PAKCHAT_OLD_DOMAIN} {
-	import server
-	@apk path /pakchat.apk /pakchat-apk.json
-	handle @apk {
-		root * /srv/site
-		import apk
-		file_server
-	}
-	handle {
-		redir https://{$PAKCHAT_DOMAIN}{uri} permanent
-	}
-}
