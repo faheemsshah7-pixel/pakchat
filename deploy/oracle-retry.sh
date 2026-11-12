@@ -7,6 +7,8 @@
 # It makes the network the first time (a public subnet, with PakChat's ports
 # open), then asks Oracle for the server once a minute until it gets one. It
 # only ever asks for the Always Free shape, and never makes a second server.
+# If Oracle stopped the server for being idle, it starts it again the same way
+# (same command), and never touches its disk or data.
 # Ctrl+C stops it; running it again carries on where it was.
 set -uo pipefail
 
@@ -35,8 +37,31 @@ echo "1/4 Is there a PakChat server already?"
 EXISTING=$(oci compute instance list -c "$TENANCY" --display-name "$NAME" --all \
   --query "data[?\"lifecycle-state\"!='TERMINATED' && \"lifecycle-state\"!='TERMINATING'] | [0].id" --raw-output 2>/dev/null)
 if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+  # Oracle stops a free server that sits idle for a week. Its disk and data stay: start it
+  # again, asking once a minute while Oracle says it's out of capacity.
+  tries=0
+  while :; do
+    STATE=$(oci compute instance get --instance-id "$EXISTING" --query 'data."lifecycle-state"' --raw-output 2>/dev/null)
+    [ "$STATE" = STOPPED ] || break
+    tries=$((tries + 1))
+    OUT=$(oci compute instance action --instance-id "$EXISTING" --action START 2>&1)
+    case "$OUT" in
+      *"Out of host capacity"*|*"OutOfCapacity"*|*"out of capacity"*)
+        printf '%s  start try %d: out of capacity, again in %ss\n' "$(date +%H:%M)" "$tries" "$WAIT" ;;
+      *"TooManyRequests"*|*'"status": 429'*)
+        printf '%s  start try %d: Oracle says too many tries, waiting 5 minutes\n' "$(date +%H:%M)" "$tries"
+        sleep 240 ;;
+      *'"lifecycle-state"'*)
+        say_and_show "PakChat's server is starting. PakChat is back in 2 to 3 minutes."
+        STATE=STARTING
+        break ;;
+      *)
+        printf '%s  start try %d: %s\n' "$(date +%H:%M)" "$tries" "$(echo "$OUT" | grep -m1 -E '"message"|Error' | sed 's/^ *//')" ;;
+    esac
+    sleep "$WAIT"
+  done
   IP=$(oci compute instance list-vnics --instance-id "$EXISTING" --query 'data[0]."public-ip"' --raw-output 2>/dev/null)
-  echo "There is one already (public IP: ${IP:-none yet}). Nothing to do."
+  echo "There is one already (public IP: ${IP:-none yet}, ${STATE:-unknown})."
   exit 0
 fi
 
