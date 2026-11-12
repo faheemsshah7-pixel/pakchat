@@ -225,16 +225,18 @@ function Words({ text, big, mentions }: { text: string; big: number; mentions?: 
   const [all, setAll] = useState(false);
   const cut = all ? null : readMoreCut(text);
   const shown = cut == null ? text : text.slice(0, cut);
+  const lines = parseRich(shown);
   return (
     <span className={`txt ${big ? `e${big}` : ''}`}>
-      {parseRich(shown).map((line, i) => (
+      {lines.map((line, i) => (
         <span key={i} className={`ln ${line.kind}`}>
           {line.kind === 'bullet' && '• '}
           {line.kind === 'number' && `${line.number}. `}
           {line.spans.map((s, j) => (
             <SpanView key={j} s={s} names={names} />
           ))}
-          {'\n'}
+          {/* No line break after the last line, so the time can sit beside it (like WhatsApp). */}
+          {(i < lines.length - 1 || cut != null) && '\n'}
         </span>
       ))}
       {cut != null && (

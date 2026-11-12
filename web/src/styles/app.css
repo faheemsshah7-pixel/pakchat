@@ -56,7 +56,7 @@ kbd { font: inherit; }
 .mrow.new { animation: arrive .18s cubic-bezier(.33,1,.68,1); }
 @keyframes arrive { from { opacity: 0; transform: translateY(10px); } }
 .mrow.out { justify-content: flex-end; }
-.bub { position: relative; max-width: var(--bubMax); padding: 6px 7px 8px 9px; border-radius: var(--bubR); background: var(--bubIn); color: var(--bubInText); font-size: var(--msgSize); line-height: 20px; box-shadow: var(--bubShadow); overflow-wrap: anywhere; }
+.bub { position: relative; max-width: var(--bubMax); padding: 6px 7px 8px 9px; border-radius: var(--bubR); background: var(--bubIn); color: var(--bubInText); font-size: var(--msgSize); line-height: 19px; box-shadow: var(--bubShadow); overflow-wrap: anywhere; }
 .bub.out { background: var(--bubOut); color: var(--bubOutText); }
 .mrow.first .bub.in { border-top-left-radius: var(--tailCorner); }
 .mrow.first .bub.out { border-top-right-radius: var(--tailCorner); }
