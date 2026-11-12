@@ -62,6 +62,7 @@ import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui
 import { Marquee } from '../../ui/Marquee';
 import { arrive, fadeIn, fadeOut, popIn, popOut, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
+import { setChatArea } from '../../ui/zoom';
 
 type Item = { key: string; kind: 'msg'; m: Message; first: boolean; album?: Message[] } | { key: string; kind: 'day'; text: string } | { key: string; kind: 'unread'; text: string } | { key: string; kind: 'typing' };
 
@@ -983,7 +984,7 @@ function ChatScreen() {
           </View>
         )}
 
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }} ref={setChatArea}>
           {/* A recycling list (like WhatsApp's): bubbles that scroll away are reused for the ones
               coming in, instead of being thrown away and made again, so scrolling stays light.
               Each kind of row is reused only for its own kind (see itemType), and a bubble starts

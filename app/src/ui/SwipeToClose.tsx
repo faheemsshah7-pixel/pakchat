@@ -43,6 +43,12 @@ export type Grow = {
   onOpened?: () => void;
   /** The spot is a circle (a profile photo): it grows from round to square, and back. */
   round?: boolean;
+  /**
+   * The part of the chat the messages show in (zoom.ts). A photo partly under the chat's top
+   * bar (or its typing box) is cut to this while it grows and shrinks, so it never covers
+   * the top bar, like WhatsApp's; filling the screen, nothing is cut.
+   */
+  clip?: Spot | null;
 };
 
 export function SwipeToClose({
@@ -150,6 +156,23 @@ export function SwipeToClose({
     },
   });
 
+  // What it's cut to: the chat's messages at the spot, the whole screen once grown.
+  const clip = spot ? (grow?.clip ?? null) : null;
+  const cut = useAnimatedStyle(() => {
+    if (!clip) return { flex: 1 };
+    const g = p.value;
+    return {
+      position: 'absolute',
+      left: clip.x * (1 - g),
+      top: clip.y * (1 - g),
+      width: clip.w + (W.value - clip.w) * g,
+      height: clip.h + (H.value - clip.h) * g,
+      overflow: 'hidden',
+    };
+  });
+  const cx = clip?.x ?? 0;
+  const cy = clip?.y ?? 0;
+
   // The frame the picture shows in: the spot at first, the whole screen once grown.
   const aspect = grow?.aspect ?? (spot ? spot.h / spot.w : 1);
   const corner = spot && grow?.round ? Math.min(spot.w, spot.h) / 2 : CORNER;
@@ -160,8 +183,9 @@ export function SwipeToClose({
     const g = p.value;
     return {
       position: 'absolute',
-      left: spot.x * (1 - g),
-      top: spot.y * (1 - g),
+      // (Inside the cut, which starts where the chat's messages do.)
+      left: (spot.x - cx) * (1 - g),
+      top: (spot.y - cy) * (1 - g),
       width: spot.w + (W.value - spot.w) * g,
       height: spot.h + (H.value - spot.h) * g,
       borderRadius: corner * (1 - g),
@@ -200,11 +224,13 @@ export function SwipeToClose({
       }}
     >
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }, black]} />
-      <GestureDetector gesture={pan}>
-        <Animated.View style={[{ flex: 1 }, frame]}>
-          <Animated.View style={inside}>{children}</Animated.View>
-        </Animated.View>
-      </GestureDetector>
+      <Animated.View style={cut}>
+        <GestureDetector gesture={pan}>
+          <Animated.View style={[{ flex: 1 }, frame]}>
+            <Animated.View style={inside}>{children}</Animated.View>
+          </Animated.View>
+        </GestureDetector>
+      </Animated.View>
     </View>
   );
 }

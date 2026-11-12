@@ -10,6 +10,8 @@ defmodule Pakchat.WhatsApp.Check do
     field :phone, :string
     field :typed_phone, :string
     field :wrong_phone, :string
+    # The code came from someone whose WhatsApp hides their number: it can't count.
+    field :number_hidden, :boolean, default: false
     field :expires_at, :utc_datetime_usec
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end

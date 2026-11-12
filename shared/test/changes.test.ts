@@ -103,6 +103,23 @@ describe.each([['node'], ['wasm']] as [Kind][])('changes (%s)', (kind) => {
     }
   });
 
+  test("a reaction (or taking it back) doesn't move the chat up the list", async () => {
+    const { ali, sara, g } = await group();
+    const m = await ali.client.sendText(g.id, 'An old sticker');
+    await w.settle();
+    const before = (await sara.client.chats()).find((c) => c.id === g.id)!.lastActivity;
+    w.offset += 60 * MINUTE;
+    await sara.client.react(g.id, { author: ali.id, id: m.id }, '❤️');
+    await w.settle();
+    await sara.client.react(g.id, { author: ali.id, id: m.id }, null);
+    await w.settle();
+    for (const p of [ali, sara]) expect((await p.client.chats()).find((c) => c.id === g.id)!.lastActivity).toBe(before);
+    // A new message still does.
+    await sara.client.sendText(g.id, 'New');
+    await w.settle();
+    expect((await sara.client.chats()).find((c) => c.id === g.id)!.lastActivity).toBeGreaterThan(before);
+  });
+
   test('the author hears about a new reaction (for "Sara reacted"), once, and not about their own', async () => {
     const { ali, sara, bilal, g } = await group();
     const heard: string[] = [];

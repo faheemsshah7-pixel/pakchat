@@ -25,6 +25,7 @@ export function WhatsAppCheck({
   quiet,
   onChecked,
   onBack,
+  onGoogle,
 }: {
   purpose: 'sign_in' | 'link';
   /** The number typed first ("+923001234567"). Then only that number's WhatsApp counts. */
@@ -35,6 +36,8 @@ export function WhatsAppCheck({
   onChecked: (phone: string, code: string) => Promise<void>;
   /** Without it there's no Back button (the screen has its own). */
   onBack?: () => void;
+  /** Signing in: offered (Continue with Google) when WhatsApp hides the person's number. */
+  onGoogle?: () => void;
 }) {
   const t = useT();
   const { theme } = useLook();
@@ -43,6 +46,8 @@ export function WhatsAppCheck({
   const [error, setError] = useState('');
   // Another number's WhatsApp sent the code: say so, and keep waiting for the right one.
   const [wrongFrom, setWrongFrom] = useState('');
+  // The code came, but their WhatsApp username hides their number: it can't count.
+  const [hidden, setHidden] = useState(false);
   const done = useRef(false);
 
   async function open() {
@@ -80,8 +85,9 @@ export function WhatsAppCheck({
       }
       asking = true;
       try {
-        const { phone, wrongFrom: other } = await core.claimWhatsApp(check.id, check.secret);
+        const { phone, wrongFrom: other, hidden: noNumber } = await core.claimWhatsApp(check.id, check.secret);
         if (alive && other) setWrongFrom(other);
+        if (alive && noNumber) setHidden(true);
         if (phone && alive && !done.current) {
           done.current = true;
           setBusy(true);
@@ -112,7 +118,10 @@ export function WhatsAppCheck({
     };
   }, [check, onChecked, t]);
 
-  const say = error || (wrongFrom && typed ? fill(t.sentFromOther, { from: formatPhone(wrongFrom), phone: formatPhone(typed) }) : '');
+  const say =
+    error ||
+    (hidden ? (onGoogle ? `${t.waHidden} ${t.waHiddenGoogle}` : t.waHidden) : '') ||
+    (wrongFrom && typed ? fill(t.sentFromOther, { from: formatPhone(wrongFrom), phone: formatPhone(typed) }) : '');
 
   return (
     <View style={{ gap: 8 }}>
@@ -131,7 +140,8 @@ export function WhatsAppCheck({
           {say}
         </Txt>
       ) : null}
-      <Button title={check ? t.waOpenAgain : t.waOpen} icon="send" onPress={open} busy={busy} testID="wa-open" />
+      {hidden && onGoogle ? <Button title={t.continueGoogle} onPress={onGoogle} testID="wa-google" /> : null}
+      <Button title={check ? t.waOpenAgain : t.waOpen} icon="send" look={hidden && onGoogle ? 'soft' : undefined} onPress={open} busy={busy} testID="wa-open" />
       {onBack && <Button title={t.back} look="soft" onPress={onBack} testID="wa-back" />}
     </View>
   );

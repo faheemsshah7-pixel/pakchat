@@ -33,11 +33,26 @@ export function parseSpot(p: string | undefined): Spot | null {
 
 let handed: Message | null = null;
 
-/** Opens a photo or video in the viewer, growing out of `from` (the picture tapped) when given. */
-export async function openViewer(m: Message, from?: HostInstance | null) {
+// The part of the chat screen the messages scroll in (between its top bar and the
+// box you type in), set by the chat screen. A photo half under the top bar grows out
+// of (and shrinks back into) only the part of it that shows, like WhatsApp's.
+let chatArea: HostInstance | null = null;
+export function setChatArea(view: HostInstance | null) {
+  chatArea = view;
+}
+
+/**
+ * Opens a photo or video in the viewer, growing out of `from` (the picture tapped) when given.
+ * `inChat`: tapped in the chat itself, so it stays inside the chat's messages while it grows and shrinks.
+ */
+export async function openViewer(m: Message, from?: HostInstance | null, inChat?: boolean) {
   const spot = await spotOf(from);
+  const clip = spot && inChat ? await spotOf(chatArea) : null;
   handed = m;
-  router.push({ pathname: '/viewer', params: { chat: m.chatId, author: m.author, id: m.id, ...(spot ? { spot: spotParam(spot) } : {}) } });
+  router.push({
+    pathname: '/viewer',
+    params: { chat: m.chatId, author: m.author, id: m.id, ...(spot ? { spot: spotParam(spot) } : {}), ...(clip ? { clip: spotParam(clip) } : {}) },
+  });
 }
 
 /**

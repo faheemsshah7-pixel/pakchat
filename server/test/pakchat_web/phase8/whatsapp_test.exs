@@ -295,7 +295,12 @@ defmodule PakchatWeb.WhatsAppTest do
            |> response(200)
 
     assert_receive {:replied, {:user_id, "PK.123456"}, "Your WhatsApp username is hiding" <> _}
-    assert %{"status" => "waiting"} = claim(check) |> json_response(200)
+
+    # The app hears why, and still waits (the same code sent from a number that shows still counts).
+    assert %{"status" => "hidden_number"} = claim(check) |> json_response(200)
+    deliver(meta_message("923001234567", "PakChat code: " <> check["code"]))
+    assert_receive {:replied, "923001234567", "✅ Done!" <> _}
+    assert %{"status" => "done", "phone" => "+923001234567"} = claim(check) |> json_response(200)
 
     # A random chat from a hidden number gets no answer.
     deliver(username_message("PK.123456", nil, "hello"))

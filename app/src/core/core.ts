@@ -707,7 +707,7 @@ class Core {
     return new HttpServer(serverUrl()).startWhatsApp(purpose, phone);
   }
 
-  /** `{}` until the person has sent the code from WhatsApp; then `{ phone }`, or `{ wrongFrom }` if another number sent it. */
+  /** `{}` until the person has sent the code from WhatsApp; then `{ phone }`, `{ wrongFrom }` if another number sent it, or `{ hidden }` if WhatsApp hid the number. */
   claimWhatsApp(id: string, secret: string) {
     return new HttpServer(serverUrl()).claimWhatsApp(id, secret);
   }

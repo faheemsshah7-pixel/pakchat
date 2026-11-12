@@ -51,7 +51,7 @@ export function useFileTap(m: Message, mine: boolean, selecting: boolean, onPick
     if (selecting) return onPick();
     // The upload button: send it again.
     if (paused) return void resumeSend(m).catch(() => {});
-    if (here && !sending) return open(m, spot.current);
+    if (here && !sending) return open(m, spot.current, true);
     // The ✕: stop it.
     if (sending) return void pauseSend(m).catch(() => {});
     if (progress !== undefined) return cancelDownload(m);
@@ -299,10 +299,10 @@ export function Stop({ progress, size, label }: { progress: number; size: number
  * Opens a file that's here: photos and videos in PakChat's viewer (growing out
  * of `from`, the picture tapped, when given), documents in another app.
  */
-export async function open(m: Message, from?: HostInstance | null) {
+export async function open(m: Message, from?: HostInstance | null, inChat?: boolean) {
   const f = m.file;
   if (!f?.local) return;
-  if (f.kind === 'image' || f.kind === 'video') return openViewer(m, from);
+  if (f.kind === 'image' || f.kind === 'video') return openViewer(m, from, inChat);
   try {
     await outsideFor(() => new File(f.local!).preview({ mimeType: f.mime }));
   } catch {

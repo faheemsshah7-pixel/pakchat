@@ -52,7 +52,7 @@ const DIM = 'rgba(0,0,0,0.4)';
 const REPLY_ROW = 60;
 
 export default function Viewer() {
-  const { chat, author, id, spot: spotParam } = useLocalSearchParams<{ chat: string; author: string; id: string; spot?: string }>();
+  const { chat, author, id, spot: spotParam, clip: clipParam } = useLocalSearchParams<{ chat: string; author: string; id: string; spot?: string; clip?: string }>();
   const t = useT();
   const insets = useSafeAreaInsets();
   const { width, height: winH } = useWindowDimensions();
@@ -62,6 +62,7 @@ export default function Viewer() {
   // The one tapped, handed over by the chat so it shows at once; the rest are read once it has grown open.
   const [tapped] = useState(() => takeHanded(chat, author, id));
   const [spot] = useState(() => parseSpot(spotParam));
+  const [clip] = useState(() => parseSpot(clipParam));
   const [opened, setOpened] = useState(false);
   // The one tapped stays on top, on its own, until the list of all of them is showing it too:
   // swapping straight from one to the other left a black frame (owner's video, 2 Nov).
@@ -195,7 +196,7 @@ export default function Viewer() {
         locked={zoomed}
         onClose={() => router.back()}
         onDrag={setDragging}
-        grow={{ spot, aspect: tapped?.file?.width && tapped.file.height ? tapped.file.height / tapped.file.width : null, back: index === start, onOpened: () => setOpened(true) }}
+        grow={{ spot, clip, aspect: tapped?.file?.width && tapped.file.height ? tapped.file.height / tapped.file.width : null, back: index === start, onOpened: () => setOpened(true) }}
       >
         <View style={{ flex: 1 }}>
           {all && (
@@ -416,7 +417,13 @@ function Page({
       {here && f.kind === 'video' ? (
         // Only the one on screen has a player (they're heavy), and it stops when you swipe away.
         active ? (
-          <Video uri={f.local!} chrome={chrome} lift={lift} onTap={onTap} />
+          <Video
+            uri={f.local!}
+            chrome={chrome}
+            lift={lift}
+            onTap={onTap}
+            zoom={{ width, height, picture: { width: shownW, height: shownH }, enabled: zoom, onZoomed: zoomedHere, onEdgeSwipe }}
+          />
         ) : (
           <Pressable style={{ flex: 1 }} onPress={onTap} />
         )
@@ -453,8 +460,20 @@ function muteVideo(player: VideoPlayer, muted: boolean) {
 /** The height of a video's controls along the bottom. */
 const VIDEO_BAR = 64;
 
-/** A video, playing, with WhatsApp-like controls that hide and show with a tap. */
-function Video({ uri, chrome, lift, onTap }: { uri: string; chrome: boolean; lift: number; onTap: () => void }) {
+type VideoZoom = {
+  width: number;
+  height: number;
+  picture: { width: number; height: number };
+  enabled: boolean;
+  onZoomed: (zoomed: boolean) => void;
+  onEdgeSwipe?: (dir: -1 | 1) => void;
+};
+
+/**
+ * A video, playing, with WhatsApp-like controls that hide and show with a tap.
+ * Pinch it (or double tap) to zoom in while it plays, like a photo (Zoomable.tsx).
+ */
+function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolean; lift: number; onTap: () => void; zoom: VideoZoom }) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const player = useVideoPlayer(uri, (p) => {
@@ -481,10 +500,19 @@ function Video({ uri, chrome, lift, onTap }: { uri: string; chrome: boolean; lif
 
   return (
     <View style={{ flex: 1 }}>
-      <Pressable style={{ flex: 1 }} onPress={onTap}>
-        {/* A texture (not Android's default surface), so it moves and shrinks with your finger when dragged to close. */}
-        <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" surfaceType="textureView" testID="viewer-video" />
-      </Pressable>
+      <Zoomable
+        width={zoom.width}
+        height={zoom.height}
+        viewport={{ width: zoom.width, height: zoom.height }}
+        picture={zoom.picture}
+        enabled={zoom.enabled}
+        onZoomed={zoom.onZoomed}
+        onTap={onTap}
+        onEdgeSwipe={zoom.onEdgeSwipe}
+      >
+        {/* A texture (not Android's default surface), so it moves, zooms and shrinks with your fingers. */}
+        <VideoView player={player} style={{ width: zoom.width, height: zoom.height }} nativeControls={false} contentFit="contain" surfaceType="textureView" testID="viewer-video" />
+      </Zoomable>
       {(chrome || !playing) && (
         <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
           <Pressy onPress={toggle} label={playing ? t.pause : t.play} scale={0.9} testID="viewer-play">

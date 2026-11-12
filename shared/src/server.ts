@@ -344,12 +344,14 @@ export class HttpServer implements ServerApi {
 
   /**
    * `{}` while the message hasn't arrived; `{ phone }` (the number that sent it) once it has;
-   * `{ wrongFrom }` while the only message came from another number than the one typed.
+   * `{ wrongFrom }` while the only message came from another number than the one typed;
+   * `{ hidden: true }` while the only one came from someone whose WhatsApp hides their number.
    */
-  async claimWhatsApp(id: string, secret: string): Promise<{ phone?: string; wrongFrom?: string }> {
+  async claimWhatsApp(id: string, secret: string): Promise<{ phone?: string; wrongFrom?: string; hidden?: boolean }> {
     const r = await this.call<{ status: string; phone?: string; from?: string }>('POST', `/auth/whatsapp/${encodeURIComponent(id)}`, { secret });
     if (r.status === 'done' && r.phone) return { phone: r.phone };
     if (r.status === 'wrong_number' && r.from) return { wrongFrom: r.from };
+    if (r.status === 'hidden_number') return { hidden: true };
     return {};
   }
 

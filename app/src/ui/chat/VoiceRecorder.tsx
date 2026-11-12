@@ -13,6 +13,7 @@
 import { useAudioPlayer, useAudioPlayerStatus, useAudioRecorder } from 'expo-audio';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Linking, Pressable, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { usePanGesture } from 'react-native-gesture-handler';
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -351,7 +352,7 @@ function LiveBars({ levels }: { levels: number[] }) {
   );
 }
 
-/** ① View once: WhatsApp's mark, a filled green "1" when on. */
+/** ① View once: WhatsApp's mark, a filled round "1" when on. */
 export function OnceToggle({ on, onChange, light }: { on: boolean; onChange: (on: boolean) => void; light?: boolean }) {
   const t = useT();
   const { theme } = useLook();
@@ -367,12 +368,19 @@ export function OnceToggle({ on, onChange, light }: { on: boolean; onChange: (on
       scale={0.88}
       testID="view-once"
     >
-      {/* Off: WhatsApp's view once mark. On: a filled green circle with the 1. */}
-      <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: on ? theme.acc : 'transparent', alignItems: 'center', justifyContent: 'center', marginHorizontal: 4 }}>
+      {/* Like WhatsApp's: off, the view once mark (a dotted ring with a 1); on, a filled
+          circle with the 1. The circle is drawn, not a coloured box with round corners:
+          Android drew that box square once its colour changed (owner's photo, 12 Nov). */}
+      <View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center', marginHorizontal: 4 }}>
         {on ? (
-          <Txt size={14} weight="800" color="#FFFFFF">
-            1
-          </Txt>
+          <>
+            <Svg width={28} height={28} style={{ position: 'absolute' }}>
+              <Circle cx={14} cy={14} r={13} fill={theme.grad[0]} />
+            </Svg>
+            <Txt size={14} weight="800" color="#FFFFFF">
+              1
+            </Txt>
+          </>
         ) : (
           <Icon name="once" size={28} color={ink} stroke={1.8} />
         )}

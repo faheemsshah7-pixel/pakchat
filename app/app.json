@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.26",
+    "version": "1.0.27",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
-      "versionCode": 26,
+      "versionCode": 27,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",

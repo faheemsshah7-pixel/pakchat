@@ -1061,7 +1061,10 @@ export class PakChat {
       }
       // A history part is kept too: if the website can't open it, it asks for it again.
       if (item.kind !== 'control' || parseContent(item.content)?.t === 'history') await this.rememberSent({ chatId: item.chatId, seq, kind: item.kind, content: item.content, at: this.now() });
-      const chat = await storage.getChat(item.chatId);
+      // Only a message moves the chat up the list: a reaction, an edit, a delete or a
+      // vote doesn't (like WhatsApp; owner, 12 Nov: taking back a reaction on an old
+      // sticker put the chat at the top with a new time).
+      const chat = item.message ? await storage.getChat(item.chatId) : null;
       if (chat) await storage.putChat({ ...chat, lastActivity: Math.max(chat.lastActivity, sentAt) });
       await storage.deleteOutbox(item.id);
       await storage.deleteValue(`paused:${item.id}`);

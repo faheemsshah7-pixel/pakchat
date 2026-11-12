@@ -125,7 +125,8 @@ defmodule Pakchat.WhatsApp do
   number has sent the code, `{:ok, phone}`: the secret is then also a one-time
   sign-in code for that number (Pakchat.PhoneCodes), and the check is gone.
   `{:ok, {:wrong_number, phone}}` while the only code that came was sent from
-  another number than the one typed.
+  another number than the one typed. `{:ok, :hidden_number}` while the only code
+  came from someone whose WhatsApp hides their number (it can't count).
   """
   def claim(id, secret) when is_binary(id) and is_binary(secret) do
     now = DateTime.utc_now()
@@ -141,6 +142,9 @@ defmodule Pakchat.WhatsApp do
 
         DateTime.compare(check.expires_at, now) == :gt and check.wrong_phone != nil ->
           {:ok, {:wrong_number, check.wrong_phone}}
+
+        DateTime.compare(check.expires_at, now) == :gt and check.number_hidden ->
+          {:ok, :hidden_number}
 
         DateTime.compare(check.expires_at, now) == :gt ->
           {:ok, :waiting}
@@ -239,19 +243,24 @@ defmodule Pakchat.WhatsApp do
   defp text_or_nil(text) when is_binary(text) and text != "", do: text
   defp text_or_nil(_), do: nil
 
-  # A code came but WhatsApp didn't say from which number. It can't count.
+  # A code came but WhatsApp didn't say from which number. It can't count; the
+  # check remembers it, so the app can say why (claim/2).
   defp hidden(body) do
     codes = codes_in(body)
     now = DateTime.utc_now()
 
-    open? =
-      codes != [] and
-        Repo.exists?(
-          from c in Check,
-            where: c.code in ^codes and is_nil(c.phone) and c.expires_at > ^now
-        )
+    {marked, _} =
+      if codes == [],
+        do: {0, nil},
+        else:
+          Repo.update_all(
+            from(c in Check,
+              where: c.code in ^codes and is_nil(c.phone) and c.expires_at > ^now
+            ),
+            set: [number_hidden: true]
+          )
 
-    if open?, do: :hidden_number, else: :no_code
+    if marked > 0, do: :hidden_number, else: :no_code
   end
 
   # Tells the person how it went, when we can send messages back. Replies inside

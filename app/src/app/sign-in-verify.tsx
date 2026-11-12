@@ -13,11 +13,13 @@ import { ActivityIndicator, ScrollView, View } from 'react-native';
 
 import { formatPhone } from '@pakchat/shared';
 
-import { core, onBuiltInServer } from '../core/core';
+import { core, isOffline, onBuiltInServer } from '../core/core';
+import { googleIdToken } from '../core/google';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { phoneError } from '../ui/format';
 import { Button, Field, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { toast } from '../ui/overlays';
 import { WhatsAppCheck } from '../ui/WhatsAppCheck';
 
 type Way = 'asking' | 'whatsapp' | 'code' | 'none';
@@ -59,6 +61,17 @@ export default function SignInVerify() {
     await core.signInWithPhone(number, oneTime);
   }, []);
 
+  // Their WhatsApp hides their number (a WhatsApp username): Google signs them in instead, right here.
+  async function google() {
+    try {
+      const idToken = await googleIdToken();
+      if (!idToken) return;
+      await core.signIn(idToken);
+    } catch (err) {
+      toast(isOffline(err) ? t.serverError : t.googleError);
+    }
+  }
+
   const shown = formatPhone(phone);
 
   return (
@@ -99,7 +112,7 @@ export default function SignInVerify() {
             <Txt size={13} color={theme.muted} align="center">
               {t.verifyNeedsWhatsApp}
             </Txt>
-            <WhatsAppCheck purpose="sign_in" phone={phone} quiet onChecked={whatsAppSignIn} />
+            <WhatsAppCheck purpose="sign_in" phone={phone} quiet onChecked={whatsAppSignIn} onGoogle={() => void google()} />
           </>
         )}
 

@@ -9,7 +9,8 @@ defmodule PakchatWeb.WhatsAppController do
       `{"id", "secret", "code", "text", "url", "expires_in"}`. The app opens `url`.
       `phone` (optional, build 16 on) is the number typed; only it may send the code.
     * `POST /api/auth/whatsapp/:id` with `{"secret"}`: `{"status": "waiting"}`,
-      `{"status": "wrong_number", "from": "+92..."}` (another number sent it), or
+      `{"status": "wrong_number", "from": "+92..."}` (another number sent it),
+      `{"status": "hidden_number"}` (it came, but WhatsApp hid the number), or
       `{"status": "done", "phone": "+92..."}`. The secret is then the code for
       `POST /api/auth/phone` (signing in), `PUT /api/me/phone` (adding the number) or
       `POST /api/account/delete` (the Delete account web page).
@@ -38,6 +39,7 @@ defmodule PakchatWeb.WhatsAppController do
       case WhatsApp.claim(id, secret) do
         {:ok, :waiting} -> json(conn, %{status: "waiting"})
         {:ok, {:wrong_number, from}} -> json(conn, %{status: "wrong_number", from: from})
+        {:ok, :hidden_number} -> json(conn, %{status: "hidden_number"})
         {:ok, phone} -> json(conn, %{status: "done", phone: phone})
         error -> error
       end
