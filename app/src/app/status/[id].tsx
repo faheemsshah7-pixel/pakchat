@@ -15,35 +15,41 @@ import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
+import { setAudioModeAsync, useAudioPlayer, type AudioPlayer } from 'expo-audio';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Pressable, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Pressable, TextInput, View, useWindowDimensions, type TextInputInstance } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { cancelAnimation, Easing, FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, FadeIn, FadeInDown, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core, isOffline } from '../../core/core';
 import { download, haveFile } from '../../core/files';
 import { useStatuses, usePeople } from '../../core/hooks';
-import { replyToStatus, STATUS_BG, STATUS_SHOW_MS, STATUS_VIDEO_MAX_MS, type StatusPerson } from '../../core/status';
+import { replyToStatus, STATUS_BG, STATUS_FONTS, STATUS_SHOW_MS, STATUS_VIDEO_MAX_MS, STATUS_VOICE_MAX_MS, voiceColour, type StatusPerson } from '../../core/status';
+import { barsOf } from '../../core/voice';
+import { stopAll } from '../../core/player';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { listTime } from '../../ui/format';
+import { RichWords } from '../../ui/chat/RichText';
+import { listTime, whenLabel } from '../../ui/format';
+import { ReportSheet } from '../../ui/ReportSheet';
 import { Icon } from '../../ui/icons';
 import { Avatar, fontStyle, IconButton, Pressy, Txt } from '../../ui/kit';
 import { tick } from '../../ui/motion';
-import { Dialog, Sheet, toast } from '../../ui/overlays';
+import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 
 /** WhatsApp's quick replies to a status, in its order. */
 const QUICK = ['😍', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯'];
 
 export default function StatusViewer() {
   const t = useT();
-  const { lang } = useLook();
+  const { lang, rtl } = useLook();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `at`: start at this one of mine (from the My status page).
+  const { id, at: startAt } = useLocalSearchParams<{ id: string; at?: string }>();
   const all = useStatuses();
   usePeople();
 
@@ -54,7 +60,9 @@ export default function StatusViewer() {
     const fresh = all.others.filter((p) => !p.seen && !p.muted);
     const seen = all.others.filter((p) => p.seen && !p.muted);
     const muted = all.others.filter((p) => p.muted);
-    return [...fresh, ...seen, ...muted];
+    // Muted people's statuses never play by themselves, like WhatsApp's: only when one of them is tapped
+    // (and then only the muted ones).
+    return all.others.find((p) => p.chat.id === id)?.muted ? muted : [...fresh, ...seen];
   }, [all, id]);
   const [chatId, setChatId] = useState(id);
   const person = order.find((p) => p.chat.id === chatId) ?? null;
@@ -66,7 +74,10 @@ export default function StatusViewer() {
   const [index, setIndex] = useState<number | null>(null);
   const loaded = person !== null;
   const initial = useMemo(
-    () => (person && !mine ? Math.max(0, person.items.findIndex((m) => m.seq === null || m.seq > person.chat.readUpTo)) : 0),
+    () =>
+      person && !mine
+        ? Math.max(0, person.items.findIndex((m) => m.seq === null || m.seq > person.chat.readUpTo))
+        : Math.max(0, person?.items.findIndex((m) => m.id === startAt) ?? 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatId, loaded],
   );
@@ -85,12 +96,17 @@ export default function StatusViewer() {
   const [typing, setTyping] = useState(false);
   const [seenBy, setSeenBy] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  // A video's sound, on or off (kept for the next video too, like WhatsApp's).
+  const [quiet, setQuiet] = useState(false);
+  const replyBox = useRef<TextInputInstance>(null);
   const [ready, setReady] = useState(false);
   const [reply, setReply] = useState('');
   // Forwarding it: the chats to send to show over it, so it waits until back here.
   const [away, setAway] = useState(false);
   useFocusEffect(useCallback(() => setAway(false), []));
-  const paused = holding || typing || seenBy || deleting || away || !ready;
+  const paused = holding || typing || seenBy || deleting || away || menu || reporting || !ready;
 
   // Nothing (left) to show: close.
   useEffect(() => {
@@ -136,7 +152,12 @@ export default function StatusViewer() {
 
   // The bar for the one showing fills over its time; when full, the next.
   const progress = useSharedValue(0);
-  const length = item?.file?.kind === 'video' ? Math.min(STATUS_VIDEO_MAX_MS, item.file.duration || 15_000) : STATUS_SHOW_MS;
+  const length =
+    item?.file?.kind === 'video'
+      ? Math.min(STATUS_VIDEO_MAX_MS, item.file.duration || 15_000)
+      : item?.file?.kind === 'voice'
+        ? Math.min(STATUS_VOICE_MAX_MS, item.file.duration || STATUS_SHOW_MS)
+        : STATUS_SHOW_MS;
   const key = item ? `${item.chatId}/${item.id}` : '';
   useEffect(() => {
     progress.value = 0;
@@ -154,20 +175,56 @@ export default function StatusViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, paused, length]);
 
-  // Swipe down to close.
+  /** The next (or the one before) person, by a swipe sideways. */
+  function nextPerson(step: 1 | -1) {
+    if (!person) return;
+    const i = order.findIndex((p) => p.chat.id === person.chat.id);
+    const to = order[i + step];
+    if (!to) return step > 0 ? close() : undefined;
+    setChatId(to.chat.id);
+    setIndex(null);
+    setReady(false);
+  }
+  function swipedUp() {
+    if (mine) setSeenBy(true);
+    else replyBox.current?.focus();
+  }
+
+  // Swipe down to close; up for the reply box (theirs) or who saw it (mine); sideways to the next
+  // or last person, with a turn like WhatsApp's.
   const pull = useSharedValue(0);
+  const side = useSharedValue(0);
+  const axis = useSharedValue(0); // 0 not yet, 1 up and down, 2 sideways
   const pan = usePanGesture({
-    activeOffsetY: [-1000, 18],
-    failOffsetX: [-24, 24],
+    activeOffsetY: [-18, 18],
+    activeOffsetX: [-18, 18],
     onUpdate: (e) => {
-      pull.value = Math.max(0, e.translationY);
+      if (!axis.value) axis.value = Math.abs(e.translationX) > Math.abs(e.translationY) ? 2 : 1;
+      if (axis.value === 1) pull.value = Math.max(0, e.translationY);
+      else side.value = e.translationX;
     },
     onDeactivate: (e) => {
-      if (e.translationY > 120) scheduleOnRN(close);
+      if (axis.value === 1) {
+        if (e.translationY > 120) scheduleOnRN(close);
+        else if (e.translationY < -80) scheduleOnRN(swipedUp);
+      } else if (axis.value === 2) {
+        if (e.translationX < -80) scheduleOnRN(nextPerson, (rtl ? -1 : 1) as 1 | -1);
+        else if (e.translationX > 80) scheduleOnRN(nextPerson, (rtl ? 1 : -1) as 1 | -1);
+      }
+      axis.value = 0;
       pull.value = withTiming(0);
+      side.value = withTiming(0, { duration: 180 });
     },
   });
-  const pullStyle = useAnimatedStyle(() => ({ transform: [{ translateY: pull.value }], opacity: 1 - Math.min(0.5, pull.value / 600) }));
+  const pullStyle = useAnimatedStyle(() => ({
+    transform: [
+      { perspective: 900 },
+      { translateY: pull.value },
+      { translateX: side.value * 0.6 },
+      { rotateY: `${interpolate(side.value, [-width, 0, width], [28, 0, -28])}deg` },
+    ],
+    opacity: 1 - Math.min(0.5, pull.value / 600) - Math.min(0.3, Math.abs(side.value) / 1200),
+  }));
 
   async function sendReply(quick?: string) {
     const words = quick ?? reply.trim();
@@ -223,7 +280,7 @@ export default function StatusViewer() {
             accessibilityLabel={t.nextStatus}
             testID="status-tap"
           >
-            <Shown key={key} m={item} playing={!paused} onReady={() => setReady(true)} />
+            <Shown key={key} m={item} playing={!paused} quiet={quiet} onReady={() => setReady(true)} />
           </Pressable>
           {/* Replying: the status dims behind the box (a tap on it puts the keyboard away). */}
           {typing && (
@@ -250,15 +307,19 @@ export default function StatusViewer() {
                   {listTime(item.sentAt, t)}
                 </Txt>
               </View>
+              {(item.file?.kind === 'video' || item.file?.kind === 'voice') && (
+                <IconButton icon={quiet ? 'speakerOff' : 'speaker'} label={quiet ? t.soundOn : t.soundOff} onPress={() => setQuiet(!quiet)} color="#FFFFFF" testID="status-sound" />
+              )}
               {mine && <IconButton icon="forward" label={t.forward} onPress={forward} color="#FFFFFF" flip testID="status-forward" />}
               {mine && <IconButton icon="trash" label={t.deleteStatus} onPress={() => setDeleting(true)} color="#FFFFFF" testID="status-delete" />}
+              {!mine && <IconButton icon="more" label={t.moreOptions} onPress={() => setMenu(true)} color="#FFFFFF" testID="status-menu" />}
             </View>
           </Animated.View>
 
           {/* Mine: who saw it. Theirs: reply and like. (Faded, not removed, while held, so the picture doesn't jump.) */}
           <Animated.View style={[{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: insets.bottom + 10 }, uiStyle]} pointerEvents={hidden ? 'none' : 'auto'}>
             {mine ? (
-              <Pressy onPress={() => setSeenBy(true)} label={t.seenBy} scale={0.95} testID="status-seen">
+              <Pressy ripple="light" onPress={() => setSeenBy(true)} label={t.seenBy} scale={0.95} testID="status-seen">
                 <View style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}>
                   <Icon name="eye" size={18} color="#FFFFFF" />
                   <Txt size={14} weight="700" color="#FFFFFF">
@@ -281,6 +342,7 @@ export default function StatusViewer() {
                 )}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
                   <TextInput
+                    ref={replyBox}
                     value={reply}
                     onChangeText={setReply}
                     onFocus={() => setTyping(true)}
@@ -309,9 +371,17 @@ export default function StatusViewer() {
             viewers.map((u) => (
               <View key={u} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 8 }}>
                 <Avatar id={u} name={core.name(u).replace(/^~ /, '')} size={40} />
-                <Txt size={15.5} weight="600" style={{ flex: 1 }} lines={1}>
-                  {core.name(u) || '…'}
-                </Txt>
+                <View style={{ flex: 1 }}>
+                  <Txt size={15.5} weight="600" lines={1}>
+                    {core.name(u) || '…'}
+                  </Txt>
+                  {/* When they saw it, like WhatsApp's ("Today, 10:42"). */}
+                  {!!item.readTimes?.[u] && (
+                    <Txt size={13} style={{ opacity: 0.65 }}>
+                      {whenLabel(item.readTimes[u], t)}
+                    </Txt>
+                  )}
+                </View>
                 {item.reactions?.[u] && <Txt size={18}>{item.reactions[u]}</Txt>}
               </View>
             ))
@@ -321,6 +391,38 @@ export default function StatusViewer() {
             </Txt>
           )}
         </Sheet>
+        <Popup visible={menu} onClose={() => setMenu(false)}>
+          <MenuItem
+            icon="muted"
+            label={person.muted ? t.unmute : t.mute}
+            onPress={() => {
+              setMenu(false);
+              core.setPrefs(person.chat.id, { muted: !person.muted });
+              toast(person.muted ? t.unmute : t.mute);
+            }}
+            testID="status-menu-mute"
+          />
+          <MenuItem
+            icon="chat"
+            label={t.message}
+            onPress={() => {
+              setMenu(false);
+              void core.client.openDirect(person.owner).then((c) => router.replace({ pathname: '/chat/[id]', params: { id: c.id } })).catch(() => toast(t.couldNot));
+            }}
+            testID="status-menu-message"
+          />
+          <MenuItem
+            icon="user"
+            label={t.viewContact}
+            onPress={() => {
+              setMenu(false);
+              void core.client.openDirect(person.owner).then((c) => router.replace({ pathname: '/info/[id]', params: { id: c.id } })).catch(() => toast(t.couldNot));
+            }}
+            testID="status-menu-contact"
+          />
+          <MenuItem icon="flag" label={t.report} onPress={() => (setMenu(false), setReporting(true))} testID="status-menu-report" />
+        </Popup>
+        <ReportSheet visible={reporting} chatId={person.chat.id} group={false} userId={person.owner} message={item} onClose={() => setReporting(false)} />
         <Dialog
           visible={deleting}
           onClose={() => setDeleting(false)}
@@ -355,7 +457,7 @@ function Bar({ state, progress }: { state: number | null; progress: SharedValue<
 }
 
 /** The status itself: words on a colour, a photo, or a video. */
-function Shown({ m, playing, onReady }: { m: Message; playing: boolean; onReady: () => void }) {
+function Shown({ m, playing, quiet, onReady }: { m: Message; playing: boolean; quiet: boolean; onReady: () => void }) {
   const t = useT();
   const f = m.file;
   const here = !!f && haveFile(m);
@@ -381,8 +483,9 @@ function Shown({ m, playing, onReady }: { m: Message; playing: boolean; onReady:
   if (!f) {
     return (
       <View style={{ flex: 1, backgroundColor: STATUS_BG[m.bg ?? 0] ?? STATUS_BG[0], alignItems: 'center', justifyContent: 'center', padding: 30 }}>
-        <Txt size={(m.text?.length ?? 0) > 120 ? 22 : 30} weight="700" color="#FFFFFF" align="center">
-          {m.text}
+        <Txt size={(m.text?.length ?? 0) > 120 ? 22 : 30} weight="700" color="#FFFFFF" align="center" style={m.font ? STATUS_FONTS[m.font] : undefined}>
+          {/* A web address can be tapped. */}
+          <RichWords text={m.text ?? ''} color="#FFFFFF" mine />
         </Txt>
       </View>
     );
@@ -401,14 +504,16 @@ function Shown({ m, playing, onReady }: { m: Message; playing: boolean; onReady:
           )}
         </View>
       ) : f.kind === 'video' ? (
-        <StatusVideo uri={f.local!} playing={playing} onReady={ready} />
+        <StatusVideo uri={f.local!} playing={playing} quiet={quiet} onReady={ready} />
+      ) : f.kind === 'voice' || f.kind === 'audio' ? (
+        <StatusVoice m={m} uri={f.local!} playing={playing} quiet={quiet} onReady={ready} />
       ) : (
         <Image source={{ uri: f.local }} style={{ flex: 1 }} contentFit="contain" onLoad={ready} onError={ready} />
       )}
       {!!m.text && (
         <View style={{ position: 'absolute', bottom: 16, start: 16, end: 16, alignItems: 'center' }}>
           <Txt size={15.5} color="#FFFFFF" align="center" style={{ backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-            {m.text}
+            <RichWords text={m.text} color="#FFFFFF" mine />
           </Txt>
         </View>
       )}
@@ -416,7 +521,50 @@ function Shown({ m, playing, onReady }: { m: Message; playing: boolean; onReady:
   );
 }
 
-function StatusVideo({ uri, playing, onReady }: { uri: string; playing: boolean; onReady: () => void }) {
+/** Turns a voice status's sound off or on. */
+function voiceOff(player: AudioPlayer, quiet: boolean) {
+  player.muted = quiet;
+}
+
+/** A voice status: its sender's photo on a colour, the bars of the recording, and it plays. */
+function StatusVoice({ m, uri, playing, quiet, onReady }: { m: Message; uri: string; playing: boolean; quiet: boolean; onReady: () => void }) {
+  const player = useAudioPlayer({ uri });
+  const bars = useMemo(() => barsOf(m.file?.waveform, 32), [m.file?.waveform]);
+  // Once, as it shows: any voice note playing elsewhere stops.
+  useEffect(() => {
+    stopAll();
+    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(() => {});
+    onReady();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (playing) player.play();
+    else player.pause();
+  }, [playing, player]);
+  useEffect(() => voiceOff(player, quiet), [quiet, player]);
+  return (
+    <View pointerEvents="none" style={{ flex: 1, backgroundColor: voiceColour(m.id), alignItems: 'center', justifyContent: 'center', gap: 28 }}>
+      <View>
+        <Avatar id={m.author} name={core.name(m.author)} size={120} />
+        <View style={{ position: 'absolute', end: -4, bottom: -4, width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="mic" size={22} color={voiceColour(m.id)} />
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 60 }}>
+        {bars.map((b, i) => (
+          <View key={i} style={{ width: 4, height: Math.max(6, b * 60), borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.85)' }} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** Turns a player's sound off or on. */
+function soundOff(player: VideoPlayer, quiet: boolean) {
+  player.muted = quiet;
+}
+
+function StatusVideo({ uri, playing, quiet, onReady }: { uri: string; playing: boolean; quiet: boolean; onReady: () => void }) {
   const player = useVideoPlayer({ uri }, (p) => {
     p.loop = false;
   });
@@ -431,6 +579,7 @@ function StatusVideo({ uri, playing, onReady }: { uri: string; playing: boolean;
     if (playing) player.play();
     else player.pause();
   }, [playing, player]);
+  useEffect(() => soundOff(player, quiet), [quiet, player]);
   // The video itself never takes the touch, so holding pauses it (and hides
   // everything over it) just like a photo: Android's video view kept it before.
   return (

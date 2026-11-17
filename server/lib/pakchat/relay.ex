@@ -282,15 +282,17 @@ defmodule Pakchat.Relay do
   ## Receipts (the ticks)
 
   @doc """
-  Tells `to_user_id` that their messages `seqs` were delivered or read.
+  Tells `to_user_id` that their messages `seqs` were delivered, read, or
+  (voice notes) played: WhatsApp's blue mic, "played".
 
-  Receipts carry no words, only numbers. "read" receipts in a one-to-one
-  chat follow the read receipts setting: if either person has turned it
-  off, the other doesn't get them (as in WhatsApp). The reader's own other
-  devices always hear about "read", so they can clear the unread count.
+  Receipts carry no words, only numbers. "read" and "played" receipts in a
+  one-to-one chat follow the read receipts setting: if either person has
+  turned it off, the other doesn't get them (as in WhatsApp). The reader's
+  own other devices always hear about "read" and "played", so they can clear
+  the unread count and show it played there too.
   """
   def send_receipt(%Device{} = sender, chat_id, to_user_id, status, seqs)
-      when status in ["delivered", "read"] do
+      when status in ["delivered", "read", "played"] do
     # Ticks are the busiest thing the server does (one per message per
     # person), so this asks the database as little as it can: the chat, its
     # people and their devices in one go.
@@ -303,7 +305,7 @@ defmodule Pakchat.Relay do
       targets =
         Enum.filter(devices, fn {user, _, id} ->
           id != nil and id != sender.id and
-            ((user == to_user_id and them?) or (user == sender.user_id and status == "read"))
+            ((user == to_user_id and them?) or (user == sender.user_id and status != "delivered"))
         end)
 
       body = Jason.encode!(%{status: status, seqs: seqs, to: to_user_id})
@@ -378,7 +380,7 @@ defmodule Pakchat.Relay do
   defp check_seqs(_), do: {:error, :bad_request}
 
   # Does the other person get this receipt? Not if it's to myself, not if
-  # either of us blocked the other, and "read" only if read receipts allow it.
+  # either of us blocked the other, and "read" or "played" only if read receipts allow it.
   defp receipt_allowed?(chat, from, to, status, blocked?) do
     from != to and not blocked? and
       (status == "delivered" or read_receipts_allowed?(chat, from, to))

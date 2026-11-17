@@ -28,9 +28,10 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { bodyLine } from '../format';
 import { Icon } from '../icons';
-import { fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
+import { Avatar, fontStyle, Glass, IconButton, Pressy, Txt } from '../kit';
 import { fadeIn, fadeOut, quick, riseIn, thud } from '../motion';
 import { ExtrasPanel } from './ExtrasPanel';
+import { QuoteThumb } from './QuoteThumb';
 import { useRoundRecorder, type RoundVideo } from './RoundRecorder';
 import { useVoiceRecorder } from './VoiceRecorder';
 
@@ -236,9 +237,11 @@ export const Composer = memo(function Composer({
             <Glass strong style={{ marginHorizontal: 10, marginBottom: 6, paddingVertical: 4, borderRadius: 18 }}>
               {suggestions.map((p) => (
                 <Pressy key={p.id} onPress={() => mention(p)} label={p.name} scale={0.98}>
-                  <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-                    <Txt size={15} weight="600" color={theme.accInk}>
-                      @{p.name}
+                  {/* Each person's photo and name, like WhatsApp. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 7 }}>
+                    <Avatar id={p.id} name={p.name} size={34} />
+                    <Txt size={15} weight="600" lines={1} style={{ flex: 1 }}>
+                      {p.name}
                     </Txt>
                   </View>
                 </Pressy>
@@ -268,13 +271,17 @@ export const Composer = memo(function Composer({
           <Glass style={{ flex: 1, padding: 4, borderRadius: 24, ...(theme.dark ? null : { backgroundColor: '#FFFFFF' }) }}>
             {banner && !recording && (
               <Animated.View entering={riseIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 2, marginBottom: 4 }}>
-                <View style={{ flex: 1, borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, paddingHorizontal: 10, paddingVertical: 6 }}>
-                  <Txt size={13} weight="700" color={theme.accInk}>
-                    {editing ? t.editing : fill(t.replyingTo, { name: banner.author === core.myId ? t.youWord : core.name(banner.author) || '…' })}
-                  </Txt>
-                  <Txt size={13} color={theme.muted} lines={1}>
-                    {bodyLine(banner, t)}
-                  </Txt>
+                <View style={{ flex: 1, flexDirection: 'row', borderStartWidth: 3, borderColor: theme.acc, borderRadius: 14, backgroundColor: theme.accSoft, overflow: 'hidden' }}>
+                  <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    {/* Just the name, like WhatsApp (not "Replying to …"). */}
+                    <Txt size={13} weight="700" color={theme.accInk} lines={1}>
+                      {editing ? t.editing : banner.author === core.myId ? t.youWord : core.name(banner.author) || '…'}
+                    </Txt>
+                    <Txt size={13} color={theme.muted} lines={1}>
+                      {bodyLine(banner, t)}
+                    </Txt>
+                  </View>
+                  {!editing && <QuoteThumb m={banner} size={46} />}
                 </View>
                 <IconButton
                   icon="close"

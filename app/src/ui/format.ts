@@ -113,6 +113,9 @@ export function systemText(m: Message, t: Strings) {
       const s = Number(e.seconds ?? 0);
       return s ? fill(t.sysTimerOn, { name: by, time: timerLabel(s, t) }) : fill(t.sysTimerOff, { name: by });
     }
+    case 'code_changed':
+      // Noted by this phone when their security code changed (client.codeChanged).
+      return fill(t.sysCodeChanged, { name: by });
     case 'call': {
       // A call, noted in the chat by this phone (core/calls.ts).
       const video = e.video === true;

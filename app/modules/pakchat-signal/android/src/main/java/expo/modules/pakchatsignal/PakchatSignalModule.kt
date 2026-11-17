@@ -295,8 +295,8 @@ class PakchatSignalModule : Module() {
     Function("openAutostart") { Autostart.open(context()) }
 
     /** A smaller copy of a video, for sending (VideoShrink.kt). */
-    AsyncFunction("shrinkVideo") { input: String, output: String, startMs: Double, endMs: Double, hd: Boolean, promise: Promise ->
-      VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, promise)
+    AsyncFunction("shrinkVideo") { input: String, output: String, startMs: Double, endMs: Double, hd: Boolean, mute: Boolean, promise: Promise ->
+      VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, mute, promise)
     }
 
     /**
@@ -341,6 +341,12 @@ class PakchatSignalModule : Module() {
 
     /** Shows the app over the lock screen during a call (and keeps the screen on), or stops. */
     Function("callShowOverLock") { on: Boolean, keepOn: Boolean -> CallLockScreen.show(on, keepOn) }
+
+    /** Is the phone locked (the lock screen showing)? A call there is answered by sliding up, like WhatsApp. */
+    Function("phoneLocked") {
+      val km = context().getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+      km?.isKeyguardLocked ?: false
+    }
 
     /** Can calls wake the screen? Android 14+ lets people turn that off. */
     Function("callFullScreenAllowed") { CallAlerts.fullScreenAllowed(context()) }

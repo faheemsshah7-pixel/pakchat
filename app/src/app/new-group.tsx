@@ -2,9 +2,12 @@
 //
 // Step 1: pick people. Each one you pick pops into the row at the top.
 // Step 2: give the group a name, and (like WhatsApp) set its disappearing
-// messages and Group permissions before it's made, then Create.
+// messages and Group permissions before it's made, and pick its photo (the
+// camera on the round picture), then Create. The photo goes up once the group
+// is made (its upload needs the group).
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
+import { Image } from 'expo-image';
 import { BackHandler, FlatList, ScrollView, View } from 'react-native';
 import Animated, { LinearTransition } from 'react-native-reanimated';
 
@@ -18,6 +21,8 @@ import { TIMERS, timerLabel } from '../ui/format';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt, useKeyboardLift } from '../ui/kit';
 import { fadeIn, fadeOut, popIn, popOut } from '../ui/motion';
 import { MenuItem, Sheet, toast } from '../ui/overlays';
+import { CameraBadge } from '../ui/PhotoSheet';
+import { pickPhoto, uploadPhoto } from '../core/photos';
 
 export default function NewGroup() {
   const { add } = useLocalSearchParams<{ add?: string }>();
@@ -38,6 +43,8 @@ export default function NewGroup() {
   const [timer, setTimer] = useState(defaultTimer);
   const [sheet, setSheet] = useState<'timer' | 'permissions' | null>(null);
   const [busy, setBusy] = useState(false);
+  // The group's photo, picked on the name step (a file on this phone until it's made).
+  const [photo, setPhoto] = useState<string | null>(null);
 
   const inGroup = new Set(existing?.members.map((m) => m.userId) ?? []);
   const list = useMemo(
@@ -92,6 +99,12 @@ export default function NewGroup() {
         const left = missing(chat.members);
         if (left.length) toast(fill(t.couldntAdd, { names: left.map((p) => p.name).join(', ') }), undefined, 5000);
         router.replace({ pathname: '/chat/[id]', params: { id: chat.id } });
+        if (photo) {
+          toast(t.uploadingPhoto);
+          void uploadPhoto(photo, chat.id)
+            .then((p) => core.client.updateGroup(chat.id, { photo: p }))
+            .catch((err) => toast(isOffline(err) ? t.offline : t.couldNot));
+        }
       }
     } catch (err) {
       toast(isOffline(err) ? t.offline : t.couldNot);
@@ -106,9 +119,10 @@ export default function NewGroup() {
         <TopBar title={t.newGroup} onBack={() => setStep(1)} />
         <Animated.View style={{ padding: 16, gap: 14 }}>
           <View style={{ alignItems: 'center', marginVertical: 10 }}>
-            <View>
-              <Avatar id={title || 'new'} name={title} size={96} group />
-            </View>
+            <Pressy onPress={() => void pickPhoto().then((uri) => uri && setPhoto(uri), () => toast(t.couldNot))} label={t.addPhoto} scale={0.95} testID="new-group-photo">
+              {photo ? <Image source={{ uri: photo }} style={{ width: 96, height: 96, borderRadius: 96 * 0.32 }} /> : <Avatar id={title || 'new'} name={title} size={96} group />}
+              <CameraBadge size={30} />
+            </Pressy>
           </View>
           <Field value={title} onChangeText={setTitle} placeholder={t.groupName} maxLength={50} autoFocus testID="group-title" />
           <Glass style={{ borderRadius: 18 }}>

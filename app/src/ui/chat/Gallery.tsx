@@ -19,9 +19,9 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { duration } from '../format';
 import { Icon } from '../icons';
-import { Button, Chip, IconButton, Pressy, Txt } from '../kit';
+import { Button, IconButton, Pressy, Txt } from '../kit';
 import { popIn, popOut, tick } from '../motion';
-import { toast } from '../overlays';
+import { Sheet, toast } from '../overlays';
 import { GalleryThumb } from './GalleryThumb';
 
 /** The most you can pick at once, as on WhatsApp. */
@@ -114,6 +114,7 @@ export function GalleryScreen({ ask }: { ask: Ask }) {
   const { width } = useWindowDimensions();
   const [albums, setAlbums] = useState<MediaLibrary.Album[]>([]);
   const [album, setAlbum] = useState<string | null>(null);
+  const [albumMenu, setAlbumMenu] = useState(false);
   const [items, setItems] = useState<MediaLibrary.Asset[] | null>(null);
   const [picked, setPicked] = useState<MediaLibrary.Asset[]>([]);
   const more = useRef<{ after?: string; done: boolean; busy: boolean }>({ done: false, busy: false });
@@ -187,19 +188,46 @@ export function GalleryScreen({ ask }: { ask: Ask }) {
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }} testID="gallery">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 6 }}>
         <IconButton icon="close" label={t.close} onPress={() => ask.done([])} testID="gallery-close" />
-        <Txt size={18} weight="700" style={{ flex: 1 }}>
-          {picked.length ? fill(t.nSelected, { n: picked.length }) : t.gallery}
-        </Txt>
+        {/* The albums are a drop-down on the title, like WhatsApp's. */}
+        <View style={{ flex: 1, alignItems: 'flex-start' }}>
+          {picked.length || !albums.length ? (
+            <Txt size={18} weight="700">
+              {picked.length ? fill(t.nSelected, { n: picked.length }) : t.gallery}
+            </Txt>
+          ) : (
+            <Pressy onPress={() => setAlbumMenu(true)} label={t.albumsWord} scale={0.97} testID="gallery-albums">
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingEnd: 8 }}>
+                <Txt size={18} weight="700" lines={1} style={{ flexShrink: 1 }}>
+                  {album ? (albums.find((a) => a.id === album)?.title ?? t.gallery) : t.recentsWord}
+                </Txt>
+                <View style={{ transform: [{ rotate: '90deg' }] }}>
+                  <Icon name="chevron" size={16} color={theme.muted} />
+                </View>
+              </View>
+            </Pressy>
+          )}
+        </View>
         <IconButton icon="folder" label={t.otherGallery} onPress={() => ask.done('system')} testID="gallery-system" />
       </View>
-      {albums.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingBottom: 8 }} style={{ flexGrow: 0 }}>
-          <Chip label={t.recentsWord} on={album === null} onPress={() => setAlbum(null)} testID="gallery-album-recents" />
-          {albums.map((a) => (
-            <Chip key={a.id} label={a.title} count={a.assetCount} on={album === a.id} onPress={() => setAlbum(a.id)} testID={`gallery-album-${a.title}`} />
+      <Sheet visible={albumMenu} onClose={() => setAlbumMenu(false)} title={t.albumsWord}>
+        <ScrollView style={{ maxHeight: 420 }}>
+          {[{ id: null as string | null, title: t.recentsWord, assetCount: 0 }, ...albums].map((a) => (
+            <Pressy key={a.id ?? 'recents'} onPress={() => (setAlbum(a.id), setAlbumMenu(false))} label={a.title} scale={0.98} testID={a.id ? `gallery-album-${a.title}` : 'gallery-album-recents'}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 }}>
+                <Icon name={album === a.id ? 'check' : 'photo'} size={19} color={album === a.id ? theme.acc : theme.muted} />
+                <Txt size={15.5} weight={album === a.id ? '700' : '500'} style={{ flex: 1 }} lines={1}>
+                  {a.title}
+                </Txt>
+                {a.assetCount > 0 && (
+                  <Txt size={13} color={theme.muted}>
+                    {a.assetCount}
+                  </Txt>
+                )}
+              </View>
+            </Pressy>
           ))}
         </ScrollView>
-      )}
+      </Sheet>
       {items === null ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={theme.acc} />
       ) : (
@@ -232,7 +260,14 @@ export function GalleryScreen({ ask }: { ask: Ask }) {
           renderItem={({ item }) => {
             const n = picked.findIndex((p) => p.id === item.id);
             return (
-              <Pressy onPress={() => toggle(item)} label={item.mediaType === 'video' ? t.videoLabel : t.photoLabel} scale={0.94} testID="gallery-item">
+              // Like WhatsApp's: a tap opens that one in the editor at once; hold (or the circle) picks several.
+              <Pressy
+                onPress={() => (picked.length ? toggle(item) : ask.done([pickedOf(item)]))}
+                onLongPress={() => toggle(item)}
+                label={item.mediaType === 'video' ? t.videoLabel : t.photoLabel}
+                scale={0.94}
+                testID="gallery-item"
+              >
                 <View style={{ width: size, height: size, backgroundColor: theme.glass }}>
                   <GalleryThumb asset={item} size={size} bg={theme.glass} />
                   {item.mediaType === 'video' && (
@@ -244,11 +279,9 @@ export function GalleryScreen({ ask }: { ask: Ask }) {
                     </View>
                   )}
                   {n >= 0 && <View style={{ position: 'absolute', inset: 0, backgroundColor: theme.acc, opacity: 0.25 }} />}
+                  <Pressy onPress={() => toggle(item)} label={t.selectWord} hitSlop={10} style={{ position: 'absolute', top: 5, end: 5 }} testID="gallery-pick">
                   <View
                     style={{
-                      position: 'absolute',
-                      top: 5,
-                      end: 5,
                       width: 22,
                       height: 22,
                       borderRadius: 11,
@@ -265,6 +298,7 @@ export function GalleryScreen({ ask }: { ask: Ask }) {
                       </Txt>
                     )}
                   </View>
+                  </Pressy>
                 </View>
               </Pressy>
             );

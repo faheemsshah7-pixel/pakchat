@@ -193,7 +193,13 @@ export class FakeServer {
 
   private me(userId: string): Me {
     const u = this.users.get(userId)!;
-    return { id: u.id, email: u.email, phone: u.phone ?? null, name: u.name, privacy: { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone', about: 'everyone', groups: 'everyone' } };
+    return {
+      id: u.id,
+      email: u.email,
+      phone: u.phone ?? null,
+      name: u.name,
+      privacy: { lastSeen: 'everyone', online: 'everyone', readReceipts: true, photo: 'everyone', about: 'everyone', groups: 'everyone', except: { last_seen: [], photo: [], about: [], groups: [] } },
+    };
   }
 
   private byToken(token: string) {
@@ -437,7 +443,7 @@ export class FakeServer {
     const status = p.status as string;
     const targets = chat.members
       .flatMap((m) => this.devicesOf(m.userId))
-      .filter((d) => d.uuid !== sender.uuid && ((d.userId === to && to !== sender.userId) || (d.userId === sender.userId && status === 'read')));
+      .filter((d) => d.uuid !== sender.uuid && ((d.userId === to && to !== sender.userId) || (d.userId === sender.userId && status !== 'delivered')));
     this.store(
       targets.map((d) => [
         d.uuid,

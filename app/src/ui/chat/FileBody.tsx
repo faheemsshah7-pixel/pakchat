@@ -123,10 +123,10 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
           style={{
             width: WIDE,
             height,
-            borderRadius: 14,
+            // It fills the bubble, with a thin edge round it (Bubble.tsx), like WhatsApp.
+            borderRadius: 7,
             overflow: 'hidden',
             backgroundColor: theme.glass,
-            marginBottom: 4,
           }}
         >
           {f.gif && here ? (
@@ -192,6 +192,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
     );
   }
 
+  const ext = (/\.([a-z0-9]{1,5})$/i.exec(f.name ?? '')?.[1] ?? '').toUpperCase();
   return (
     <Pressy onPress={tap} onLongPress={onPick} label={f.name ?? t.document} scale={0.98} testID="file-doc">
       <View
@@ -206,24 +207,33 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
           marginBottom: 4,
         }}
       >
-        <View
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 10,
-            backgroundColor: theme.accSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon name={f.kind === 'audio' || f.kind === 'voice' ? 'music' : 'doc'} size={21} color={theme.accInk} />
-        </View>
+        {/* Coloured by type, with the type written on it, like WhatsApp (PDF red, Word blue…). */}
+        {docColour(ext) ? (
+          <View style={{ width: 36, height: 44, borderRadius: 6, borderTopEndRadius: 12, backgroundColor: docColour(ext)!, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 6 }} testID={`doc-${ext}`}>
+            <Txt size={ext.length > 3 ? 9.5 : 11} weight="800" color="#FFFFFF">
+              {ext}
+            </Txt>
+          </View>
+        ) : (
+          <View
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              backgroundColor: theme.accSoft,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon name={f.kind === 'audio' || f.kind === 'voice' ? 'music' : 'doc'} size={21} color={theme.accInk} />
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           <Txt size={14.5} weight="600" color={ink} lines={2}>
             {f.name ?? t.document}
           </Txt>
           <Txt size={12} color={meta}>
-            {[fileSize(f.size), (/\.([a-z0-9]+)$/i.exec(f.name ?? '')?.[1] ?? '').toUpperCase()].filter(Boolean).join(' · ')}
+            {[fileSize(f.size), ext].filter(Boolean).join(' · ')}
           </Txt>
         </View>
         {badge && (
@@ -247,6 +257,18 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
       </View>
     </Pressy>
   );
+}
+
+/** A document's colour by its type (none: the plain document icon). */
+function docColour(ext: string) {
+  if (ext === 'PDF') return '#E5483D';
+  if (['DOC', 'DOCX', 'ODT', 'RTF'].includes(ext)) return '#2F6FDE';
+  if (['XLS', 'XLSX', 'CSV', 'ODS'].includes(ext)) return '#1E9E5A';
+  if (['PPT', 'PPTX', 'ODP'].includes(ext)) return '#E8702A';
+  if (['ZIP', 'RAR', '7Z', 'TAR', 'GZ'].includes(ext)) return '#8A63C9';
+  if (ext === 'APK') return '#3BA55C';
+  if (['TXT', 'MD', 'JSON', 'XML', 'HTML'].includes(ext)) return '#6B7785';
+  return null;
 }
 
 /** A GIF: its little video, playing on a loop with no sound. */

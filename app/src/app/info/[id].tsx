@@ -6,10 +6,16 @@
 // who joins (and let in those waiting). A community's announcements group has
 // "Exit community" instead of leaving. Someone's info also shows the groups
 // you're both in, and Add to Favourites and Add to list, like WhatsApp's.
-import { formatPhone, roleOf } from '@pakchat/shared';
+// Under the buttons, the chat's latest photos and videos in a strip (tap
+// "Media, links and docs" for them all). A group's description can be edited
+// by whoever can edit its info; its members can be searched, and each one's
+// About shows under their name. Blocking, removing someone and leaving all ask
+// first (leaving offers "Mute instead").
+import { formatPhone, roleOf, type Message } from '@pakchat/shared';
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { View, type HostInstance } from 'react-native';
+import { ScrollView, View, type HostInstance } from 'react-native';
 import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { core } from '../../core/core';
@@ -21,7 +27,7 @@ import { ExportSheet } from '../../ui/ExportSheet';
 import { TonePicker, toneName } from '../../ui/TonePicker';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { lastSeen, TIMERS, timerLabel } from '../../ui/format';
+import { duration, lastSeen, TIMERS, timerLabel } from '../../ui/format';
 import { Icon, type IconName } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, Toggle, Txt } from '../../ui/kit';
 import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
@@ -30,7 +36,7 @@ import { ReportSheet } from '../../ui/ReportSheet';
 import { LeftGroupChoices } from '../../ui/DeleteChats';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
 import { MuteSheet, mutedLine } from '../../ui/MuteSheet';
-import { openPhoto } from '../../ui/zoom';
+import { openPhoto, openViewer } from '../../ui/zoom';
 
 export default function Info() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -53,6 +59,8 @@ export default function Info() {
   const [leftChoices, setLeftChoices] = useState<'left' | 'ask' | null>(null);
   const [timerOpen, setTimerOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
+  // "Report and block": blocked at once, then the report sheet (closing it leaves them blocked).
+  const [reportBlocked, setReportBlocked] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   // The photo at the top, for the full-screen one to grow out of.
   const photoRef = useRef<HostInstance>(null);
@@ -60,6 +68,27 @@ export default function Info() {
   const [listOpen, setListOpen] = useState(false);
   const [allMembers, setAllMembers] = useState(false);
   const [requests, setRequests] = useState<{ userId: string; at: number }[]>([]);
+  const [blocking, setBlocking] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [describing, setDescribing] = useState(false);
+  const [about, setAbout] = useState('');
+  const [find, setFind] = useState('');
+  // The latest photos and videos, for the strip (and how many there are).
+  const [media, setMedia] = useState<Message[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      void core.storage
+        .shared(id, 'media')
+        .then((l) => alive && setMedia(l))
+        .catch(() => {});
+    load();
+    const off = core.on(`messages:${id}`, load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [id]);
   const community = useChat(chat?.communityId ?? '');
   const rows = useChatList();
   const y = useSharedValue(0);
@@ -109,12 +138,15 @@ export default function Info() {
   const self = core.isSelfChat(chat);
   const sub = group ? fill(t.members, { n: chat.members.length }) : self ? t.messageYourself : lastSeen(presence, t);
 
+  /** Does it, or says it couldn't. True if it went. */
   async function act(work: () => Promise<unknown>, done?: string) {
     try {
       await work();
       if (done) toast(done);
+      return true;
     } catch {
       toast(t.couldNot);
+      return false;
     }
   }
 
@@ -135,7 +167,17 @@ export default function Info() {
   const picked = member ? chat.members.find((m) => m.userId === member) : null;
   // A big group shows its first few members, and "View all" for the rest, like WhatsApp (drawing
   // hundreds at once made the page slow to open).
-  const shownMembers = allMembers ? members : members.slice(0, SOME_MEMBERS);
+  // Searching shows every match.
+  const q = find.trim().toLowerCase();
+  const matching = q ? members.filter((m) => (m.userId === core.myId ? t.youWord : core.name(m.userId)).toLowerCase().includes(q)) : members;
+  const shownMembers = allMembers || q ? matching : members.slice(0, SOME_MEMBERS);
+  const maker = group && chat.createdBy ? (chat.createdBy === core.myId ? t.createdByYou : fill(t.createdByName, { name: core.name(chat.createdBy) || '…' })) : '';
+  /** One member's own chat (made if there isn't one yet). */
+  const direct = (userId: string, then: (chatId: string) => void) =>
+    void act(async () => {
+      const c = await core.client.openDirect(userId, defaultTimer());
+      then(c.id);
+    });
 
   return (
     <Screen>
@@ -162,7 +204,7 @@ export default function Info() {
             // It grows out of the photo here, and shrinks back into it (owner, 2 Nov).
             <Pressy onPress={() => void openPhoto(id, title, photoRef.current, true)} label={t.profilePhoto} scale={0.95} testID="info-photo">
               <View ref={photoRef} collapsable={false}>
-                <Avatar id={id} name={title} size={104} group={group} online={!!presence?.online} />
+                <Avatar id={id} name={title} size={104} group={group} />
               </View>
             </Pressy>
           )}
@@ -179,9 +221,21 @@ export default function Info() {
               {person.about}
             </Txt>
           )}
-          {group && !!chat.description && (
+          {group && !!chat.description && !canEditInfo && (
             <Txt size={14} color={theme.sectionText} align="center" style={{ paddingHorizontal: 30 }}>
               {chat.description}
+            </Txt>
+          )}
+          {canEditInfo && (
+            <Pressy onPress={() => (setAbout(chat.description ?? ''), setDescribing(true))} label={t.groupDescription} scale={0.98} testID="group-description">
+              <Txt size={14} color={chat.description ? theme.sectionText : theme.accInk} weight={chat.description ? '400' : '600'} align="center" style={{ paddingHorizontal: 30 }}>
+                {chat.description || t.addDescription}
+              </Txt>
+            </Pressy>
+          )}
+          {!!maker && (
+            <Txt size={12.5} color={theme.muted} align="center">
+              {maker}
             </Txt>
           )}
         </Animated.View>
@@ -230,7 +284,14 @@ export default function Info() {
         )}
 
         <Glass style={{ marginHorizontal: 12, marginTop: 16 }}>
-          <SettingRow icon="photo" title={t.media} onPress={() => router.push({ pathname: '/media/[id]', params: { id } })} testID="info-media" />
+          <SettingRow icon="photo" title={t.media} sub={media?.length ? String(media.length) : undefined} onPress={() => router.push({ pathname: '/media/[id]', params: { id } })} testID="info-media" />
+          {!!media?.length && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingHorizontal: 14, paddingBottom: 12 }}>
+              {media.slice(0, 12).map((m) => (
+                <StripTile key={`${m.author}/${m.id}`} m={m} />
+              ))}
+            </ScrollView>
+          )}
           <Divider />
           <SettingRow icon="star" title={t.starred} onPress={() => router.push({ pathname: '/starred', params: { chat: id } })} />
           <Divider />
@@ -388,6 +449,19 @@ export default function Info() {
                   <Divider />
                 </>
               )}
+              {members.length > 6 && (
+                <>
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+                    <Field icon="search" value={find} onChangeText={setFind} placeholder={t.searchMembers} testID="member-search" />
+                  </View>
+                  <Divider />
+                </>
+              )}
+              {shownMembers.length === 0 && !!find.trim() && (
+                <Txt size={14} color={theme.muted} style={{ padding: 16 }}>
+                  {t.noResults}
+                </Txt>
+              )}
               {shownMembers.map((mb, i) => (
                 <Animated.View key={mb.userId}>
                   {i > 0 && <Divider />}
@@ -398,6 +472,11 @@ export default function Info() {
                         <Txt size={15.5} weight="600" lines={1}>
                           {mb.userId === core.myId ? t.youWord : core.name(mb.userId) || '…'}
                         </Txt>
+                        {!!core.people[mb.userId]?.about && (
+                          <Txt size={13} color={theme.muted} lines={1}>
+                            {core.people[mb.userId]?.about}
+                          </Txt>
+                        )}
                       </View>
                       {mb.role === 'admin' && (
                         <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: theme.accSoft }}>
@@ -410,7 +489,7 @@ export default function Info() {
                   </Pressy>
                 </Animated.View>
               ))}
-              {members.length > SOME_MEMBERS && !allMembers && (
+              {members.length > SOME_MEMBERS && !allMembers && !q && (
                 <>
                   <Divider />
                   <SettingRow title={t.viewAll} onPress={() => setAllMembers(true)} testID="info-all-members" />
@@ -442,7 +521,7 @@ export default function Info() {
                 title={isBlocked ? t.unblock : fill(t.blockName, { name: title })}
                 danger={!isBlocked}
                 chevron={false}
-                onPress={() => void act(() => core.block(other, !isBlocked), isBlocked ? t.unblocked : t.blocked)}
+                onPress={() => (isBlocked ? void act(() => core.block(other, false), t.unblocked) : setBlocking(true))}
                 testID="block"
               />
             )
@@ -457,14 +536,11 @@ export default function Info() {
             <MenuItem
               icon="chat"
               label={fill(t.messageName, { name: core.name(picked.userId) })}
-              onPress={() => {
-                setMember(null);
-                void act(async () => {
-                  const c = await core.client.openDirect(picked.userId, defaultTimer());
-                  router.push({ pathname: '/chat/[id]', params: { id: c.id } });
-                });
-              }}
+              onPress={() => (setMember(null), direct(picked.userId, (c) => router.push({ pathname: '/chat/[id]', params: { id: c } })))}
             />
+            <MenuItem icon="calls" label={fill(t.callPerson, { name: core.name(picked.userId) })} onPress={() => (setMember(null), direct(picked.userId, (c) => void startCall(c, false, t)))} testID="member-call" />
+            <MenuItem icon="video" label={fill(t.videoCallPerson, { name: core.name(picked.userId) })} onPress={() => (setMember(null), direct(picked.userId, (c) => void startCall(c, true, t)))} testID="member-video" />
+            <MenuItem icon="user" label={fill(t.viewName, { name: core.name(picked.userId) })} onPress={() => (setMember(null), direct(picked.userId, (c) => router.push({ pathname: '/info/[id]', params: { id: c } })))} testID="member-view" />
             {amAdmin && (
               <MenuItem
                 icon="shield"
@@ -481,10 +557,7 @@ export default function Info() {
                 icon="leave"
                 danger
                 label={fill(t.removeName, { name: core.name(picked.userId) })}
-                onPress={() => {
-                  setMember(null);
-                  void act(() => core.client.removeMember(id, picked.userId));
-                }}
+                onPress={() => (setMember(null), setRemoving(picked.userId))}
                 testID="remove-member"
               />
             )}
@@ -507,6 +580,71 @@ export default function Info() {
         </View>
       </Sheet>
 
+      <Sheet visible={describing} onClose={() => setDescribing(false)} title={t.groupDescription}>
+        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 12 }}>
+          <Field value={about} onChangeText={setAbout} placeholder={t.addDescription} maxLength={2048} multiline style={{ maxHeight: 180 }} testID="group-description-field" />
+          <Button
+            title={t.save}
+            onPress={() => {
+              setDescribing(false);
+              if (about.trim() !== (chat.description ?? '')) void act(() => core.client.updateGroup(id, { description: about.trim() }));
+            }}
+            testID="group-description-save"
+          />
+        </View>
+      </Sheet>
+
+      <Dialog
+        visible={blocking}
+        onClose={() => setBlocking(false)}
+        title={fill(t.blockName, { name: title })}
+        text={t.blockNote}
+        buttons={[
+          {
+            label: t.reportAndBlock,
+            danger: true,
+            testID: 'confirm-report-block',
+            onPress: () => {
+              setBlocking(false);
+              if (!other) return;
+              void act(() => core.block(other, true), t.blocked).then((ok) => {
+                if (!ok) return;
+                setReportBlocked(true);
+                setReporting(true);
+              });
+            },
+          },
+          {
+            label: t.block,
+            danger: true,
+            testID: 'confirm-block',
+            onPress: () => {
+              setBlocking(false);
+              if (other) void act(() => core.block(other, true), t.blocked);
+            },
+          },
+          { label: t.cancel, onPress: () => setBlocking(false) },
+        ]}
+      />
+      <Dialog
+        visible={removing !== null}
+        onClose={() => setRemoving(null)}
+        title={fill(t.removeMemberSure, { name: removing ? core.name(removing) : '', group: title })}
+        buttons={[
+          {
+            label: t.removeWord,
+            danger: true,
+            testID: 'confirm-remove-member',
+            onPress: () => {
+              const who = removing;
+              setRemoving(null);
+              if (who) void act(() => core.client.removeMember(id, who));
+            },
+          },
+          { label: t.cancel, onPress: () => setRemoving(null) },
+        ]}
+      />
+
       <Sheet visible={timerOpen} onClose={() => setTimerOpen(false)} title={t.disappearing}>
         <View style={{ paddingHorizontal: 16, gap: 4 }}>
           {TIMERS.map((s) => (
@@ -527,7 +665,7 @@ export default function Info() {
       <ExportSheet visible={exportOpen} chatId={id} onClose={() => setExportOpen(false)} />
       <ChatLockSheet visible={lockOpen} chatId={id} onClose={() => setLockOpen(false)} />
       <AddToListSheet visible={listOpen} chatIds={[id]} onClose={() => setListOpen(false)} />
-      <ReportSheet visible={reporting} chatId={id} group={group} userId={group ? null : other} onClose={() => setReporting(false)} />
+      <ReportSheet visible={reporting} chatId={id} group={group} userId={group ? null : other} blocked={reportBlocked} onClose={() => (setReporting(false), setReportBlocked(false))} />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => core.mute(id, ms)} />
       <PhotoSheet visible={photoOpen} onClose={() => setPhotoOpen(false)} has={!!chat.photo} chatId={id} title={title} />
 
@@ -561,7 +699,9 @@ export default function Info() {
         visible={leaving && !ann}
         onClose={() => setLeaving(false)}
         title={fill(t.leaveSure, { name: title })}
+        text={prefs.muted ? undefined : t.leaveMuteNote}
         buttons={[
+          ...(prefs.muted ? [] : [{ label: t.muteInstead, testID: 'leave-mute-instead', onPress: () => (setLeaving(false), setMuting(true)) }]),
           {
             label: t.leaveGroup,
             danger: true,
@@ -584,3 +724,28 @@ export default function Info() {
 
 /** How many members a group's info shows before "View all". */
 const SOME_MEMBERS = 12;
+
+/** One photo or video in Info's strip. */
+function StripTile({ m }: { m: Message }) {
+  const { theme } = useLook();
+  const f = m.file!;
+  const source = f.kind === 'image' && f.local ? { uri: f.local } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
+  const spot = useRef<HostInstance>(null);
+  return (
+    <Pressy onPress={() => void openViewer(m, spot.current)} label={f.kind} scale={0.95} testID="info-media-tile">
+      <View ref={spot} collapsable={false} style={{ width: 76, height: 76, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.glass }}>
+        {source && <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" blurRadius={f.local ? 0 : 4} />}
+        {f.kind === 'video' && (
+          <View style={{ position: 'absolute', start: 5, bottom: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Icon name="video" size={12} color="#FFFFFF" />
+            {!!f.duration && (
+              <Txt size={10.5} weight="600" color="#FFFFFF">
+                {duration(f.duration)}
+              </Txt>
+            )}
+          </View>
+        )}
+      </View>
+    </Pressy>
+  );
+}

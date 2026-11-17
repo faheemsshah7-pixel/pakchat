@@ -1,10 +1,11 @@
 // settings/index.tsx: Settings (from the chat list's ⋮ menu), laid out like
 // WhatsApp's: you at the top (tap for your Profile, the QR for your code),
 // then a plain list of pages. The 🔍 at the top searches every setting
-// (ui/SettingsSearch.tsx), like WhatsApp.
+// (ui/SettingsSearch.tsx), like WhatsApp. At the end, Invite a friend shares a
+// note with the website's link.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { BackHandler, ScrollView, View } from 'react-native';
+import { BackHandler, ScrollView, Share, View } from 'react-native';
 
 import { useAuth } from '../../core/hooks';
 import { useT } from '../../i18n';
@@ -83,6 +84,10 @@ export default function Settings() {
                 <SettingRow icon={p.icon} title={p.title} sub={p.sub} onPress={() => router.push(p.to)} testID={p.testID} />
               </View>
             ))}
+          </Glass>
+
+          <Glass style={{ marginTop: 14 }}>
+            <SettingRow icon="userPlus" title={t.inviteFriend} onPress={() => void Share.share({ message: t.inviteMessage }).catch(() => {})} testID="invite-friend" />
           </Glass>
         </ScrollView>
       )}

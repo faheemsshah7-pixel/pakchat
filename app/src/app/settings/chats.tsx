@@ -7,7 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { core, type FontSize } from '../../core/core';
+import { core, isOffline, type FontSize } from '../../core/core';
 import { allowGallery } from '../../core/files';
 import { useChatList, useSettings } from '../../core/hooks';
 import { outsideFor } from '../../core/lock';
@@ -31,6 +31,24 @@ export default function ChatsSettings() {
   }
   const rows = useChatList();
   const [archivingAll, setArchivingAll] = useState(false);
+  // Clear all chats (their messages go, the chats stay) or Delete all chats, like WhatsApp's.
+  // Delete all doesn't take me out of groups: a group I'm still in is cleared instead.
+  const [wiping, setWiping] = useState<'clear' | 'delete' | null>(null);
+  async function wipe(how: 'clear' | 'delete') {
+    setWiping(null);
+    try {
+      // Every chat, Locked chats too (the chat list leaves those out).
+      const all = (await core.client.chats()).filter((c) => (c.kind === 'direct' || c.kind === 'group') && !c.callLink);
+      for (const chat of all) {
+        const stays = chat.kind === 'group' && !chat.left;
+        if (how === 'delete' && !stays) await core.deleteChatHere(chat.id);
+        else await core.clearChat(chat.id);
+      }
+      toast(how === 'clear' ? t.chatsCleared : t.chatsDeleted);
+    } catch (err) {
+      toast(isOffline(err) ? t.offline : t.couldNot);
+    }
+  }
   const [sizing, setSizing] = useState(false);
   const sizes: { key: FontSize; label: string }[] = [
     { key: 'small', label: t.fontSmall },
@@ -132,6 +150,12 @@ export default function ChatsSettings() {
         <Glass style={{ marginTop: 14 }}>
           <SettingRow icon="upload" title={t.backup} onPress={() => router.push('/settings/backup')} testID="open-backup" />
         </Glass>
+
+        <Glass style={{ marginTop: 14 }}>
+          <SettingRow icon="ban" title={t.clearAllChats} danger chevron={false} onPress={() => setWiping('clear')} testID="clear-all-chats" />
+          <Divider />
+          <SettingRow icon="trash" title={t.deleteAllChats} danger chevron={false} onPress={() => setWiping('delete')} testID="delete-all-chats" />
+        </Glass>
       </ScrollView>
 
       {/* Font size: Small, Medium or Large, like WhatsApp's. */}
@@ -164,6 +188,16 @@ export default function ChatsSettings() {
         </View>
       </Sheet>
 
+      <Dialog
+        visible={wiping !== null}
+        onClose={() => setWiping(null)}
+        title={wiping === 'delete' ? `${t.deleteAllChats}?` : `${t.clearAllChats}?`}
+        text={wiping === 'delete' ? t.deleteAllNote : t.clearAllNote}
+        buttons={[
+          { label: wiping === 'delete' ? t.delete : t.clearChat, danger: true, testID: 'confirm-wipe-chats', onPress: () => wiping && void wipe(wiping) },
+          { label: t.cancel, onPress: () => setWiping(null) },
+        ]}
+      />
       <Dialog
         visible={archivingAll}
         onClose={() => setArchivingAll(false)}

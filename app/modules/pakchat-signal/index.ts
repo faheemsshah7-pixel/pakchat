@@ -64,7 +64,7 @@ export type FileModule = {
    * A copy of a video for sending, written to `output`: smaller (720 px on its short side) unless `hd`,
    * cut to `startMs`..`endMs` (0 and 0: all of it), and without where it was filmed.
    */
-  shrinkVideo(input: string, output: string, startMs: number, endMs: number, hd: boolean): Promise<{ uri: string; size: number; width: number; height: number }>;
+  shrinkVideo(input: string, output: string, startMs: number, endMs: number, hd: boolean, mute: boolean): Promise<{ uri: string; size: number; width: number; height: number }>;
   /** What made PakChat close by mistake since last asked (a crash's details), or null. Each is told once. */
   lastCrash(): string | null;
   /** A gallery item's small preview (by its media library id), as a file address; null if the phone has none (GalleryThumbs.kt). */
@@ -78,6 +78,8 @@ export type FileModule = {
   callStopTone(): void;
   callShowOverLock(on: boolean, keepOn: boolean): void;
   callFullScreenAllowed(): boolean;
+  /** Is the phone locked (the lock screen showing)? */
+  phoneLocked(): boolean;
   callOpenFullScreenSettings(): void;
   addListener(event: 'callAudio', fn: (e: CallAudioState) => void): EventSubscription;
 

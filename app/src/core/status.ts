@@ -18,9 +18,21 @@ import { core } from './core';
 /** The colours a status in words can have (the message carries the number). */
 export const STATUS_BG = ['#2F6BF0', '#7C3AED', '#DB2777', '#E11D48', '#EA580C', '#B45309', '#16A34A', '#0D9488', '#0891B2', '#4F46E5', '#334155', '#9333EA'];
 
+/** The fonts a status in words can have (the message carries the number), like WhatsApp's font button. */
+export const STATUS_FONTS: { fontFamily?: string; fontStyle?: 'italic' }[] = [{}, { fontFamily: 'serif' }, { fontFamily: 'monospace' }, { fontFamily: 'cursive' }, { fontFamily: 'sans-serif-condensed' }];
+
 /** How long a photo or words show before moving on (videos play to their end, up to a minute, like WhatsApp's). */
 export const STATUS_SHOW_MS = 5_000;
 export const STATUS_VIDEO_MAX_MS = 60_000;
+/** A voice status is up to 30 seconds, like WhatsApp's. */
+export const STATUS_VOICE_MAX_MS = 30_000;
+
+/** A voice status's colour: picked from its id, so everyone sees the same one. */
+export function voiceColour(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return STATUS_BG[h % STATUS_BG.length];
+}
 
 /** Who sees my status: all my contacts, my contacts except some, or only some. */
 export type StatusPrivacy = { mode: 'contacts' | 'except' | 'only'; ids: string[] };
@@ -39,6 +51,17 @@ export function statusPrivacy(): StatusPrivacy {
 export async function setStatusPrivacy(p: StatusPrivacy) {
   KV.setItemSync('statusPrivacy', JSON.stringify(p));
   if (await core.client.myStatus()) await core.client.setStatusAudience(audience(p));
+}
+
+/** Who sees my status, in a few words ("My contacts", "Contacts except 2"…), for the line under a new status. */
+export function audienceLabel(t: { myContacts: string; statusExcept: string; statusOnly: string; statusTo: string }) {
+  return t.statusTo.replace('{who}', audienceWho(t));
+}
+
+/** Just who ("My contacts", "Contacts except 2"…), for Settings › Privacy › Status. */
+export function audienceWho(t: { myContacts: string; statusExcept: string; statusOnly: string }) {
+  const p = statusPrivacy();
+  return p.mode === 'only' ? t.statusOnly.replace('{n}', String(p.ids.length)) : p.mode === 'except' ? t.statusExcept.replace('{n}', String(p.ids.length)) : t.myContacts;
 }
 
 /** The people who may see my status now (contacts can change, so it's worked out each time). */

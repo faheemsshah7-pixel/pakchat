@@ -5,6 +5,7 @@
 import { en7, ur7 } from './phase7';
 import { en8, ur8 } from './phase8';
 import { en11, ur11 } from './phase11';
+import { en12, ur12 } from './phase12';
 import { enSignIn, urSignIn } from './signin';
 
 export const en = {
@@ -526,6 +527,7 @@ export const en = {
   ...en8,
   ...enSignIn,
   ...en11,
+  ...en12,
 };
 
 export type Strings = typeof en;
@@ -1025,6 +1027,7 @@ export const ur: Strings = {
   ...ur8,
   ...urSignIn,
   ...ur11,
+  ...ur12,
 };
 
 /** Fills {name}-style gaps: fill('{n} members', { n: 3 }) → '3 members'. */

@@ -9,9 +9,10 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Pressable, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fileModule } from '../../modules/pakchat-signal';
@@ -24,6 +25,7 @@ import { duration, whenLabel } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { Avatar, IconButton, Pressy, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { Slider } from '../ui/Slider';
 
 const BAR_W = 4;
 const GAP = 3;
@@ -124,9 +126,63 @@ export default function Once() {
   );
 }
 
+/** A view once video, with PakChat's own controls (like the viewer's): tap to stop or play, and the line along the bottom. */
 function OnceVideo({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (p) => p.play());
-  return <VideoView player={player} style={{ flex: 1 }} nativeControls contentFit="contain" testID="once-video" />;
+  const t = useT();
+  const insets = useSafeAreaInsets();
+  const player = useVideoPlayer(uri, (p) => {
+    p.timeUpdateEventInterval = 0.25;
+    p.play();
+  });
+  const [playing, setPlaying] = useState(true);
+  const [at, setAt] = useState(0);
+  const [length, setLength] = useState(0);
+  const [dragging, setDragging] = useState<number | null>(null);
+  useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => setAt(currentTime));
+  useEventListener(player, 'statusChange', ({ status }) => {
+    if (status === 'readyToPlay' && player.duration > 0) setLength(player.duration);
+  });
+  useEventListener(player, 'playToEnd', () => {
+    player.seekBy(-player.currentTime);
+    setAt(0);
+  });
+  const shown = dragging ?? (length ? Math.min(1, at / length) : 0);
+  return (
+    <View style={{ flex: 1 }}>
+      <Pressable style={{ flex: 1 }} onPress={() => (playing ? player.pause() : player.play())} accessibilityLabel={playing ? t.pause : t.play}>
+        <VideoView player={player} style={{ flex: 1 }} nativeControls={false} contentFit="contain" testID="once-video" />
+        {!playing && (
+          <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="play" size={30} color="#FFFFFF" />
+            </View>
+          </View>
+        )}
+      </Pressable>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingTop: 10, paddingBottom: insets.bottom + 12, backgroundColor: 'rgba(0,0,0,0.4)' }}>
+        <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>
+          {duration(shown * length * 1000)}
+        </Txt>
+        <View style={{ flex: 1 }}>
+          <Slider
+            value={shown}
+            onChange={setDragging}
+            onDone={(v) => {
+              player.seekBy(v * length - player.currentTime);
+              setAt(v * length);
+              setDragging(null);
+            }}
+            label={t.videoLabel}
+            testID="once-seek"
+          />
+        </View>
+        <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>
+          {duration(length * 1000)}
+        </Txt>
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -211,12 +267,12 @@ function OnceVoice({ uri, length, waveform, author }: { uri: string; length: num
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 28 }}>
         <View style={{ width: 52 }} />
-        <Pressy onPress={toggle} label={status.playing ? t.pause : t.play} testID="once-voice-play">
+        <Pressy ripple="light" onPress={toggle} label={status.playing ? t.pause : t.play} testID="once-voice-play">
           <View style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={status.playing ? 'pause' : 'play'} size={34} color="#000000" />
           </View>
         </Pressy>
-        <Pressy onPress={faster} label={t.speed} testID="once-voice-speed">
+        <Pressy ripple="light" onPress={faster} label={t.speed} testID="once-voice-speed">
           <View style={{ width: 52, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}>
             <Txt size={14} weight="700" color="#FFFFFF">
               {`${speed}×`}

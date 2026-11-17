@@ -49,6 +49,12 @@ const ICONS = {
   edit: { d: ['M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4'] },
   info: { d: ['M12 11v5M12 8h.01'], circles: [[12, 12, 9]] },
   close: { d: ['M6 6l12 12M18 6L6 18'] },
+  /** Back down to the newest message: WhatsApp's double chevron. */
+  filters: { circles: [[9, 9.5, 5.5], [15, 9.5, 5.5], [12, 14.5, 5.5]] },
+  blurPen: { circles: [[12, 12, 9]], dots: [[8.5, 9, 1.3], [12, 8, 1.3], [15.5, 9.5, 1.3], [9.5, 13, 1.3], [13.5, 12.5, 1.3], [11.5, 16, 1.3]] },
+  chevronsDown: { d: ['M7 7l5 5 5-5', 'M7 13l5 5 5-5'] },
+  /** A deleted message: WhatsApp's circle with a line through it. */
+  ban: { d: ['M5.6 5.6l12.8 12.8'], circles: [[12, 12, 9]] },
   check: { d: ['M5 12.5l4.5 4.5L19 7'] },
   lock: { d: ['M8 11V8a4 4 0 0 1 8 0v3'], rects: [[5, 11, 14, 10, 2.5]] },
   shield: { d: ['M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', 'M8.5 12l2.5 2.5 4.5-5'] },
@@ -123,6 +129,8 @@ const ICONS = {
   export: { d: ['M12 15V3M7.5 7.5L12 3l4.5 4.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7'] },
   tone: { d: ['M9 17V5l11-2v12'], circles: [[6, 17, 3], [17, 15, 3]] },
   flash: { d: ['M13 2L4 14h7l-1 8 9-12h-7z'] },
+  flashAuto: { d: ['M11 2L3.5 12.5h6l-1 8.5 7.5-10.5h-6z', 'M15.5 21.5l2.5-7 2.5 7M16.4 19h3.2'] },
+  mail: { d: ['M3.5 7l8.5 6 8.5-6'], rects: [[3, 5, 18, 14, 2.5]] },
   flashOff: { d: ['M13 2L9.5 6.7M7.5 9.3L4 14h7l-1 8 4.3-5.7M15.6 12H19l-2 2.7M3 3l18 18'] },
   undo: { d: ['M9 14L4 9l5-5', 'M4 9h10a6 6 0 0 1 0 12h-3'] },
   schedule: { d: ['M12 9v4l2.5 1.5', 'M4 20l2-2M20 20l-2-2'], circles: [[12, 12.5, 7]] },

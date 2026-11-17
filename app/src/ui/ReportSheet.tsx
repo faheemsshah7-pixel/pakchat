@@ -2,7 +2,8 @@
 // Pick why; the last few messages (at most 5) from this phone go with the
 // report so PakChat can see what happened, as on WhatsApp: messages are locked
 // end to end, so a report is the only way PakChat ever sees any. Then you can
-// also block them, or leave the group.
+// also block them, or leave the group. From "Report and block" they're already
+// blocked (that happens first, so closing the sheet still leaves them blocked).
 import type { Message, ReportReason } from '@pakchat/shared';
 import { useState } from 'react';
 import { View } from 'react-native';
@@ -22,6 +23,7 @@ export const ReportSheet = whenOpened(function ReportSheet({
   group,
   userId,
   message,
+  blocked = false,
   onClose,
 }: {
   visible: boolean;
@@ -31,6 +33,8 @@ export const ReportSheet = whenOpened(function ReportSheet({
   userId: string | null;
   /** A held message: it goes first. */
   message?: Message | null;
+  /** Already blocked ("Report and block"): no "also block" switch. */
+  blocked?: boolean;
   onClose: () => void;
 }) {
   const t = useT();
@@ -53,7 +57,7 @@ export const ReportSheet = whenOpened(function ReportSheet({
         userId,
         list.map((m) => ({ author: m.author, text: bodyLine(m, t).slice(0, 2000), at: m.sentAt })),
       );
-      if (also) {
+      if (also && !blocked) {
         if (group) await core.client.removeMember(chatId, core.myId);
         else if (userId) await core.block(userId, true);
       }
@@ -84,14 +88,16 @@ export const ReportSheet = whenOpened(function ReportSheet({
             </View>
           </Pressy>
         ))}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 6, paddingVertical: 4 }}>
-          <View style={{ flex: 1 }}>
-            <Txt size={15} weight="600">
-              {group ? t.alsoLeave : fill(t.alsoBlock, { name: who })}
-            </Txt>
+        {!blocked && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 6, paddingVertical: 4 }}>
+            <View style={{ flex: 1 }}>
+              <Txt size={15} weight="600">
+                {group ? t.alsoLeave : fill(t.alsoBlock, { name: who })}
+              </Txt>
+            </View>
+            <Toggle on={also} onChange={setAlso} label={group ? t.alsoLeave : t.block} testID="report-also" />
           </View>
-          <Toggle on={also} onChange={setAlso} label={group ? t.alsoLeave : t.block} testID="report-also" />
-        </View>
+        )}
         <Button title={t.report} look="danger" busy={busy} onPress={() => void send()} testID="report-send" />
       </View>
     </Sheet>

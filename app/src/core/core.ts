@@ -18,6 +18,7 @@ import {
   type ContactCard,
   type Me,
   type Message,
+  type PrivacyExcept,
   type Session,
   SYNCED_PREFS,
   type SyncChange,
@@ -119,6 +120,8 @@ export type AppSettings = {
   keepArchived: boolean;
   /** "Use less data for calls" (Settings › Storage and data), like WhatsApp. */
   lessDataCalls?: boolean;
+  /** Settings › Storage › Media upload quality: photos and videos start in HD (each send can still change it). */
+  uploadHd?: boolean;
   /** When I last looked at Calls: missed calls since then are the number on its tab. */
   callsSeenAt?: number;
   /** Settings › Privacy › Calls: people not in my contacts don't ring (a missed call instead), like WhatsApp. */
@@ -181,6 +184,8 @@ type Topic =
   // Linked devices: one was added, removed, or finished getting its chats.
   | 'devices'
   | `messages:${string}`
+  // A tab was tapped while already on it: its list goes back to the top, like WhatsApp's.
+  | `tabAgain:${string}`
   // Someone asked to join a group, or suggested a group for a community (admins' lists).
   | `notice:${string}`;
 
@@ -836,7 +841,12 @@ class Core {
   }
 
   /** Changes my name, about, or privacy. The server answers with the new me. */
-  async updateMe(change: { name?: string; about?: string; photo?: string; privacy?: { last_seen?: string; online?: string; photo?: string; about?: string; groups?: string; read_receipts?: boolean } }) {
+  async updateMe(change: {
+    name?: string;
+    about?: string;
+    photo?: string;
+    privacy?: { last_seen?: string; online?: string; photo?: string; about?: string; groups?: string; read_receipts?: boolean; except?: Partial<PrivacyExcept> };
+  }) {
     await this.saveMe(meFromWire(await this.call<Parameters<typeof meFromWire>[0]>('PATCH', '/me', change)));
   }
 

@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { FlatList, Linking, Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { GestureDetector, GestureHandlerRootView, usePanGesture, usePinchGesture, useSimultaneousGestures } from 'react-native-gesture-handler';
+import { GestureDetector, GestureHandlerRootView, useExclusiveGestures, usePanGesture, usePinchGesture, useSimultaneousGestures, useTapGesture } from 'react-native-gesture-handler';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
@@ -120,7 +120,12 @@ function Camera({
   const kinds: Kind[] = onRound ? ['video', 'photo', 'note'] : ['video', 'photo'];
   const [kind, setKind] = useState<Kind>('photo');
   const [facing, setFacing] = useState<CameraType>('back');
-  const [flash, setFlash] = useState(false);
+  // Off, on, or auto (the camera decides), like WhatsApp's.
+  const [flashMode, setFlashMode] = useState<'off' | 'on' | 'auto'>('off');
+  const flash = flashMode === 'on';
+  // A tap on the picture: focus again (a ring shows where), like WhatsApp's.
+  const [focus, setFocus] = useState<{ x: number; y: number; n: number } | null>(null);
+  const [autofocus, setAutofocus] = useState<'on' | 'off'>('off');
   // In Photo, holding the button switches the camera to video for a moment.
   const [holding, setHolding] = useState(false);
   const [filming, setFilming] = useState(false);
@@ -163,6 +168,19 @@ function Camera({
   const [zoom, setZoom] = useState(0);
   const zoomNow = useSharedValue(0);
   const zoomFrom = useSharedValue(0);
+  function flipNow() {
+    tick();
+    face(facing === 'back' ? 'front' : 'back');
+  }
+  /**
+   * Focus again: the camera focuses once more (and then carries on by itself). Expo's camera
+   * can't be told a point to focus on, so the ring shows where you tapped while it refocuses.
+   */
+  function focusAt(x: number, y: number) {
+    setFocus((f) => ({ x, y, n: (f?.n ?? 0) + 1 }));
+    setAutofocus('on');
+    setTimeout(() => setAutofocus('off'), 600);
+  }
   /** The other camera: it starts not zoomed. */
   function face(f: CameraType) {
     setFacing(f);
@@ -269,7 +287,24 @@ function Camera({
     [],
   );
 
-  const pinchOrSwipe = useSimultaneousGestures(swipe, pinch, pullPicture);
+  // Double tap: the other camera; one tap: focus again there, like WhatsApp's.
+  const twice = useTapGesture({
+    numberOfTaps: 2,
+    enabled: !filming && !note,
+    onActivate: () => {
+      'worklet';
+      scheduleOnRN(flipNow);
+    },
+  });
+  const once = useTapGesture({
+    enabled: !note,
+    onActivate: (e) => {
+      'worklet';
+      scheduleOnRN(focusAt, e.x, e.y);
+    },
+  });
+  const taps = useExclusiveGestures(twice, once);
+  const pinchOrSwipe = useSimultaneousGestures(swipe, pinch, pullPicture, taps);
 
   async function photo() {
     if (busy.current || !cam.current) return;
@@ -388,7 +423,8 @@ function Camera({
       style={{ flex: 1 }}
       facing={facing}
       mode={kind === 'photo' && !holding ? 'picture' : 'video'}
-      flash={flash && kind === 'photo' && !holding ? 'on' : 'off'}
+      flash={kind === 'photo' && !holding ? flashMode : 'off'}
+      autofocus={autofocus}
       enableTorch={flash && !note && (kind === 'video' || holding)}
       videoQuality={note ? '720p' : '1080p'}
       mirror={facing === 'front'}
@@ -414,6 +450,9 @@ function Camera({
             ) : (
               camera
             )}
+            {focus && (
+              <Animated.View key={focus.n} entering={fadeIn} exiting={fadeOut} pointerEvents="none" style={{ position: 'absolute', left: focus.x - 34, top: focus.y - 34, width: 68, height: 68, borderRadius: 34, borderWidth: 1.5, borderColor: '#FFFFFF' }} />
+            )}
           </View>
         </GestureDetector>
 
@@ -432,7 +471,22 @@ function Camera({
               </Txt>
             </Animated.View>
           )}
-          {note ? <View style={{ width: 42 }} /> : <Round icon={flash ? 'flash' : 'flashOff'} size={42} label={t.flashWord} onPress={() => setFlash(!flash)} testID="camera-flash" />}
+          {note ? (
+            <View style={{ width: 42 }} />
+          ) : (
+            <Round
+              icon={flashMode === 'on' ? 'flash' : flashMode === 'auto' ? 'flashAuto' : 'flashOff'}
+              size={42}
+              label={flashMode === 'on' ? t.flashOn : flashMode === 'auto' ? t.flashAuto : t.flashOffWord}
+              // Off → auto → on, like WhatsApp's (videos: on or off, as a light).
+              onPress={() => {
+                const next = flashMode === 'off' ? (kind === 'photo' ? 'auto' : 'on') : flashMode === 'auto' ? 'on' : 'off';
+                setFlashMode(next);
+                toast(next === 'on' ? t.flashOn : next === 'auto' ? t.flashAuto : t.flashOffWord);
+              }}
+              testID="camera-flash"
+            />
+          )}
         </View>
 
         {/* The bottom: the newest photos, then the gallery, the button and the other camera. */}
@@ -493,7 +547,7 @@ function Camera({
 /** A round, see-through dark button over the picture, like WhatsApp's. */
 function Round({ icon, size, label, onPress, testID }: { icon: IconName; size: number; label: string; onPress: () => void; testID?: string }) {
   return (
-    <Pressy onPress={onPress} label={label} scale={0.9} testID={testID}>
+    <Pressy ripple="light" onPress={onPress} label={label} scale={0.9} testID={testID}>
       <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: 'rgba(0,0,0,0.38)', alignItems: 'center', justifyContent: 'center' }}>
         <Icon name={icon} size={Math.round(size * 0.48)} color="#FFFFFF" />
       </View>
@@ -605,7 +659,7 @@ function Recent({ onPick, onGallery, pull, onAllowed }: { onPick: (p: Picked[]) 
     <View>
       {picked.length > 0 && (
         <Animated.View entering={fadeIn} exiting={fadeOut} style={{ alignSelf: 'flex-end', marginEnd: 14, marginBottom: 10 }}>
-          <Pressy onPress={send} label={t.send} scale={0.92} testID="camera-recent-send">
+          <Pressy ripple="light" onPress={send} label={t.send} scale={0.92} testID="camera-recent-send">
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, height: 48, borderRadius: 24, backgroundColor: theme.acc }}>
               <Icon name="send" size={19} color="#FFFFFF" flip />
               <Txt size={16} weight="700" color="#FFFFFF">
@@ -630,8 +684,10 @@ function Recent({ onPick, onGallery, pull, onAllowed }: { onPick: (p: Picked[]) 
               renderItem={({ item }) => {
                 const n = picked.indexOf(item.id);
                 return (
+                  // Like WhatsApp's: a tap opens that one in the editor at once; hold picks several.
                   <Pressable
-                    onPress={() => toggle(item.id)}
+                    onPress={() => (picked.length ? toggle(item.id) : onPick([pickedOf(item)]))}
+                    onLongPress={() => toggle(item.id)}
                     accessibilityRole="button"
                     accessibilityLabel={item.mediaType === 'video' ? t.videoLabel : t.photoLabel}
                     accessibilityState={{ selected: n >= 0 }}

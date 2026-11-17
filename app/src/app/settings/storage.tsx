@@ -1,6 +1,6 @@
 // settings/storage.tsx: which files download by themselves, on mobile data and on
 // Wi-Fi (like WhatsApp's "Media auto-download"). Others wait for a tap. And
-// "Use less data for calls", as in WhatsApp's Storage and data.
+// "Use less data for calls" and "Media upload quality", as in WhatsApp's Storage and data.
 import type { FileKind } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -13,7 +13,8 @@ import { useSettings } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
-import { Divider, Glass, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
+import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
+import { Sheet } from '../../ui/overlays';
 
 export default function Storage() {
   const t = useT();
@@ -21,6 +22,7 @@ export default function Storage() {
   const [auto, setAuto] = useState<AutoDownload>(autoDownload);
   const [limit, setLimit] = useState<number | null>(null);
   const settings = useSettings();
+  const [quality, setQuality] = useState(false);
 
   useEffect(() => {
     void loadLimits().then(setLimit);
@@ -80,6 +82,10 @@ export default function Storage() {
             </Glass>
           </View>
         ))}
+        <Section title={t.mediaQuality} />
+        <Glass>
+          <SettingRow icon="photo" title={t.mediaQuality} sub={settings.uploadHd ? t.hdQuality : t.standardQuality} onPress={() => setQuality(true)} testID="upload-quality" />
+        </Glass>
         <Section title={t.calls} />
         <Glass>
           <SettingRow
@@ -101,6 +107,35 @@ export default function Storage() {
           />
         </Glass>
       </ScrollView>
+
+      {/* Media upload quality, like WhatsApp's: Standard (smaller, quicker) or HD. */}
+      <Sheet visible={quality} onClose={() => setQuality(false)} title={t.mediaQuality}>
+        <View style={{ paddingHorizontal: 16, gap: 4 }}>
+          {(
+            [
+              [false, t.standardQuality, t.hdOffNote],
+              [true, t.hdQuality, t.hdOnNote],
+            ] as const
+          ).map(([on, label, note]) => {
+            const picked = !!settings.uploadHd === on;
+            return (
+              <Pressy key={label} label={label} scale={0.98} onPress={() => (setQuality(false), core.setSettings({ uploadHd: on }))} testID={on ? 'upload-hd' : 'upload-standard'}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 14, backgroundColor: picked ? theme.accSoft : 'transparent' }}>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Txt size={15.5} weight={picked ? '700' : '500'} color={picked ? theme.accInk : theme.text}>
+                      {label}
+                    </Txt>
+                    <Txt size={13} color={theme.muted}>
+                      {note}
+                    </Txt>
+                  </View>
+                  {picked && <Icon name="check" size={20} color={theme.accInk} stroke={2.4} />}
+                </View>
+              </Pressy>
+            );
+          })}
+        </View>
+      </Sheet>
     </Screen>
   );
 }

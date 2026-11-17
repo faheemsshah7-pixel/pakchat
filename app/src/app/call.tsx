@@ -14,9 +14,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { FlatList, useWindowDimensions, View } from 'react-native';
+import { FlatList, Pressable, useWindowDimensions, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, interpolateColor, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { RTCView } from 'react-native-webrtc';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -84,6 +85,8 @@ export default function CallScreen() {
     return () => sub.remove();
   }, []);
   const pipOk = video && call?.state === 'active';
+  // A tap on a video call's picture hides everything over it.
+  const [hide, setBare] = useState(false);
   useFocusEffect(
     useCallback(() => {
       fileModule().callPip(pipOk);
@@ -97,6 +100,15 @@ export default function CallScreen() {
   // it goes to the chat list rather than staying on an empty screen.
   const navigation = useNavigation();
   const closed = useRef(false);
+  // A quick double tap mustn't go back twice (that would close the chat under the call too).
+  const minimised = useRef(false);
+  const minimise = () => {
+    if (minimised.current) return;
+    minimised.current = true;
+    if (navigation.canGoBack()) navigation.goBack();
+    else router.replace('/');
+    setTimeout(() => (minimised.current = false), 800);
+  };
   const check = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ended = call?.state === 'ended';
   useEffect(() => {
@@ -123,6 +135,14 @@ export default function CallScreen() {
     [],
   );
 
+  const tapHides = !!call && call.video && call.state === 'active' && !call.group && !ended;
+  // No longer a one-to-one video call (or again one): the name and buttons come back, and stay.
+  const [wasTapHides, setWasTapHides] = useState(tapHides);
+  if (wasTapHides !== tapHides) {
+    setWasTapHides(tapHides);
+    setBare(false);
+  }
+
   if (!call) return <View style={{ flex: 1, backgroundColor: '#0B1424' }} />;
   // In the small window: only the video, no names or buttons.
   if (small && !ended) {
@@ -138,13 +158,29 @@ export default function CallScreen() {
       <StatusBar style="light" />
       <LinearGradient colors={['#13233F', '#0B1424']} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} />
       {/* The video goes before the screen closes, so nothing is left behind on top. */}
-      {!ended && <Picture call={call} />}
-      <View style={{ flex: 1, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 18 }} pointerEvents="box-none">
+      {/* A video call: a tap on the picture hides the name and buttons (and brings them back), like WhatsApp's.
+          The tap area is under my small picture, so that one can still be tapped and dragged. */}
+      {!ended && <Picture call={call} onTap={tapHides ? () => setBare((b) => !b) : undefined} />}
+      {!(hide && tapHides) && (
+      <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={{ flex: 1, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 18 }} pointerEvents="box-none">
         <Header call={call} t={t} />
+        {/* The arrow at the top: the call goes on, the screen goes small (the green bar brings it back), like WhatsApp's.
+            After the header, so the header doesn't cover it; it only goes back once. */}
+        {call.state !== 'incoming' && !ended && (
+          <View style={{ position: 'absolute', top: insets.top + 4, start: 14 }}>
+            <Pressy ripple="light" onPress={minimise} label={t.minimiseCall} round testID="call-minimise">
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ transform: [{ rotate: '90deg' }] }}>
+                  <Icon name="chevron" size={22} color={INK} stroke={2} />
+                </View>
+              </View>
+            </Pressy>
+          </View>
+        )}
         {call.canAdd && call.state === 'active' && (
           // Top corner, like WhatsApp: add someone, and the call becomes a group call.
           <View style={{ position: 'absolute', top: insets.top + 4, end: 14 }}>
-            <Pressy onPress={() => setAdding(true)} label={t.addPeople} scale={0.9} testID="call-add">
+            <Pressy ripple="light" onPress={() => setAdding(true)} label={t.addPeople} scale={0.9} testID="call-add">
               <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="userPlus" size={21} color={INK} stroke={2} />
               </View>
@@ -155,7 +191,8 @@ export default function CallScreen() {
         {call.group && call.state === 'active' ? <Tiles call={call} /> : <View style={{ flex: 1 }} pointerEvents="none" />}
         {call.waiting && call.state !== 'ended' && <Waiting w={call.waiting} t={t} />}
         {call.state === 'incoming' ? <Ringing call={call} t={t} /> : <Controls call={call} t={t} />}
-      </View>
+      </Animated.View>
+      )}
       <AddPeople call={call} visible={adding} onClose={() => setAdding(false)} />
     </View>
   );
@@ -179,14 +216,14 @@ function Waiting({ w, t }: { w: NonNullable<CallView['waiting']>; t: Strings }) 
         </View>
       </View>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Pressy onPress={() => void calls.declineWaiting()} label={t.decline} scale={0.96} style={{ flex: 1 }} testID="waiting-decline">
+        <Pressy ripple="light" onPress={() => void calls.declineWaiting()} label={t.decline} scale={0.96} style={{ flex: 1 }} testID="waiting-decline">
           <View style={{ height: 44, borderRadius: 22, backgroundColor: RED, alignItems: 'center', justifyContent: 'center' }}>
             <Txt size={15} weight="700" color={INK}>
               {t.decline}
             </Txt>
           </View>
         </Pressy>
-        <Pressy onPress={() => void calls.acceptWaiting()} label={t.endAndAccept} scale={0.96} style={{ flex: 1 }} testID="waiting-accept">
+        <Pressy ripple="light" onPress={() => void calls.acceptWaiting()} label={t.endAndAccept} scale={0.96} style={{ flex: 1 }} testID="waiting-accept">
           <View style={{ height: 44, borderRadius: 22, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' }}>
             <Txt size={15} weight="700" color={INK}>
               {t.endAndAccept}
@@ -247,7 +284,7 @@ function AddPeople({ call, visible, onClose }: { call: CallView; visible: boolea
               </Txt>
             }
             renderItem={({ item }) => (
-              <Pressy onPress={() => void add(item.id, item.name)} label={item.name} scale={0.98} testID="call-add-person">
+              <Pressy ripple="light" onPress={() => void add(item.id, item.name)} label={item.name} scale={0.98} testID="call-add-person">
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 8 }}>
                   <Avatar id={item.id} name={item.name} size={42} />
                   <Txt size={16} weight="600" lines={1} style={{ flex: 1 }}>
@@ -295,7 +332,8 @@ function Header({ call, t }: { call: CallView; t: Strings }) {
           {t.callLocked}
         </Txt>
       </View>
-      {showAvatar && !call.group && call.state !== 'active' && (
+      {/* A voice call keeps the big photo once it's answered too, like WhatsApp's. */}
+      {showAvatar && !call.group && (
         <Pulse>
           <Avatar id={call.direction === 'in' ? call.from : ((chat && core.otherPerson(chat)) ?? call.chatId)} name={title} size={110} />
         </Pulse>
@@ -350,7 +388,7 @@ function Pulse({ children }: { children: ReactNode }) {
  * corner. (A group call's tiles are in Tiles.) Before anyone answers, my own
  * camera shows dimmed behind the name, as when it rings.
  */
-function Picture({ call, small }: { call: CallView; small?: boolean }) {
+function Picture({ call, small, onTap }: { call: CallView; small?: boolean; onTap?: () => void }) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -396,10 +434,11 @@ function Picture({ call, small }: { call: CallView; small?: boolean }) {
       {/* A shared screen shows whole; a face fills the screen. */}
       {!waiting && flip && call.local && <RTCView key="me-big" streamURL={call.local} objectFit="cover" mirror={call.front} style={full} zOrder={0} />}
       {!waiting && !flip && other?.stream && <RTCView key={`${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={full} zOrder={0} />}
+      {onTap && !waiting && <Pressable style={full} onPress={onTap} accessibilityLabel={t.showControls} testID="call-tap" />}
       {call.local && !waiting && !small && (
         <GestureDetector gesture={drag}>
           <Animated.View style={[{ position: 'absolute', top: insets.top + 110, end: 14, width: SELF_W, height: SELF_H, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' }, moved]}>
-            <Pressy onPress={() => other?.stream && setSwapped((v) => !v)} label={t.swapVideo} scale={0.96} style={{ flex: 1 }} testID="call-self-view">
+            <Pressy ripple="light" onPress={() => other?.stream && setSwapped((v) => !v)} label={t.swapVideo} scale={0.96} style={{ flex: 1 }} testID="call-self-view">
               {flip && other?.stream ? (
                 <RTCView key={`small-${other.key}:${other.rev}`} streamURL={other.stream} objectFit={other.screen ? 'contain' : 'cover'} style={{ flex: 1 }} zOrder={1} />
               ) : (
@@ -478,6 +517,14 @@ function Tile({ call, peer, w, h }: { call: CallView; peer: PeerView | 'me'; w: 
 
 /** Decline and Answer, and (one to one) Message: decline with a quick reply, like WhatsApp. */
 function Ringing({ call, t }: { call: CallView; t: Strings }) {
+  // On the lock screen: slide up to answer (and down to decline), like WhatsApp's, so a pocket can't answer it.
+  const [locked] = useState(() => {
+    try {
+      return fileModule().phoneLocked();
+    } catch {
+      return false;
+    }
+  });
   const [replying, setReplying] = useState(false);
   const [own, setOwn] = useState('');
   const quick = [t.declineQuick1, t.declineQuick2, t.declineQuick3, t.declineQuick4];
@@ -491,7 +538,7 @@ function Ringing({ call, t }: { call: CallView; t: Strings }) {
     <View style={{ gap: 26 }}>
       {!call.group && (
         <View style={{ alignItems: 'center' }}>
-          <Pressy onPress={() => setReplying(true)} label={t.declineWithMessage} scale={0.94} testID="call-decline-message">
+          <Pressy ripple="light" onPress={() => setReplying(true)} label={t.declineWithMessage} scale={0.94} testID="call-decline-message">
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.16)' }}>
               <Icon name="chat" size={18} color={INK} />
               <Txt size={14} weight="600" color={INK}>
@@ -501,10 +548,14 @@ function Ringing({ call, t }: { call: CallView; t: Strings }) {
           </Pressy>
         </View>
       )}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 30 }}>
-        <Round icon="endCall" color={RED} label={t.decline} onPress={() => void calls.decline()} testID="call-decline" big />
-        <Round icon={call.video ? 'video' : 'calls'} color={GREEN} label={t.answer} onPress={() => void calls.answer()} testID="call-answer" big />
-      </View>
+      {locked ? (
+        <SlideToAnswer video={call.video} t={t} />
+      ) : (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 30 }}>
+          <Round icon="endCall" color={RED} label={t.decline} onPress={() => void calls.decline()} testID="call-decline" big />
+          <Round icon={call.video ? 'video' : 'calls'} color={GREEN} label={t.answer} onPress={() => void calls.answer()} testID="call-answer" big />
+        </View>
+      )}
       <Sheet visible={replying} onClose={() => setReplying(false)} title={t.declineWithMessage}>
         <View style={{ paddingHorizontal: 16, gap: 6, paddingBottom: 6 }}>
           {quick.map((q, i) => (
@@ -518,7 +569,7 @@ function Ringing({ call, t }: { call: CallView; t: Strings }) {
             <View style={{ flex: 1 }}>
               <Field value={own} onChangeText={setOwn} placeholder={t.writeYourOwn} returnKeyType="send" onSubmitEditing={() => declineWith(own)} testID="decline-own" />
             </View>
-            <Pressy onPress={() => declineWith(own)} label={t.send} scale={0.9} disabled={!own.trim()} testID="decline-own-send">
+            <Pressy ripple="light" onPress={() => declineWith(own)} label={t.send} scale={0.9} disabled={!own.trim()} testID="decline-own-send">
               <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center', opacity: own.trim() ? 1 : 0.5 }}>
                 <Icon name="send" size={20} color={INK} />
               </View>
@@ -526,6 +577,60 @@ function Ringing({ call, t }: { call: CallView; t: Strings }) {
           </View>
         </View>
       </Sheet>
+    </View>
+  );
+}
+
+/** Slide the button up to answer, down to decline (on the lock screen). A tap does nothing, so a pocket can't answer. */
+function SlideToAnswer({ video, t }: { video: boolean; t: Strings }) {
+  const y = useSharedValue(0);
+  const answer = () => void calls.answer();
+  const decline = () => void calls.decline();
+  const pan = usePanGesture({
+    onUpdate: (e) => {
+      'worklet';
+      y.value = Math.max(-150, Math.min(110, e.translationY));
+    },
+    onDeactivate: (e) => {
+      'worklet';
+      if (e.translationY < -100) scheduleOnRN(answer);
+      else if (e.translationY > 80) scheduleOnRN(decline);
+      y.value = withSpring(0, smooth);
+    },
+  });
+  const moved = useAnimatedStyle(() => ({
+    transform: [{ translateY: y.value }],
+    backgroundColor: interpolateColor(y.value, [-120, 0, 90], [GREEN, 'rgba(255,255,255,0.22)', RED]),
+  }));
+  return (
+    <View style={{ alignItems: 'center', gap: 14 }}>
+      <Txt size={14} weight="600" color={SOFT}>
+        {t.swipeUpAnswer}
+      </Txt>
+      <View style={{ transform: [{ rotate: '-90deg' }] }}>
+        <Icon name="chevron" size={22} color={SOFT} />
+      </View>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[{ width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center' }, moved]}
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel={t.answer}
+          accessibilityHint={t.swipeUpAnswer}
+          // TalkBack can't slide: its own actions answer or decline (double tap answers).
+          accessibilityActions={[
+            { name: 'activate', label: t.answer },
+            { name: 'increment', label: t.answer },
+            { name: 'decrement', label: t.decline },
+          ]}
+          onAccessibilityAction={(e) => (e.nativeEvent.actionName === 'decrement' ? decline() : answer())}
+          testID="call-slide"
+        >
+          <Icon name={video ? 'video' : 'calls'} size={32} color={INK} stroke={2} />
+        </Animated.View>
+      </GestureDetector>
+      <Txt size={12.5} color={SOFT}>
+        {t.swipeDownDecline}
+      </Txt>
     </View>
   );
 }
@@ -554,7 +659,7 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
             <Txt size={13.5} weight="600" color={INK}>
               {t.sharingScreen}
             </Txt>
-            <Pressy onPress={() => calls.stopSharing()} label={t.stopSharing} scale={0.94} testID="call-stop-sharing">
+            <Pressy ripple="light" onPress={() => calls.stopSharing()} label={t.stopSharing} scale={0.94} testID="call-stop-sharing">
               <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: RED }}>
                 <Txt size={13} weight="700" color={INK}>
                   {t.stopSharing}
@@ -564,7 +669,8 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
           </View>
         </Animated.View>
       )}
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: canShare ? 12 : 18 }}>
+      {/* One bar, with the red button at its end, like WhatsApp's. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginHorizontal: 14, paddingHorizontal: 10, paddingVertical: 10, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.1)' }}>
         <Round icon={ROUTE_ICON[call.route]} on={speakerOn} label={`${t.speaker}: ${routeName(call.route, t)}`} onPress={() => calls.setRoute(nextRoute())} testID="call-speaker" />
         {/* In a voice call it shows once the call is on, and turns it into a video call. */}
         {(call.video || call.state === 'active') && (
@@ -579,9 +685,7 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
         {call.video && call.camera && !call.sharing && <Round icon="flipCamera" label={t.flipCamera} onPress={() => calls.flipCamera()} testID="call-flip" />}
         {canShare && <Round icon="screenShare" on={call.sharing} label={call.sharing ? t.stopSharing : t.shareScreen} onPress={() => (call.sharing ? calls.stopSharing() : void calls.shareScreen())} testID="call-share-screen" />}
         <Round icon={call.muted ? 'micOff' : 'mic'} on={call.muted} label={call.muted ? t.unmute : t.muteMic} onPress={() => (tick(), calls.setMuted(!call.muted))} testID="call-mute" />
-      </View>
-      <View style={{ alignItems: 'center' }}>
-        <Round icon="endCall" color={RED} label={t.hangUp} onPress={() => void calls.hangUp()} testID="call-hangup" big />
+        <Round icon="endCall" color={RED} label={t.hangUp} onPress={() => void calls.hangUp()} testID="call-hangup" />
       </View>
     </View>
   );
@@ -594,7 +698,7 @@ function routeName(r: AudioRoute, t: Strings) {
 function Round({ icon, label, onPress, color, on, big, testID }: { icon: IconName; label: string; onPress: () => void; color?: string; on?: boolean; big?: boolean; testID?: string }) {
   const size = big ? 70 : 58;
   return (
-    <Pressy onPress={onPress} label={label} scale={0.9} testID={testID}>
+    <Pressy ripple="light" onPress={onPress} label={label} scale={0.9} testID={testID}>
       <View
         style={{
           width: size,

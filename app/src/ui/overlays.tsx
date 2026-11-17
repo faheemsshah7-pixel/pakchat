@@ -12,7 +12,7 @@
 //
 // One that has never been opened costs nothing: none of its parts are made until
 // the first time it shows (whenOpened), so a screen with many of them opens fast.
-import { useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { Easing, FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming, type WithTimingConfig } from 'react-native-reanimated';
@@ -113,10 +113,12 @@ export const Popup = whenOpened(function Popup({ visible, onClose, children: now
             {
               position: 'absolute',
               top: insets.top + top,
-              end: 12,
-              minWidth: 220,
-              paddingVertical: 6,
-              borderRadius: 20,
+              end: 10,
+              minWidth: 200,
+              paddingVertical: 8,
+              // Tighter corners than a card, like WhatsApp's ⋮ menu.
+              borderRadius: 12,
+              overflow: 'hidden',
               backgroundColor: t.dark ? '#24262C' : 'rgba(255,255,255,0.97)',
               borderWidth: 1,
               borderColor: t.glassLine,
@@ -126,20 +128,24 @@ export const Popup = whenOpened(function Popup({ visible, onClose, children: now
             style,
           ]}
         >
-          {children}
+          <InMenu.Provider value>{children}</InMenu.Provider>
         </Animated.View>
       </View>
     </Modal>
   );
 });
 
+/** Inside a ⋮ menu: its rows are words only, like WhatsApp's (sheets keep their icons). */
+const InMenu = createContext(false);
+
 export function MenuItem({ icon, label, onPress, danger, testID }: { icon?: IconName; label: string; onPress: () => void; danger?: boolean; testID?: string }) {
   const t = useTheme();
+  const menu = useContext(InMenu);
   return (
     <Pressy onPress={onPress} label={label} testID={testID} scale={0.97}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 }}>
-        {icon && <Icon name={icon} size={20} color={danger ? t.danger : t.accInk} />}
-        <Txt size={15} weight="500" color={danger ? t.danger : t.text}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: menu ? 20 : 16, paddingVertical: menu ? 13 : 12 }}>
+        {icon && !menu && <Icon name={icon} size={20} color={danger ? t.danger : t.accInk} />}
+        <Txt size={15.5} weight={menu ? '400' : '500'} color={danger ? t.danger : t.text}>
           {label}
         </Txt>
       </View>
@@ -249,6 +255,7 @@ export const Dialog = whenOpened(function Dialog(props: { visible: boolean; onCl
   const { mounted, p } = useOpenClose(visible);
   // Like WhatsApp's: fades in while growing the last little bit, and fades away.
   const style = useAnimatedStyle(() => ({ opacity: interpolate(p.value, [0, 0.6], [0, 1], 'clamp'), transform: [{ scale: interpolate(p.value, [0, 1], [0.92, 1]) }] }));
+  const side = buttons.length <= 2 && buttons.reduce((n, b) => n + b.label.length, 0) <= 22;
   if (!mounted) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
@@ -267,10 +274,12 @@ export const Dialog = whenOpened(function Dialog(props: { visible: boolean; onCl
               {text}
             </Txt>
           )}
-          <View style={{ gap: 8, marginTop: 8 }}>
-            {buttons.map((b) => (
+          {/* Like WhatsApp's: word buttons at the bottom right. Two short ones sit side by side
+              ("Cancel  Delete", the answer last); more, or long ones, stack on the right. */}
+          <View style={side ? { flexDirection: 'row', justifyContent: 'flex-end', gap: 4, marginTop: 6 } : { alignItems: 'flex-end', gap: 2, marginTop: 6 }}>
+            {(side ? [...buttons].reverse() : buttons).map((b) => (
               <Pressy key={b.label} onPress={b.onPress} label={b.label} testID={b.testID} scale={0.97}>
-                <View style={{ height: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: b.danger ? t.dangerSoft : t.accSoft }}>
+                <View style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>
                   <Txt size={15} weight="700" color={b.danger ? t.danger : t.accInk} align="center">
                     {b.label}
                   </Txt>

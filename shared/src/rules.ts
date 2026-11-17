@@ -38,12 +38,19 @@ export function statusOwner(chat: Chat) {
   return chat.kind === 'status' ? (chat.members.find((m) => m.role === 'admin')?.userId ?? null) : null;
 }
 
+/** Words that can be edited: a text message, or a photo or video's caption (like WhatsApp; not a view once one). */
+export function editable(m: Message) {
+  if (m.deleted) return false;
+  if (m.kind === 'text') return true;
+  return m.kind === 'file' && !!m.file && (m.file.kind === 'image' || m.file.kind === 'video') && !m.file.once && !m.file.gif;
+}
+
 /** Does this change to `m`, from `from`, made at the server's time `at`, follow the rules? */
 export function changeAllowed(chat: Chat, m: Message, change: Change, from: string, at: number) {
   if (m.kind === 'system') return false;
   switch (change.t) {
     case 'edit':
-      return m.author === from && m.kind === 'text' && !m.deleted && at - m.sentAt <= EDIT_MINUTES * 60_000 + GRACE_MS;
+      return m.author === from && editable(m) && at - m.sentAt <= EDIT_MINUTES * 60_000 + GRACE_MS;
     case 'delete':
       if (m.deleted) return false;
       // Group admins can delete anyone's message, as in WhatsApp.

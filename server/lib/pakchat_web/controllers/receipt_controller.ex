@@ -11,7 +11,7 @@ defmodule PakchatWeb.ReceiptController do
 
   action_fallback PakchatWeb.FallbackController
 
-  @doc "`POST /api/receipts` with `{chat_id, to, status: \"delivered\" | \"read\", seqs}`."
+  @doc "`POST /api/receipts` with `{chat_id, to, status: \"delivered\" | \"read\" | \"played\", seqs}`."
   def create(conn, %{"chat_id" => chat_id, "to" => to} = p)
       when is_binary(chat_id) and is_binary(to) do
     with :ok <- Relay.send_receipt(conn.assigns.device, chat_id, to, p["status"], p["seqs"]) do

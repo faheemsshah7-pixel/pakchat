@@ -13,7 +13,10 @@ defmodule PakchatWeb.MeController do
   `privacy: {last_seen: "everyone" | "contacts" | "nobody",
   online: "everyone" | "same", photo: "everyone" | "contacts" | "nobody",
   about: "everyone" | "contacts" | "nobody", groups: "everyone" | "contacts",
-  read_receipts: true | false}`. A new photo deletes the old one's file.
+  read_receipts: true | false, except: %{last_seen | photo | about | groups => [user ids]}}`.
+  Last seen, photo, About and groups can also be "except": my contacts except the
+  people in `except` for it ("My contacts except…"). An `except` list given
+  replaces that setting's list; the others stay. A new photo deletes the old one's file.
   """
   def update(conn, params) do
     privacy = if is_map(params["privacy"]), do: params["privacy"], else: %{}
@@ -27,6 +30,7 @@ defmodule PakchatWeb.MeController do
       |> put_if(privacy, "about", "about_visibility")
       |> put_if(privacy, "groups", "groups_visibility")
       |> put_if(privacy, "read_receipts", "read_receipts")
+      |> put_except(privacy["except"], conn.assigns.user)
 
     was = conn.assigns.user.photo
 
@@ -35,6 +39,14 @@ defmodule PakchatWeb.MeController do
       json(conn, Wire.me(user))
     end
   end
+
+  # Only the lists given change; anything not a map is passed on to be refused.
+  defp put_except(attrs, nil, _user), do: attrs
+
+  defp put_except(attrs, given, user) when is_map(given),
+    do: Map.put(attrs, "privacy_except", Map.merge(user.privacy_except || %{}, given))
+
+  defp put_except(attrs, given, _user), do: Map.put(attrs, "privacy_except", given)
 
   defp put_if(attrs, from, key, as) do
     if Map.has_key?(from, key), do: Map.put(attrs, as, from[key]), else: attrs

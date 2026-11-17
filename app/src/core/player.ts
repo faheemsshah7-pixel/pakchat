@@ -223,3 +223,22 @@ export function useVoicePlayer(key: string) {
   }, [key]);
   return mine;
 }
+
+/** The player's state, whichever voice note it is (the little player bar outside its chat). */
+export function useAnyVoice() {
+  const [now, setNow] = useState<PlayerState>(state);
+  useEffect(() => {
+    const fn = (s: PlayerState) => setNow(s);
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+    };
+  }, []);
+  return now;
+}
+
+/** Plays the voice note that's loaded again (after a pause), from where it was. */
+export function resume() {
+  if (!player || !state.key || !uri) return;
+  play(state.key, uri);
+}

@@ -15,7 +15,7 @@ import { findBackup } from '../../core/backup';
 import { handOffMedia, type Picked } from '../../core/files';
 import { chatOpen, FOLDER, leftFolder, unlockChat } from '../../core/lock';
 import { core } from '../../core/core';
-import { markListShown, TABS_DRAWN_AFTER, useAllPresence, useAllTyping, useAuth, useChatList, useCommunities, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
+import { markListShown, TABS_DRAWN_AFTER, useAllPresence, useAllTyping, useAuth, useChatList, useCore, useLists, useSettings, useStable, warmChats, type ChatRow as Row } from '../../core/hooks';
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
@@ -82,6 +82,7 @@ export default function Chats() {
   // least a row taller than the screen, so there's room to hide it.
   const lockedRow = lockedCount > 0 && !settings.lockedHidden && filter === 'all' && !selecting;
   const list = useRef<FlashListRef<Item>>(null);
+  // Tapping Chats while on it: back to the top (the locked chats row stays tucked away).
   const [listHeight, setListHeight] = useState(0);
   const scrolled = useRef(0);
   // Only near the top: coming back to a list scrolled further down leaves it where it was.
@@ -104,6 +105,8 @@ export default function Chats() {
   const hideLocked = useCallback(() => {
     if (lockedRow && scrolled.current < LOCKED_ROW) requestAnimationFrame(() => list.current?.scrollToOffset({ offset: LOCKED_ROW, animated: false }));
   }, [lockedRow]);
+  // Tapping Chats while on it: back to the top (the locked chats row stays tucked away).
+  useEffect(() => core.on('tabAgain:index', () => list.current?.scrollToOffset({ offset: lockedRow ? LOCKED_ROW : 0, animated: true })), [lockedRow]);
   useFocusEffect(hideLocked);
   // Back on the list from Locked chats: the folder locks again, like WhatsApp's.
   useFocusEffect(useCallback(() => leftFolder(), []));
@@ -199,15 +202,17 @@ export default function Chats() {
     return () => clearTimeout(wait);
   }, [top]);
 
-  // Back cancels picking, instead of leaving the app.
-  useEffect(() => {
-    if (!selecting) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setPicked(new Set());
-      return true;
-    });
-    return () => sub.remove();
-  }, [selecting]);
+  // Back cancels picking, instead of leaving the app (only while this tab is on screen).
+  useFocusEffect(
+    useCallback(() => {
+      if (!selecting) return;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        setPicked(new Set());
+        return true;
+      });
+      return () => sub.remove();
+    }, [selecting]),
+  );
 
   const visible = useMemo(() => {
     const live = (rows ?? []).filter((r) => !r.prefs.archived);
@@ -221,28 +226,9 @@ export default function Chats() {
     return live;
   }, [rows, filter, lists]);
 
-  // A community's groups sit together, under its name, where the newest of them
-  // would be (like WhatsApp). A pinned group stays pinned on its own.
-  const communities = useCommunities();
-  const items = useMemo<Item[]>(() => {
-    const names = new Map((communities ?? []).map((c) => [c.community.id, core.chatTitle(c.community)]));
-    if ((filter !== 'all' && filter !== 'groups') || !names.size) return visible.map((row) => ({ kind: 'row', row }));
-    const inOne = (r: Row) => !!r.chat.communityId && names.has(r.chat.communityId) && !r.prefs.pinnedAt;
-    const out: Item[] = [];
-    const done = new Set<string>();
-    for (const r of visible) {
-      if (!inOne(r)) {
-        out.push({ kind: 'row', row: r });
-        continue;
-      }
-      const id = r.chat.communityId!;
-      if (done.has(id)) continue;
-      done.add(id);
-      out.push({ kind: 'community', id, title: names.get(id)! });
-      for (const g of visible) if (inOne(g) && g.chat.communityId === id) out.push({ kind: 'row', row: g });
-    }
-    return out;
-  }, [visible, communities, filter]);
+  // A community's groups are listed like any other chat, in time order, like WhatsApp's
+  // (they used to sit together under the community's name).
+  const items = useMemo<Item[]>(() => visible.map((row) => ({ kind: 'row', row })), [visible]);
 
   const archivedCount = (rows ?? []).filter((r) => r.prefs.archived).length;
   // Like WhatsApp: how many archived chats have something unread.
@@ -314,16 +300,29 @@ export default function Chats() {
         end={{ x: 1, y: 1 }}
         style={{ flexDirection: 'row', alignItems: 'center', padding: 6, borderRadius: 22, boxShadow: `0 14px 30px -14px ${theme.acc}` }}
       >
-        <IconButton icon="close" label={t.cancelSelection} look="onAccent" onPress={() => setPicked(new Set())} testID="cancel-pick" />
+        <IconButton icon="back" label={t.cancelSelection} look="onAccent" flip onPress={() => setPicked(new Set())} testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
           <Txt size={18} weight="700" color="#FFFFFF">
             {fill(t.selected, { n: picked.size })}
           </Txt>
         </View>
-        <IconButton icon="pin" label={allPinned ? t.unpinChat : t.pinChat} look="onAccent" onPress={() => forPicked((r) => pinAll(r, !allPinned))} />
+        {/* WhatsApp's order: pin, delete, mute, archive. */}
+        <IconButton
+          icon="pin"
+          label={allPinned ? t.unpinChat : t.pinChat}
+          look="onAccent"
+          onPress={() => {
+            // Up to 5 pinned chats (owner, 12 Nov; WhatsApp allows 3).
+            const already = (rows ?? []).filter((r) => r.prefs.pinnedAt && !r.prefs.archived).length;
+            const adding = pickedRows.filter((r) => !r.prefs.pinnedAt).length;
+            if (!allPinned && already + adding > MAX_PINNED) return toast(t.pinLimit);
+            forPicked((r) => pinAll(r, !allPinned));
+          }}
+          testID="pin-picked"
+        />
+        <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setChatAction('delete')} />
         <IconButton icon="muted" label={allMuted ? t.unmute : t.mute} look="onAccent" onPress={() => (allMuted ? forPicked((r) => core.unmute(r.chat.id)) : setMuting(true))} />
         <IconButton icon="archive" label={t.archive} look="onAccent" onPress={() => (archive(pickedRows, t), setPicked(new Set()))} testID="archive-picked" />
-        <IconButton icon="trash" label={t.delete} look="onAccent" onPress={() => setChatAction('delete')} />
         <IconButton icon="more" label={t.moreOptions} look="onAccent" onPress={() => setPickMenu(true)} />
       </LinearGradient>
     </Animated.View>
@@ -345,44 +344,6 @@ export default function Chats() {
       <View style={{ minHeight: selecting ? 66 : 62 }}>
         <LayoutAnimationConfig skipEntering>{header}</LayoutAnimationConfig>
       </View>
-
-      <Pressy onPress={() => router.push('/search')} label={t.search} scale={0.98} testID="open-search">
-        <Glass style={{ marginHorizontal: 14, marginTop: 16, height: 46, borderRadius: 15, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>
-          <Icon name="search" size={19} color={theme.muted} />
-          <Txt size={15} color={theme.muted}>
-            {t.searchHint}
-          </Txt>
-        </Glass>
-      </Pressy>
-
-      {/* The chips slide sideways when they don't all fit (big text, or Urdu),
-          instead of the last one being cut off at the edge. */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0 }}
-        contentContainerStyle={{ gap: 8, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}
-      >
-        <Chip label={t.all} on={filter === 'all'} onPress={() => setFilter('all')} testID="filter-all" />
-        <Chip label={t.unread} on={filter === 'unread'} onPress={() => setFilter('unread')} count={unreadCount} testID="filter-unread" />
-        <Chip label={t.favourites} on={filter === 'favourites'} onPress={() => setFilter('favourites')} testID="filter-favourites" />
-        <Chip label={t.groups} on={filter === 'groups'} onPress={() => setFilter('groups')} testID="filter-groups" />
-        {lists.map((l) => (
-          <Chip
-            key={l.id}
-            label={l.name}
-            on={filter === `list:${l.id}`}
-            onPress={() => setFilter(`list:${l.id}`)}
-            onLongPress={() => {
-              thud();
-              setHeldList(l.id);
-            }}
-            testID={`filter-list-${l.name}`}
-          />
-        ))}
-        {/* ＋ makes a new list, like WhatsApp's Lists. */}
-        <Chip label={t.newList} icon="plus" on={false} onPress={() => router.push('/list')} testID="new-list" />
-      </ScrollView>
 
       {/* The chats run edge to edge, like WhatsApp, so they line up with the tab bar below. */}
       <View style={{ flex: 1, paddingHorizontal: 4 }}>
@@ -421,6 +382,44 @@ export default function Chats() {
                   </Pressy>
                 </View>
               )}
+              {/* The search box and the chips scroll away with the chats, like WhatsApp's, so more chats fit. */}
+              <Pressy onPress={() => router.push('/search')} label={t.search} scale={0.98} testID="open-search">
+                <Glass style={{ marginHorizontal: 14, marginTop: 16, height: 46, borderRadius: 15, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>
+                  <Icon name="search" size={19} color={theme.muted} />
+                  <Txt size={15} color={theme.muted}>
+                    {t.searchHint}
+                  </Txt>
+                </Glass>
+              </Pressy>
+
+              {/* The chips slide sideways when they don't all fit (big text, or Urdu),
+                  instead of the last one being cut off at the edge. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ flexGrow: 0 }}
+                contentContainerStyle={{ gap: 8, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}
+              >
+                <Chip label={t.all} on={filter === 'all'} onPress={() => setFilter('all')} testID="filter-all" />
+                <Chip label={t.unread} on={filter === 'unread'} onPress={() => setFilter('unread')} count={unreadCount} testID="filter-unread" />
+                <Chip label={t.favourites} on={filter === 'favourites'} onPress={() => setFilter('favourites')} testID="filter-favourites" />
+                <Chip label={t.groups} on={filter === 'groups'} onPress={() => setFilter('groups')} testID="filter-groups" />
+                {lists.map((l) => (
+                  <Chip
+                    key={l.id}
+                    label={l.name}
+                    on={filter === `list:${l.id}`}
+                    onPress={() => setFilter(`list:${l.id}`)}
+                    onLongPress={() => {
+                      thud();
+                      setHeldList(l.id);
+                    }}
+                    testID={`filter-list-${l.name}`}
+                  />
+                ))}
+                {/* ＋ makes a new list, like WhatsApp's Lists. */}
+                <Chip label={t.newList} icon="plus" on={false} onPress={() => router.push('/list')} testID="new-list" />
+              </ScrollView>
               {/* Realme, Xiaomi and the like: turn on Autostart, or alerts don't come. */}
               {filter === 'all' && !selecting && <AlertsCard />}
               {archivedCount > 0 && filter === 'all' ? (
@@ -450,11 +449,20 @@ export default function Chats() {
             )
           }
           ListFooterComponent={
-            visible.length > 0 && visible.length < 4 && !selecting ? (
+            visible.length > 0 && !selecting ? (
               <View>
-                <Txt size={12.5} color={theme.muted} align="center" style={{ marginTop: 18, paddingHorizontal: 30 }}>
-                  {t.swipeHint}
-                </Txt>
+                {visible.length < 4 && (
+                  <Txt size={12.5} color={theme.muted} align="center" style={{ marginTop: 18, paddingHorizontal: 30 }}>
+                    {t.swipeHint}
+                  </Txt>
+                )}
+                {/* Under the last chat, like WhatsApp's. */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 18, paddingHorizontal: 30 }} testID="list-e2e">
+                  <Icon name="lock" size={12} color={theme.muted} />
+                  <Txt size={12} color={theme.muted} align="center" style={{ flexShrink: 1 }}>
+                    {t.listE2e}
+                  </Txt>
+                </View>
               </View>
             ) : undefined
           }
@@ -650,6 +658,9 @@ export default function Chats() {
     </Screen>
   );
 }
+
+/** The most chats that can be pinned at once (owner, 12 Nov: 5). */
+const MAX_PINNED = 5;
 
 function pinAll(r: Row, on: boolean) {
   core.setPrefs(r.chat.id, { pinnedAt: on ? (r.prefs.pinnedAt ?? Date.now()) : undefined });

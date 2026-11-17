@@ -13,7 +13,7 @@ defmodule PakchatWeb.DeviceChannel do
     * `"call"`    a locked call message (ringing, connecting), see `Pakchat.Relay.send_call/3`
     * `"ack"`     `{ids}`: "I have these", so the server deletes them
     * `"sync"`    `{after: {chat_id: N}}`: "I have everything up to N", send the rest
-    * `"receipt"` `{chat_id, to, status: "delivered" | "read", seqs}`: the ticks
+    * `"receipt"` `{chat_id, to, status: "delivered" | "read" | "played", seqs}`: the ticks
     * `"typing"`  `{chat_id, typing, audio}`: never saved (`audio`: recording a voice note)
     * `"watch"` / `"unwatch"` `{user_id}`: follow someone's online / last seen
     * `"active"`  `{active}`: the app came on screen (true) or went away (false)

@@ -27,7 +27,7 @@ const LATELY = 28 * 86_400_000;
 type Item = { kind: 'head'; key: string; title: string } | { kind: 'row'; key: string; row: ChatRow };
 
 export default function Forward() {
-  const { texts, files, hops: hopsParam } = useLocalSearchParams<{ texts?: string; files?: string; hops?: string }>();
+  const { texts, files, hops: hopsParam, others } = useLocalSearchParams<{ texts?: string; files?: string; hops?: string; others?: string }>();
   const t = useT();
   const { theme } = useLook();
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left);
@@ -60,8 +60,17 @@ export default function Forward() {
     void Promise.all(refs.map(([c, a, i]) => core.storage.getMessage(c, a, i))).then((l) => setFileMsgs(l.filter((m): m is Message => !!m?.file?.local)));
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
+  // Shared places and contact cards: [chatId, author, id] each (sent on as new ones).
+  const otherRefs: [string, string, string][] = parse(others);
+  const [otherMsgs, setOtherMsgs] = useState<Message[]>([]);
+  useEffect(() => {
+    void Promise.all(otherRefs.map(([c, a, i]) => core.storage.getMessage(c, a, i))).then((l) =>
+      setOtherMsgs(l.filter((m): m is Message => !!m && !m.deleted && ((m.kind === 'location' && !!m.location && !m.location.live) || (m.kind === 'contact' && !!m.contacts?.length)))),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [others]);
   // Forwarded many times: one chat at a time, like WhatsApp.
-  const many = hops.some((h) => h > MANY_HOPS) || fileMsgs.some((m) => nextHops(m) > MANY_HOPS);
+  const many = hops.some((h) => h > MANY_HOPS) || [...fileMsgs, ...otherMsgs].some((m) => nextHops(m) > MANY_HOPS);
   const max = many ? 1 : MAX;
 
   function toggle(id: string) {
@@ -83,6 +92,11 @@ export default function Forward() {
       for (const chatId of picked) {
         for (const [i, w] of words.entries()) await core.client.sendText(chatId, w, { forwarded: true, hops: hops[i] ?? 1 });
         for (const m of fileMsgs) await forwardFile(chatId, m);
+        for (const m of otherMsgs) {
+          const extra = { forwarded: true, hops: nextHops(m) };
+          if (m.kind === 'location' && m.location) await core.client.sendLocation(chatId, { lat: m.location.lat, lng: m.location.lng, name: m.location.name, address: m.location.address }, extra);
+          else if (m.contacts) await core.client.sendContacts(chatId, m.contacts, extra);
+        }
       }
       toast(t.forwardedNote);
       if (picked.size === 1) router.replace({ pathname: '/chat/[id]', params: { id: [...picked][0] } });

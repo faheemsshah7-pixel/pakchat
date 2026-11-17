@@ -24,7 +24,9 @@ defmodule PakchatWeb.Wire do
         photo: u.photo_visibility,
         about: u.about_visibility,
         groups: u.groups_visibility,
-        read_receipts: u.read_receipts
+        read_receipts: u.read_receipts,
+        # "My contacts except…": who is left out of each setting.
+        except: Map.new(User.except_keys(), &{&1, Map.get(u.privacy_except || %{}, &1, [])})
       }
     }
   end

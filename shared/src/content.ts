@@ -122,7 +122,7 @@ export const MAX_CALL_PEOPLE = 8;
 /** Things that show up as a message bubble. */
 export type Body =
   /** `bg`: a status in words, on one of the app's colours. `status`: a reply to someone's status. */
-  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; hops?: number; bg?: number; status?: StatusQuote; quote?: ChatQuote; link?: LinkPreview }
+  | { t: 'text'; text: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; hops?: number; bg?: number; font?: number; status?: StatusQuote; quote?: ChatQuote; link?: LinkPreview }
   | { t: 'poll'; question: string; options: string[]; multi: boolean }
   | { t: 'file'; file: Attachment; caption?: string; mentions?: string[]; replyTo?: Ref; forwarded?: boolean; hops?: number; status?: StatusQuote; quote?: ChatQuote }
   | ({ t: 'location'; replyTo?: Ref; forwarded?: boolean; hops?: number } & Place)
@@ -210,6 +210,8 @@ const MAX_THUMB = 16_000;
 const MAX_SDP = 20_000;
 /** How many colours a status in words can have (the app has a list). */
 export const STATUS_COLOURS = 12;
+/** How many fonts a status in words can have (the message carries the number). */
+export const STATUS_FONT_COUNT = 5;
 
 export function isBody(c: Payload): c is Body {
   return (BODY_TYPES as readonly string[]).includes(c.t);
@@ -355,6 +357,10 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       if (x.bg !== undefined) {
         if (!isCount(x.bg) || x.bg >= STATUS_COLOURS) return null;
         out.bg = x.bg;
+      }
+      if (x.font !== undefined) {
+        if (!isCount(x.font) || x.font >= STATUS_FONT_COUNT) return null;
+        out.font = x.font;
       }
       if (x.status !== undefined) {
         const quote = checkQuote(x.status);

@@ -16,7 +16,11 @@ export type Me = {
   name: string;
   about?: string | null;
   photo?: string | null;
-  privacy: { lastSeen: string; online: string; readReceipts: boolean; photo: string; about: string; groups: string };
+  /**
+   * Who sees what. Last seen, photo, About and groups can also be "except": my contacts
+   * except the people in `except` for that setting ("My contacts except…").
+   */
+  privacy: { lastSeen: string; online: string; readReceipts: boolean; photo: string; about: string; groups: string; except: PrivacyExcept };
 };
 
 export type SignedIn = {
@@ -150,7 +154,17 @@ export const REQUESTED = 'requested' as const;
 
 export type ReportReason = 'spam' | 'abuse' | 'scam' | 'other';
 
-type WireMe = { id: string; email: string | null; phone?: string | null; name: string; about?: string | null; photo?: string | null; privacy: { last_seen: string; online: string; read_receipts: boolean; photo?: string; about?: string; groups?: string } };
+/** "My contacts except…": per setting, the user ids left out. */
+export type PrivacyExcept = { last_seen: string[]; photo: string[]; about: string[]; groups: string[] };
+type WireMe = {
+  id: string;
+  email: string | null;
+  phone?: string | null;
+  name: string;
+  about?: string | null;
+  photo?: string | null;
+  privacy: { last_seen: string; online: string; read_receipts: boolean; photo?: string; about?: string; groups?: string; except?: Partial<PrivacyExcept> };
+};
 
 type WireBundle = {
   device_id: number;
@@ -212,6 +226,11 @@ function joined(r: WireChat | { requested: true }): ServerChat | typeof REQUESTE
   return 'requested' in r ? REQUESTED : chatFromWire(r);
 }
 
+/** A list of user ids from the server (anything else counts as empty). */
+function ids(x: unknown): string[] {
+  return Array.isArray(x) ? x.filter((v): v is string => typeof v === 'string') : [];
+}
+
 export function meFromWire(u: WireMe): Me {
   return {
     id: u.id,
@@ -220,7 +239,16 @@ export function meFromWire(u: WireMe): Me {
     name: u.name,
     about: u.about,
     photo: u.photo,
-    privacy: { lastSeen: u.privacy.last_seen, online: u.privacy.online, readReceipts: u.privacy.read_receipts, photo: u.privacy.photo ?? 'everyone', about: u.privacy.about ?? 'everyone', groups: u.privacy.groups ?? 'everyone' },
+    privacy: {
+      lastSeen: u.privacy.last_seen,
+      online: u.privacy.online,
+      readReceipts: u.privacy.read_receipts,
+      photo: u.privacy.photo ?? 'everyone',
+      about: u.privacy.about ?? 'everyone',
+      groups: u.privacy.groups ?? 'everyone',
+      // An older server has no lists: nobody left out.
+      except: { last_seen: ids(u.privacy.except?.last_seen), photo: ids(u.privacy.except?.photo), about: ids(u.privacy.except?.about), groups: ids(u.privacy.except?.groups) },
+    },
   };
 }
 

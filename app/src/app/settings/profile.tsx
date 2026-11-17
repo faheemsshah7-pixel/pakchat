@@ -1,6 +1,7 @@
 // settings/profile.tsx: Settings › Profile (tap yourself at the top of
 // Settings), like WhatsApp's. Your photo, big (tap the camera to change it),
-// then Name, About and the number and Gmail you sign in with.
+// then Name, About and the number and Gmail you sign in with. About also has
+// ready choices to tap (Available, Busy, At work…), like WhatsApp.
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -82,6 +83,19 @@ export default function MyProfile() {
             <Txt size={13} color={theme.muted}>
               {t.nameNote}
             </Txt>
+          )}
+          {editing === 'about' && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {t.aboutPresets.map((a, i) => (
+                <Pressy key={a} onPress={() => setText(a)} label={a} scale={0.95} testID={`about-preset-${i}`}>
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: text === a ? theme.acc : theme.accSoft }}>
+                    <Txt size={13.5} weight="600" color={text === a ? '#FFFFFF' : theme.accInk}>
+                      {a}
+                    </Txt>
+                  </View>
+                </Pressy>
+              ))}
+            </View>
           )}
           <Button title={t.save} onPress={save} disabled={editing === 'name' && !text.trim()} testID="me-save" />
         </View>

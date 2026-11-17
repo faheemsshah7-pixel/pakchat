@@ -95,6 +95,8 @@ export type Message = {
   keptExpiresAt?: number;
   /** A status in words: its colour (an index into the app's list). */
   bg?: number;
+  /** …and its font (an index into the app's list; 0 or none: the usual one). */
+  font?: number;
   /** A reply to someone's status: a little copy of it. */
   statusReply?: StatusQuote;
   /** "Reply privately": the group message it answers. */
@@ -116,6 +118,15 @@ export type Message = {
   /** Groups: who has it, and who has read it. */
   deliveredTo?: string[];
   readBy?: string[];
+  /** Groups and status: when each one read it (ms, when the receipt came), for "Seen by" times. */
+  readTimes?: Record<string, number>;
+  /**
+   * Voice notes. Mine: they played it (a group: everyone did), the blue mic.
+   * Received: I played it.
+   */
+  played?: boolean;
+  /** Groups, my voice notes: who has played them. */
+  playedBy?: string[];
 };
 
 /** A file in a message, plus what only this device knows about it. */

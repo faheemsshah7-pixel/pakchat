@@ -9,10 +9,15 @@
 // "Aa" turns a voice note into words, on the phone itself (Transcribe.kt,
 // Android 13 and later): nothing is sent anywhere. The words are kept with the
 // message, only on this phone.
+//
+// The little mic on the photo turns blue once the voice note is played (by
+// them, on mine; by me, on theirs), like WhatsApp.
 import type { Message } from '@pakchat/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import Svg, { Circle } from 'react-native-svg';
 
 import { fileModule } from '../../../modules/pakchat-signal';
@@ -25,7 +30,7 @@ import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { duration as clockOf } from '../format';
 import { Icon } from '../icons';
-import { Pressy, Txt } from '../kit';
+import { Avatar, Pressy, Txt } from '../kit';
 import { toast } from '../overlays';
 
 let canTranscribe: boolean | null = null;
@@ -41,16 +46,19 @@ function transcriptsHere() {
   return canTranscribe;
 }
 
-const BAR_COUNT = 34;
+// (Fewer bars than before: the sender's photo sits beside them now, like WhatsApp.)
+const BAR_COUNT = 28;
 const BAR_W = 3;
 const GAP = 2;
 const WIDTH = BAR_COUNT * (BAR_W + GAP);
+/** The "listened" blue, like WhatsApp's (its own colour, so it shows on every accent). */
+const PLAYED = '#34B7F1';
 
 export const voiceKey = (m: Message) => `${m.chatId}/${m.author}/${m.id}`;
 
 export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: boolean; selecting: boolean; onPick: () => void }) {
   const t = useT();
-  const { theme, lang } = useLook();
+  const { theme, lang, rtl } = useLook();
   const f = m.file!;
   const key = voiceKey(m);
   const [writing, setWriting] = useState(false);
@@ -67,6 +75,47 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
   const at = now ? now.position : 0;
   const done = length ? Math.min(1, at / length) : 0;
   const playing = !!now?.playing;
+
+  // The dot on the bars: where it's got to. Drag it to jump, like WhatsApp (it jumps on letting go).
+  const pos = useSharedValue(done);
+  const drag = useSharedValue(-1);
+  useEffect(() => {
+    pos.set(done);
+  }, [done, pos]);
+  const jump = (to: number) => {
+    if (f.local) seek(key, f.local, Math.round(to * length));
+  };
+  const pan = usePanGesture({
+    enabled: here && !selecting && length > 0,
+    activeOffsetX: [-4, 4],
+    failOffsetY: [-14, 14],
+    onUpdate: (e) => {
+      'worklet';
+      // Urdu: the bars run right to left, so the far end is on the left.
+      const x = Math.min(1, Math.max(0, e.x / WIDTH));
+      drag.value = rtl ? 1 - x : x;
+    },
+    onDeactivate: () => {
+      'worklet';
+      if (drag.value >= 0) {
+        pos.set(drag.value);
+        scheduleOnRN(jump, drag.value);
+      }
+      drag.value = -1;
+    },
+  });
+  const dotAt = useAnimatedStyle(() => {
+    const at = (drag.value >= 0 ? drag.value : pos.value) * WIDTH;
+    // `start: 0` is the right edge in Urdu, so it moves left from there.
+    return { transform: [{ translateX: rtl ? 6 - at : at - 6 }] };
+  });
+  const face = f.kind === 'voice';
+
+  // Started playing a voice note sent to me: the blue mic for them (the "listened" sign).
+  const fresh = face && !mine && !m.played;
+  useEffect(() => {
+    if (playing && fresh) void core.client.markPlayed(m).catch(() => {});
+  }, [playing, fresh, m]);
 
   async function tap() {
     if (selecting) return onPick();
@@ -108,15 +157,28 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
   return (
     <View style={{ marginBottom: 2 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, minWidth: 236 }}>
+        {/* The sender's photo with a little mic, like WhatsApp's voice notes. */}
+        {face && (
+          <View testID="voice-face">
+            <Avatar id={m.author} name={core.name(m.author) || '…'} size={42} />
+            <View style={{ position: 'absolute', bottom: -2, end: -3, width: 18, height: 18, borderRadius: 9, backgroundColor: m.played ? PLAYED : mine ? 'rgba(255,255,255,0.35)' : theme.bubbleIn, alignItems: 'center', justifyContent: 'center' }} testID={m.played ? 'voice-played' : undefined}>
+              <Icon name="mic" size={11} color={m.played || mine ? '#FFFFFF' : theme.accInk} />
+            </View>
+          </View>
+        )}
         <Pressy onPress={tap} onLongPress={onPick} label={playing ? t.pause : t.play} scale={0.9} testID="voice-play">
           <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: mine ? 'rgba(255,255,255,0.22)' : theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
             {moving ? <Ring progress={progress ?? 0} color={mine ? '#FFFFFF' : theme.accInk} /> : icon && <Icon name={icon} size={20} color={mine ? '#FFFFFF' : theme.accInk} />}
           </View>
         </Pressy>
         <View style={{ flex: 1 }}>
+          <GestureDetector gesture={pan}>
           <Pressable
             disabled={!here || selecting}
-            onPress={(e) => seek(key, f.local!, Math.round(Math.min(1, Math.max(0, e.nativeEvent.locationX / WIDTH)) * length))}
+            onPress={(e) => {
+              const x = Math.min(1, Math.max(0, e.nativeEvent.locationX / WIDTH));
+              seek(key, f.local!, Math.round((rtl ? 1 - x : x) * length));
+            }}
             onLongPress={onPick}
             accessibilityLabel={t.voiceNote}
             style={{ height: 30, width: WIDTH, flexDirection: 'row', alignItems: 'center', gap: GAP }}
@@ -134,7 +196,15 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
                 }}
               />
             ))}
+            {here && length > 0 && (
+              <Animated.View
+                pointerEvents="none"
+                style={[{ position: 'absolute', start: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: mine ? '#FFFFFF' : theme.acc }, dotAt]}
+                testID="voice-dot"
+              />
+            )}
           </Pressable>
+          </GestureDetector>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
             <Txt size={11.5} color={meta}>
               {clockOf(now && (playing || at > 0) ? at : length)}

@@ -4,7 +4,7 @@
 // up from the bottom as they arrive. Hold a message to pick it (then reply,
 // react, star, copy, edit, pin, forward or delete); swipe one to reply.
 import type { ChatQuote, Gif, LinkPreview, Message, Place, Ref, SharedContact } from '@pakchat/shared';
-import { EDIT_MINUTES, nextHops, UNSEND_HOURS, roleOf } from '@pakchat/shared';
+import { EDIT_MINUTES, editable, nextHops, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
@@ -56,7 +56,7 @@ import { ScheduledBar } from '../../ui/chat/ScheduledBar';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { MuteSheet } from '../../ui/MuteSheet';
 import { SchedulePicker } from '../../ui/SchedulePicker';
-import { dayLabel, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
+import { bodyLine, dayLabel, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
@@ -127,6 +127,8 @@ function ChatScreen() {
     }
   });
   const [reportOf, setReportOf] = useState<Message | null | undefined>(undefined);
+  // "Report and block": blocked at once, then the report sheet (closing it leaves them blocked).
+  const [reportBlocked, setReportBlocked] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -155,6 +157,8 @@ function ChatScreen() {
   const [clearing, setClearing] = useState(false);
   const [leftChoices, setLeftChoices] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  // How far up the newest one on screen is (in messages), for the button back down.
+  const nearest = useRef(0);
   // When the newest messages were last on screen: anything from them after that is "unseen".
   const [bottomAt, setBottomAt] = useState(Date.now);
   const wasAtBottom = useRef(true);
@@ -397,6 +401,7 @@ function ChatScreen() {
     if (top?.kind === 'msg') pill.setText(dayLabel(top.m.sentAt, tRef.current));
     else if (top?.kind === 'day') pill.setText(top.text);
     const bottom = viewableItems.some((v) => v.index === 0 || v.index === 1);
+    nearest.current = viewableItems.reduce((a, v) => Math.min(a, v.index ?? a), Infinity);
     // Only when it changes (scrolled away from the newest, or back), so scrolling
     // doesn't redraw the whole chat over and over.
     if (bottom === wasAtBottom.current) return;
@@ -502,6 +507,15 @@ function ChatScreen() {
 
   // The "+" on the reactions bar: any emoji.
   const [reactingTo, setReactingTo] = useState<Message | null>(null);
+  // Who reacted to a message (tap its reactions), and which emoji is picked at the top.
+  const [whoReacted, setWhoReacted] = useState<Message | null>(null);
+  const [reactTab, setReactTab] = useState<string | null>(null);
+  const showReactions = useCallback((m: Message) => (setReactTab(null), setWhoReacted(m)), []);
+  // The quick arrow beside a photo, video or link: forward just that one.
+  const forwardOne = useCallback((m: Message) => {
+    if (m.kind === 'file') router.push({ pathname: '/forward', params: { files: JSON.stringify([[m.chatId, m.author, m.id]]) } });
+    else if (m.text) router.push({ pathname: '/forward', params: { texts: JSON.stringify([m.text]), hops: JSON.stringify([nextHops(m)]) } });
+  }, []);
 
   // ---- Picking messages ----
 
@@ -544,7 +558,8 @@ function ChatScreen() {
   const pickedList = [...picked.values()];
   const one = pickedList.length === 1 ? pickedList[0] : null;
   const amAdmin = !!chat && chat.kind === 'group' && roleOf(chat, core.myId) === 'admin';
-  const canEdit = !!one && one.author === core.myId && one.kind === 'text' && !one.deleted && now - one.sentAt < EDIT_MINUTES * 60_000;
+  // Words, or a photo or video's caption, like WhatsApp.
+  const canEdit = !!one && one.author === core.myId && editable(one) && now - one.sentAt < EDIT_MINUTES * 60_000;
   const canUnsend = pickedList.length > 0 && pickedList.every((m) => !m.deleted && m.seq !== null && (amAdmin || (m.author === core.myId && now - m.sentAt < UNSEND_HOURS * 3_600_000)));
   const allStarred = pickedList.length > 0 && pickedList.every((m) => core.isStarred(m));
   // One sticker picked (and on this phone): "Save sticker" sits at the top right.
@@ -557,11 +572,14 @@ function ChatScreen() {
 
   const ref = (m: Message): Ref => ({ author: m.author, id: m.id });
 
+  /** Does it, or says it couldn't. True if it went. */
   async function act(work: () => Promise<unknown>) {
     try {
       await work();
+      return true;
     } catch {
       toast(t.couldNot);
+      return false;
     }
   }
 
@@ -823,7 +841,23 @@ function ChatScreen() {
         ? t.messageYourself
         : lastSeen(presence, t) || t.tapForInfo;
 
-  const pinned = useMemo(() => [...(list ?? [])].reverse().find((m) => m.pinnedUntil && m.pinnedUntil > now && !m.deleted), [list, now]);
+  // Up to 3 pinned messages, like WhatsApp: the strip shows one, and a tap goes to it and on to the next.
+  const pins = useMemo(() => (list ?? []).filter((m) => m.pinnedUntil && m.pinnedUntil > now && !m.deleted).sort((a, b) => b.sentAt - a.sentAt).slice(0, 3), [list, now]);
+  const [pinAt, setPinAt] = useState(0);
+  const pinned = pins.length ? pins[Math.min(pinAt, pins.length - 1)] : undefined;
+  // Pinning: how long for (24 hours, 7 days or 30 days), like WhatsApp.
+  const [pinFor, setPinFor] = useState<Message | null>(null);
+  const [e2e, setE2e] = useState(false);
+  function pinIt(m: Message, days: number) {
+    setPinFor(null);
+    // A fourth pin takes the place of the one that ends soonest, as on WhatsApp.
+    if (pins.length >= 3) {
+      const oldest = [...pins].sort((a, b) => (a.pinnedUntil ?? 0) - (b.pinnedUntil ?? 0))[0];
+      void act(() => core.client.pin(id, ref(oldest), null));
+      toast(t.pinReplaced);
+    }
+    void act(() => core.client.pin(id, ref(m), Date.now() + days * 86_400_000));
+  }
   const mayWrite = chat && !chat.left && !(group && chat.onlyAdminsSend && !amAdmin);
   // Calls: anyone still in the chat (not a group I left, and not myself).
   const mayCall = !!chat && !chat.left && chat.members.some((mb) => mb.userId !== core.myId);
@@ -858,7 +892,7 @@ function ChatScreen() {
     </Animated.View>
   ) : selecting ? (
     <Animated.View key="pick" entering={fadeIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', height: BAR, paddingHorizontal: 4 }}>
-        <IconButton icon="close" label={t.cancelSelection} onPress={done} size={bs} testID="cancel-pick" />
+        <IconButton icon="back" label={t.cancelSelection} onPress={done} size={bs} flip testID="cancel-pick" />
         <View style={{ flex: 1, paddingHorizontal: 4 }}>
           <Txt size={18} weight="700">
             {fill(t.selected, { n: picked.size })}
@@ -892,8 +926,11 @@ function ChatScreen() {
             // Files go on only once they're on this phone (downloaded).
             // View once can't be forwarded.
             const files = pickedList.filter((m) => m.kind === 'file' && !m.deleted && !m.file?.once && haveFile(m)).map((m) => [m.chatId, m.author, m.id]);
+            // Shared places (not live ones) and contact cards go on too.
+            const others = pickedList.filter((m) => !m.deleted && ((m.kind === 'location' && !m.location?.live) || m.kind === 'contact')).map((m) => [m.chatId, m.author, m.id]);
             done();
-            if (texts.length || files.length) router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), hops: JSON.stringify(hops), files: JSON.stringify(files) } });
+            if (texts.length || files.length || others.length)
+              router.push({ pathname: '/forward', params: { texts: JSON.stringify(texts), hops: JSON.stringify(hops), files: JSON.stringify(files), others: JSON.stringify(others) } });
           }}
           testID="pick-forward"
         />
@@ -917,7 +954,7 @@ function ChatScreen() {
         <IconButton icon="back" label={t.back} onPress={() => router.back()} flip size={42} iconSize={23} testID="back" />
         <Pressy onPress={() => router.push({ pathname: '/info/[id]', params: { id } })} label={title} scale={0.98} style={{ flex: 1, alignSelf: 'stretch', justifyContent: 'center' }} testID="chat-header">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Avatar id={id} name={title} size={38} online={!!presence?.online} group={group} />
+            <Avatar id={id} name={title} size={38} group={group} />
             <View style={{ flex: 1 }}>
               <Txt size={16} weight="700" lines={1}>
                 {title}
@@ -966,20 +1003,33 @@ function ChatScreen() {
       </View>
       <Animated.View style={[{ flex: 1 }, lift]}>
 
+        {/* The pinned messages: a flat strip across the top, like WhatsApp's. With more than one,
+            the little bars on the side say which, and each tap goes to it and on to the next. */}
         {pinned && !selecting && (
-          <View>
-            <Pressy onPress={() => jumpTo(pinned)} label={t.pinnedMessage} scale={0.98}>
-              <Glass style={{ marginHorizontal: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Icon name="pin" size={16} color={theme.accInk} />
+          <View style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.glassLine, backgroundColor: theme.dark ? '#16181D' : '#FFFFFF' }}>
+            <Pressy
+              onPress={() => {
+                jumpTo(pinned);
+                if (pins.length > 1) setPinAt((i) => (Math.min(i, pins.length - 1) + 1) % pins.length);
+              }}
+              label={pins.length > 1 ? fill(t.pinnedOf, { i: Math.min(pinAt, pins.length - 1) + 1, n: pins.length }) : t.pinnedMessage}
+              testID="pinned-strip"
+            >
+              <View style={{ paddingHorizontal: 14, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {pins.length > 1 && (
+                  <View style={{ gap: 2, alignSelf: 'stretch', justifyContent: 'center' }}>
+                    {pins.map((p, i) => (
+                      <View key={p.id} style={{ width: 2.5, flex: 1, maxHeight: 12, borderRadius: 2, backgroundColor: i === Math.min(pinAt, pins.length - 1) ? theme.acc : theme.faint }} />
+                    ))}
+                  </View>
+                )}
+                <Icon name="pin" size={16} color={theme.muted} />
                 <View style={{ flex: 1 }}>
-                  <Txt size={12} weight="700" color={theme.accInk}>
-                    {t.pinnedMessage}
-                  </Txt>
-                  <Txt size={13} lines={1} color={theme.muted}>
-                    {pinned.kind === 'poll' ? pinned.poll?.question : pinned.text}
+                  <Txt size={13} lines={1} color={theme.text}>
+                    {pinned.kind === 'poll' ? pinned.poll?.question : pinned.text || bodyLine(pinned, t)}
                   </Txt>
                 </View>
-              </Glass>
+              </View>
             </Pressy>
           </View>
         )}
@@ -1016,14 +1066,17 @@ function ChatScreen() {
             ListFooterComponent={
               list && !hasMore ? (
                 <View>
-                  <View style={{ alignSelf: 'center', maxWidth: '88%', marginVertical: 12, padding: 12, borderRadius: 14, backgroundColor: theme.glass, flexDirection: 'row', gap: 8 }}>
-                    <Icon name="lock" size={15} color={theme.accInk} />
-                    <View style={{ flexShrink: 1 }}>
-                      <Txt size={12.5} color={theme.sectionText}>
-                        {t.lockedNote}
-                      </Txt>
+                  {/* WhatsApp's pale yellow note: a tap explains it. */}
+                  <Pressy onPress={() => setE2e(true)} label={t.e2eTitle} style={{ alignSelf: 'center', maxWidth: '88%', marginVertical: 12, borderRadius: 10 }} testID="e2e-note">
+                    <View style={{ padding: 10, borderRadius: 10, backgroundColor: theme.dark ? '#2E2A1C' : '#FFF4C7', flexDirection: 'row', gap: 8 }}>
+                      <Icon name="lock" size={14} color={theme.dark ? '#E8D9A0' : '#6B5A1E'} />
+                      <View style={{ flexShrink: 1 }}>
+                        <Txt size={12.5} color={theme.dark ? '#E8D9A0' : '#5C4E1A'} align="center">
+                          {t.lockedNote}
+                        </Txt>
+                      </View>
                     </View>
-                  </View>
+                  </Pressy>
                   {stranger && <NotInContacts userId={other} onBlock={() => setBlocking(true)} />}
                 </View>
               ) : undefined
@@ -1061,6 +1114,8 @@ function ChatScreen() {
                     onReply={reply}
                     onVote={vote}
                     onReaction={react}
+                    onReactions={showReactions}
+                    onForward={forwardOne}
                     onQuote={jumpTo}
                     onRetry={retry}
                     above={showBar ? <ReactionBar mine={m.author === core.myId} current={m.reactions?.[core.myId]} onPick={(e) => react(m, e)} onMore={() => setReactingTo(m)} /> : undefined}
@@ -1102,9 +1157,10 @@ function ChatScreen() {
           {/* Back to the newest, when you've scrolled up. */}
           {!atBottom && (
             <Animated.View entering={popIn} exiting={popOut} style={{ position: 'absolute', end: 16, bottom: 12 }}>
-              <Pressy onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })} label={t.newest} scale={0.9} testID="to-bottom">
-                <Glass strong style={{ width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="down" size={22} color={theme.accInk} />
+              {/* A round button, like WhatsApp's: close by, it glides down; far up, it jumps. */}
+              <Pressy onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: nearest.current < 40 })} label={t.newest} scale={0.9} testID="to-bottom">
+                <Glass strong style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="chevronsDown" size={22} color={theme.accInk} />
                   {unseen > 0 && (
                     <View style={{ position: 'absolute', top: -6, end: -6, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
                       <Txt size={11} weight="700" color="#FFFFFF" align="center">
@@ -1252,7 +1308,8 @@ function ChatScreen() {
             label={one.pinnedUntil && one.pinnedUntil > now ? t.unpin : t.pin}
             onPress={() => {
               const on = one.pinnedUntil && one.pinnedUntil > now;
-              void act(() => core.client.pin(id, ref(one), on ? null : Date.now() + 7 * 86_400_000));
+              if (on) void act(() => core.client.pin(id, ref(one), null));
+              else setPinFor(one);
               done();
             }}
             testID="pick-pin"
@@ -1339,13 +1396,28 @@ function ChatScreen() {
       <ExportSheet visible={exportOpen} chatId={id} onClose={() => setExportOpen(false)} />
       <ScheduleCallSheet visible={planOpen} chatId={id} onClose={() => setPlanOpen(false)} />
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => core.mute(id, ms)} />
-      <ReportSheet visible={reportOf !== undefined} chatId={id} group={!!group} userId={reportOf ? reportOf.author : group ? null : other} message={reportOf} onClose={() => setReportOf(undefined)} />
+      <ReportSheet visible={reportOf !== undefined} chatId={id} group={!!group} userId={reportOf ? reportOf.author : group ? null : other} message={reportOf} blocked={reportBlocked} onClose={() => (setReportOf(undefined), setReportBlocked(false))} />
 
       <Dialog
         visible={blocking}
         onClose={() => setBlocking(false)}
         title={fill(t.blockName, { name: other ? core.plainName(other) : '' })}
+        text={t.blockNote}
         buttons={[
+          {
+            label: t.reportAndBlock,
+            danger: true,
+            testID: 'confirm-report-block',
+            onPress: () => {
+              setBlocking(false);
+              if (!other) return;
+              void act(() => core.block(other, true)).then((ok) => {
+                if (!ok) return;
+                setReportBlocked(true);
+                setReportOf(null);
+              });
+            },
+          },
           {
             label: t.block,
             danger: true,
@@ -1459,6 +1531,43 @@ function ChatScreen() {
       />
 
       {/* Disappearing messages. */}
+      <Dialog
+        visible={e2e}
+        onClose={() => setE2e(false)}
+        title={t.e2eTitle}
+        text={t.e2eExplain}
+        buttons={[
+          ...(other && !group && chat && !core.isSelfChat(chat)
+            ? [{ label: t.e2eVerify, onPress: () => (setE2e(false), router.push({ pathname: '/verify/[id]', params: { id: other } })), testID: 'e2e-verify' }]
+            : []),
+          { label: t.okWord, onPress: () => setE2e(false), testID: 'e2e-ok' },
+        ]}
+      />
+      <WhoReacted
+        m={whoReacted ? (byKey.get(keyOf(whoReacted)) ?? whoReacted) : null}
+        tab={reactTab}
+        onTab={setReactTab}
+        onClose={() => setWhoReacted(null)}
+        onRemove={(m) => {
+          setWhoReacted(null);
+          const mine = m.reactions?.[core.myId];
+          if (mine) react(m, mine);
+        }}
+      />
+      <Sheet visible={!!pinFor} onClose={() => setPinFor(null)} title={t.pinHowLong}>
+        <Txt size={13.5} color={theme.muted} style={{ marginHorizontal: 20, marginBottom: 6 }}>
+          {t.pinHowLongNote}
+        </Txt>
+        {(
+          [
+            [1, t.pin24h],
+            [7, t.pin7d],
+            [30, t.pin30d],
+          ] as const
+        ).map(([days, label]) => (
+          <MenuItem key={days} icon="pin" label={label} onPress={() => pinFor && pinIt(pinFor, days)} testID={`pin-${days}`} />
+        ))}
+      </Sheet>
       <Sheet visible={timerOpen} onClose={() => setTimerOpen(false)} title={t.disappearing}>
         <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 4 }}>
           <Txt size={14} color={theme.muted} style={{ marginHorizontal: 4, marginBottom: 6 }}>
@@ -1635,5 +1744,60 @@ function DatePill({ pill }: { pill: Pill }) {
         </Txt>
       </View>
     </Animated.View>
+  );
+}
+
+/** Who reacted with what (tap a message's reactions), like WhatsApp: "All", then each emoji; tap yours to take it back. */
+function WhoReacted({ m, tab, onTab, onClose, onRemove }: { m: Message | null; tab: string | null; onTab: (e: string | null) => void; onClose: () => void; onRemove: (m: Message) => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const list = Object.entries(m?.reactions ?? {});
+  const counts = new Map<string, number>();
+  for (const [, e] of list) counts.set(e, (counts.get(e) ?? 0) + 1);
+  const tabs = [...counts].sort((a, b) => b[1] - a[1]);
+  // Mine first, then the rest by name.
+  const shown = list
+    .filter(([, e]) => !tab || e === tab)
+    .sort(([a], [b]) => (a === core.myId ? -1 : b === core.myId ? 1 : (core.name(a) || '').localeCompare(core.name(b) || '')));
+  return (
+    <Sheet visible={!!m && list.length > 0} onClose={onClose}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingBottom: 8 }}>
+        {[[null, list.length] as const, ...tabs].map(([e, n]) => (
+          <Pressy key={e ?? 'all'} onPress={() => onTab(e)} label={e ?? fill(t.reactionsAll, { n })} testID={`react-tab-${e ?? 'all'}`}>
+            <View style={{ height: 32, paddingHorizontal: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: tab === e ? theme.accSoft : 'transparent', borderWidth: 1, borderColor: tab === e ? theme.acc : theme.glassLine }}>
+              <Txt size={14} weight="600" color={tab === e ? theme.accInk : theme.text}>
+                {e === null ? fill(t.reactionsAll, { n }) : `${e} ${n}`}
+              </Txt>
+            </View>
+          </Pressy>
+        ))}
+      </View>
+      {shown.map(([user, e]) => {
+        const me = user === core.myId;
+        const row = (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 8 }}>
+            <Avatar id={user} name={core.name(user) || '…'} size={40} />
+            <View style={{ flex: 1 }}>
+              <Txt size={15.5} weight="600" lines={1}>
+                {me ? t.youWord : core.name(user) || '…'}
+              </Txt>
+              {me && (
+                <Txt size={13} color={theme.muted}>
+                  {t.tapToRemove}
+                </Txt>
+              )}
+            </View>
+            <Txt size={22}>{e}</Txt>
+          </View>
+        );
+        return me && m ? (
+          <Pressy key={user} onPress={() => onRemove(m)} label={t.tapToRemove} testID="react-remove">
+            {row}
+          </Pressy>
+        ) : (
+          <View key={user}>{row}</View>
+        );
+      })}
+    </Sheet>
   );
 }

@@ -23,6 +23,7 @@ import { screenMoved, screenMoving, watchBackButton, watchRouter } from '../core
 import { LIKE_ALERT, PLAN_ALERT, takeTapped, watchTaps } from '../core/push';
 import { ThemeProvider, useLook } from '../theme/ThemeProvider';
 import { CallBar } from '../ui/CallBar';
+import { VoiceBar } from '../ui/VoiceBar';
 import { CrashNote } from '../ui/CrashNote';
 import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
@@ -236,7 +237,9 @@ function App() {
           {/* A status and a view once photo fade in (and out), like WhatsApp's, instead of appearing at once. */}
           <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" />
+          <Stack.Screen name="status-mine" />
           <Stack.Screen name="settings/status-privacy" />
+          <Stack.Screen name="settings/privacy-except" />
           <Stack.Screen name="once" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="invite/[id]" />
           <Stack.Screen name="join/[code]" />
@@ -260,6 +263,7 @@ function App() {
         </Stack.Protected>
       </Stack>
       {state === 'signedIn' && <CallBar />}
+      {state === 'signedIn' && <VoiceBar />}
       {/* App lock covers everything, except a call (you can answer, as on WhatsApp). */}
       {state === 'signedIn' && appLocked && !(call && call.state !== 'ended') && <LockScreen />}
       {state === 'signedIn' && <CrashNote />}

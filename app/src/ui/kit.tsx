@@ -3,7 +3,7 @@
 //   Screen       the sky (or graphite) background, safe from the notch, right-to-left in Urdu
 //   Txt          words, in the phone's own font (Roboto, like WhatsApp) or Noto Nastaliq (Urdu), picked by the words themselves
 //   Glass        a frosted card
-//   Pressy       anything you can tap: it dims under your finger
+//   Pressy       anything you can tap: a ripple spreads from your finger, like WhatsApp's
 //   IconButton   a round-cornered button with an icon
 //   Avatar       a person or group's picture, or their first letter on a soft tile
 //   Chip         a filter like "All" or "Unread"
@@ -13,9 +13,10 @@
 //   SettingRow   one row in Settings
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useMemo, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
-import Animated, { Easing, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { isValidElement, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions, type HostInstance, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
+import Animated, { Easing, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
@@ -84,6 +85,8 @@ export function Txt({
       testID={testID}
       selectable={selectable}
       numberOfLines={lines}
+      // Android's biggest font sizes still fit the pills and rows (the settings' own sizes go on top).
+      maxFontSizeMultiplier={1.3}
       style={[fontStyle(text, lang, size, weight), { color: color ?? theme.text, textAlign }, style]}
     >
       {children}
@@ -169,9 +172,36 @@ export function Glass({ children, style, strong, testID }: { children?: ReactNod
   );
 }
 
-/** Anything tappable. It dims under your finger, at once. */
+/**
+ * Anything tappable. Like WhatsApp, a soft grey ripple spreads out from your finger
+ * (owner, 12 Nov: WhatsApp comparison #1), clipped to the thing's own round corners.
+ */
 // The size and place keys that Pressy copies onto its outer Pressable (see below).
 const OUTER_KEYS = ['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'width', 'minWidth', 'maxWidth'] as const;
+const RADIUS_KEYS = [
+  'borderRadius',
+  'borderTopLeftRadius',
+  'borderTopRightRadius',
+  'borderBottomLeftRadius',
+  'borderBottomRightRadius',
+  'borderTopStartRadius',
+  'borderTopEndRadius',
+  'borderBottomStartRadius',
+  'borderBottomEndRadius',
+] as const;
+/** A finger that rests this long shows the ripple; a scroll that starts sooner shows none (Android's tap wait). */
+const RIPPLE_WAIT = 90;
+
+/** The round corners of a style, if it has any. */
+function cornersOf(style: unknown): ViewStyle | null {
+  const flat = StyleSheet.flatten(style as StyleProp<ViewStyle>) as Record<string, unknown> | undefined;
+  if (!flat) return null;
+  const out: Record<string, unknown> = {};
+  for (const k of RADIUS_KEYS) if (flat[k] !== undefined) out[k] = flat[k];
+  return Object.keys(out).length ? (out as ViewStyle) : null;
+}
+
+type Wave = { key: number; x: number; y: number; w: number; h: number };
 
 export function Pressy({
   children,
@@ -182,6 +212,8 @@ export function Pressy({
   label,
   testID,
   hitSlop,
+  ripple = 'auto',
+  round,
 }: {
   children: ReactNode;
   onPress?: () => void;
@@ -193,12 +225,17 @@ export function Pressy({
   label?: string;
   testID?: string;
   hitSlop?: number;
+  /** auto: grey (light on dark mode). light: for buttons on black or on a photo. none: no ripple (a message bubble). */
+  ripple?: 'auto' | 'light' | 'none';
+  /** A round ripple (an icon button), like WhatsApp's. */
+  round?: boolean;
 }) {
+  const theme = useTheme();
   // How big the button is in its row (flex: 1, a width, alignSelf) has to be set on
   // the outer Pressable too. With it only on the inner view, the Pressable shrank
   // to fit, so a `flex: 1` button (like the chat title) got no room for its text.
   // The inner view keeps the rest (colours, corners, padding) and fills the outer one.
-  const { outer, inner } = useMemo(() => {
+  const { outer, inner, corners } = useMemo(() => {
     const o: Record<string, unknown> = {};
     const i: Record<string, unknown> = { ...StyleSheet.flatten(style) };
     for (const k of OUTER_KEYS) {
@@ -206,8 +243,41 @@ export function Pressy({
       delete i[k];
     }
     if (o.flex !== undefined || o.flexGrow !== undefined) i.flexGrow = 1;
-    return { outer: o as ViewStyle, inner: i as ViewStyle };
+    // The ripple keeps inside the round corners: the button's own, or else those of the one thing inside it.
+    const own = cornersOf(i);
+    const child = !own && isValidElement(children) ? cornersOf((children.props as { style?: unknown }).style) : null;
+    return { outer: o as ViewStyle, inner: i as ViewStyle, corners: own ?? child };
+    // (The children only matter for their corners, which don't change.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [style]);
+
+  // The ripple: only made while a finger is on it (or it's fading), so a long list costs nothing.
+  const box = useRef<HostInstance>(null);
+  const [wave, setWave] = useState<Wave | null>(null);
+  const [held, setHeld] = useState(false);
+  const at = useRef<{ x: number; y: number } | null>(null);
+  const wait = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shown = useRef(false);
+  const on = ripple !== 'none' && !disabled;
+  const start = (stay: boolean) => {
+    const p = at.current;
+    if (!p || !box.current) return;
+    shown.current = true;
+    setHeld(stay);
+    box.current.measure((_x: number, _y: number, w: number, h: number, px: number, py: number) => {
+      if (!w || !h) return;
+      setWave((old) => ({ key: (old?.key ?? 0) + 1, x: Math.max(0, Math.min(w, p.x - px)), y: Math.max(0, Math.min(h, p.y - py)), w, h }));
+    });
+  };
+  useEffect(
+    () => () => {
+      if (wait.current) clearTimeout(wait.current);
+    },
+    [],
+  );
+  const color = ripple === 'light' || theme.dark ? 'rgba(255,255,255,0.16)' : 'rgba(11,27,54,0.10)';
+  const shape: ViewStyle | null = round && wave ? { borderRadius: Math.max(wave.w, wave.h) / 2 } : corners;
+
   return (
     <Pressable
       style={outer}
@@ -215,14 +285,76 @@ export function Pressy({
       accessibilityLabel={label}
       testID={testID}
       disabled={disabled}
-      onPress={onPress}
+      onPressIn={
+        on
+          ? (e) => {
+              at.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+              shown.current = false;
+              if (wait.current) clearTimeout(wait.current);
+              wait.current = setTimeout(() => {
+                wait.current = null;
+                start(true);
+              }, RIPPLE_WAIT);
+            }
+          : undefined
+      }
+      onPressOut={
+        on
+          ? () => {
+              if (wait.current) clearTimeout(wait.current);
+              wait.current = null;
+              setHeld(false);
+            }
+          : undefined
+      }
+      onPress={
+        onPress
+          ? () => {
+              // A quick tap (let go before the ripple showed): it ripples as it goes.
+              if (on && !shown.current) start(false);
+              onPress();
+            }
+          : undefined
+      }
       onLongPress={onLongPress}
       hitSlop={hitSlop}
     >
-      {/* While a finger is on it, it dims at once. Only this view redraws (what's inside is left alone),
-          and nothing is set up per button for it, so a long list of them opens quicker. */}
-      {({ pressed }) => <View style={[inner, { opacity: disabled ? 0.5 : pressed ? 0.6 : 1 }]}>{children}</View>}
+      <View ref={box} collapsable={false} style={[inner, disabled ? { opacity: 0.5 } : null]}>
+        {children}
+        {wave && <Ripple key={wave.key} wave={wave} held={held} color={color} shape={shape} onDone={() => setWave((w) => (w?.key === wave.key ? null : w))} />}
+      </View>
     </Pressable>
+  );
+}
+
+/** One ripple: it grows out from the finger, then fades once the finger lifts. */
+function Ripple({ wave, held, color, shape, onDone }: { wave: Wave; held: boolean; color: string; shape: ViewStyle | null; onDone: () => void }) {
+  const r = Math.hypot(Math.max(wave.x, wave.w - wave.x), Math.max(wave.y, wave.h - wave.y));
+  const grow = useSharedValue(0);
+  const fade = useSharedValue(1);
+  useEffect(() => {
+    grow.set(withTiming(1, { duration: 420, easing: Easing.out(Easing.quad) }));
+  }, [grow]);
+  useEffect(() => {
+    if (held) return;
+    grow.set(withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) }));
+    fade.set(
+      withDelay(
+        90,
+        withTiming(0, { duration: 240 }, (done) => {
+          'worklet';
+          if (done) scheduleOnRN(onDone);
+        }),
+      ),
+    );
+    // (onDone only clears this one ripple.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held]);
+  const style = useAnimatedStyle(() => ({ opacity: fade.value, transform: [{ scale: 0.08 + 0.92 * grow.value }] }));
+  return (
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, shape, { overflow: 'hidden' }]}>
+      <Animated.View style={[{ position: 'absolute', left: wave.x - r, top: wave.y - r, width: r * 2, height: r * 2, borderRadius: r, backgroundColor: color }, style]} />
+    </View>
   );
 }
 
@@ -263,6 +395,8 @@ export function IconButton({
       testID={testID}
       disabled={disabled}
       scale={0.9}
+      round
+      ripple={look === 'onAccent' ? 'light' : 'auto'}
       style={{
         width: size,
         height: size,

@@ -1,10 +1,12 @@
 // settings/help.tsx: Settings › Help. Which PakChat this is, how your chats
 // stay private, the Terms and the Privacy Policy (Phase 11), and how long things
-// took on this phone (Speed check).
+// took on this phone (Speed check). Contact us writes an email to PakChat's
+// support address, with the version and phone filled in (no chats, nothing else).
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { Linking, Platform, ScrollView, View } from 'react-native';
+import * as Device from 'expo-device';
 
 import { onBuiltInServer, pageUrl } from '../../core/core';
 import { SPEED_OK, speedLog, type SpeedWhat } from '../../core/speed';
@@ -12,6 +14,10 @@ import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
+import { toast } from '../../ui/overlays';
+
+/** Where Contact us writes to. */
+const SUPPORT = 'support@pakchat.com';
 
 export default function Help() {
   const t = useT();
@@ -47,6 +53,17 @@ export default function Help() {
         </Glass>
 
         <Glass style={{ marginTop: 14 }}>
+          <SettingRow
+            icon="mail"
+            title={t.contactUs}
+            sub={SUPPORT}
+            onPress={() => {
+              const body = `\n\n\n—\nPakChat ${version} · ${Device.manufacturer ?? ''} ${Device.modelName ?? ''} · Android ${Platform.Version}`;
+              void Linking.openURL(`mailto:${SUPPORT}?subject=${encodeURIComponent(t.contactSubject)}&body=${encodeURIComponent(body)}`).catch(() => toast(SUPPORT));
+            }}
+            testID="contact-us"
+          />
+          <Divider />
           <SettingRow icon="doc" title={t.termsWord} onPress={() => void Linking.openURL(pageUrl('terms', lang)).catch(() => {})} testID="open-terms" />
           <Divider />
           <SettingRow icon="shield" title={t.privacyPolicyWord} onPress={() => void Linking.openURL(pageUrl('privacy', lang)).catch(() => {})} testID="open-privacy" />

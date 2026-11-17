@@ -41,7 +41,7 @@ object VideoShrink {
   private const val BITRATE = 2_000_000
 
   @OptIn(UnstableApi::class)
-  fun shrink(context: Context, input: String, output: String, startMs: Long, endMs: Long, hd: Boolean, promise: Promise) {
+  fun shrink(context: Context, input: String, output: String, startMs: Long, endMs: Long, hd: Boolean, mute: Boolean, promise: Promise) {
     val app = context.applicationContext
     Handler(Looper.getMainLooper()).post {
       val out = File(Uri.parse(output).path ?: output)
@@ -88,6 +88,8 @@ object VideoShrink {
           media.setClippingConfiguration(clip.build())
         }
         val item = EditedMediaItem.Builder(media.build())
+        // The editor's speaker button: sent without its sound, like WhatsApp's.
+        if (mute) item.setRemoveAudio(true)
         if (!hd) item.setEffects(Effects(listOf(), listOf(Presentation.createForShortSide(SHORT_SIDE))))
         transformer.start(item.build(), out.path)
       } catch (e: Exception) {

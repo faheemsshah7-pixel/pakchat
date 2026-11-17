@@ -111,6 +111,8 @@ export type Picked = {
   gif?: true;
   /** Send a photo or video as it is, without making it smaller (the "HD" switch). */
   hd?: boolean;
+  /** A video sent without its sound (the editor's speaker button). */
+  mute?: boolean;
   /** A video cut in the editor: from and to (ms). */
   trim?: { start: number; end: number };
   /** View once. */
@@ -215,7 +217,7 @@ async function smallerVideo(p: Picked): Promise<Picked> {
   const attempt = async (hd: boolean) => {
     const out = new File(Paths.cache, `small-${core.newId()}.mp4`);
     try {
-      return await fileModule().shrinkVideo(p.uri, out.uri, trimmed ? p.trim!.start : 0, trimmed ? p.trim!.end : 0, hd);
+      return await fileModule().shrinkVideo(p.uri, out.uri, trimmed ? p.trim!.start : 0, trimmed ? p.trim!.end : 0, hd, !!p.mute);
     } catch (err) {
       console.log(`[pakchat] video shrink: ${String(err)}`);
       if (out.exists) out.delete();
@@ -223,6 +225,8 @@ async function smallerVideo(p: Picked): Promise<Picked> {
     }
   };
   const r = (await attempt(!!p.hd)) ?? (p.hd ? await attempt(false) : null);
+  // Asked to go without its sound: never sent with it instead.
+  if (!r && p.mute) throw new Error('mute');
   if (!r) return p;
   const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.mp4` : undefined;
   const duration = trimmed ? p.trim!.end - p.trim!.start : p.duration;

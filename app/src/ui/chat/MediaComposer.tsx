@@ -14,23 +14,26 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, KeyboardAvoidingView, Modal, PixelRatio, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Image as RNImage, Keyboard, KeyboardAvoidingView, Modal, PixelRatio, Pressable, ScrollView, TextInput, useWindowDimensions, View, type TextInputInstance } from 'react-native';
+import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
+import Svg from 'react-native-svg';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 
 import { core } from '../../core/core';
-import type { Picked } from '../../core/files';
+import { videoSizeGuess, type Picked } from '../../core/files';
 import { useSavedStickers } from '../../core/hooks';
 import { PACK } from '../../core/stickers';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { duration } from '../format';
+import { duration, fileSize } from '../format';
 import { Icon, type IconName } from '../icons';
 import { fontStyle, Pressy, Txt } from '../kit';
 import { fadeIn, fadeOut, tick } from '../motion';
-import { Sheet, toast } from '../overlays';
-import { Canvas, type CanvasRef, type Layer, type NewLayer, type Stroke, UNITS } from './editor/Canvas';
+import { Dialog, Sheet, toast } from '../overlays';
+import { boxInk, Canvas, FilteredPhoto, FILTERS, FONTS, PENS, type CanvasRef, type Layer, type NewLayer, type Stroke, UNITS } from './editor/Canvas';
 import { CropTool, fit, type Rect } from './editor/CropTool';
 import { TrimStrip } from './editor/TrimStrip';
 import { EMOJI } from './ExtrasPanel';
@@ -39,8 +42,9 @@ import { GALLERY_MAX } from './Gallery';
 
 export type Ready = Picked & { caption?: string };
 
-type Draft = { key: string; p: Picked; caption: string; strokes: Stroke[]; layers: Layer[] };
-type Tool = null | 'crop' | 'draw' | 'text' | 'sticker';
+/** `filter`: one of the colour filters (Canvas.tsx FILTERS). */
+type Draft = { key: string; p: Picked; caption: string; strokes: Stroke[]; layers: Layer[]; filter?: number };
+type Tool = null | 'crop' | 'draw' | 'text' | 'sticker' | 'filter';
 
 const COLORS = ['#FFFFFF', '#111111', '#E5484D', '#F5A524', '#FFE14D', '#30C76F', '#2F80ED', '#9B5CF6', '#F062B0'];
 
@@ -73,17 +77,27 @@ export function MediaComposer({
   onSend: (list: Ready[]) => void;
 }) {
   const t = useT();
-  const { theme, lang } = useLook();
+  const { theme, lang, rtl } = useLook();
   const insets = useSafeAreaInsets();
+  // A narrow phone: "Private" is just its icon, so every tool fits on the top row.
+  const narrow = useWindowDimensions().width < 400;
+  const caption = useRef<TextInputInstance>(null);
   const [drafts, setDrafts] = useState<Draft[]>(() => items.map((p) => ({ key: core.newId(), p: capped(p, maxVideoMs), caption: '', strokes: [], layers: [] })));
   const [at, setAt] = useState(0);
-  const [hd, setHd] = useState(false);
+  // Starts as Settings › Storage › Media upload quality says.
+  const [hd, setHd] = useState(() => !!core.settings.uploadHd);
   const [once, setOnce] = useState(false);
   const [tool, setTool] = useState<Tool>(null);
   const [color, setColor] = useState(COLORS[0]);
   const [area, setArea] = useState({ w: 0, h: 0 });
   const [busy, setBusy] = useState(false);
-  const [writing, setWriting] = useState<{ id: string | null; text: string } | null>(null);
+  const [writing, setWriting] = useState<{ id: string | null; text: string; font: number; box: boolean } | null>(null);
+  // The pen: which thickness, or the blur pen.
+  const [pen, setPen] = useState(1);
+  const [blur, setBlur] = useState(false);
+  const [hdSheet, setHdSheet] = useState(false);
+  const [discard, setDiscard] = useState(false);
+  const [emoji, setEmoji] = useState(false);
   const shot = useRef<CanvasRef>(null);
 
   const d = drafts[Math.min(at, drafts.length - 1)];
@@ -106,12 +120,12 @@ export function MediaComposer({
 
   /** Drawings, words and stickers become part of the photo (a snapshot of the canvas). */
   async function flatten(x: Draft): Promise<Draft> {
-    if (!x.strokes.length && !x.layers.length) return x;
+    if (!x.strokes.length && !x.layers.length && !x.filter) return x;
     if (!shot.current || x.key !== d?.key) return x;
     const box = fit(size, area);
     const uri = await captureRef(shot, { format: 'jpg', quality: 0.95, result: 'tmpfile' });
     const scale = PixelRatio.get();
-    const flat: Draft = { ...x, strokes: [], layers: [], p: { ...x.p, uri: uri.startsWith('file:') ? uri : `file://${uri}`, mime: 'image/jpeg', width: Math.round(box.w * scale), height: Math.round(box.h * scale), size: undefined, edited: true } };
+    const flat: Draft = { ...x, strokes: [], layers: [], filter: undefined, p: { ...x.p, uri: uri.startsWith('file:') ? uri : `file://${uri}`, mime: 'image/jpeg', width: Math.round(box.w * scale), height: Math.round(box.h * scale), size: undefined, edited: true } };
     setDrafts((all) => all.map((y) => (y.key === x.key ? flat : y)));
     return flat;
   }
@@ -161,6 +175,26 @@ export function MediaComposer({
     }
   }
 
+  /** Closing with drawing, words, stickers or a filter on a photo: "Discard changes?" first, like WhatsApp. */
+  function tryClose() {
+    if (drafts.some((x) => x.strokes.length || x.layers.length || x.filter || x.p.edited || x.p.mute || x.p.trim)) setDiscard(true);
+    else onClose();
+  }
+
+  // Swiping the photo sideways goes to the next (or last) one picked, like WhatsApp.
+  const swipe = usePanGesture({
+    enabled: drafts.length > 1 && !tool,
+    activeOffsetX: [-30, 30],
+    failOffsetY: [-20, 20],
+    onDeactivate: (e) => {
+      if (Math.abs(e.translationX) > 60 || Math.abs(e.velocityX) > 600) scheduleOnRN(swiped, e.translationX < 0 ? 1 : -1);
+    },
+  });
+  function swiped(step: number) {
+    const i = at + (rtl ? -step : step);
+    if (i >= 0 && i < drafts.length) void goTo(i);
+  }
+
   async function addMore() {
     if (drafts.length >= GALLERY_MAX) return;
     const more = await onMore().catch(() => []);
@@ -202,7 +236,15 @@ export function MediaComposer({
   function addLayer(l: NewLayer) {
     const box = fit(size, area);
     const k = UNITS / Math.max(1, box.w);
-    change(d.key, { layers: [...d.layers, { ...l, id: core.newId(), x: (box.w / 2) * k, y: (box.h / 2.4) * k, scale: 1 } as Layer] });
+    change(d.key, { layers: [...d.layers, { ...l, id: core.newId(), x: (box.w / 2) * k, y: (box.h / 2.4) * k, scale: 1, rot: 0 } as Layer] });
+  }
+
+  /** About how big it goes, for the quality sheet (a single video: from its length). */
+  function sizeNote(on: boolean) {
+    if (drafts.length !== 1 || p?.kind !== 'video' || p.gif) return null;
+    const len = p.trim ? p.trim.end - p.trim.start : p.duration;
+    if (!len) return null;
+    return fill(t.aboutSize, { size: fileSize(on ? Math.max(p.size ?? 0, videoSizeGuess(p, len)) : videoSizeGuess(p, len)) });
   }
 
   if (!d) return null;
@@ -213,39 +255,42 @@ export function MediaComposer({
   const top: { icon: IconName; label: string; on: () => void; active?: boolean; id: string }[] = editable(p)
     ? [
         { icon: 'crop', label: t.cropWord, on: () => setTool(tool === 'crop' ? null : 'crop'), active: tool === 'crop', id: 'tool-crop' },
+        { icon: 'filters', label: t.filtersWord, on: () => setTool(tool === 'filter' ? null : 'filter'), active: tool === 'filter', id: 'tool-filter' },
         { icon: 'sticker', label: t.sticker, on: () => setTool('sticker'), active: tool === 'sticker', id: 'tool-sticker' },
-        { icon: 'text', label: t.textWord, on: () => (setTool('text'), setWriting({ id: null, text: '' })), active: tool === 'text', id: 'tool-text' },
+        { icon: 'text', label: t.textWord, on: () => (setTool('text'), setWriting({ id: null, text: '', font: 0, box: false })), active: tool === 'text', id: 'tool-text' },
         { icon: 'draw', label: t.drawWord, on: () => setTool(tool === 'draw' ? null : 'draw'), active: tool === 'draw', id: 'tool-draw' },
       ]
-    : [];
+    : p.kind === 'video' && !p.gif
+      ? // A video: send it without its sound, like WhatsApp's speaker button.
+        [{ icon: p.mute ? 'speakerOff' : 'speaker', label: p.mute ? t.soundOff : t.soundOn, on: () => (tick(), changeP(d.key, { mute: !p.mute })), active: !!p.mute, id: 'video-mute' }]
+      : [];
 
   return (
-    <Modal visible animationType="slide" onRequestClose={() => (tool ? setTool(null) : onClose())} statusBarTranslucent navigationBarTranslucent>
+    <Modal visible animationType="slide" onRequestClose={() => (tool ? setTool(null) : tryClose())} statusBarTranslucent navigationBarTranslucent>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: '#000' }}>
         {/* Top: close, Private, HD, and the photo tools. */}
         <View style={{ paddingTop: insets.top + 6, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4, zIndex: 3 }}>
-          <Round icon="close" label={t.close} onPress={onClose} id="editor-close" />
-          <Pressy onPress={() => toast(t.privateNote)} label={t.privateWord} scale={0.94} testID="editor-private">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.14)' }}>
+          <Round icon="close" label={t.close} onPress={tryClose} id="editor-close" />
+          <Pressy ripple="light" onPress={() => toast(t.privateNote)} label={t.privateWord} scale={0.94} testID="editor-private">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: narrow ? 8 : 10, minHeight: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.14)' }}>
               <Icon name="privateBadge" size={15} color="#FFFFFF" />
-              <Txt size={12.5} weight="700" color="#FFFFFF">
-                {t.privateWord}
-              </Txt>
+              {!narrow && (
+                <Txt size={12.5} weight="700" color="#FFFFFF">
+                  {t.privateWord}
+                </Txt>
+              )}
             </View>
           </Pressy>
           <View style={{ flex: 1 }} />
           {canHd && (
             <Pressy
-              onPress={() => {
-                tick();
-                toast(hd ? t.hdOffNote : t.hdOnNote);
-                setHd(!hd);
-              }}
+              // A little sheet to choose, like WhatsApp's: Standard or HD.
+              onPress={() => setHdSheet(true)}
               label={t.hdQuality}
               scale={0.9}
               testID="send-hd"
             >
-              <View style={{ height: 30, paddingHorizontal: 9, borderRadius: 9, borderWidth: 1.6, borderColor: hd ? theme.acc : '#FFFFFF', backgroundColor: hd ? theme.acc : 'transparent', justifyContent: 'center', marginHorizontal: 4 }}>
+              <View style={{ minHeight: 30, paddingHorizontal: 9, borderRadius: 9, borderWidth: 1.6, borderColor: hd ? theme.acc : '#FFFFFF', backgroundColor: hd ? theme.acc : 'transparent', justifyContent: 'center', marginHorizontal: 4 }}>
                 <Txt size={13} weight="800" color="#FFFFFF">
                   HD
                 </Txt>
@@ -259,6 +304,7 @@ export function MediaComposer({
         </View>
 
         {/* The photo or video. */}
+        <GestureDetector gesture={swipe}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
           {p.kind === 'image' && box.w > 0 && editable(p) ? (
             <Canvas
@@ -269,15 +315,18 @@ export function MediaComposer({
               layers={d.layers}
               drawing={tool === 'draw'}
               color={color}
+              pen={PENS[pen]}
+              blur={blur}
+              filter={d.filter}
               shot={shot}
               onStroke={(s) => change(d.key, { strokes: [...d.strokes, s] })}
-              onMove={(id, x, y, scale) => change(d.key, { layers: d.layers.map((l) => (l.id === id ? { ...l, x, y, scale } : l)) })}
+              onMove={(id, x, y, scale, rot) => change(d.key, { layers: d.layers.map((l) => (l.id === id ? { ...l, x, y, scale, rot } : l)) })}
               onRemove={(id) => change(d.key, { layers: d.layers.filter((l) => l.id !== id) })}
               onEditText={(id) => {
                 const l = d.layers.find((x) => x.id === id);
                 if (l?.kind === 'text') {
                   setColor(l.color);
-                  setWriting({ id, text: l.text });
+                  setWriting({ id, text: l.text, font: l.font ?? 0, box: !!l.box });
                   setTool('text');
                 }
               }}
@@ -289,6 +338,7 @@ export function MediaComposer({
               key={d.key}
               p={p}
               max={maxVideoMs}
+              quiet={!!p.mute}
               onTrim={(trim) => changeP(d.key, { trim })}
               onLength={(ms) => !p.duration && setDrafts((all) => all.map((x) => (x.key === d.key ? { ...x, p: capped({ ...x.p, duration: ms }, maxVideoMs) } : x)))}
             />
@@ -301,11 +351,28 @@ export function MediaComposer({
             </View>
           )}
 
-          {/* Drawing: the colours down the side, and undo. */}
+          {/* Drawing: undo, the colour slider down the side (any colour, like WhatsApp's), and along the
+              bottom the three thicknesses and the blur pen. */}
           {tool === 'draw' && (
-            <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', end: 10, top: 10, gap: 8, alignItems: 'center' }}>
+            <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', end: 10, top: 10, gap: 10, alignItems: 'center' }}>
               <Round icon="undo" label={t.undoWord} onPress={() => change(d.key, { strokes: d.strokes.slice(0, -1) })} id="draw-undo" />
-              <Colors color={color} onPick={setColor} vertical />
+              {!blur && <ColourSlider color={color} onPick={setColor} />}
+            </Animated.View>
+          )}
+          {tool === 'draw' && (
+            <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', bottom: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+              {PENS.map((w, i) => (
+                <Pressy key={w} ripple="light" onPress={() => (setPen(i), setBlur(false))} label={`${t.penSize} ${i + 1}`} round testID={`pen-${i}`}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: !blur && pen === i ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
+                    <View style={{ width: 6 + i * 6, height: 6 + i * 6, borderRadius: 10, backgroundColor: color }} />
+                  </View>
+                </Pressy>
+              ))}
+              <Pressy ripple="light" onPress={() => setBlur(!blur)} label={t.blurPen} round testID="pen-blur">
+                <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: blur ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
+                  <Icon name="blurPen" size={20} color="#FFFFFF" />
+                </View>
+              </Pressy>
             </Animated.View>
           )}
 
@@ -313,6 +380,29 @@ export function MediaComposer({
             <CropTool uri={p.uri} size={size} area={area} busy={busy} onCancel={() => setTool(null)} onRotate={() => void rotate()} onDone={(r) => void crop(r)} />
           )}
         </View>
+        </GestureDetector>
+
+        {/* Filters: a strip of small copies of the photo, one per filter, like WhatsApp's. */}
+        {tool === 'filter' && editable(p) && (
+          <Animated.View entering={fadeIn} exiting={fadeOut}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 12, paddingVertical: 10 }}>
+              {FILTERS.map((_, i) => (
+                <Pressy key={i} ripple="light" onPress={() => (tick(), change(d.key, { filter: i || undefined }))} label={t.filterNames[i] ?? ''} scale={0.94} testID={`filter-${i}`}>
+                  <View style={{ alignItems: 'center', gap: 5 }}>
+                    <View style={{ width: 62, height: 62, borderRadius: 10, overflow: 'hidden', borderWidth: 2, borderColor: (d.filter ?? 0) === i ? theme.acc : 'transparent' }}>
+                      <Svg width={58} height={58} viewBox="0 0 58 58">
+                        <FilteredPhoto uri={p.uri} w={58} h={58} filter={i} />
+                      </Svg>
+                    </View>
+                    <Txt size={11.5} weight="600" color="#FFFFFF">
+                      {t.filterNames[i] ?? ''}
+                    </Txt>
+                  </View>
+                </Pressy>
+              ))}
+            </ScrollView>
+          </Animated.View>
+        )}
 
         {/* Bottom: everything picked, the caption, and send. */}
         {tool !== 'crop' && (
@@ -335,17 +425,53 @@ export function MediaComposer({
                     </View>
                   </Pressy>
                 ))}
-              <Pressy onPress={() => void addMore()} label={t.addMoreMedia} scale={0.92} testID="editor-more">
+              <Pressy ripple="light" onPress={() => void addMore()} label={t.addMoreMedia} scale={0.92} testID="editor-more">
                 <View style={{ width: 54, height: 54, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.5)', alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="plus" size={22} color="#FFFFFF" />
                 </View>
               </Pressy>
             </ScrollView>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingStart: 14, paddingEnd: 6, minHeight: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.13)' }}>
+            {emoji && (
+              <Animated.View entering={fadeIn} exiting={fadeOut} style={{ height: 160, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)' }}>
+                <ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', padding: 6 }} keyboardShouldPersistTaps="handled">
+                  {EMOJI.map((e) => (
+                    <Pressy key={e} onPress={() => change(d.key, { caption: d.caption + e })} label={e} scale={0.85}>
+                      <View style={{ width: 42, height: 42, alignItems: 'center', justifyContent: 'center' }}>
+                        <Txt size={26}>{e}</Txt>
+                      </View>
+                    </Pressy>
+                  ))}
+                </ScrollView>
+              </Animated.View>
+            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingStart: 6, paddingEnd: 6, minHeight: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.13)' }}>
+              {/* The smiley, like WhatsApp's caption box. */}
+              {/* The emoji panel and the keyboard take turns, so the photo stays in view. */}
+              <Pressy
+                ripple="light"
+                onPress={() => {
+                  if (emoji) {
+                    setEmoji(false);
+                    caption.current?.focus();
+                  } else {
+                    Keyboard.dismiss();
+                    setEmoji(true);
+                  }
+                }}
+                label={t.emojiWord}
+                round
+                testID="caption-emoji"
+              >
+                <View style={{ width: 38, height: 38, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={emoji ? 'keyboard' : 'emoji'} size={22} color="#FFFFFF" />
+                </View>
+              </Pressy>
               <TextInput
+                ref={caption}
                 key={d.key}
                 value={d.caption}
+                onFocus={() => setEmoji(false)}
                 onChangeText={(caption) => change(d.key, { caption })}
                 placeholder={t.addCaption}
                 placeholderTextColor="rgba(255,255,255,0.6)"
@@ -368,7 +494,7 @@ export function MediaComposer({
                   </Txt>
                 </View>
               </View>
-              <Pressy onPress={() => void send()} label={t.send} scale={0.9} disabled={busy} testID="send-file">
+              <Pressy ripple="light" onPress={() => void send()} label={t.send} scale={0.9} disabled={busy} testID="send-file">
                 <LinearGradient colors={theme.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', boxShadow: `0 10px 24px -8px ${theme.acc}` }}>
                   <Icon name="send" size={23} color="#FFFFFF" stroke={2} flip />
                   {drafts.length > 1 && (
@@ -387,12 +513,29 @@ export function MediaComposer({
         {/* Words: write them big, pick a colour, Done puts them on the photo. */}
         {tool === 'text' && writing && (
           <Animated.View entering={fadeIn} style={{ position: 'absolute', top: 0, start: 0, end: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', paddingTop: insets.top + 10, zIndex: 5 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 }}>
+              {/* Like WhatsApp's: the next font, and the words on a box of their colour. */}
+              <Pressy ripple="light" onPress={() => setWriting({ ...writing, font: (writing.font + 1) % FONTS.length })} label={t.statusFont} round testID="text-font">
+                <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.12)' }}>
+                  <Txt size={19} weight="700" color="#FFFFFF" style={writing.font ? FONTS[writing.font] : undefined}>
+                    Aa
+                  </Txt>
+                </View>
+              </Pressy>
+              <Pressy ripple="light" onPress={() => setWriting({ ...writing, box: !writing.box })} label={t.textBox} round testID="text-box">
+                <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: writing.box ? '#FFFFFF' : 'rgba(255,255,255,0.12)' }}>
+                  <Txt size={17} weight="800" color={writing.box ? '#000000' : '#FFFFFF'}>
+                    A
+                  </Txt>
+                </View>
+              </Pressy>
+              <View style={{ flex: 1 }} />
               <Pressy
                 onPress={() => {
                   const text = writing.text.trim();
-                  if (writing.id) change(d.key, { layers: text ? d.layers.map((l) => (l.id === writing.id && l.kind === 'text' ? { ...l, text, color } : l)) : d.layers.filter((l) => l.id !== writing.id) });
-                  else if (text) addLayer({ kind: 'text', text, color });
+                  const look = { font: writing.font || undefined, box: writing.box || undefined };
+                  if (writing.id) change(d.key, { layers: text ? d.layers.map((l) => (l.id === writing.id && l.kind === 'text' ? { ...l, text, color, ...look } : l)) : d.layers.filter((l) => l.id !== writing.id) });
+                  else if (text) addLayer({ kind: 'text', text, color, ...look });
                   setWriting(null);
                   setTool(null);
                 }}
@@ -416,7 +559,12 @@ export function MediaComposer({
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 multiline
                 maxLength={200}
-                style={[fontStyle(writing.text || null, lang, 30, '800'), { color, textAlign: 'center' }]}
+                style={[
+                  fontStyle(writing.text || null, lang, 30, '800'),
+                  { color: writing.box ? boxInk(color) : color, textAlign: 'center' },
+                  writing.box && { backgroundColor: color, borderRadius: 12, alignSelf: 'center', paddingHorizontal: 12 },
+                  writing.font ? FONTS[writing.font] : null,
+                ]}
                 testID="text-input"
               />
             </View>
@@ -427,6 +575,49 @@ export function MediaComposer({
         )}
       </KeyboardAvoidingView>
 
+      <Sheet visible={hdSheet} onClose={() => setHdSheet(false)} title={t.mediaQuality}>
+        {(
+          [
+            [false, t.standardQuality, t.hdOffNote],
+            [true, t.hdQuality, t.hdOnNote],
+          ] as const
+        ).map(([on, label, note]) => (
+          <Pressy
+            key={label}
+            onPress={() => {
+              tick();
+              setHd(on);
+              setHdSheet(false);
+            }}
+            label={label}
+            scale={0.98}
+            testID={on ? 'quality-hd' : 'quality-standard'}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 12 }}>
+              <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: hd === on ? theme.acc : theme.muted, alignItems: 'center', justifyContent: 'center' }}>
+                {hd === on && <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: theme.acc }} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Txt size={15.5} weight="600">
+                  {label}
+                </Txt>
+                <Txt size={13} color={theme.muted}>
+                  {sizeNote(on) ?? note}
+                </Txt>
+              </View>
+            </View>
+          </Pressy>
+        ))}
+      </Sheet>
+      <Dialog
+        visible={discard}
+        onClose={() => setDiscard(false)}
+        title={t.discardChanges}
+        buttons={[
+          { label: t.cancel, onPress: () => setDiscard(false) },
+          { label: t.discardWord, danger: true, onPress: () => (setDiscard(false), onClose()), testID: 'editor-discard' },
+        ]}
+      />
       <StickerPicker
         visible={tool === 'sticker'}
         onClose={() => setTool(null)}
@@ -443,7 +634,7 @@ export function MediaComposer({
 function Round({ icon, label, onPress, active, id }: { icon: IconName; label: string; onPress: () => void; active?: boolean; id: string }) {
   const { theme } = useLook();
   return (
-    <Pressy onPress={onPress} label={label} scale={0.88} testID={id}>
+    <Pressy ripple="light" onPress={onPress} label={label} scale={0.88} testID={id}>
       <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? theme.acc : 'rgba(255,255,255,0.12)' }}>
         <Icon name={icon} size={20} color="#FFFFFF" />
       </View>
@@ -463,6 +654,42 @@ function Colors({ color, onPick, vertical }: { color: string; onPick: (c: string
   );
 }
 
+/** The colour slider: drag along it for any colour (white at the top, black at the bottom), like WhatsApp's. */
+const SLIDER = 200;
+const HUES = ['#FFFFFF', '#FF0000', '#FF8A00', '#FFE600', '#2EE61A', '#00D5FF', '#2050FF', '#B020FF', '#FF2D9B', '#000000'];
+function colourAt(f: number) {
+  const n = HUES.length - 1;
+  const at = Math.min(n, Math.max(0, f * n));
+  const i = Math.min(n - 1, Math.floor(at));
+  const mix = at - i;
+  const a = parseInt(HUES[i].slice(1), 16);
+  const b = parseInt(HUES[i + 1].slice(1), 16);
+  const ch = (sh: number) => Math.round(((a >> sh) & 255) * (1 - mix) + ((b >> sh) & 255) * mix);
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0').toUpperCase()}`;
+}
+function ColourSlider({ color, onPick }: { color: string; onPick: (c: string) => void }) {
+  const pick = (y: number) => onPick(colourAt(y / SLIDER));
+  const drag = usePanGesture({
+    minDistance: 0,
+    onBegin: (e) => {
+      scheduleOnRN(pick, e.y);
+    },
+    onUpdate: (e) => {
+      scheduleOnRN(pick, e.y);
+    },
+  });
+  return (
+    <View style={{ alignItems: 'center', gap: 8 }}>
+      <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: color, borderWidth: 2, borderColor: '#FFFFFF' }} />
+      <GestureDetector gesture={drag}>
+        <View style={{ width: 28, height: SLIDER, alignItems: 'center' }} testID="colour-slider">
+          <LinearGradient colors={HUES as unknown as [string, string, ...string[]]} style={{ width: 12, height: SLIDER, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)' }} />
+        </View>
+      </GestureDetector>
+    </View>
+  );
+}
+
 /** Stickers (PakChat's pack and my saved ones) and emoji to put on a photo. */
 function StickerPicker({ visible, onClose, onPick }: { visible: boolean; onClose: () => void; onPick: (l: NewLayer) => void }) {
   const t = useT();
@@ -472,7 +699,7 @@ function StickerPicker({ visible, onClose, onPick }: { visible: boolean; onClose
       <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 8, gap: 4 }}>
         {[...saved.map((s) => s.uri), ...PACK.map((s) => s.source)].map((src, i) => (
           <Animated.View key={String(src)}>
-            <Pressy onPress={() => onPick({ kind: 'sticker', source: src })} label={t.sticker} scale={0.88} testID={i === 0 ? 'editor-sticker-first' : undefined}>
+            <Pressy ripple="light" onPress={() => onPick({ kind: 'sticker', source: src })} label={t.sticker} scale={0.88} testID={i === 0 ? 'editor-sticker-first' : undefined}>
               <Image source={typeof src === 'number' ? src : { uri: src }} style={{ width: 76, height: 76, margin: 2 }} contentFit="contain" />
             </Pressy>
           </Animated.View>
@@ -491,8 +718,13 @@ function StickerPicker({ visible, onClose, onPick }: { visible: boolean; onClose
   );
 }
 
+/** Turns a player's sound off or on (the speaker button: how it will go). */
+function soundOff(player: ReturnType<typeof useVideoPlayer>, quiet: boolean) {
+  player.muted = quiet;
+}
+
 /** A video playing over and over (only the part that's kept), with the trim strip under it. */
-function VideoPart({ p, max, onTrim, onLength }: { p: Picked; max?: number; onTrim: (trim: { start: number; end: number }) => void; onLength: (ms: number) => void }) {
+function VideoPart({ p, max, quiet, onTrim, onLength }: { p: Picked; max?: number; quiet: boolean; onTrim: (trim: { start: number; end: number }) => void; onLength: (ms: number) => void }) {
   const t = useT();
   const player = useVideoPlayer({ uri: p.uri }, (pl) => {
     pl.loop = true;
@@ -502,6 +734,7 @@ function VideoPart({ p, max, onTrim, onLength }: { p: Picked; max?: number; onTr
   });
   const [length, setLength] = useState(p.duration ?? 0);
   const [playing, setPlaying] = useState(true);
+  useEffect(() => soundOff(player, quiet), [player, quiet]);
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
   useEventListener(player, 'statusChange', ({ status }) => {
     if (status === 'readyToPlay' && !length && player.duration > 0) {

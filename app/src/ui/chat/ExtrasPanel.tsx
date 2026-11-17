@@ -32,17 +32,25 @@ export type Tab = 'emoji' | 'gif' | 'sticker';
 
 const HEIGHT = 300;
 
+/** The tab used last (Emoji until another is used), kept while the app runs. */
+let lastTab: Tab = 'emoji';
+
 export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string) => void; onGif: (g: Gif) => void; onSticker: (from: string | number) => void }) {
   const t = useT();
   const { theme } = useLook();
-  const [tab, setTab] = useState<Tab>('sticker');
+  // It opens on Emoji the first time, then on whichever tab you used last, like WhatsApp's.
+  const [tab, setTabNow] = useState<Tab>(lastTab);
+  const setTab = (next: Tab) => {
+    lastTab = next;
+    setTabNow(next);
+  };
   // The GIF tab shows unless the server said it has no GIFs.
   const [gifsOn, setGifsOn] = useState(gifsAvailable() !== false);
 
   const tabs: { key: Tab; icon: IconName; label: string }[] = [
-    { key: 'sticker', icon: 'sticker', label: t.stickers },
-    ...(gifsOn ? [{ key: 'gif' as const, icon: 'gif' as const, label: t.gifWord }] : []),
     { key: 'emoji', icon: 'emoji', label: t.emoji },
+    ...(gifsOn ? [{ key: 'gif' as const, icon: 'gif' as const, label: t.gifWord }] : []),
+    { key: 'sticker', icon: 'sticker', label: t.stickers },
   ];
 
   return (
@@ -55,7 +63,7 @@ export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string
               onGif={onGif}
               onNone={() => {
                 setGifsOn(false);
-                setTab('sticker');
+                setTab('emoji');
               }}
             />
           )}

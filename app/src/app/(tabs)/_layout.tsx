@@ -10,12 +10,13 @@
 // slide, like WhatsApp"). All four are made ready just after the chat list first
 // shows, so none has to load when you get to it, and starting up draws the chat
 // list first.
+import { core } from '../../core/core';
 import { TopTabs, type MaterialTopTabBarProps } from 'expo-router/js-top-tabs';
 import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { markListShown, useChatList, useMissedCalls } from '../../core/hooks';
+import { markListShown, useChatList, useMissedCalls, useStatuses } from '../../core/hooks';
 import { startTimer, stopTimer } from '../../core/speed';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
@@ -38,6 +39,9 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
   const rows = useChatList();
   const unreadChats = (rows ?? []).filter((r) => (r.chat.unread > 0 || r.prefs.markedUnread) && !r.prefs.archived).length;
   const missed = useMissedCalls();
+  // A dot on Status when someone (not muted) has posted one I haven't watched, like WhatsApp's.
+  const statuses = useStatuses();
+  const newStatus = !!statuses?.others.some((p) => !p.seen && !p.muted);
 
   // A tap is timed until the tab is on screen (Settings › Help › Speed check).
   useEffect(() => {
@@ -80,7 +84,8 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
               scale={0.9}
               onPress={() => {
                 // No vibration here: like WhatsApp, switching tabs is silent.
-                if (on) return;
+                // Tapping the tab you're on takes its list back to the top, like WhatsApp.
+                if (on) return core.emit(`tabAgain:${tab.name}`);
                 startTimer('tab');
                 navigateToTab(state.routes[i].key);
               }}
@@ -88,6 +93,9 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
               <View style={{ alignItems: 'center', gap: 3 }}>
                 <View style={{ width: 58, height: 32, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name={tab.icon} size={22} color={color} stroke={on ? 2 : 1.8} />
+                  {tab.name === 'status' && newStatus && (
+                    <View style={{ position: 'absolute', top: 3, end: 12, width: 9, height: 9, borderRadius: 5, backgroundColor: theme.acc }} testID="tab-dot-status" />
+                  )}
                   {badge > 0 && (
                     <View
                       style={{

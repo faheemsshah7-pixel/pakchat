@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
-import Animated, { FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
+import Animated, { cancelAnimation, FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { core } from '../../core/core';
@@ -27,7 +27,10 @@ import { BigEmoji, RichWords } from './RichText';
 import { VoiceBody } from './VoiceBody';
 import { bodyLine, clock, systemText } from '../format';
 import { Icon } from '../icons';
-import { fontStyle, hasUrdu, Pressy, Txt } from '../kit';
+import { haveFile } from '../../core/files';
+import { Avatar, fontStyle, hasUrdu, Pressy, Txt } from '../kit';
+import { QuoteThumb } from './QuoteThumb';
+import { hash } from '../letters';
 import { fadeIn, fadeOut, popIn, popOut, smooth, tick } from '../motion';
 
 const PULL = 64;
@@ -51,6 +54,10 @@ type Props = {
   onReply: (m: Message) => void;
   onVote: (m: Message, option: number) => void;
   onReaction: (m: Message, emoji: string) => void;
+  /** Tap on the reactions under a bubble: who reacted with what. */
+  onReactions?: (m: Message) => void;
+  /** The quick round arrow beside a photo, video or link: forward just that one. */
+  onForward?: (m: Message) => void;
   onQuote: (m: Message) => void;
   onRetry: (m: Message) => void;
   /** Shown just above the bubble (the reactions bar when it's held). */
@@ -68,14 +75,14 @@ export const Bubble = memo(function Bubble(p: Props) {
 });
 
 /** The reply arrow behind a bubble being pulled: it fades and grows in as the bubble moves. */
-function ReplyArrow({ x, mine }: { x: SharedValue<number>; mine: boolean }) {
+function ReplyArrow({ x }: { x: SharedValue<number> }) {
   const { theme } = useLook();
   const arrow = useAnimatedStyle(() => {
     const pull = Math.abs(x.value);
     return { opacity: interpolate(pull, [10, PULL], [0, 1], 'clamp'), transform: [{ scale: interpolate(pull, [0, PULL], [0.5, 1], 'clamp') }] };
   });
   return (
-    <Animated.View style={[{ position: 'absolute' }, mine ? { end: 4 } : { start: 4 }, arrow]}>
+    <Animated.View style={[{ position: 'absolute', start: 4 }, arrow]}>
       <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
         <Icon name="reply" size={17} color={theme.accInk} flip />
       </View>
@@ -88,16 +95,25 @@ function SystemNote({ m }: { m: Message }) {
   const { theme } = useLook();
   const text = systemText(m, t);
   if (!text) return null;
-  return (
-    <View style={{ alignSelf: 'center', maxWidth: '86%', marginVertical: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: theme.glass }}>
-      <Txt size={12.5} weight="500" color={theme.sectionText} align="center">
+  const note = (
+    <View style={{ alignSelf: 'center', maxWidth: '86%', marginVertical: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: theme.glass, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      {m.event?.event === 'code_changed' && <Icon name="shield" size={14} color={theme.accInk} />}
+      <Txt size={12.5} weight="500" color={theme.sectionText} align="center" style={{ flexShrink: 1 }}>
         {text}
       </Txt>
     </View>
   );
+  // "Security code changed": tap to compare the codes (Verify).
+  if (m.event?.event === 'code_changed')
+    return (
+      <Pressy onPress={() => router.push({ pathname: '/verify/[id]', params: { id: m.event!.by } })} label={text} scale={0.98} style={{ alignSelf: 'center' }} testID="code-changed">
+        {note}
+      </Pressy>
+    );
+  return note;
 }
 
-function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onQuote, onRetry, above, album, textSize }: Props) {
+function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected, flash, onPress, onLongPress, onReply, onVote, onReaction, onReactions, onForward, onQuote, onRetry, above, album, textSize }: Props) {
   const t = useT();
   const { theme, rtl, lang } = useLook();
   const mine = m.author === core.myId;
@@ -113,8 +129,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   const [pulled, setPulled] = useState(false);
   const armed = useSharedValue(0);
 
-  // Towards the middle of the screen: right for theirs, left for mine (the other way round in Urdu).
-  const dir = (mine ? -1 : 1) * (rtl ? -1 : 1);
+  // Every message swipes to the right to reply, mine too, like WhatsApp (left in Urdu).
+  const dir = rtl ? -1 : 1;
   const pan = usePanGesture({
     enabled: !selecting && !m.deleted,
     activeOffsetX: dir > 0 ? [-1000, 16] : [-16, 1000],
@@ -149,30 +165,51 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   // The time (and ticks) sit on the text's last line when there's room, like WhatsApp: "Hi 10:01 am",
   // not "Hi" with the time on a line of its own (owner, 3 Nov). The text ends with an invisible copy
   // of them, so a line too full for it pushes the time onto the next line by itself.
-  const inline = !m.deleted && m.kind === 'text' && !!m.text && !m.link && !urdu && !rtl;
+  // Urdu words run right to left, so their last line ends on the left: the time sits there instead.
+  const inline = !m.deleted && m.kind === 'text' && !!m.text && !m.link && (urdu || !rtl);
   const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
-  const corner = 6;
+  // Smaller corners than before, and the first bubble of a run has a little tail at the top
+  // on the sender's side, like WhatsApp (its corner there is square, the tail carries on from it).
+  const R = 10;
   const radius = {
-    borderTopStartRadius: 18,
-    borderTopEndRadius: 18,
-    borderBottomStartRadius: mine ? 18 : first ? corner : 18,
-    borderBottomEndRadius: mine ? (first ? corner : 18) : 18,
+    borderTopStartRadius: !mine && first ? 0 : R,
+    borderTopEndRadius: mine && first ? 0 : R,
+    borderBottomStartRadius: R,
+    borderBottomEndRadius: R,
   };
+  // A photo or video fills its bubble, with only a thin edge round it (and the time on the photo).
+  const photo = !m.deleted && m.kind === 'file' && !!m.file && (album ? true : (m.file.kind === 'image' || m.file.kind === 'video') && !m.file.once);
+  const onPhoto = photo && !m.text;
+  const inset = photo ? { paddingHorizontal: 6 } : null;
   const reactions = Object.entries(m.reactions ?? {});
   // A sticker (and a round video) has no bubble: just the picture, with the time on a little pill under it.
   // One to three emoji on their own are shown big, with no bubble either (like WhatsApp).
   const big = !m.deleted && m.kind === 'text' && !quoted && !m.link && !m.forwarded && !m.quote && !m.statusReply ? emojiOnly(m.text ?? '') : 0;
   const bare = big > 0 || (!m.deleted && m.kind === 'file' && (m.file?.kind === 'sticker' || (!!m.file?.round && !m.file.once)));
 
+  const metaInk = onPhoto ? '#FFFFFF' : meta;
+  // The quick forward arrow: photos and videos once they're on this phone, and links.
+  const quick = !!onForward && !selecting && !m.deleted && !album && ((photo && haveFile(m)) || (m.kind === 'text' && !!m.link));
+  const arrow = quick ? (
+    <Pressy onPress={() => onForward(m)} label={t.forward} round testID="quick-forward">
+      <View style={{ width: 32, height: 32, borderRadius: 16, marginHorizontal: 8, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="forward" size={17} color={theme.muted} />
+      </View>
+    </Pressy>
+  ) : null;
+  // In a group, the sender's photo beside the first bubble of their run (a space beside the rest).
+  const face = group && !mine;
+  const tail = first && !bare ? <Tail mine={mine} colour={mine ? middle(theme.bubbleMine) : theme.bubbleIn} /> : null;
+
   const body = (
-    <View key={k} style={{ paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
+    <View key={k} style={photo ? { padding: 3 } : { paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
       {!!name && (
-        <Txt size={13} weight="700" color={theme.accInk} lines={1}>
+        <Txt size={13} weight="700" color={nameColour(m.author, theme.dark)} lines={1} style={[inset, photo && { paddingTop: 2, paddingBottom: 2 }]}>
           {name}
         </Txt>
       )}
       {m.forwarded && !m.deleted && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+        <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }, inset]}>
           <Icon name="forward" size={13} color={meta} />
           {/* Forwarded many times: WhatsApp's double arrow. */}
           {forwardedMany(m) && (
@@ -186,12 +223,16 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         </View>
       )}
       {/* While picking messages, a tap anywhere on the bubble picks it (no jumping, voting or retrying). */}
-      {quoted && !m.deleted && <Quote m={quoted} mine={mine} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />}
+      {quoted && !m.deleted && (
+        <View style={photo ? { marginBottom: -2 } : null}>
+          <Quote m={quoted} mine={mine} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
+        </View>
+      )}
       {m.statusReply && !m.deleted && <StatusQuoteView q={m.statusReply} mine={mine} />}
       {m.quote && !m.deleted && <ChatQuoteView q={m.quote} mine={mine} />}
       {m.deleted ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Icon name="close" size={14} color={meta} />
+          <Icon name="ban" size={15} color={meta} />
           <Txt size={14.5} color={meta} style={{ fontStyle: 'italic' }}>
             {mine ? t.youDeleted : t.deleted}
           </Txt>
@@ -224,7 +265,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
             <Text
               style={[
                 fontStyle(m.text, lang, textSize, '400'),
-                { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left', maxWidth: 236 },
+                { color: mine ? theme.bubbleMineText : theme.text, writingDirection: urdu ? 'rtl' : 'ltr', textAlign: urdu ? 'right' : 'left', maxWidth: 236, paddingHorizontal: photo ? 6 : 0, paddingTop: photo ? 4 : 0 },
               ]}
             >
               <RichWords text={m.text} mentions={m.mentions} color={mine ? theme.bubbleMineText : theme.text} mine={mine} />
@@ -261,28 +302,31 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
       )}
       <View
         style={
-          inline
-            ? { position: 'absolute', end: 12, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }
-            : { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 2 }
+          onPhoto
+            ? // Written on the photo's bottom corner, like WhatsApp.
+              { position: 'absolute', end: 9, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.32)' }
+            : inline
+              ? { position: 'absolute', ...(urdu ? { start: 12 } : { end: 12 }), bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }
+              : { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 2, marginEnd: photo ? 6 : 0, marginBottom: photo ? 2 : 0 }
         }
       >
-        {starred && <Icon name="starFilled" size={11} color={meta} />}
-        {!!m.pinnedUntil && m.pinnedUntil > now && <Icon name="pin" size={11} color={meta} />}
-        {!!m.expiresAt && <Icon name="timer" size={11} color={meta} />}
+        {starred && <Icon name="starFilled" size={11} color={metaInk} />}
+        {!!m.pinnedUntil && m.pinnedUntil > now && <Icon name="pin" size={11} color={metaInk} />}
+        {!!m.expiresAt && <Icon name="timer" size={11} color={metaInk} />}
         {!!m.keptBy && !m.deleted && (
-          <Txt size={11} color={meta}>
+          <Txt size={11} color={metaInk}>
             {t.keptWord}
           </Txt>
         )}
         {!!m.editedAt && !m.deleted && (
-          <Txt size={11} color={meta}>
+          <Txt size={11} color={metaInk}>
             {t.edited}
           </Txt>
         )}
-        <Txt size={11} color={meta}>
+        <Txt size={11} color={metaInk}>
           {clock(m.sentAt)}
         </Txt>
-        {mine && !m.deleted && <Ticks status={m.status} size={15} color={meta} />}
+        {mine && !m.deleted && <Ticks status={m.status} size={15} color={metaInk} />}
       </View>
     </View>
   );
@@ -315,7 +359,17 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center'}}
         >
           {/* The reply arrow, behind the bubble (made the first time it's pulled). */}
-          {pulled && <ReplyArrow x={x} mine={mine} />}
+          {pulled && <ReplyArrow x={x} />}
+          {face && (
+            <View style={{ width: 30, marginEnd: 6, alignSelf: 'flex-start' }}>
+              {first && (
+                <Pressy onPress={() => void core.client.openDirect(m.author).then((c) => router.push({ pathname: '/chat/[id]', params: { id: c.id } })).catch(() => {})} round label={core.name(m.author) || '…'} testID="msg-face">
+                  <Avatar id={m.author} name={core.name(m.author) || '…'} size={30} />
+                </Pressy>
+              )}
+            </View>
+          )}
+          {mine && arrow}
           <GestureDetector gesture={pan}>
             <Animated.View style={[{ maxWidth: '80%' }, slide]}>
               <Pressy
@@ -358,18 +412,25 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 ) : mine && (slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]) ? (
                   // One plain colour: on a slower phone (the colour fade and its clipping cost a lot
                   // there), and in the dark look, whose "fade" is one colour anyway.
-                  <View style={[radius, { backgroundColor: middle(theme.bubbleMine) }]}>{body}</View>
+                  <View style={[radius, { backgroundColor: middle(theme.bubbleMine) }]}>
+                    {body}
+                    {tail}
+                  </View>
                 ) : mine ? (
                   // The gradient can't round its own corners one by one on Android (it came
                   // out square), so a plain View with the corners clips it instead.
-                  <View
-                    style={[
-                      radius,
-                      { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}` },
-                    ]}
-                  >
-                    <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-                    {body}
+                  // (The tail sits outside the clipped part, so it isn't cut off.)
+                  <View style={radius}>
+                    <View
+                      style={[
+                        radius,
+                        { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}` },
+                      ]}
+                    >
+                      <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+                      {body}
+                    </View>
+                    {tail && <Tail mine colour={middle(theme.bubbleMine)} />}
                   </View>
                 ) : (
                   <View
@@ -379,6 +440,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                     ]}
                   >
                     {body}
+                    {tail}
                   </View>
                 )}
               </Pressy>
@@ -389,10 +451,11 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               )}
               {/* A reused bubble's reactions just show (or go); one added or taken away pops. */}
               <LayoutAnimationConfig key={k} skipEntering skipExiting>
-                {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={(e) => (selecting ? onPress(m) : onReaction(m, e))} />}
+                {reactions.length > 0 && <Reactions list={reactions} mine={mine} onPress={() => (selecting ? onPress(m) : onReactions ? onReactions(m) : onReaction(m, m.reactions?.[core.myId] ?? reactions[0][1]))} />}
               </LayoutAnimationConfig>
             </Animated.View>
           </GestureDetector>
+          {!mine && arrow}
         </Pressable>
       </View>
     </LayoutAnimationConfig>
@@ -409,22 +472,26 @@ function Quote({ m, mine, onPress }: { m: Message; mine: boolean; onPress: () =>
     <Pressy onPress={onPress} scale={0.98} label={text}>
       <View
         style={{
+          flexDirection: 'row',
           borderStartWidth: 3,
           borderColor: theme.acc,
           borderRadius: 8,
           backgroundColor: mine ? (theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)') : theme.accSoft,
-          paddingHorizontal: 9,
-          paddingVertical: 5,
           marginBottom: 5,
           marginTop: 2,
+          overflow: 'hidden',
         }}
       >
-        <Txt size={13} weight="700" color={theme.accInk} lines={1}>
-          {who}
-        </Txt>
-        <Txt size={13} color={theme.muted} lines={2}>
-          {text}
-        </Txt>
+        <View style={{ flexShrink: 1, flexGrow: 1, paddingHorizontal: 9, paddingVertical: 5 }}>
+          <Txt size={13} weight="700" color={nameColourOrAcc(m, theme)} lines={1}>
+            {who}
+          </Txt>
+          <Txt size={13} color={theme.muted} lines={2}>
+            {text}
+          </Txt>
+        </View>
+        {/* A photo or video answered shows a little picture of it, like WhatsApp. */}
+        <QuoteThumb m={m} size={50} />
       </View>
     </Pressy>
   );
@@ -465,45 +532,70 @@ function StatusQuoteView({ q, mine }: { q: NonNullable<Message['statusReply']>; 
   );
 }
 
-/** The little emoji chips under a bubble. Tap yours to take it back. */
-function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: boolean; onPress: (emoji: string) => void }) {
+/**
+ * The reactions under a bubble: one pill holding the emoji (the three used most) and how
+ * many reacted, like WhatsApp. Tap it to see who reacted with what.
+ */
+function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: boolean; onPress: () => void }) {
   const { theme } = useLook();
-  const counts = new Map<string, { n: number; me: boolean }>();
-  for (const [user, emoji] of list) {
-    const c = counts.get(emoji) ?? { n: 0, me: false };
-    counts.set(emoji, { n: c.n + 1, me: c.me || user === core.myId });
-  }
+  const counts = new Map<string, number>();
+  for (const [, emoji] of list) counts.set(emoji, (counts.get(emoji) ?? 0) + 1);
+  const top = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 3);
   return (
-    <View style={{ flexDirection: 'row', gap: 4, marginTop: -6, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 10 }}>
-      {[...counts].map(([emoji, c]) => (
-        <Animated.View key={emoji} entering={popIn} exiting={popOut}>
-          <Pressy onPress={() => onPress(emoji)} scale={0.9} label={emoji}>
-            <View
-              style={{
-                height: 26,
-                paddingHorizontal: 8,
-                borderRadius: 13,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 3,
-                backgroundColor: c.me ? theme.accSoft : theme.bubbleIn,
-                borderWidth: 1,
-                borderColor: c.me ? theme.acc : theme.glassLine,
-                boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.25)',
-              }}
-            >
-              <Text style={{ fontSize: 13 }}>{emoji}</Text>
-              {c.n > 1 && (
-                <Txt size={12} weight="600">
-                  {c.n}
-                </Txt>
-              )}
-            </View>
-          </Pressy>
-        </Animated.View>
-      ))}
-    </View>
+    <Animated.View entering={popIn} exiting={popOut} style={{ marginTop: -6, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 10 }}>
+      <Pressy onPress={onPress} scale={0.9} label={top.map(([e]) => e).join(' ')} testID="reactions">
+        <View
+          style={{
+            minHeight: 26,
+            paddingHorizontal: 7,
+            borderRadius: 13,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 2,
+            backgroundColor: theme.bubbleIn,
+            borderWidth: 1,
+            borderColor: theme.glassLine,
+            boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.25)',
+          }}
+        >
+          {top.map(([emoji]) => (
+            <Text key={emoji} style={{ fontSize: 13 }}>
+              {emoji}
+            </Text>
+          ))}
+          {list.length > 1 && (
+            <Txt size={12} weight="600" color={theme.muted} style={{ marginStart: 2 }}>
+              {list.length}
+            </Txt>
+          )}
+        </View>
+      </Pressy>
+    </Animated.View>
   );
+}
+
+/** The little tail at the top of a run's first bubble, on the sender's side. */
+function Tail({ mine, colour }: { mine: boolean; colour: string }) {
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        top: 0,
+        ...(mine ? { end: -8 } : { start: -8 }),
+        width: 0,
+        height: 0,
+        borderTopWidth: 11,
+        borderTopColor: colour,
+        ...(mine ? { borderEndWidth: 8, borderEndColor: 'transparent' } : { borderStartWidth: 8, borderStartColor: 'transparent' }),
+      }}
+    />
+  );
+}
+
+/** The name on a quote: the person's own colour in a group, like the names on bubbles. */
+function nameColourOrAcc(m: Message, theme: { dark: boolean; accInk: string }) {
+  return m.author === core.myId ? theme.accInk : nameColour(m.author, theme.dark);
 }
 
 /** A poll: each answer is a bar that fills (on a spring) as votes come in. */
@@ -629,9 +721,23 @@ export function TypingDots({ name }: { name?: string }) {
 }
 
 function Dot({ delay }: { delay: number }) {
-  // Still dots (they used to bob): the words "typing…" at the top say it too, and nothing moves.
+  // The dots bounce one after another, like WhatsApp's (owner, 12 Nov: WhatsApp comparison #8).
   const { theme } = useLook();
-  return <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.acc, opacity: delay ? 0.7 : 1 }} />;
+  const v = useSharedValue(0);
+  useEffect(() => {
+    v.set(withDelay(delay, withRepeat(withSequence(withTiming(1, { duration: 280 }), withTiming(0, { duration: 280 }), withTiming(0, { duration: 340 })), -1)));
+    return () => cancelAnimation(v);
+  }, [v, delay]);
+  const style = useAnimatedStyle(() => ({ opacity: 0.45 + 0.55 * v.value, transform: [{ translateY: -3.5 * v.value }] }));
+  return <Animated.View style={[{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.muted }, style]} />;
+}
+
+/** Each person's own colour for their name in a group, like WhatsApp's (the same person always gets the same one). */
+const NAMES_LIGHT = ['#1F7A4D', '#B5487A', '#2F6FC2', '#B3651E', '#7B4BC4', '#B23C3C', '#1E8A8A', '#8A6D1E', '#5B6FD6', '#C2457A', '#3E8E3E', '#A0522D'];
+const NAMES_DARK = ['#53BDEB', '#FC9775', '#A5B337', '#FF72A1', '#7F66FF', '#25D366', '#FFBC38', '#E26AB6', '#42C7B8', '#FA6533', '#C4A3FF', '#06CF9C'];
+export function nameColour(id: string, dark: boolean) {
+  const list = dark ? NAMES_DARK : NAMES_LIGHT;
+  return list[hash(id) % list.length];
 }
 
 /** The colour halfway along a two-colour fade ("#RRGGBB" each), for the plain bubble. */

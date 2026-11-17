@@ -27,14 +27,14 @@ export function AlbumBody({ ms, mine, selecting, onPick }: { ms: Message[]; mine
   const shown = ms.slice(0, 4);
   const rest = ms.length - 3;
   return (
-    <View style={{ width: WIDE, flexDirection: 'row', flexWrap: 'wrap', gap: GAP, marginBottom: 4 }} testID="album">
+    <View style={{ width: WIDE, flexDirection: 'row', flexWrap: 'wrap', gap: GAP }} testID="album">
       {shown.map((m, i) => (
         <AlbumTile
           key={`${m.author}/${m.id}`}
           m={m}
           mine={mine}
           size={size}
-          radius={10}
+          radius={7}
           selecting={selecting}
           onPick={onPick}
           more={i === 3 && ms.length > 4 ? rest : 0}

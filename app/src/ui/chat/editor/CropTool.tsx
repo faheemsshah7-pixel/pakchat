@@ -1,6 +1,7 @@
-// CropTool.tsx: cropping and turning a photo in the editor. Drag a corner to
-// crop, drag the middle to move the frame, ⟳ turns it a quarter. Done makes
-// the new photo at full size (expo-image-manipulator).
+// CropTool.tsx: cropping and turning a photo in the editor. Drag a corner or a
+// side to crop, drag the middle to move the frame, ⟳ turns it a quarter. Like
+// WhatsApp's, a fixed shape can be picked (square, 4:3, 16:9…): the corners then
+// keep it. Done makes the new photo at full size (expo-image-manipulator).
 import { useRef, useState } from 'react';
 import { Image as RNImage, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
@@ -20,7 +21,16 @@ export function fit(size: { w: number; h: number }, area: { w: number; h: number
   return { w: Math.floor(size.w * r), h: Math.floor(size.h * r) };
 }
 
-type Corner = 'tl' | 'tr' | 'bl' | 'br' | 'move';
+type Corner = 'tl' | 'tr' | 'bl' | 'br' | 't' | 'b' | 'l' | 'r' | 'move';
+/** The shapes to pick (width over height); 0 is free. */
+const SHAPES: { label: string; r: number }[] = [
+  { label: '', r: 0 },
+  { label: '1:1', r: 1 },
+  { label: '4:3', r: 4 / 3 },
+  { label: '3:4', r: 3 / 4 },
+  { label: '16:9', r: 16 / 9 },
+  { label: '9:16', r: 9 / 16 },
+];
 
 export function CropTool({
   uri,
@@ -45,6 +55,24 @@ export function CropTool({
   const box = fit(size, { w: area.w - 32, h: area.h - 120 });
   const [rect, setRect] = useState<Rect>(FULL);
   const base = useRef(rect);
+  const [shape, setShape] = useState(0);
+  // A shape's height for a width, both as parts of the photo.
+  const ratio = SHAPES[shape].r;
+  const tall = (w: number) => (w * box.w) / (ratio * Math.max(1, box.h));
+
+  /** Picks a shape: the biggest frame of it, in the middle. */
+  function pickShape(i: number) {
+    setShape(i);
+    const r = SHAPES[i].r;
+    if (!r) return setRect(FULL);
+    let w = 1;
+    let h = (w * box.w) / (r * Math.max(1, box.h));
+    if (h > 1) {
+      h = 1;
+      w = (h * r * box.h) / Math.max(1, box.w);
+    }
+    setRect({ x: (1 - w) / 2, y: (1 - h) / 2, w, h });
+  }
 
   const drag = (c: Corner) =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -60,6 +88,26 @@ export function CropTool({
         if (c === 'move') {
           x = Math.min(1 - w, Math.max(0, b.x + dx));
           y = Math.min(1 - h, Math.max(0, b.y + dy));
+        } else if (c === 't' || c === 'b' || c === 'l' || c === 'r') {
+          // A side (only with no fixed shape).
+          if (ratio) return;
+          if (c === 'l') {
+            x = Math.min(b.x + b.w - MIN, Math.max(0, b.x + dx));
+            w = b.x + b.w - x;
+          } else if (c === 'r') w = Math.min(1 - b.x, Math.max(MIN, b.w + dx));
+          else if (c === 't') {
+            y = Math.min(b.y + b.h - MIN, Math.max(0, b.y + dy));
+            h = b.y + b.h - y;
+          } else h = Math.min(1 - b.y, Math.max(MIN, b.h + dy));
+        } else if (ratio) {
+          // A corner, keeping the shape: the width follows the finger, the height goes with it.
+          const left = c === 'tl' || c === 'bl';
+          const top = c === 'tl' || c === 'tr';
+          w = Math.max(MIN, left ? b.w - dx : b.w + dx);
+          h = tall(w);
+          x = left ? b.x + b.w - w : b.x;
+          y = top ? b.y + b.h - h : b.y;
+          if (x < -0.001 || y < -0.001 || x + w > 1.001 || y + h > 1.001 || h < MIN) return;
         } else {
           if (c === 'tl' || c === 'bl') {
             x = Math.min(b.x + b.w - MIN, Math.max(0, b.x + dx));
@@ -78,6 +126,15 @@ export function CropTool({
   const bl = drag('bl');
   const br = drag('br');
   const mv = drag('move');
+  const st = drag('t');
+  const sb = drag('b');
+  const sl = drag('l');
+  const sr = drag('r');
+  const side = (g: typeof tl, style: object, id: string) => (
+    <GestureDetector gesture={g}>
+      <View hitSlop={14} style={[{ position: 'absolute', borderColor: '#FFFFFF' }, style]} testID={id} />
+    </GestureDetector>
+  );
 
   const px = { left: rect.x * box.w, top: rect.y * box.h, width: rect.w * box.w, height: rect.h * box.h };
   const corner = (g: typeof tl, style: object, id: string) => (
@@ -108,21 +165,43 @@ export function CropTool({
         {corner(tr, { left: px.left + px.width - 25, top: px.top - 3, borderTopWidth: 4, borderRightWidth: 4 }, 'crop-tr')}
         {corner(bl, { left: px.left - 3, top: px.top + px.height - 25, borderBottomWidth: 4, borderLeftWidth: 4 }, 'crop-bl')}
         {corner(br, { left: px.left + px.width - 25, top: px.top + px.height - 25, borderBottomWidth: 4, borderRightWidth: 4 }, 'crop-br')}
+        {/* The sides: a short bar in the middle of each, like WhatsApp's. */}
+        {!ratio && (
+          <>
+            {side(st, { left: px.left + px.width / 2 - 14, top: px.top - 3, width: 28, height: 22, borderTopWidth: 4 }, 'crop-t')}
+            {side(sb, { left: px.left + px.width / 2 - 14, top: px.top + px.height - 19, width: 28, height: 22, borderBottomWidth: 4 }, 'crop-b')}
+            {side(sl, { left: px.left - 3, top: px.top + px.height / 2 - 14, width: 22, height: 28, borderLeftWidth: 4 }, 'crop-l')}
+            {side(sr, { left: px.left + px.width - 19, top: px.top + px.height / 2 - 14, width: 22, height: 28, borderRightWidth: 4 }, 'crop-r')}
+          </>
+        )}
+      </View>
+
+      {/* The shapes. */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: -8 }}>
+        {SHAPES.map((x, i) => (
+          <Pressy key={i} ripple="light" onPress={() => pickShape(i)} label={x.label || t.freeShape} scale={0.94} testID={`crop-shape-${i}`}>
+            <View style={{ paddingHorizontal: 11, height: 30, borderRadius: 15, justifyContent: 'center', backgroundColor: shape === i ? theme.acc : 'rgba(255,255,255,0.12)' }}>
+              <Txt size={13} weight="700" color="#FFFFFF">
+                {x.label || t.freeShape}
+              </Txt>
+            </View>
+          </Pressy>
+        ))}
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
-        <Pressy onPress={onCancel} label={t.cancel} scale={0.94} testID="crop-cancel">
+        <Pressy ripple="light" onPress={onCancel} label={t.cancel} scale={0.94} testID="crop-cancel">
           <Txt size={15} weight="700" color="#FFFFFF" style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
             {t.cancel}
           </Txt>
         </Pressy>
-        <IconButton icon="rotate" label={t.rotateWord} look="onAccent" onPress={() => (setRect(FULL), onRotate())} disabled={busy} testID="crop-rotate" />
-        <Pressy onPress={() => setRect(FULL)} label={t.resetWord} scale={0.94} testID="crop-reset">
+        <IconButton icon="rotate" label={t.rotateWord} look="onAccent" onPress={() => (setRect(FULL), setShape(0), onRotate())} disabled={busy} testID="crop-rotate" />
+        <Pressy ripple="light" onPress={() => (setRect(FULL), setShape(0))} label={t.resetWord} scale={0.94} testID="crop-reset">
           <Txt size={15} weight="700" color="#FFFFFF" style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
             {t.resetWord}
           </Txt>
         </Pressy>
-        <Pressy onPress={() => onDone(rect)} label={t.doneWord} scale={0.94} disabled={busy} testID="crop-done">
+        <Pressy ripple="light" onPress={() => onDone(rect)} label={t.doneWord} scale={0.94} disabled={busy} testID="crop-done">
           <View style={{ paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, backgroundColor: theme.acc }}>
             <Txt size={15} weight="700" color="#FFFFFF">
               {t.doneWord}

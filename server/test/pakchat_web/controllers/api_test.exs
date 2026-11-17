@@ -29,7 +29,8 @@ defmodule PakchatWeb.ApiTest do
                "last_seen" => "contacts",
                "online" => "same",
                "photo" => "everyone",
-               "read_receipts" => false
+               "read_receipts" => false,
+               "except" => %{"last_seen" => [], "photo" => [], "about" => [], "groups" => []}
              }
     end
 

@@ -94,6 +94,8 @@ export type Events = {
 
 /** Group notes that only tell the app to look again (its admins' lists), never a line in the chat. */
 const QUIET_NOTES = ['requested', 'request_done', 'suggested', 'suggestion_done'];
+/** Notes only this device writes (calls, timer changes it opened, a changed security code): never taken from the server. */
+const LOCAL_NOTES = ['call', 'timer', 'code_changed'];
 
 export type Device = { userId: string; deviceId: number };
 
@@ -536,7 +538,7 @@ export class PakChat {
    * `quote`: replying privately to a group message. `link`: the card for a web address in it.
    * `hold`: wait this long (ms) before it goes, so it can be taken back ("Undo", see `takeBack`).
    */
-  sendText(chatId: string, text: string, extra: SendExtra & { bg?: number; link?: LinkPreview } = {}) {
+  sendText(chatId: string, text: string, extra: SendExtra & { bg?: number; font?: number; link?: LinkPreview } = {}) {
     if (text.trim() === '') throw new Error('Nothing to send');
     const body: Body = { t: 'text', text };
     if (extra.mentions?.length) body.mentions = extra.mentions;
@@ -544,6 +546,7 @@ export class PakChat {
     if (extra.forwarded) body.forwarded = true;
     if (extra.forwarded && extra.hops && extra.hops > 1) body.hops = extra.hops;
     if (extra.bg !== undefined) body.bg = extra.bg;
+    if (extra.font) body.font = extra.font;
     if (extra.status) body.status = extra.status;
     if (extra.quote) body.quote = extra.quote;
     if (extra.link) body.link = extra.link;
@@ -1136,7 +1139,7 @@ export class PakChat {
         const before = await signal.identityKey(this.s.handle, userId, b.deviceId);
         await signal.startSession(this.s.handle, userId, b.deviceId, b);
         const after = await signal.identityKey(this.s.handle, userId, b.deviceId);
-        if (before && before !== after && userId !== this.s.userId) this.emit('securityCodeChanged', { userId });
+        if (before && before !== after && userId !== this.s.userId) await this.codeChanged(userId);
       }
       // Devices the server doesn't have any more.
       const returned = new Set(bundles.map((b) => b.deviceId));
@@ -1303,7 +1306,8 @@ export class PakChat {
         if (e.type === SEALED.first) {
           this.keysUsed++;
           const after = await signal.identityKey(handle, e.from, e.from_device);
-          if (before && before !== after && e.from !== this.s.userId) this.emit('securityCodeChanged', { userId: e.from });
+          // The message is open (its key is used up): a failed note mustn't ask for it again.
+          if (before && before !== after && e.from !== this.s.userId) await this.codeChanged(e.from).catch((err) => this.emit('error', err as Error));
         }
       }
     } catch (err) {
@@ -1410,6 +1414,7 @@ export class PakChat {
       if (c.forwarded) m.forwarded = true;
       if (c.hops) m.forwardHops = c.hops;
       if (c.bg !== undefined) m.bg = c.bg;
+      if (c.font) m.font = c.font;
       if (c.status) m.statusReply = c.status;
       if (c.quote) m.quote = c.quote;
       if (c.link) m.link = c.link;
@@ -1545,6 +1550,17 @@ export class PakChat {
     for (const w of list) await this.applyChange(chat, w.from, w.at, w.change as Content & Change, false);
   }
 
+  /**
+   * Someone's security code changed (a new phone, or PakChat put on again): says so, and
+   * notes it in our chat ("Ali's security code changed"), like WhatsApp. Only on this phone.
+   */
+  private async codeChanged(userId: string) {
+    this.emit('securityCodeChanged', { userId });
+    const chat = (await this.o.storage.listChats()).find((c) => c.kind === 'direct' && c.members.some((m) => m.userId === userId));
+    const at = this.now();
+    if (chat) await this.note(chat, `code-${userId}-${at}`, { event: 'code_changed', by: userId }, at);
+  }
+
   /** A note in the chat from this device itself, like "messages now disappear after 7 days". */
   private async note(chat: Chat, id: string, event: SystemEvent, at: number) {
     // It goes just after the newest sent message, so later messages still come under it.
@@ -1561,6 +1577,8 @@ export class PakChat {
     const data = (e.data ?? {}) as SystemEvent;
     const users = Array.isArray(data.users) ? (data.users as string[]) : [];
     const at = Date.parse(e.sent_at) || this.now();
+    // The server can't put words in this phone's mouth ("security code changed" and the like).
+    if (typeof data.event !== 'string' || LOCAL_NOTES.includes(data.event)) return;
     if (QUIET_NOTES.includes(data.event)) {
       this.emit('notice', { chatId: e.chat_id, event: data.event });
       return;
@@ -1600,7 +1618,7 @@ export class PakChat {
     const data = e.data as { status?: string; seqs?: number[] } | undefined;
     const seqs = Array.isArray(data?.seqs) ? data.seqs.filter(Number.isInteger) : [];
     const status = data?.status;
-    if (!seqs.length || (status !== 'delivered' && status !== 'read')) return;
+    if (!seqs.length || (status !== 'delivered' && status !== 'read' && status !== 'played')) return;
     const { storage } = this.o;
     const chat = await storage.getChat(e.chat_id);
     if (!chat) return;
@@ -1608,6 +1626,16 @@ export class PakChat {
     if (e.from === this.s.userId) {
       // I read these on another device: they're not unread here either.
       if (status === 'read') await this.markReadUpTo(chat, Math.max(...seqs));
+      // I played these voice notes on another device: no longer new here.
+      if (status === 'played') {
+        for (const seq of seqs) {
+          const m = await storage.getMessageBySeq(chat.id, seq);
+          if (!m || m.author === this.s.userId || m.played) continue;
+          m.played = true;
+          await storage.putMessage(m);
+          this.emit('message', m);
+        }
+      }
       return;
     }
 
@@ -1615,12 +1643,22 @@ export class PakChat {
     for (const seq of seqs) {
       const m = await storage.getMessageBySeq(chat.id, seq);
       if (!m || m.author !== this.s.userId) continue;
+      // Played means heard, so read too.
+      const seen = status === 'read' || status === 'played';
       if (chat.kind === 'direct') {
-        if (status === 'read') m.status = 'read';
+        if (seen) m.status = 'read';
         else if (m.status !== 'read') m.status = 'delivered';
+        if (status === 'played') m.played = true;
       } else {
         m.deliveredTo = [...new Set([...(m.deliveredTo ?? []), e.from])];
-        if (status === 'read') m.readBy = [...new Set([...(m.readBy ?? []), e.from])];
+        if (seen) {
+          m.readBy = [...new Set([...(m.readBy ?? []), e.from])];
+          if (!m.readTimes?.[e.from]) m.readTimes = { ...m.readTimes, [e.from]: Date.parse(e.sent_at) || Date.now() };
+        }
+        if (status === 'played') {
+          m.playedBy = [...new Set([...(m.playedBy ?? []), e.from])];
+          if (others.every((u) => m.playedBy?.includes(u))) m.played = true;
+        }
         if (others.every((u) => m.readBy?.includes(u))) m.status = 'read';
         else if (others.every((u) => m.deliveredTo?.includes(u)) && m.status !== 'read') m.status = 'delivered';
       }
@@ -1659,6 +1697,24 @@ export class PakChat {
     for (const [to, seqs] of ticks) {
       await this.push('receipt', { chat_id: chatId, to, status: 'read', seqs }).catch(() => {});
     }
+  }
+
+  /**
+   * I started playing a voice note someone sent me: the blue mic for them (if
+   * my read receipts are on; the server checks), and no longer new here.
+   */
+  async markPlayed(note: Pick<Message, 'chatId' | 'author' | 'id'>) {
+    const chatId = note.chatId;
+    const m = await this.inLane(async () => {
+      const x = await this.o.storage.getMessage(chatId, note.author, note.id);
+      if (!x || x.author === this.s.userId || x.played || x.kind !== 'file' || x.file?.kind !== 'voice' || x.seq == null) return null;
+      x.played = true;
+      await this.o.storage.putMessage(x);
+      this.emit('message', x);
+      return x;
+    });
+    if (!m) return;
+    await this.push('receipt', { chat_id: chatId, to: m.author, status: 'played', seqs: [m.seq!] }).catch(() => {});
   }
 
   // ---- Asking again ----

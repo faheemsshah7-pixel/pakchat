@@ -1,9 +1,10 @@
 // new-chat.tsx: start a chat. Type a friend's Gmail (or just the part before
 // "@gmail.com") or number and PakChat finds them, or pick one of your contacts
 // or someone you already chat with. Your phone's contacts can be checked too.
+import { Contact, ContactField, getPermissionsAsync } from 'expo-contacts';
 import { router } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Linking, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 
 import { core, isOffline } from '../core/core';
@@ -38,6 +39,39 @@ export default function NewChat() {
       .filter((p) => !q || p.name.toLowerCase().includes(q))
       .sort((a, b) => Number(b.saved) - Number(a.saved) || a.name.replace(/^~ /, '').localeCompare(b.name.replace(/^~ /, '')));
   }, [people, query]);
+
+  // Phone contacts not on PakChat, with an Invite button, like WhatsApp (only once PakChat may
+  // see the contacts; nothing is sent anywhere, the list is only shown here).
+  const [phone, setPhone] = useState<{ name: string; number: string }[]>([]);
+  useEffect(() => {
+    let gone = false;
+    void (async () => {
+      if (!(await getPermissionsAsync()).granted) return;
+      const all = await Contact.getAllDetails([ContactField.FULL_NAME, ContactField.PHONES] as const);
+      if (gone) return;
+      const out = all
+        .map((c) => ({ name: (c.fullName ?? '').trim(), number: c.phones?.find((p) => p.number)?.number ?? '' }))
+        .filter((c) => c.name && c.number)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setPhone(out);
+    })().catch(() => {});
+    return () => {
+      gone = true;
+    };
+  }, [syncing]);
+  const invites = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const onApp = new Set(Object.values(people).map((p) => core.name(p.id).replace(/^~ /, '').toLowerCase()));
+    const seen = new Set<string>();
+    return phone.filter((c) => {
+      const k = c.name.toLowerCase();
+      if (onApp.has(k) || seen.has(k) || (q && !k.includes(q))) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [phone, people, query]);
+  type Item = { kind: 'person'; id: string; name: string; about?: string | null } | { kind: 'head' } | { kind: 'invite'; name: string; number: string };
+  const items: Item[] = [...known.map((p) => ({ kind: 'person' as const, ...p })), ...(invites.length ? [{ kind: 'head' as const }, ...invites.map((c) => ({ kind: 'invite' as const, ...c }))] : [])];
 
   async function phoneBook() {
     setSyncing(true);
@@ -129,6 +163,8 @@ export default function NewChat() {
       <Glass style={{ marginHorizontal: 12 }}>
         <SettingRow icon="group" title={t.newGroup} onPress={() => router.replace('/new-group')} testID="to-new-group" />
         <Divider />
+        <SettingRow icon="community" title={t.newCommunity} onPress={() => router.replace('/new-community')} testID="to-new-community" />
+        <Divider />
         <SettingRow
           icon="userPlus"
           title={t.newContact}
@@ -148,8 +184,9 @@ export default function NewChat() {
       {/* A recycling list: rows that scroll away are reused for the ones coming in. */}
       <FlashList
         maintainVisibleContentPosition={{ disabled: true }}
-        data={known}
-        keyExtractor={(p) => p.id}
+        data={items}
+        keyExtractor={(p, i) => (p.kind === 'person' ? p.id : p.kind === 'head' ? 'head' : `invite-${i}`)}
+        getItemType={(p) => p.kind}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ marginHorizontal: 12, paddingBottom: 30 }}
         ItemSeparatorComponent={Divider}
@@ -174,7 +211,22 @@ export default function NewChat() {
             </>
           ) : undefined
         }
-        renderItem={({ item, index }) => (
+        renderItem={({ item }) =>
+          item.kind === 'head' ? (
+            <Section title={t.inviteSection} />
+          ) : item.kind === 'invite' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }} testID={`invite-${item.name}`}>
+              <Avatar id={`phone:${item.number}`} name={item.name} size={44} />
+              <Txt size={15.5} weight="600" lines={1} style={{ flex: 1 }}>
+                {item.name}
+              </Txt>
+              <Pressy onPress={() => void Linking.openURL(`sms:${item.number.replace(/[^\d+]/g, '')}?body=${encodeURIComponent(t.inviteMessage)}`).catch(() => toast(t.couldNot))} label={t.inviteWord} hitSlop={8}>
+                <Txt size={14.5} weight="700" color={theme.acc}>
+                  {t.inviteWord}
+                </Txt>
+              </Pressy>
+            </View>
+          ) : (
           <View>
             <Pressy onPress={() => open(item.id)} label={item.name} scale={0.98} testID={`person-${item.name}`}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
@@ -192,7 +244,8 @@ export default function NewChat() {
               </View>
             </Pressy>
           </View>
-        )}
+          )
+        }
       />
     </Screen>
   );

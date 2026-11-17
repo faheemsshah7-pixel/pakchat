@@ -10,24 +10,29 @@
 // Like WhatsApp, it grows out of its spot in the chat when it opens, and
 // shrinks back into it when it closes (SwipeToClose.tsx, zoom.ts).
 // Along the top, like WhatsApp: Star, Forward, and ⋮ with Reply, Show in chat,
-// All media, Share and Delete. The bars sit on a dim strip, top and bottom, and
+// All media, Edit (a photo, in the editor, then sent to the chat again), Save (to
+// the phone's gallery), Rotate (how it's shown here), Set as profile photo, Share
+// and Delete. A video has a speed button (1×, 1.5×, 2×). The bars sit on a dim strip, top and bottom, and
 // along the bottom are Reply and two quick reactions, like WhatsApp's.
 // Pinch a photo (or double tap it) to zoom in (Zoomable.tsx).
 import type { Message } from '@pakchat/shared';
 import { UNSEND_HOURS } from '@pakchat/shared';
 import { Image } from 'expo-image';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, BackHandler, FlatList, Image as RNImage, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, isOffline } from '../core/core';
-import { Cancelled, download, FileBroken, FileGone, haveFile, tagOf } from '../core/files';
+import { Cancelled, download, FileBroken, FileGone, haveFile, sendPicked, tagOf } from '../core/files';
+import { uploadPhoto } from '../core/photos';
 import { useChat, useFileProgress, useNow, useStarred } from '../core/hooks';
 import { outsideFor } from '../core/lock';
 import { useT } from '../i18n';
@@ -36,6 +41,7 @@ import { clock, dayLabel, duration, fileSize } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Txt } from '../ui/kit';
 import { fadeIn, fadeOut } from '../ui/motion';
+import { MediaComposer, type Ready } from '../ui/chat/MediaComposer';
 import { Dialog, MenuItem, Popup, toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
 import { SwipeToClose, type Closer } from '../ui/SwipeToClose';
@@ -151,6 +157,10 @@ export default function Viewer() {
   const chatInfo = useChat(chat);
   const [menu, setMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState<Message | null>(null);
+  const [asProfile, setAsProfile] = useState(false);
+  // Rotate: how each photo is turned here (quarters), only for looking at it.
+  const [turns, setTurns] = useState<Record<string, number>>({});
   const now = useNow(60_000);
   const isStarred = !!m && !!starred[`${m.chatId}/${m.author}/${m.id}`];
   const amAdmin = chatInfo?.kind === 'group' && chatInfo.members.some((mb) => mb.userId === core.myId && mb.role === 'admin');
@@ -171,6 +181,49 @@ export default function Viewer() {
   const share = () => {
     if (f?.local && m && haveFile(m)) void outsideFor(() => Sharing.shareAsync(f.local!, { mimeType: f.mime })).catch(() => {});
   };
+  /** Save: into the phone's gallery. */
+  async function save() {
+    if (!f?.local || !m || !haveFile(m)) return toast(t.downloadFirst);
+    try {
+      const now = await MediaLibrary.getPermissionsAsync(true);
+      const ok = now.granted || (now.canAskAgain && (await outsideFor(() => MediaLibrary.requestPermissionsAsync(true))).granted);
+      if (!ok) return toast(t.couldNot);
+      await MediaLibrary.saveToLibraryAsync(f.local);
+      toast(t.savedToGallery);
+    } catch {
+      toast(t.couldNot);
+    }
+  }
+  /** Set as profile photo: the middle square of it, like WhatsApp's (made smaller and uploaded). */
+  async function makeProfile() {
+    setAsProfile(false);
+    if (!f?.local) return toast(t.couldNot);
+    try {
+      toast(t.uploadingPhoto);
+      // A photo sent without its size: ask the file itself.
+      const { width, height } =
+        f.width && f.height ? { width: f.width, height: f.height } : await new Promise<{ width: number; height: number }>((ok, fail) => RNImage.getSize(f.local!, (w, h) => ok({ width: w, height: h }), fail));
+      const side = Math.min(width, height);
+      const ctx = ImageManipulator.manipulate(f.local);
+      ctx.crop({ originX: Math.round((width - side) / 2), originY: Math.round((height - side) / 2), width: side, height: side });
+      const square = await (await ctx.renderAsync()).saveAsync({ compress: 0.95, format: SaveFormat.JPEG });
+      await core.updateMe({ photo: await uploadPhoto(square.uri) });
+      toast(t.photoUpdated);
+    } catch (err) {
+      toast(isOffline(err) ? t.offline : t.couldNot);
+    }
+  }
+  /** Edit: the photo goes through the editor and is sent to this chat again. */
+  function sendEdited(list: Ready[]) {
+    setEditing(null);
+    void (async () => {
+      for (const p of list) {
+        const { caption, ...one } = p;
+        await sendPicked(chat, one, caption);
+      }
+      toChat({});
+    })().catch(() => toast(t.couldNot));
+  }
   const remove = (everyone: boolean) => {
     setDeleting(false);
     if (!m) return;
@@ -227,6 +280,7 @@ export default function Viewer() {
                   onZoomed={setZoomed}
                   onEdgeSwipe={edgeSwipe}
                   onShown={!swapped && i === start ? reveal : undefined}
+                  turn={turns[keyOf(item)] ?? 0}
                 />
               )}
             />
@@ -281,10 +335,35 @@ export default function Viewer() {
         {!chatInfo?.left && <MenuItem icon="reply" label={t.reply} onPress={() => (setMenu(false), toChat({ jump: key, reply: key }))} testID="viewer-reply" />}
         <MenuItem icon="chat" label={t.showInChat} onPress={() => (setMenu(false), toChat({ jump: key }))} testID="viewer-show" />
         <MenuItem icon="photo" label={t.allMedia} onPress={() => (setMenu(false), router.push({ pathname: '/media/[id]', params: { id: chat } }))} testID="viewer-all-media" />
+        {!!m && haveFile(m) && f?.kind === 'image' && !chatInfo?.left && <MenuItem icon="edit" label={t.edit} onPress={() => (setMenu(false), setEditing(m))} testID="viewer-edit" />}
+        {!!m && haveFile(m) && <MenuItem icon="download" label={t.saveWord} onPress={() => (setMenu(false), void save())} testID="viewer-save" />}
+        {!!m && haveFile(m) && f?.kind === 'image' && (
+          <MenuItem icon="rotate" label={t.rotateWord} onPress={() => (setMenu(false), setTurns((x) => ({ ...x, [key]: ((x[key] ?? 0) + 3) % 4 })))} testID="viewer-rotate" />
+        )}
+        {!!m && haveFile(m) && f?.kind === 'image' && <MenuItem icon="user" label={t.setAsProfile} onPress={() => (setMenu(false), setAsProfile(true))} testID="viewer-profile" />}
         {!!m && haveFile(m) && <MenuItem icon="upload" label={t.share} onPress={() => (setMenu(false), share())} testID="viewer-share" />}
         <MenuItem icon="trash" label={t.delete} danger onPress={() => (setMenu(false), setDeleting(true))} testID="viewer-delete" />
       </Popup>
 
+      <Dialog
+        visible={asProfile}
+        onClose={() => setAsProfile(false)}
+        title={t.setAsProfile}
+        text={t.setAsProfileNote}
+        buttons={[
+          { label: t.cancel, onPress: () => setAsProfile(false) },
+          { label: t.okWord, onPress: () => void makeProfile(), testID: 'viewer-profile-ok' },
+        ]}
+      />
+      {editing?.file?.local && (
+        <MediaComposer
+          items={[{ uri: editing.file.local, mime: editing.file.mime, kind: 'image', width: editing.file.width, height: editing.file.height }]}
+          to={chatInfo ? core.chatTitle(chatInfo) : ''}
+          onClose={() => setEditing(null)}
+          onMore={async () => []}
+          onSend={sendEdited}
+        />
+      )}
       <Dialog
         visible={deleting}
         onClose={() => setDeleting(false)}
@@ -325,7 +404,7 @@ export default function Viewer() {
           exiting={fadeOut}
           style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: REPLY_ROW + insets.bottom, paddingBottom: insets.bottom, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: DIM }}
         >
-          <Pressy onPress={() => toChat({ jump: key, reply: key })} label={t.reply} scale={0.98} testID="viewer-reply-bar" style={{ flex: 1 }}>
+          <Pressy ripple="light" onPress={() => toChat({ jump: key, reply: key })} label={t.reply} scale={0.98} testID="viewer-reply-bar" style={{ flex: 1 }}>
             <View style={{ height: 42, borderRadius: 21, paddingHorizontal: 18, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' }}>
               <Txt size={15} color="rgba(255,255,255,0.8)">
                 {t.reply}
@@ -360,7 +439,10 @@ function Page({
   onZoomed,
   onEdgeSwipe,
   onShown,
+  turn = 0,
 }: {
+  /** Quarters it's turned (Rotate, from the ⋮ menu). */
+  turn?: number;
   m: Message;
   width: number;
   height: number;
@@ -432,13 +514,15 @@ function Page({
         // screen zooms, and swiping away from it puts it back.
         <Zoomable width={width} height={height} viewport={{ width, height }} picture={{ width: shownW, height: shownH }} enabled={active && zoom} onZoomed={zoomedHere} onTap={onTap} onEdgeSwipe={onEdgeSwipe}>
           {/* Kept in memory, so it shows at once when the pages swap in after opening. */}
-          <Image source={{ uri: f.local }} style={{ width, height }} contentFit="contain" cachePolicy="memory-disk" onDisplay={onShown} testID="viewer-image" />
+          <View style={turn ? { transform: [{ rotate: `${turn * 90}deg` }, { scale: turn % 2 ? Math.min(width / shownH, height / shownW) : 1 }] } : undefined}>
+            <Image source={{ uri: f.local }} style={{ width, height }} contentFit="contain" cachePolicy="memory-disk" onDisplay={onShown} testID="viewer-image" />
+          </View>
           {sharp && <Image source={{ uri: f.local }} style={StyleSheet.absoluteFill} contentFit="contain" allowDownscaling={false} transition={120} testID="viewer-image-sharp" />}
         </Zoomable>
       ) : (
         <Pressable style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onPress={onTap}>
           {f.thumb && <Image source={{ uri: `data:image/jpeg;base64,${f.thumb}` }} style={{ position: 'absolute', width: '100%', height: '100%' }} contentFit="contain" blurRadius={8} />}
-          <Pressy onPress={() => void get()} label={t.download} scale={0.92} testID="viewer-download">
+          <Pressy ripple="light" onPress={() => void get()} label={t.download} scale={0.92} testID="viewer-download">
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.55)' }}>
               {progress !== undefined ? <ActivityIndicator color="#FFFFFF" /> : <Icon name="download" size={20} color="#FFFFFF" />}
               <Txt size={14} weight="700" color="#FFFFFF">
@@ -456,6 +540,12 @@ function Page({
 function muteVideo(player: VideoPlayer, muted: boolean) {
   player.muted = muted;
 }
+
+/** A video's speed (1×, 1.5×, 2×), like WhatsApp's. */
+function setSpeed(player: VideoPlayer, rate: number) {
+  player.playbackRate = rate;
+}
+const SPEEDS = [1, 1.5, 2];
 
 /** The height of a video's controls along the bottom. */
 const VIDEO_BAR = 64;
@@ -484,6 +574,7 @@ function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolea
   const [at, setAt] = useState(0);
   const [length, setLength] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [speed, setSpeedNow] = useState(1);
   // While the line is being dragged, it shows where you are, not where the video is.
   const [dragging, setDragging] = useState<number | null>(null);
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
@@ -515,7 +606,7 @@ function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolea
       </Zoomable>
       {(chrome || !playing) && (
         <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
-          <Pressy onPress={toggle} label={playing ? t.pause : t.play} scale={0.9} testID="viewer-play">
+          <Pressy ripple="light" onPress={toggle} label={playing ? t.pause : t.play} scale={0.9} testID="viewer-play">
             <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name={playing ? 'pause' : 'play'} size={30} color="#FFFFFF" />
             </View>
@@ -560,6 +651,23 @@ function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolea
           <Txt size={13} weight="600" color="#FFFFFF" style={{ fontVariant: ['tabular-nums'], minWidth: 38 }}>
             {duration(length * 1000)}
           </Txt>
+          <Pressy
+            ripple="light"
+            onPress={() => {
+              const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+              setSpeed(player, next);
+              setSpeedNow(next);
+            }}
+            label={t.speed}
+            scale={0.9}
+            testID="viewer-speed"
+          >
+            <View style={{ minWidth: 40, minHeight: 26, borderRadius: 13, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)' }}>
+              <Txt size={12.5} weight="800" color="#FFFFFF">
+                {`${speed}×`}
+              </Txt>
+            </View>
+          </Pressy>
           <IconButton
             icon={muted ? 'speakerOff' : 'speaker'}
             label={muted ? t.unmute : t.mute}

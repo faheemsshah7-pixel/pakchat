@@ -480,12 +480,12 @@ defmodule PakchatWeb.DeviceChannelTest do
 
   ## Ticks
 
-  test "delivered and read ticks go to the sender", ctx do
+  test "delivered, read and played ticks go to the sender", ctx do
     %{ali: ali, sara: sara, chat: chat} = ctx
     online(ali.token, ali.device)
     s = online(sara.token, sara.device)
 
-    for status <- ["delivered", "read"] do
+    for status <- ["delivered", "read", "played"] do
       ref =
         push(s, "receipt", %{
           "chat_id" => chat.id,
@@ -552,10 +552,31 @@ defmodule PakchatWeb.DeviceChannelTest do
     refute_envelopes(ali.device)
     assert [%{data: %{"status" => "read"}}] = envelopes_for(sara_web.device)
 
+    # A voice note played: no blue mic for Ali either, but Sara's website knows.
+    ref = push(s, "receipt", %{read | "status" => "played"})
+    assert_reply ref, :ok
+    refute_envelopes(ali.device)
+    assert [%{data: %{"status" => "played"}}] = envelopes_for(sara_web.device)
+
     # "Delivered" still goes.
     ref = push(s, "receipt", %{read | "status" => "delivered"})
     assert_reply ref, :ok
     assert [%{data: %{"status" => "delivered"}}] = envelopes_for(ali.device)
+  end
+
+  test "made-up tick kinds are refused", ctx do
+    %{ali: ali, sara: sara, chat: chat} = ctx
+    s = online(sara.token, sara.device)
+
+    ref =
+      push(s, "receipt", %{
+        "chat_id" => chat.id,
+        "to" => ali.user.id,
+        "status" => "heard",
+        "seqs" => [1]
+      })
+
+    assert_reply ref, :error, %{reason: :bad_request}
   end
 
   test "no ticks between people who blocked each other, either way", ctx do
