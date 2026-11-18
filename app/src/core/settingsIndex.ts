@@ -36,7 +36,7 @@ function entries(t: Strings, showServer: boolean): Entry[] {
     { title: t.hideLockedChats, icon: 'eye', ...lock },
     { title: t.secretCode, icon: 'key', ...lock },
     { title: t.backup, icon: 'archive', ...backup },
-    { title: t.dailyBackup, icon: 'clock', ...backup },
+    { title: t.backupEvery, icon: 'clock', ...backup },
     { title: t.backupPassword, icon: 'key', ...backup },
     { title: t.signInWays, icon: 'key', ...account },
     { title: t.linkGoogle, icon: 'globe', ...account },

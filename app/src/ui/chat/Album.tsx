@@ -92,7 +92,7 @@ export function AlbumTile({
       onPress={more > 0 && onMore ? onMore : () => void tap()}
       onLongPress={onPick}
       label={f.kind === 'image' ? t.photoLabel : t.videoLabel}
-      scale={0.97}
+      ripple="none"
       testID={more > 0 ? 'album-more' : 'album-tile'}
     >
       <View ref={spot} collapsable={false} style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden', backgroundColor: theme.glass }}>

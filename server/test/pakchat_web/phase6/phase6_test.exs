@@ -103,7 +103,7 @@ defmodule PakchatWeb.Phase6Test do
       assert length(all_enqueued(worker: Notify)) == 2
     end
 
-    test "a connected phone that doesn't pick up the ringing is pushed anyway", ctx do
+    test "a connected phone is pushed at once for a ring too (its line may be asleep)", ctx do
       %{ali: ali, sara: sara, chat: chat} = ctx
       Accounts.set_push_token(sara.device, %{push_token: "fcm-token", push_platform: "fcm"})
       a = online(ali.token, ali.device)
@@ -113,7 +113,7 @@ defmodule PakchatWeb.Phase6Test do
       call(a, chat.id, [sealed(sara, "ring")], %{"ring" => true})
       [env] = envelopes_for(sara.device)
       assert [job] = all_enqueued(worker: Notify)
-      assert job.args == %{"device_id" => sara.device.id, "if_waiting" => true, "call" => true}
+      assert job.args == %{"device_id" => sara.device.id, "call" => true}
 
       assert Relay.waiting?(sara.device.id, before, "call")
       refute Relay.waiting?(sara.device.id, before)

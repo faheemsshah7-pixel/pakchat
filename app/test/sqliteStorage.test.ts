@@ -217,10 +217,15 @@ describe('media, links and docs', () => {
     expect((await s.keptFiles()).map((m) => m.id)).toEqual(['p2', 'p1', 'v1']);
     expect((await s.keptFiles({ chatId: 'c1' })).map((m) => m.id)).toEqual(['p1', 'v1']);
     expect((await s.keptFiles({ atLeast: 100 })).map((m) => m.id)).toEqual(['p2', 'p1']);
+    expect(await s.keptFiles({ forwardedMany: true })).toEqual([]);
     expect(await s.keptByChat()).toEqual([
       { chatId: 'c2', bytes: 900, count: 1 },
       { chatId: 'c1', bytes: 350, count: 2 },
     ]);
+    // "Forwarded many times": 5 hops or more.
+    await s.putMessage(msg('f1', 7, { kind: 'file', forwarded: true, forwardHops: 5, file: file('image', { size: 70, local: 'file:///f1' }) }) as never);
+    await s.putMessage(msg('f2', 8, { kind: 'file', forwarded: true, forwardHops: 4, file: file('image', { size: 80, local: 'file:///f2' }) }) as never);
+    expect((await s.keptFiles({ forwardedMany: true })).map((m) => m.id)).toEqual(['f1']);
   });
 
   test('finding web addresses in words', () => {

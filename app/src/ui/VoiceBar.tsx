@@ -1,8 +1,8 @@
 // VoiceBar.tsx: a voice note still playing after you leave its chat shows a little bar at
 // the top, like WhatsApp's: who it's from, how far it's got, pause or play, and ✕ to stop.
-// Tap it to go back to the chat. A locked chat's voice note stops once the chat locks again.
+// Tap it to go back to the chat. Paused when you leave the chat, it doesn't show. A locked chat's voice note stops once the chat locks again.
 import { router, usePathname } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import Animated, { Easing, FadeInUp, FadeOutUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,7 +33,15 @@ export function VoiceBar() {
   useEffect(() => {
     if (lockedAway) stopAll();
   }, [lockedAway]);
-  const shown = !!now.key && !lockedAway && (now.playing || now.position > 0) && !here && !path.startsWith('/call');
+  // Left its chat while it was paused: no bar, like WhatsApp (it stays paused where it was, for
+  // when you come back). Left while it plays: the bar shows, and pausing there keeps it.
+  const [wasHere, setWasHere] = useState(here);
+  const [hidden, setHidden] = useState<string | null>(null);
+  if (wasHere !== here) {
+    setWasHere(here);
+    setHidden(!here && !now.playing ? (now.key ?? null) : null);
+  }
+  const shown = !!now.key && now.key !== hidden && !lockedAway && (now.playing || now.position > 0) && !here && !path.startsWith('/call');
   if (!shown) return null;
   // Under the call bar when there's one.
   const callShown = !!call && call.state !== 'ended' && !calls.screenOpen;

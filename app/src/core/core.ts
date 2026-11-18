@@ -107,9 +107,11 @@ export type AppSettings = {
   mediaVisible?: boolean;
   /** App lock (fingerprint or face only), and when: 0 at once, 30 or 60 seconds, -1 when the phone locks. */
   appLock: boolean;
-  appLockAfter: 0 | 30 | 60 | -1;
+  appLockAfter: 0 | 30 | 60 | 1800 | -1;
   /** A locked chat locks again this long after you leave it (seconds). */
   chatRelock: 0 | 30 | 60;
+  /** Locked chats' alerts show who wrote and what (default off: just "New message"), like WhatsApp's switch. */
+  lockedAlertsShow?: boolean;
   /** The Locked chats folder only opens by typing the secret code in search (it's hidden from the list). */
   lockedHidden: boolean;
   /** The secret code's SHA-256 (never the code itself). */
@@ -132,6 +134,14 @@ export type AppSettings = {
   vibrate?: boolean;
   /** Settings › Notifications: an alert when someone reacts to my message (default on). */
   reactionAlerts?: boolean;
+  /** Settings › Account › Security notifications: the "security code changed" note in chats (default on). */
+  securityNotes?: boolean;
+  /** Settings › Notifications: alerts pop up at the top of the screen (default on), like WhatsApp's "high priority". */
+  highPriority?: boolean;
+  /** Settings › Notifications › Groups: the same three for groups (each default on). */
+  groupVibrate?: boolean;
+  groupHighPriority?: boolean;
+  groupReactionAlerts?: boolean;
   /** Settings › Notifications: the ringtone for calls ('' is the phone's own). */
   callTone?: string;
   /** Settings › Chats › Font size: how big messages' words are in chats (default medium), like WhatsApp. */
@@ -396,6 +406,8 @@ class Core {
       this.connected = c;
       this.emit('connection');
       if (c) this.rewatch();
+      // The relay's details ready before any call (kept for a day; usually nothing to fetch).
+      if (c && this.myId) calls.warm();
     });
     this.client.on('typing', ({ chatId, userId, typing, audio }) => {
       const now = { ...(this.typing[chatId] ?? {}) };

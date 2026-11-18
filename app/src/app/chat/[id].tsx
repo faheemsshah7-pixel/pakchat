@@ -365,8 +365,10 @@ function ChatScreen() {
   // Newest first (the list is upside down, so the newest sits at the bottom), with day labels between days.
   // Photos and videos sent together: one album each (albums.ts), shown where its newest is.
   const albums = useMemo(() => albumsIn(list ?? []), [list]);
+  // Security notifications off (Settings › Account): no "security code changed" notes, like WhatsApp.
+  const hideCodeNotes = settings.securityNotes === false;
   const items = useMemo<Item[]>(() => {
-    const ms = list ?? [];
+    const ms = (list ?? []).filter((m) => !(hideCodeNotes && m.kind === 'system' && m.event?.event === 'code_changed'));
     const out: Item[] = [];
     const firstOf = (i: number) => {
       const m = ms[i];
@@ -386,7 +388,7 @@ function ChatScreen() {
       if (!prev || !sameDay(prev.sentAt, m.sentAt)) out.push({ key: `day-${m.sentAt}`, kind: 'day', text: dayLabel(m.sentAt, t) });
     }
     return out;
-  }, [list, albums, typing.length, t, unreadKey, unreadN]);
+  }, [list, albums, typing.length, t, unreadKey, unreadN, hideCodeNotes]);
 
   const unseen = atBottom ? 0 : (list ?? []).filter((m) => m.kind !== 'system' && m.author !== core.myId && m.sentAt > bottomAt).length;
 

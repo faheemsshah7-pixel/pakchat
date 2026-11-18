@@ -66,7 +66,13 @@ object ChatAlerts {
     val count = o.optInt("count", lines.length())
 
     val locked = o.optBoolean("locked")
-    val builder = base(context, channelFor(context, o.optString("tone", ""), words, o.optBoolean("vibrate", true)))
+    // A locked chat, even one whose alerts show the sender and words (Settings' switch): no
+    // reply box, and hidden on the lock screen, so it can't be read or answered without the fingerprint.
+    val chatLocked = o.optBoolean("chatLocked", locked)
+    // High priority off (Settings › Notifications): it doesn't pop up at the top of the screen.
+    val popup = o.optBoolean("popup", true)
+    val builder = base(context, channelFor(context, o.optString("tone", ""), words, o.optBoolean("vibrate", true), popup))
+      .setPriority(if (popup) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
       .setStyle(style)
       .setContentTitle(title)
       .setContentText(lines.getJSONObject(lines.length() - 1).getString("text"))
@@ -75,12 +81,11 @@ object ChatAlerts {
       .setNumber(count)
       .setContentIntent(open(context, chatId))
       .addPerson(them)
-    // A locked chat's alert only says "New message": no reply box under it.
-    if (!locked) builder.addAction(replyAction(context, chatId, words))
+    if (!chatLocked) builder.addAction(replyAction(context, chatId, words))
     builder
       .addAction(action(context, chatId, "read", words.optString("markRead", "Mark as read"), NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ))
       .addAction(action(context, chatId, "mute", words.optString("mute", "Mute"), NotificationCompat.Action.SEMANTIC_ACTION_MUTE))
-    if (locked) builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+    if (chatLocked) builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
     if (o.optBoolean("quiet")) builder.setSilent(true)
     builder.extras.putInt(COUNT, count)
     builder.extras.putString("pakchat.summaryLine", "$title: ${lines.getJSONObject(lines.length() - 1).getString("text")}")
@@ -120,20 +125,24 @@ object ChatAlerts {
    * "messages" is the default, "messages-silent" has none, "messages-<tone>"
    * plays res/raw/pakchat_tone_<tone>. With Vibrate off (Settings › Notifications)
    * each has a twin that doesn't buzz: "messages-default-quiet", "messages-<tone>-quiet".
+   * With High priority off, each has a twin that doesn't pop up ("...-nopop"), since only
+   * the channel decides that on Android 8 and later.
    */
   val TONES = listOf("chime", "bell", "pop", "drop", "harp", "soft")
 
-  private fun channelFor(context: Context, asked: String, words: JSONObject, vibrate: Boolean = true): String {
+  private fun channelFor(context: Context, asked: String, words: JSONObject, vibrate: Boolean = true, popup: Boolean = true): String {
     if (Build.VERSION.SDK_INT < 26) return CHANNEL
     val tone = if (asked == "silent" || asked in TONES) asked else ""
-    if (tone.isEmpty() && vibrate) return CHANNEL
+    if (tone.isEmpty() && vibrate && popup) return CHANNEL
     val quiet = !vibrate && tone != "silent"
-    val id = (if (tone.isEmpty()) "messages-default" else "messages-$tone") + if (quiet) "-quiet" else ""
+    val id = (if (tone.isEmpty()) "messages-default" else "messages-$tone") + (if (quiet) "-quiet" else "") + if (popup) "" else "-nopop"
     val nm = manager(context)
     if (nm.getNotificationChannel(id) != null) return id
     val shown = if (tone.isEmpty()) words.optString("defaultToneName", "PakChat") else words.optString("toneName", tone)
-    val name = words.optString("toneChannel", "Messages ({tone})").replace("{tone}", shown) + if (quiet) " · ${words.optString("noVibrate", "no vibration")}" else ""
-    val channel = android.app.NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH)
+    val name = words.optString("toneChannel", "Messages ({tone})").replace("{tone}", shown) +
+      (if (quiet) " · ${words.optString("noVibrate", "no vibration")}" else "") +
+      if (popup) "" else " · ${words.optString("noPopup", "no pop-up")}"
+    val channel = android.app.NotificationChannel(id, name, if (popup) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT)
     if (tone == "silent") {
       channel.setSound(null, null)
       channel.enableVibration(false)

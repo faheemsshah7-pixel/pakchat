@@ -201,7 +201,8 @@ function cornersOf(style: unknown): ViewStyle | null {
   return Object.keys(out).length ? (out as ViewStyle) : null;
 }
 
-type Wave = { key: number; x: number; y: number; w: number; h: number };
+/** `box`: where the ripple shows, when only part of the button (a tab's pill). */
+type Wave = { key: number; x: number; y: number; w: number; h: number; box?: ViewStyle };
 
 export function Pressy({
   children,
@@ -214,6 +215,7 @@ export function Pressy({
   hitSlop,
   ripple = 'auto',
   round,
+  rippleIn,
 }: {
   children: ReactNode;
   onPress?: () => void;
@@ -229,6 +231,8 @@ export function Pressy({
   ripple?: 'auto' | 'light' | 'none';
   /** A round ripple (an icon button), like WhatsApp's. */
   round?: boolean;
+  /** The ripple shows only in this pill, centred, `top` from the top (a bottom tab, like WhatsApp's). */
+  rippleIn?: { width: number; height: number; top: number; radius: number };
 }) {
   const theme = useTheme();
   // How big the button is in its row (flex: 1, a width, alignSelf) has to be set on
@@ -266,6 +270,11 @@ export function Pressy({
     setHeld(stay);
     box.current.measure((_x: number, _y: number, w: number, h: number, px: number, py: number) => {
       if (!w || !h) return;
+      if (rippleIn) {
+        const { width, height, top, radius } = rippleIn;
+        const pill: ViewStyle = { position: 'absolute', left: (w - width) / 2, top, width, height, borderRadius: radius, overflow: 'hidden' };
+        return setWave((old) => ({ key: (old?.key ?? 0) + 1, x: width / 2, y: height / 2, w: width, h: height, box: pill }));
+      }
       setWave((old) => ({ key: (old?.key ?? 0) + 1, x: Math.max(0, Math.min(w, p.x - px)), y: Math.max(0, Math.min(h, p.y - py)), w, h }));
     });
   };
@@ -275,8 +284,11 @@ export function Pressy({
     },
     [],
   );
-  const color = ripple === 'light' || theme.dark ? 'rgba(255,255,255,0.16)' : 'rgba(11,27,54,0.10)';
-  const shape: ViewStyle | null = round && wave ? { borderRadius: Math.max(wave.w, wave.h) / 2 } : corners;
+  // Faint, like WhatsApp's press: a soft wash, never a grey box.
+  const color = ripple === 'light' ? 'rgba(255,255,255,0.14)' : theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(11,27,54,0.06)';
+  // Small things with square edges (an icon, a little button) get a round ripple, like WhatsApp's.
+  const small = !!wave && !corners && wave.w <= 64 && wave.h <= 64;
+  const shape: ViewStyle | null = wave?.box ?? ((round || small) && wave ? { borderRadius: Math.max(wave.w, wave.h) / 2 } : corners);
 
   return (
     <Pressable
@@ -352,7 +364,7 @@ function Ripple({ wave, held, color, shape, onDone }: { wave: Wave; held: boolea
   }, [held]);
   const style = useAnimatedStyle(() => ({ opacity: fade.value, transform: [{ scale: 0.08 + 0.92 * grow.value }] }));
   return (
-    <View pointerEvents="none" style={[StyleSheet.absoluteFill, shape, { overflow: 'hidden' }]}>
+    <View pointerEvents="none" style={[wave.box ? null : StyleSheet.absoluteFill, shape, { overflow: 'hidden' }]}>
       <Animated.View style={[{ position: 'absolute', left: wave.x - r, top: wave.y - r, width: r * 2, height: r * 2, borderRadius: r, backgroundColor: color }, style]} />
     </View>
   );

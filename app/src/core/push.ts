@@ -141,8 +141,9 @@ export function alertFor(m: Message) {
     // Still showing? Then this message adds to it. Swiped away? Start again.
     const was = fm.chatAlertShowing(m.chatId) ? shown[m.chatId] : undefined;
     const prefs = core.prefs[m.chatId] ?? {};
-    // A locked chat's alert says only "New message": not who, nor what.
-    const locked = !!prefs.lock;
+    // A locked chat's alert says only "New message": not who, nor what (unless Settings › App lock
+    // › "Show sender and message" is on, like WhatsApp's switch).
+    const locked = !!prefs.lock && !core.settings.lockedAlertsShow;
     const line: Line = locked ? { name: 'PakChat', text: t.newMessage, at: m.sentAt } : { name: core.name(m.author) || '…', text: preview(m, t, false) || t.newMessage, at: m.sentAt };
     const next = { count: (was?.count ?? 0) + 1, lines: [...(was?.lines ?? []), line].slice(-KEEP) };
     await core.storage.setValue(SHOWN, { ...shown, [m.chatId]: next });
@@ -158,10 +159,14 @@ export function alertFor(m: Message) {
         count: next.count,
         lines: next.lines,
         locked,
+        // Locked either way: no Reply under it and hidden on the lock screen, even with the words shown.
+        chatLocked: !!prefs.lock,
         tone,
-        vibrate: core.settings.vibrate !== false,
+        // Groups have their own Vibrate and High priority (Settings › Notifications › Groups), like WhatsApp.
+        vibrate: chat.kind === 'group' ? core.settings.groupVibrate !== false : core.settings.vibrate !== false,
+        popup: chat.kind === 'group' ? core.settings.groupHighPriority !== false : core.settings.highPriority !== false,
         avatar: locked ? { ...avatarTint('pakchat'), letters: 'P' } : { ...avatarTint(core.otherPerson(chat) ?? chat.id), letters: initials(title) },
-        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats, toneChannel: t.toneChannel, toneName: toneName(tone, t), defaultToneName: t.tonePhone, noVibrate: t.noVibration },
+        words: { reply: t.reply, replyHint: t.message, markRead: t.markRead, mute: t.mute, summary: t.messagesFromChats, toneChannel: t.toneChannel, toneName: toneName(tone, t), defaultToneName: t.tonePhone, noVibrate: t.noVibration, noPopup: t.noPopup },
       }),
     );
   });
@@ -170,7 +175,7 @@ export function alertFor(m: Message) {
 /**
  * Someone reacted to my message. A like on my status gets its own alert, like
  * WhatsApp's "Sara liked your status" (tap it for the Status tab). In a chat,
- * "Sara reacted 👍 to: "See you at 5"" (Settings › Notifications › Reactions),
+ * "Sara reacted 👍 to: "See you at 5"" (Settings › Notifications › Reactions, or Groups' own),
  * unless the chat is muted or locked, or I'm looking at it. Not for one taken
  * back, nor an old one caught up later.
  */
@@ -182,7 +187,8 @@ export function alertReaction(e: { message: Message; from: string; emoji: string
     const t = words();
     if (chat.kind !== 'status') {
       const prefs = core.prefs[chat.id] ?? {};
-      if (core.settings.reactionAlerts === false || isMuted(prefs) || prefs.lock || prefs.archived || e.message.author !== core.myId) return;
+      const reactions = chat.kind === 'group' ? core.settings.groupReactionAlerts : core.settings.reactionAlerts;
+      if (reactions === false || isMuted(prefs) || prefs.lock || prefs.archived || e.message.author !== core.myId) return;
       if (core.viewing === chat.id && AppState.currentState === 'active') return;
       const what = preview(e.message, t, false).slice(0, 80);
       const who = core.name(e.from) || t.newMessage;

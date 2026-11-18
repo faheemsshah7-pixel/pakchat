@@ -1,8 +1,10 @@
 // VoiceBody.tsx: a voice note (or an audio file) inside a message bubble.
 //
-// A play button, the voice note's bars (how loud each moment was; the part
-// already heard is coloured in), and its length. Tap the bars to jump there;
-// while it plays, a 1× button changes the speed (1.5×, 2×). Before it has
+// Like WhatsApp's, on one line: a plain play button, the voice note's bars (how
+// loud each moment was; the part already heard is coloured in) with a dot, and
+// the sender's photo. Under the bars, its length; the bubble puts the time on
+// that same line. Tap or drag on the bars to jump there; while it's on, the
+// photo turns into a 1× button that changes the speed (1.5×, 2×). Before it has
 // downloaded, the play button is a download button, and while it moves a ring
 // fills around a ✕, as on photos.
 //
@@ -46,17 +48,24 @@ function transcriptsHere() {
   return canTranscribe;
 }
 
-// (Fewer bars than before: the sender's photo sits beside them now, like WhatsApp.)
-const BAR_COUNT = 28;
-const BAR_W = 3;
+// Thin, short bars like WhatsApp's, on one line with the play button and the sender's photo.
+const BAR_COUNT = 32;
+const BAR_W = 2.5;
 const GAP = 2;
-const WIDTH = BAR_COUNT * (BAR_W + GAP);
+const BAR_H = 19;
+const WIDTH = BAR_COUNT * (BAR_W + GAP) - GAP;
+/** The play button's width. */
+const PLAY_W = 36;
+/** The note's one row, and the sender's photo in it (a little shorter than before: owner, 18 Nov). */
+const ROW_H = 42;
+const FACE = 40;
 /** The "listened" blue, like WhatsApp's (its own colour, so it shows on every accent). */
 const PLAYED = '#34B7F1';
 
 export const voiceKey = (m: Message) => `${m.chatId}/${m.author}/${m.id}`;
 
-export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: boolean; selecting: boolean; onPick: () => void }) {
+/** `metaRoom`: room kept at the end of the line under the bars for the bubble's time (and star, pin...). */
+export function VoiceBody({ m, mine, metaRoom = 64, selecting, onPick }: { m: Message; mine: boolean; metaRoom?: number; selecting: boolean; onPick: () => void }) {
   const t = useT();
   const { theme, lang, rtl } = useLook();
   const f = m.file!;
@@ -75,6 +84,12 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
   const at = now ? now.position : 0;
   const done = length ? Math.min(1, at / length) : 0;
   const playing = !!now?.playing;
+  // The part already heard, and the dot.
+  const heard = mine ? ink : theme.acc;
+  // On (playing, or paused part way): the speed button shows. Once it ends, the photo is back.
+  const on = !!now && (playing || at > 0);
+  // A soft fill for the little buttons that shows on the bubble in both looks.
+  const pillFill = theme.dark ? (mine ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.12)') : 'rgba(0,0,0,0.07)';
 
   // The dot on the bars: where it's got to. Drag it to jump, like WhatsApp (it jumps on letting go).
   const pos = useSharedValue(done);
@@ -156,23 +171,14 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
 
   return (
     <View style={{ marginBottom: 2 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, minWidth: 236 }}>
-        {/* The sender's photo with a little mic, like WhatsApp's voice notes. */}
-        {face && (
-          <View testID="voice-face">
-            <Avatar id={m.author} name={core.name(m.author) || '…'} size={42} />
-            <View style={{ position: 'absolute', bottom: -2, end: -3, width: 18, height: 18, borderRadius: 9, backgroundColor: m.played ? PLAYED : mine ? 'rgba(255,255,255,0.35)' : theme.bubbleIn, alignItems: 'center', justifyContent: 'center' }} testID={m.played ? 'voice-played' : undefined}>
-              <Icon name="mic" size={11} color={m.played || mine ? '#FFFFFF' : theme.accInk} />
-            </View>
-          </View>
-        )}
-        <Pressy onPress={tap} onLongPress={onPick} label={playing ? t.pause : t.play} scale={0.9} testID="voice-play">
-          <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: mine ? 'rgba(255,255,255,0.22)' : theme.accSoft, alignItems: 'center', justifyContent: 'center' }}>
-            {moving ? <Ring progress={progress ?? 0} color={mine ? '#FFFFFF' : theme.accInk} /> : icon && <Icon name={icon} size={20} color={mine ? '#FFFFFF' : theme.accInk} />}
+      {/* One line, like WhatsApp: play, the bars with their dot, and the sender's photo (the speed while it plays). */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: ROW_H }}>
+        <Pressy onPress={tap} onLongPress={onPick} label={playing ? t.pause : t.play} ripple="none" testID="voice-play">
+          <View style={{ width: PLAY_W, height: ROW_H, alignItems: 'center', justifyContent: 'center', opacity: moving ? 1 : 0.85 }}>
+            {moving ? <Ring progress={progress ?? 0} color={ink} /> : icon && <Icon name={icon} size={icon === 'play' || icon === 'pause' ? 28 : 22} color={ink} />}
           </View>
         </Pressy>
-        <View style={{ flex: 1 }}>
-          <GestureDetector gesture={pan}>
+        <GestureDetector gesture={pan}>
           <Pressable
             disabled={!here || selecting}
             onPress={(e) => {
@@ -181,66 +187,74 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
             }}
             onLongPress={onPick}
             accessibilityLabel={t.voiceNote}
-            style={{ height: 30, width: WIDTH, flexDirection: 'row', alignItems: 'center', gap: GAP }}
+            style={{ height: ROW_H, width: WIDTH, flexDirection: 'row', alignItems: 'center', gap: GAP }}
             testID="voice-bars"
           >
-            {bars.map((b, i) => (
-              <View
-                key={i}
-                style={{
-                  width: BAR_W,
-                  height: Math.max(3, Math.round(b * 26)),
-                  borderRadius: 2,
-                  backgroundColor: (i + 0.5) / bars.length <= done ? (mine ? '#FFFFFF' : theme.acc) : mine ? 'rgba(255,255,255,0.4)' : theme.muted,
-                  opacity: (i + 0.5) / bars.length <= done ? 1 : 0.6,
-                }}
-              />
-            ))}
+            {bars.map((b, i) => {
+              const past = (i + 0.5) / bars.length <= done;
+              return <View key={i} style={{ width: BAR_W, height: Math.max(3, Math.round(b * BAR_H)), borderRadius: 2, backgroundColor: past ? heard : ink, opacity: past ? 1 : 0.35 }} />;
+            })}
             {here && length > 0 && (
-              <Animated.View
-                pointerEvents="none"
-                style={[{ position: 'absolute', start: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: mine ? '#FFFFFF' : theme.acc }, dotAt]}
-                testID="voice-dot"
-              />
+              <Animated.View pointerEvents="none" style={[{ position: 'absolute', start: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: heard }, dotAt]} testID="voice-dot" />
             )}
           </Pressable>
-          </GestureDetector>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
-            <Txt size={11.5} color={meta}>
-              {clockOf(now && (playing || at > 0) ? at : length)}
-            </Txt>
-            {now && (
-              <Pressy onPress={nextSpeed} label={t.speed} scale={0.9} testID="voice-speed">
-                <View style={{ paddingHorizontal: 7, height: 18, borderRadius: 9, backgroundColor: mine ? 'rgba(255,255,255,0.22)' : theme.accSoft, justifyContent: 'center' }}>
-                  <Txt size={11} weight="700" color={ink}>
+        </GestureDetector>
+        {face &&
+          (on && now ? (
+            <Pressy onPress={nextSpeed} label={t.speed} ripple="none" testID="voice-speed">
+              <View style={{ width: ROW_H, height: ROW_H, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ paddingHorizontal: 9, height: 24, borderRadius: 12, backgroundColor: pillFill, justifyContent: 'center' }}>
+                  <Txt size={12.5} weight="700" color={ink}>
                     {`${now.speed}×`}
                   </Txt>
                 </View>
-              </Pressy>
-            )}
-            {f.kind === 'audio' && f.name && (
-              <Txt size={11.5} color={meta} lines={1} style={{ flex: 1 }}>
-                {f.name}
+              </View>
+            </Pressy>
+          ) : (
+            // The sender's photo with a little mic, like WhatsApp's voice notes.
+            <View style={{ width: ROW_H, height: ROW_H, alignItems: 'center', justifyContent: 'center' }} testID="voice-face">
+              <Avatar id={m.author} name={core.name(m.author) || '…'} size={FACE} />
+              <View style={{ position: 'absolute', bottom: -1, end: -3, width: 16, height: 16, borderRadius: 8, backgroundColor: m.played ? PLAYED : mine ? 'rgba(255,255,255,0.35)' : theme.bubbleIn, alignItems: 'center', justifyContent: 'center' }} testID={m.played ? 'voice-played' : undefined}>
+                <Icon name="mic" size={10} color={m.played || mine ? '#FFFFFF' : theme.accInk} />
+              </View>
+            </View>
+          ))}
+      </View>
+      {/* Under the bars: how long (or how far it's got). The bubble's time sits at the end of this line. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 15, marginStart: PLAY_W + 8, paddingEnd: metaRoom }}>
+        <Txt size={11.5} color={meta}>
+          {clockOf(now && (playing || at > 0) ? at : length)}
+        </Txt>
+        {on && now && !face && (
+          <Pressy onPress={nextSpeed} label={t.speed} ripple="none" testID="voice-speed">
+            <View style={{ paddingHorizontal: 7, height: 18, borderRadius: 9, backgroundColor: mine ? pillFill : theme.accSoft, justifyContent: 'center' }}>
+              <Txt size={11} weight="700" color={ink}>
+                {`${now.speed}×`}
               </Txt>
-            )}
-            {showAa && (
-              <Pressy onPress={() => void transcribe()} label={t.transcribe} scale={0.9} testID="voice-transcribe">
-                <View style={{ paddingHorizontal: 7, height: 18, borderRadius: 9, backgroundColor: mine ? 'rgba(255,255,255,0.22)' : theme.accSoft, justifyContent: 'center' }}>
-                  {writing ? (
-                    <ActivityIndicator size={11} color={ink} />
-                  ) : (
-                    <Txt size={11} weight="800" color={ink}>
-                      Aa
-                    </Txt>
-                  )}
-                </View>
-              </Pressy>
-            )}
-          </View>
-        </View>
+            </View>
+          </Pressy>
+        )}
+        {f.kind === 'audio' && f.name && (
+          <Txt size={11.5} color={meta} lines={1} style={{ flex: 1 }}>
+            {f.name}
+          </Txt>
+        )}
+        {showAa && (
+          <Pressy onPress={() => void transcribe()} label={t.transcribe} ripple="none" testID="voice-transcribe">
+            <View style={{ paddingHorizontal: 7, height: 18, borderRadius: 9, backgroundColor: mine ? pillFill : theme.accSoft, justifyContent: 'center' }}>
+              {writing ? (
+                <ActivityIndicator size={11} color={ink} />
+              ) : (
+                <Txt size={11} weight="800" color={ink}>
+                  Aa
+                </Txt>
+              )}
+            </View>
+          </Pressy>
+        )}
       </View>
       {!!f.transcript && shown && (
-        <Animated.View style={{ maxWidth: 236, paddingTop: 2, paddingBottom: 2 }} testID="voice-transcript">
+        <Animated.View style={{ maxWidth: 250, paddingTop: 6, paddingBottom: 18 }} testID="voice-transcript">
           <Txt size={13.5} color={ink} style={{ fontStyle: 'italic' }}>
             {f.transcript}
           </Txt>
@@ -251,7 +265,7 @@ export function VoiceBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
 }
 
 function Ring({ progress, color }: { progress: number; color: string }) {
-  const size = 42;
+  const size = PLAY_W;
   const r = size / 2 - 3;
   const round = 2 * Math.PI * r;
   return (

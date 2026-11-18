@@ -316,14 +316,16 @@ export class SqliteStorage implements Storage {
 
   /**
    * Files kept on this phone, biggest first (Manage storage): from one chat, or
-   * from all of them at least `atLeast` bytes big.
+   * from all of them at least `atLeast` bytes big, or (`forwardedMany`) only those
+   * "Forwarded many times" (5 or more), like WhatsApp's list.
    */
-  async keptFiles(options: { chatId?: string; atLeast?: number; limit?: number } = {}): Promise<Message[]> {
+  async keptFiles(options: { chatId?: string; atLeast?: number; limit?: number; forwardedMany?: boolean } = {}): Promise<Message[]> {
     const rows = await this.db.all<{ json: string }>(
       `SELECT json FROM messages WHERE json_extract(json, '$.file.local') IS NOT NULL AND json_extract(json, '$.deleted') IS NOT 1
        AND (? IS NULL OR chat_id = ?) AND COALESCE(json_extract(json, '$.file.size'), 0) >= ?
+       AND (? = 0 OR COALESCE(json_extract(json, '$.forwardHops'), 0) >= 5)
        ORDER BY json_extract(json, '$.file.size') DESC LIMIT ?`,
-      [options.chatId ?? null, options.chatId ?? null, options.atLeast ?? 0, options.limit ?? 500],
+      [options.chatId ?? null, options.chatId ?? null, options.atLeast ?? 0, options.forwardedMany ? 1 : 0, options.limit ?? 500],
     );
     return rows.map((r) => JSON.parse(r.json) as Message);
   }

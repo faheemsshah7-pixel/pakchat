@@ -15,6 +15,7 @@ It writes assets/fonts/icons/PakIcons<width>.ttf and src/ui/iconFont.ts.
 import json
 import math
 import os
+import shutil
 import re
 import subprocess
 import sys
@@ -304,6 +305,11 @@ def build(entries, width):
     out = os.path.join(APP, 'assets/fonts/icons', name + '.ttf')
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fb.save(out)
+    # The Android build keeps its own copy of each font (made by prebuild), and it is not
+    # made again on its own, so keep it the same here or the app shows the wrong icons.
+    native = os.path.join(APP, 'android/app/src/main/res/font')
+    if os.path.isdir(native):
+        shutil.copyfile(out, os.path.join(native, 'pak_icons' + name[len('PakIcons'):] + '.ttf'))
     return name
 
 

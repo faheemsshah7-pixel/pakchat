@@ -2,7 +2,8 @@
 // The alert shows who wrote and what they said, unlocked on the phone itself.
 // Also the tone for chats without their own, one for groups, and conversation
 // tones (the little sounds while a chat is open) with how loud they are.
-// Like WhatsApp's: Vibrate, Reaction notifications, and the calls' Ringtone.
+// Like WhatsApp's: Vibrate, High priority and Reaction notifications, for messages and for
+// groups each, and the calls' Ringtone.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
@@ -69,6 +70,14 @@ export default function NotificationsScreen() {
           />
           <Divider />
           <SettingRow
+            icon="bell"
+            title={t.highPriority}
+            sub={t.highPrioritySub}
+            chevron={false}
+            right={<Toggle on={settings.highPriority !== false} onChange={(on) => core.setSettings({ highPriority: on })} label={t.highPriority} testID="alerts-popup" />}
+          />
+          <Divider />
+          <SettingRow
             icon="smile"
             title={t.reactionNotifications}
             sub={t.reactionNotificationsSub}
@@ -98,6 +107,29 @@ export default function NotificationsScreen() {
         <Section title={t.groups} />
         <Glass>
           <SettingRow icon="group" title={t.notificationTone} sub={toneName(settings.groupTone ?? settings.defaultTone, t)} onPress={() => setPicking('groups')} testID="group-tone" />
+          <Divider />
+          <SettingRow
+            icon="bell"
+            title={t.vibrateWord}
+            chevron={false}
+            right={<Toggle on={settings.groupVibrate !== false} onChange={(on) => core.setSettings({ groupVibrate: on })} label={t.vibrateWord} testID="group-vibrate" />}
+          />
+          <Divider />
+          <SettingRow
+            icon="bell"
+            title={t.highPriority}
+            sub={t.highPrioritySub}
+            chevron={false}
+            right={<Toggle on={settings.groupHighPriority !== false} onChange={(on) => core.setSettings({ groupHighPriority: on })} label={t.highPriority} testID="group-popup" />}
+          />
+          <Divider />
+          <SettingRow
+            icon="smile"
+            title={t.reactionNotifications}
+            sub={t.reactionNotificationsSub}
+            chevron={false}
+            right={<Toggle on={settings.groupReactionAlerts !== false} onChange={(on) => core.setSettings({ groupReactionAlerts: on })} label={t.reactionNotifications} testID="group-reactions" />}
+          />
         </Glass>
 
         <Section title={t.calls} />

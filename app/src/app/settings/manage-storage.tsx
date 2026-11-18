@@ -1,7 +1,7 @@
 // settings/manage-storage.tsx: Storage and data › Manage storage, like WhatsApp's.
 //
 //   The phone's space: how much PakChat's files take, how much is free.
-//   Review and delete: files larger than 5 MB.
+//   Review and delete: files larger than 5 MB, and ones forwarded many times.
 //   Chats: each chat's files, biggest first.
 // Tap one to see its files in a grid; tap files to pick them, then Delete
 // (they go from this phone, with their messages, as "Delete for me" does).
@@ -29,8 +29,8 @@ const iconOf = (m: Message): IconName => (m.file?.kind === 'video' ? 'video' : m
 const keyOf = (m: Pick<Message, 'chatId' | 'author' | 'id'>) => `${m.chatId}/${m.author}/${m.id}`;
 
 export default function ManageStorage() {
-  const { chat, big } = useLocalSearchParams<{ chat?: string; big?: string }>();
-  if (chat || big) return <Files chatId={chat} big={!!big} />;
+  const { chat, big, many } = useLocalSearchParams<{ chat?: string; big?: string; many?: string }>();
+  if (chat || big || many) return <Files chatId={chat} big={!!big} many={!!many} />;
   return <Overview />;
 }
 
@@ -39,13 +39,15 @@ function Overview() {
   const { theme } = useLook();
   const rows = useChatList();
   const [byChat, setByChat] = useState<{ chatId: string; bytes: number; count: number }[] | null>(null);
-  const [bigOnes, setBigOnes] = useState<{ bytes: number; count: number }>({ bytes: 0, count: 0 });
+  const [bigOnes, setBigOnes] = useState<Message[]>([]);
+  const [manyOnes, setManyOnes] = useState<Message[]>([]);
   const [space, setSpace] = useState<{ free: number; total: number } | null>(null);
 
   useEffect(() => {
     const load = () => {
       void core.storage.keptByChat().then(setByChat);
-      void core.storage.keptFiles({ atLeast: BIG, limit: 2000 }).then((l) => setBigOnes({ bytes: l.reduce((a, m) => a + (m.file?.size ?? 0), 0), count: l.length }));
+      void core.storage.keptFiles({ atLeast: BIG, limit: 2000 }).then(setBigOnes);
+      void core.storage.keptFiles({ forwardedMany: true, limit: 2000 }).then(setManyOnes);
       setTimeout(() => {
         try {
           setSpace({ free: Paths.availableDiskSpace, total: Paths.totalDiskSpace });
@@ -59,6 +61,13 @@ function Overview() {
   }, []);
 
   const titles = new Map((rows ?? []).map((r) => [r.chat.id, r]));
+  // Locked chats aren't listed, so their files don't count here either.
+  const sum = (l: Message[]) => {
+    const mine = l.filter((m) => titles.has(m.chatId));
+    return { count: mine.length, bytes: mine.reduce((a, m) => a + (m.file?.size ?? 0), 0) };
+  };
+  const bigSum = sum(bigOnes);
+  const manySum = sum(manyOnes);
   const shown = (byChat ?? []).filter((c) => titles.has(c.chatId));
   const used = shown.reduce((a, c) => a + c.bytes, 0);
   const total = space?.total ?? 0;
@@ -100,20 +109,28 @@ function Overview() {
 
         <Section title={t.reviewAndDelete} />
         <Glass>
-          <Pressy onPress={() => router.push({ pathname: '/settings/manage-storage', params: { big: '1' } })} label={t.largerThan5} scale={0.98} testID="storage-big">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-              <Icon name="doc" size={22} color={theme.accInk} />
-              <View style={{ flex: 1 }}>
-                <Txt size={15.5} weight="600">
-                  {t.largerThan5}
-                </Txt>
-                <Txt size={13} color={theme.muted}>
-                  {bigOnes.count ? `${fill(t.nItems, { n: bigOnes.count })} · ${fileSize(bigOnes.bytes)}` : t.nothingHere}
-                </Txt>
-              </View>
-              <Icon name="chevron" size={18} color={theme.faint} />
+          {[
+            { key: 'big', icon: 'doc' as const, title: t.largerThan5, n: bigSum, testID: 'storage-big' },
+            { key: 'many', icon: 'forwardArrow' as const, title: t.forwardedManyTimes, n: manySum, testID: 'storage-many' },
+          ].map((r, i) => (
+            <View key={r.key}>
+              {i > 0 && <Divider />}
+              <Pressy onPress={() => router.push({ pathname: '/settings/manage-storage', params: { [r.key]: '1' } })} label={r.title} scale={0.98} testID={r.testID}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+                  <Icon name={r.icon} size={22} color={theme.accInk} />
+                  <View style={{ flex: 1 }}>
+                    <Txt size={15.5} weight="600">
+                      {r.title}
+                    </Txt>
+                    <Txt size={13} color={theme.muted}>
+                      {r.n.count ? `${fill(t.nItems, { n: r.n.count })} · ${fileSize(r.n.bytes)}` : t.nothingHere}
+                    </Txt>
+                  </View>
+                  <Icon name="chevron" size={18} color={theme.faint} flip />
+                </View>
+              </Pressy>
             </View>
-          </Pressy>
+          ))}
         </Glass>
 
         <Section title={t.chats} />
@@ -152,7 +169,7 @@ function Overview() {
   );
 }
 
-function Files({ chatId, big }: { chatId?: string; big: boolean }) {
+function Files({ chatId, big, many }: { chatId?: string; big: boolean; many: boolean }) {
   const t = useT();
   const { theme } = useLook();
   const rows = useChatList();
@@ -163,13 +180,13 @@ function Files({ chatId, big }: { chatId?: string; big: boolean }) {
   const [asking, setAsking] = useState(false);
 
   useEffect(() => {
-    const load = () => void core.storage.keptFiles({ chatId, atLeast: big ? BIG : 0, limit: 2000 }).then(setList);
+    const load = () => void core.storage.keptFiles({ chatId, atLeast: big ? BIG : 0, forwardedMany: many, limit: 2000 }).then(setList);
     load();
     return core.on(chatId ? `messages:${chatId}` : 'chats', load);
-  }, [chatId, big]);
+  }, [chatId, big, many]);
 
   const allowed = new Set((rows ?? []).map((r) => r.chat.id));
-  const title = chatId ? ((rows ?? []).find((r) => r.chat.id === chatId)?.title ?? '') : t.largerThan5;
+  const title = chatId ? ((rows ?? []).find((r) => r.chat.id === chatId)?.title ?? '') : many ? t.forwardedManyTimes : t.largerThan5;
   const files = (list ?? [])
     .filter((m) => allowed.has(m.chatId))
     .sort((a, b) => (order === 'big' ? (b.file?.size ?? 0) - (a.file?.size ?? 0) : order === 'new' ? b.sentAt - a.sentAt : a.sentAt - b.sentAt));

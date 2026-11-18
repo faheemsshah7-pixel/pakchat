@@ -103,7 +103,7 @@ export function RoundBody({ m, mine, selecting, onPick }: { m: Message; mine: bo
   }
 
   return (
-    <Pressy onPress={() => void tap()} onLongPress={onPick} label={t.roundVideo} scale={0.97} testID="file-round">
+    <Pressy onPress={() => void tap()} onLongPress={onPick} label={t.roundVideo} ripple="none" testID="file-round">
       <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', backgroundColor: '#111', borderWidth: 3, borderColor: mine ? theme.acc : theme.glassLine }}>
         {playing && here ? (
           <RoundPlayer uri={f.local!} onEnd={() => setPlaying(false)} />

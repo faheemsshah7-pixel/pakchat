@@ -82,6 +82,8 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
               testID={`tab-${tab.name}`}
               label={t[tab.label]}
               scale={0.9}
+              // The press shows only in the pill around the icon, like WhatsApp's, not the whole tab.
+              rippleIn={{ width: 58, height: 32, top: 0, radius: 12 }}
               onPress={() => {
                 // No vibration here: like WhatsApp, switching tabs is silent.
                 // Tapping the tab you're on takes its list back to the top, like WhatsApp.

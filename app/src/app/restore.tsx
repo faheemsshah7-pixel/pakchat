@@ -1,5 +1,6 @@
 // restore.tsx: on a new phone, right after signing in, if there's a backup on the
-// server: type its password to bring your chats here, or skip.
+// server: type its password to bring your chats here, or skip (it asks first: skipping
+// can't be undone, and the next backup replaces this one).
 import { router } from 'expo-router';
 import KV from 'expo-sqlite/kv-store';
 import { useEffect, useState } from 'react';
@@ -14,7 +15,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Button, Field, Screen, Txt } from '../ui/kit';
 import { clock, dayLabel, fileSize } from '../ui/format';
-import { toast } from '../ui/overlays';
+import { Dialog, toast } from '../ui/overlays';
 
 export default function Restore() {
   const t = useT();
@@ -23,6 +24,8 @@ export default function Restore() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Skipping can't be undone (and the next backup replaces this one), so it asks first, like WhatsApp.
+  const [skipping, setSkipping] = useState(false);
   const progress = useFileProgress('restore');
   const keyboard = useAnimatedKeyboard();
   const lift = useAnimatedStyle(() => ({ paddingBottom: 24 + keyboard.height.value }));
@@ -85,10 +88,20 @@ export default function Restore() {
             disabled={!b || !password}
             testID="restore-go"
           />
-          <Button title={t.skipRestore} look="soft" onPress={done} disabled={busy} testID="restore-skip" />
+          <Button title={t.skipRestore} look="soft" onPress={() => setSkipping(true)} disabled={busy} testID="restore-skip" />
         </Animated.View>
         <View />
       </Animated.View>
+      <Dialog
+        visible={skipping}
+        onClose={() => setSkipping(false)}
+        title={t.skipRestoreTitle}
+        text={t.skipRestoreText}
+        buttons={[
+          { label: t.skipRestoring, danger: true, onPress: () => (setSkipping(false), done()), testID: 'restore-skip-yes' },
+          { label: t.cancel, onPress: () => setSkipping(false) },
+        ]}
+      />
     </Screen>
   );
 }

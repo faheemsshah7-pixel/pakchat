@@ -143,6 +143,31 @@ async function ask(prompt: string, cancel: string): Promise<AuthResult> {
   }
 }
 
+/**
+ * "Is it you?" before something only you should do (linking a computer), like WhatsApp: the
+ * fingerprint or face, or the phone's own PIN or pattern. A phone with no screen lock at all
+ * has nothing to ask, so it goes ahead.
+ */
+export async function confirmItsYou(prompt: string, cancel: string): Promise<boolean> {
+  try {
+    if ((await LocalAuthentication.getEnrolledLevelAsync()) === LocalAuthentication.SecurityLevel.NONE) return true;
+  } catch {
+    // Can't tell: don't go ahead without asking.
+    return false;
+  }
+  outside++;
+  try {
+    const r = await LocalAuthentication.authenticateAsync({ promptMessage: prompt, cancelLabel: cancel, disableDeviceFallback: false, requireConfirmation: false });
+    return r.success;
+  } catch {
+    return false;
+  } finally {
+    setTimeout(() => {
+      outside = Math.max(0, outside - 1);
+    }, 1_500);
+  }
+}
+
 /** Unlocks PakChat (App lock). Already unlocked: nothing to ask. */
 export async function unlockApp(prompt: string, cancel: string): Promise<AuthResult> {
   if (!appLocked) return 'ok';

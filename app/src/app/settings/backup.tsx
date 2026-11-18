@@ -1,18 +1,21 @@
 // settings/backup.tsx: chat backup. Pick a password (kept only on this phone, in
-// Android's locked storage), back up now, or let it back up once a day.
+// Android's locked storage), back up now, or let it back up by itself daily, weekly or
+// monthly (or only when you tap), like WhatsApp.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { backUp, backupPrefs, findBackup, hasPassword, lastBackupAt, MIN_PASSWORD, setBackupPrefs, setPassword, type BackupInfo } from '../../core/backup';
+import { backUp, backupEvery, backupPrefs, findBackup, hasPassword, lastBackupAt, MIN_PASSWORD, setBackupPrefs, setPassword, type BackupEvery, type BackupInfo } from '../../core/backup';
 import { useFileProgress } from '../../core/hooks';
 import { core, isOffline } from '../../core/core';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
-import { Button, Divider, Field, Glass, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
+import { Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { clock, dayLabel, fileSize } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
+
+const EVERY: BackupEvery[] = ['daily', 'weekly', 'monthly', 'never'];
 
 export default function Backup() {
   const t = useT();
@@ -25,6 +28,8 @@ export default function Backup() {
   const [again, setAgain] = useState('');
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pickingEvery, setPickingEvery] = useState(false);
+  const everyName: Record<BackupEvery, string> = { daily: t.everyDay, weekly: t.everyWeek, monthly: t.everyMonth, never: t.onlyWhenTap };
   const progress = useFileProgress('backup');
 
   function load() {
@@ -103,7 +108,7 @@ export default function Backup() {
 
         <Section title={t.settings} />
         <Glass>
-          <SettingRow icon="clock" title={t.dailyBackup} chevron={false} right={<Toggle on={prefs.daily} onChange={(on) => change({ ...prefs, daily: on })} label={t.dailyBackup} />} />
+          <SettingRow icon="clock" title={t.backupEvery} sub={everyName[backupEvery(prefs)]} onPress={() => setPickingEvery(true)} testID="backup-every" />
           <Divider />
           <SettingRow icon="globe" title={t.wifiOnly} chevron={false} right={<Toggle on={prefs.wifiOnly} onChange={(on) => change({ ...prefs, wifiOnly: on })} label={t.wifiOnly} />} />
           <Divider />
@@ -128,6 +133,21 @@ export default function Backup() {
         </View>
       </Sheet>
 
+      {/* How often, like WhatsApp's list. */}
+      <Sheet visible={pickingEvery} onClose={() => setPickingEvery(false)} title={t.backupEvery}>
+        <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
+          {EVERY.map((e) => (
+            <Pressy key={e} onPress={() => (change({ ...prefs, every: e, daily: e !== 'never' }), setPickingEvery(false))} label={everyName[e]} scale={0.98} testID={`backup-every-${e}`}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 }}>
+                <Txt size={15.5} style={{ flex: 1 }}>
+                  {everyName[e]}
+                </Txt>
+                {backupEvery(prefs) === e && <Icon name="check" size={18} color={theme.accInk} stroke={2.6} />}
+              </View>
+            </Pressy>
+          ))}
+        </View>
+      </Sheet>
       <Dialog
         visible={deleting}
         onClose={() => setDeleting(false)}

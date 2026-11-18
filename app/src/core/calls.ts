@@ -43,7 +43,7 @@
 import { MAX_CALL_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device } from '@pakchat/shared';
 import { router } from 'expo-router';
 import KV from 'expo-sqlite/kv-store';
-import { AppState, Dimensions, Vibration } from 'react-native';
+import { AppState, Dimensions, PermissionsAndroid, Vibration } from 'react-native';
 import { mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, type MediaStreamTrack } from 'react-native-webrtc';
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
@@ -53,6 +53,16 @@ import { core } from './core';
 import { stopAll } from './player';
 import { tuneSdp } from './sdp';
 import { toneName } from './tones';
+
+/** The mic (and camera, for video) are allowed already, so opening them won't ask. */
+async function mediaAllowed(video: boolean) {
+  try {
+    const mic = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+    return mic && (!video || (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA)));
+  } catch {
+    return false;
+  }
+}
 
 /** How long a call rings before it's "missed" (the same on both sides). */
 export const RING_MS = 45_000;
@@ -175,6 +185,7 @@ type Live = Omit<CallView, 'peers' | 'local' | 'waiting'> & {
 };
 
 /** A ringing call, kept so it survives PakChat being started by the ringing alert. */
+type IceServer = { urls: string[]; username?: string; credential?: string };
 type Ringing = { id: string; chatId: string; from: string; fromDevice: number; video: boolean; group: boolean; until: number; extra?: string[]; canAdd?: boolean };
 const RINGING = 'call:ringing';
 
@@ -250,7 +261,8 @@ class Calls {
   private listeners = new Set<() => void>();
   /** Calls that are over, so a late message about one is ignored. */
   private finished: string[] = [];
-  private ice: { servers: { urls: string[]; username?: string; credential?: string }[]; at: number } | null = null;
+  private ice: { servers: IceServer[]; at: number; key: string } | null = null;
+  private iceFetch: Promise<IceServer[]> | null = null;
   /**
    * Call links: a call in a call link's chat never rings anyone. Each phone
    * just notes it here (who's in it), so opening the link joins it.
@@ -326,16 +338,24 @@ class Calls {
     this.call = c;
     this.emit();
     ready?.(c.id);
-    if (!(await this.media(c))) {
+    // Like WhatsApp, their phone rings at once: the ring goes out while my mic (and camera)
+    // open, instead of after. A connection to them waits for the mic (connection()), so it
+    // always carries my sound. Only when they're allowed already: if Android has to ask,
+    // it asks first, so nobody rings for a call that can't go ahead.
+    const media = this.media(c);
+    c.mediaReady = media;
+    const allowed = await mediaAllowed(video);
+    const refused = () => {
       // Hung up while the mic was starting: nothing more to do (and no "allow the mic" message).
-      if (c.done) return 'started';
+      if (c.done) return 'started' as const;
       this.end(c, 'permission');
-      return 'permission';
-    }
+      return 'permission' as const;
+    };
+    if (!allowed && !(await media)) return refused();
+    if (c.done) return 'started';
     stopAll();
     const audio = fileModule();
     audio.callAudioStart(video);
-    this.watchAudio(c);
     // No ringing sound yet: it starts when their phone says it's ringing (like WhatsApp's "Calling…" then "Ringing…").
     // Everyone in the chat rings; closed phones are woken for it. A call link's call rings nobody: people join from the link.
     const rang = await this.send(c, { op: 'ring', video, group: c.group }, undefined, !chat.callLink);
@@ -345,6 +365,13 @@ class Calls {
       this.end(c, 'offline');
       return 'offline';
     }
+    if (!(await media)) {
+      // The mic couldn't open after all: their phones stop ringing.
+      if (!c.done) void this.send(c, { op: 'leave' }, undefined, true);
+      return refused();
+    }
+    if (c.done) return 'started';
+    this.watchAudio(c);
     this.ongoing(c);
     if (chat.callLink) {
       this.linkCalls.set(chatId, { id: c.id, from: me.userId, fromDevice: me.deviceId, video, at: Date.now(), people: new Set([me.userId]) });
@@ -995,6 +1022,8 @@ class Calls {
 
   /** Puts my mic (and camera) on a connection made while it rang, whose senders were left empty. */
   private async sendTracks(c: Live, p: Peer) {
+    // Answered while my mic was still opening (it opens while their phone rings): wait for it.
+    if (c.mediaReady && !c.localStream) await c.mediaReady;
     const local = c.localStream;
     if (!local || !p.pc) return;
     for (const t of p.pc.getTransceivers()) {
@@ -1029,14 +1058,48 @@ class Calls {
 
   // ---- Connecting two phones (WebRTC) ----
 
+  /**
+   * The relay's details (good for a day). Kept on the phone, so a phone woken by a call
+   * already has them and starts connecting at once, without asking the server first.
+   * Older than an hour: used anyway and fetched again in the background; older than
+   * 12 hours: fetched before use.
+   */
   private async iceServers() {
-    if (this.ice && Date.now() - this.ice.at < 3_600_000) return this.ice.servers;
-    try {
-      this.ice = { servers: await core.server.iceServers(), at: Date.now() };
+    const key = `call:ice:${core.myId}`;
+    if (!this.ice || this.ice.key !== key) {
+      try {
+        const kept = KV.getItemSync(key);
+        this.ice = kept ? { ...(JSON.parse(kept) as { servers: IceServer[]; at: number }), key } : null;
+      } catch {
+        this.ice = null;
+      }
+    }
+    const age = this.ice ? Date.now() - this.ice.at : Infinity;
+    if (this.ice && age < 3_600_000) return this.ice.servers;
+    const fetching = (this.iceFetch ??= core.server
+      .iceServers()
+      .then((servers) => {
+        this.ice = { servers, at: Date.now(), key };
+        KV.setItemSync(key, JSON.stringify({ servers, at: this.ice.at }));
+        return servers;
+      })
+      .finally(() => {
+        this.iceFetch = null;
+      }));
+    if (this.ice && age < 12 * 3_600_000) {
+      fetching.catch(() => {});
       return this.ice.servers;
+    }
+    try {
+      return await fetching;
     } catch {
       return this.ice?.servers ?? [{ urls: ['stun:stun.l.google.com:19302'] }];
     }
+  }
+
+  /** Connected to the server: have the relay's details ready for the next call. */
+  warm() {
+    void this.iceServers().catch(() => {});
   }
 
   private async connection(c: Live, p: Peer) {

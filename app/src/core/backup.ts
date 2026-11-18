@@ -46,7 +46,12 @@ export async function forgetBackup() {
 
 // ---- Settings ----
 
-export type BackupPrefs = { daily: boolean; wifiOnly: boolean };
+/** How often it backs up by itself, like WhatsApp's: daily, weekly, monthly, or only when you tap. */
+export type BackupEvery = 'daily' | 'weekly' | 'monthly' | 'never';
+/** `daily` is from before `every` (on: daily, off: only when you tap). */
+export type BackupPrefs = { daily: boolean; wifiOnly: boolean; every?: BackupEvery };
+const EVERY_MS: Record<Exclude<BackupEvery, 'never'>, number> = { daily: 24 * 3_600_000, weekly: 7 * 24 * 3_600_000, monthly: 30 * 24 * 3_600_000 };
+export const backupEvery = (p: BackupPrefs): BackupEvery => p.every ?? (p.daily ? 'daily' : 'never');
 
 export function backupPrefs(): BackupPrefs {
   try {
@@ -92,10 +97,11 @@ export function backUp() {
 
 export const lastBackupAt = () => Number(KV.getItemSync(LAST()) ?? 0);
 
-/** Once a day, if switched on (and on Wi-Fi, if asked): called when PakChat starts. */
+/** Daily, weekly or monthly, as picked (and on Wi-Fi, if asked): called when PakChat starts. */
 export async function backUpIfDue() {
   const p = backupPrefs();
-  if (!p.daily || !hasPassword() || Date.now() - lastBackupAt() < 24 * 3_600_000) return;
+  const every = backupEvery(p);
+  if (every === 'never' || !hasPassword() || Date.now() - lastBackupAt() < EVERY_MS[every]) return;
   if (p.wifiOnly) {
     const net = await Network.getNetworkStateAsync().catch(() => null);
     if (net?.type !== Network.NetworkStateType.WIFI && net?.type !== Network.NetworkStateType.ETHERNET) return;

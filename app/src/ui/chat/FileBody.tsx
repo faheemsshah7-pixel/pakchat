@@ -100,7 +100,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
     // Here: only the picture (a tap or hold goes to the message, as on WhatsApp).
     if (here && !moving && !paused) return <Image source={{ uri: f.local }} style={{ width: STICKER_SHOWN, height: STICKER_SHOWN }} contentFit="contain" testID="file-sticker" />;
     return (
-      <Pressy onPress={tap} onLongPress={onPick} label={t.sticker} scale={0.96} testID="file-sticker">
+      <Pressy onPress={tap} onLongPress={onPick} label={t.sticker} ripple="none" testID="file-sticker">
         <View style={{ width: STICKER_SHOWN, height: STICKER_SHOWN, borderRadius: 24, backgroundColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
           {here && <Image source={{ uri: f.local }} style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.6 }} contentFit="contain" />}
           <View style={{ minWidth: 52, height: 52, paddingHorizontal: 12, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>{badge}</View>
@@ -116,7 +116,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
     const sharp = f.kind === 'video' && !!f.poster;
     const source = here && f.kind === 'image' ? { uri: f.local } : sharp ? { uri: f.poster } : f.thumb ? { uri: `data:image/jpeg;base64,${f.thumb}` } : null;
     return (
-      <Pressy onPress={tap} onLongPress={onPick} label={f.kind === 'image' ? t.photoLabel : t.videoLabel} scale={0.98} testID={`file-${f.kind}`}>
+      <Pressy onPress={tap} onLongPress={onPick} label={f.kind === 'image' ? t.photoLabel : t.videoLabel} ripple="none" testID={`file-${f.kind}`}>
         <View
           ref={spot}
           collapsable={false}

@@ -7,10 +7,11 @@ import { ScrollView, View } from 'react-native';
 import { isOffline } from '../core/core';
 import { useLinkedDevices } from '../core/hooks';
 import { logOutDevice } from '../core/linking';
+import { confirmItsYou } from '../core/lock';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { clock, dayLabel } from '../ui/format';
-import { Icon } from '../ui/icons';
+import { Icon, type IconName } from '../ui/icons';
 import { Button, Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
 import { Dialog, toast } from '../ui/overlays';
 
@@ -35,6 +36,12 @@ export default function LinkedDevices() {
           ? fill(t.lastActive, { when: fill(t.dayAtTime, { day: when(d.lastActive), time: clock(d.lastActive) }) })
           : fill(t.linkedOn, { when: when(d.linkedAt) });
 
+  // Your fingerprint (or the phone's PIN) first, like WhatsApp, so someone holding your
+  // unlocked phone can't quietly link a computer.
+  async function linkOne() {
+    if (linked.length >= 4) return toast(t.tooManyDevices);
+    if (await confirmItsYou(t.linkConfirm, t.cancel)) router.push('/link-device');
+  }
   return (
     <Screen>
       <TopBar title={t.linkedDevices} onBack={() => router.back()} />
@@ -52,7 +59,7 @@ export default function LinkedDevices() {
         </View>
         <Button
           title={t.linkADevice}
-          onPress={() => (linked.length >= 4 ? toast(t.tooManyDevices) : router.push('/link-device'))}
+          onPress={() => void linkOne()}
           testID="link-a-device"
         />
 
@@ -72,7 +79,7 @@ export default function LinkedDevices() {
                 <View key={d.deviceId}>
                   {i > 0 && <Divider />}
                   <SettingRow
-                    icon="laptop"
+                    icon={deviceIcon(d.name)}
                     title={d.name}
                     sub={status(d)}
                     onPress={() => setLeaving({ deviceId: d.deviceId, name: d.name })}
@@ -114,4 +121,9 @@ export default function LinkedDevices() {
       />
     </Screen>
   );
+}
+
+/** A computer's browser gets the laptop; a phone's or tablet's (or one we can't tell) the globe. */
+function deviceIcon(name: string): IconName {
+  return /Mac|Windows|Linux|ChromeOS/i.test(name) && !/Android|iOS/i.test(name) ? 'laptop' : 'globe';
 }

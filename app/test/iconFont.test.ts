@@ -1,7 +1,7 @@
 // The icon fonts (scripts/make-icon-font.py) have to be made again when an icon is added or
 // changed in icons.tsx; this notices when they weren't.
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -28,5 +28,15 @@ describe('icon fonts', () => {
   it('are all in the app', () => {
     const app = readFileSync(join(__dirname, '../app.json'), 'utf8');
     for (const [, family] of ICON_FONTS) expect(app).toContain(`./assets/fonts/icons/${family}.ttf`);
+  });
+
+  // Prebuild copies each font into the Android project once and never again, so a font made
+  // after that has to be copied there too, or the app shows the wrong icons (build 28 did).
+  const native = join(__dirname, '../android/app/src/main/res/font');
+  it.skipIf(!existsSync(native))('are the same in the Android build', () => {
+    const sum = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
+    for (const [, family] of ICON_FONTS) {
+      expect(sum(join(native, `pak_icons${family.slice('PakIcons'.length)}.ttf`)), family).toBe(sum(join(__dirname, `../assets/fonts/icons/${family}.ttf`)));
+    }
   });
 });

@@ -180,6 +180,18 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   // A photo or video fills its bubble, with only a thin edge round it (and the time on the photo).
   const photo = !m.deleted && m.kind === 'file' && !!m.file && (album ? true : (m.file.kind === 'image' || m.file.kind === 'video') && !m.file.once);
   const onPhoto = photo && !m.text;
+  // A voice note's time sits on the line under its bars, at the end (under the photo), like WhatsApp.
+  const onVoice = !m.deleted && m.kind === 'file' && !!m.file && !m.file.once && (m.file.kind === 'voice' || m.file.kind === 'audio') && !m.text && !album;
+  // Room the voice note leaves for that time at its end: the time and ticks, plus a star, pin,
+  // timer, "kept" or "edited" when they show, so they never sit on the length or Aa.
+  const voiceRoom = !onVoice
+    ? 0
+    : 64 +
+      (starred ? 14 : 0) +
+      (m.pinnedUntil && m.pinnedUntil > now ? 14 : 0) +
+      (m.expiresAt ? 14 : 0) +
+      (m.keptBy ? t.keptWord.length * 6.5 + 3 : 0) +
+      (m.editedAt ? t.edited.length * 6.5 + 3 : 0);
   const inset = photo ? { paddingHorizontal: 6 } : null;
   const reactions = Object.entries(m.reactions ?? {});
   // A sticker (and a round video) has no bubble: just the picture, with the time on a little pill under it.
@@ -202,7 +214,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   const tail = first && !bare ? <Tail mine={mine} colour={mine ? middle(theme.bubbleMine) : theme.bubbleIn} /> : null;
 
   const body = (
-    <View key={k} style={photo ? { padding: 3 } : { paddingHorizontal: 12, paddingTop: 7, paddingBottom: 6, minWidth: 72 }}>
+    <View key={k} style={photo ? { padding: 3 } : { paddingHorizontal: 12, paddingTop: onVoice ? 5 : 7, paddingBottom: onVoice ? 5 : 6, minWidth: 72 }}>
       {!!name && (
         <Txt size={13} weight="700" color={nameColour(m.author, theme.dark)} lines={1} style={[inset, photo && { paddingTop: 2, paddingBottom: 2 }]}>
           {name}
@@ -257,7 +269,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           {m.file.once ? (
             <OnceBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
           ) : m.file.kind === 'voice' || m.file.kind === 'audio' ? (
-            <VoiceBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
+            <VoiceBody m={m} mine={mine} metaRoom={voiceRoom} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
           ) : (
             <FileBody m={m} mine={mine} selecting={selecting} onPick={() => (selecting ? onPress(m) : onLongPress(m))} />
           )}
@@ -307,6 +319,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               { position: 'absolute', end: 9, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.32)' }
             : inline
               ? { position: 'absolute', ...(urdu ? { start: 12 } : { end: 12 }), bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }
+              : onVoice
+                ? { position: 'absolute', end: 12, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }
               : { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 3, marginTop: 2, marginEnd: photo ? 6 : 0, marginBottom: photo ? 2 : 0 }
         }
       >
@@ -683,7 +697,8 @@ export function DayLabel({ text }: { text: string }) {
   const { theme } = useLook();
   return (
     <View style={{ alignSelf: 'center', marginVertical: 8, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, backgroundColor: theme.glass }}>
-      <Txt size={12} weight="600" color={theme.accInk} align="center">
+      {/* Grey words, like WhatsApp's (and the floating date pill). */}
+      <Txt size={12} weight="600" color={theme.sectionText} align="center">
         {text}
       </Txt>
     </View>

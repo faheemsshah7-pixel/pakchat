@@ -3,7 +3,7 @@
 // there. A Gmail or number that already has its own PakChat account can't be added
 // (later, its owner will be asked to agree).
 //
-// Also where the server is (only on a test server: change it when the Mac's Wi-Fi address
+// Also Security notifications (the "security code changed" notes), where the server is (only on a test server: change it when the Mac's Wi-Fi address
 // changes, no need to log out), Log out, and Delete my account (settings/delete-account.tsx).
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
@@ -12,10 +12,10 @@ import { ScrollView, View } from 'react-native';
 
 import { core, onBuiltInServer, reasonOf, serverUrl } from '../../core/core';
 import { googleIdToken } from '../../core/google';
-import { useAuth } from '../../core/hooks';
+import { useAuth, useSettings } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { Button, Divider, Field, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
+import { Button, Divider, Field, Glass, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { phoneError } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 import { WhatsAppCheck } from '../../ui/WhatsAppCheck';
@@ -24,6 +24,7 @@ export default function Account() {
   const t = useT();
   const { theme } = useLook();
   const { me } = useAuth();
+  const settings = useSettings();
   const [removing, setRemoving] = useState<'google' | 'phone' | null>(null);
   const [adding, setAdding] = useState(false);
   const [phone, setPhone] = useState('');
@@ -227,6 +228,17 @@ export default function Account() {
             <SettingRow icon="server" title={t.serverAddress} sub={serverUrl().replace(/^https?:\/\//, '')} onPress={() => setServer(serverUrl())} testID="open-server" />
           </Glass>
         )}
+        {/* Like WhatsApp's: a note in the chat when someone's security code changes (a new phone,
+            or PakChat put back on), so you can check it. Off: no notes. */}
+        <Glass>
+          <SettingRow
+            icon="shield"
+            title={t.securityNotes}
+            sub={t.securityNotesSub}
+            chevron={false}
+            right={<Toggle on={settings.securityNotes !== false} onChange={(on) => core.setSettings({ securityNotes: on })} label={t.securityNotes} testID="security-notes" />}
+          />
+        </Glass>
         <Glass>
           <SettingRow icon="logout" title={t.logOut} danger chevron={false} onPress={() => setLeaving(true)} testID="log-out" />
           <Divider />

@@ -2,9 +2,10 @@
 //
 // App lock: on with a fingerprint or face only, after a warning that if it
 // stops working the only way back is to reinstall and restore. When it locks:
-// at once, after 30 seconds, after a minute, or when the phone locks.
+// at once, after 30 seconds, a minute or 30 minutes, or when the phone locks.
 // Chat lock: how soon a locked chat locks again after you leave it, the secret
-// code that hides the Locked chats folder, and "Clear locked chats" for a
+// code that hides the Locked chats folder, whether their alerts show who and what,
+// and "Clear locked chats" for a
 // forgotten code (it deletes them from this phone).
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -71,10 +72,11 @@ export default function LockSettings() {
     toast(t.lockedCleared);
   }
 
-  const afters: { v: 0 | 30 | 60 | -1; label: string }[] = [
+  const afters: { v: 0 | 30 | 60 | 1800 | -1; label: string }[] = [
     { v: 0, label: t.atOnce },
     { v: 30, label: t.after30s },
     { v: 60, label: t.after1m },
+    { v: 1800, label: t.after30m },
     { v: -1, label: t.whenPhoneLocks },
   ];
   const relocks: { v: 0 | 30 | 60; label: string }[] = [
@@ -155,6 +157,14 @@ export default function LockSettings() {
               <SettingRow icon="key" title={t.changeSecretCode} onPress={() => setCoding(true)} testID="change-code" />
             </>
           )}
+          <Divider />
+          <SettingRow
+            icon="bell"
+            title={t.lockedAlertsShow}
+            sub={t.lockedAlertsShowSub}
+            chevron={false}
+            right={<Toggle on={!!settings.lockedAlertsShow} onChange={(on) => core.setSettings({ lockedAlertsShow: on })} label={t.lockedAlertsShow} testID="locked-alerts-show" />}
+          />
           <Divider />
           <SettingRow icon="trash" title={t.clearLockedChats} sub={t.clearLockedChatsSub} danger chevron={false} onPress={() => setClearing(true)} testID="clear-locked" />
         </Glass>

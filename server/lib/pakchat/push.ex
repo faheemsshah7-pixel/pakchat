@@ -52,15 +52,24 @@ defmodule Pakchat.Push do
   @doc """
   Queues an alert for each device that has a push token: now if it's offline,
   in a second (only if the message is still waiting then) if it's connected.
-  Used for calls. Messages to a connected phone are checked by its own
+  A ring (`call: true`) pushes every one of them at once. Messages to a connected phone are checked by its own
   connection instead (see `PakchatWeb.DeviceChannel`), which costs nothing
   when the phone collects them, as it nearly always does.
   """
   def wake_offline(senders, opts \\ []) do
     {connected, offline} = wakeable(senders)
     call = opts[:call] == true
-    Enum.each(connected, &check_later(&1, call: call))
-    Enum.each(offline, &wake(&1, call: call))
+
+    # A ring pushes every phone at once, connected or not, like WhatsApp: a phone in a
+    # pocket often still looks connected while its line is asleep, and waiting a second
+    # (or more) to find out made it ring late. A phone that already has the ring just
+    # ignores the push (it's the same call).
+    if call do
+      Enum.each(connected ++ offline, &wake(&1, call: true))
+    else
+      Enum.each(connected, &check_later(&1))
+      Enum.each(offline, &wake(&1))
+    end
   end
 
   @doc "Push this device now."

@@ -32,6 +32,7 @@ import { Icon, type IconName } from '../ui/icons';
 import { Avatar, Field, Pressy, Txt } from '../ui/kit';
 import { smooth, tick } from '../ui/motion';
 import { Sheet, toast } from '../ui/overlays';
+import { useTheme } from '../theme/ThemeProvider';
 
 const INK = '#FFFFFF';
 const SOFT = 'rgba(255,255,255,0.72)';
@@ -640,14 +641,21 @@ const ROUTE_ICON: Record<AudioRoute, IconName> = { earpiece: 'calls', speaker: '
 /** The buttons during a call. */
 function Controls({ call, t }: { call: CallView; t: Strings }) {
   const over = call.state === 'ended';
-  // The sound button: speaker on and off, or through the headphones and Bluetooth when they're there.
-  const nextRoute = (): AudioRoute => {
-    const order: AudioRoute[] = ['earpiece', 'speaker', 'headset', 'bluetooth'];
-    const have = order.filter((r) => call.routes.includes(r));
-    if (have.length <= 1) return call.route === 'speaker' ? 'earpiece' : 'speaker';
-    return have[(have.indexOf(call.route) + 1) % have.length];
+  // The sound button, like WhatsApp's: with only the phone, it turns the speaker on and off and
+  // always shows the speaker. With headphones or Bluetooth connected, it shows where the sound
+  // goes now and opens a list to pick from.
+  const order: AudioRoute[] = ['earpiece', 'speaker', 'headset', 'bluetooth'];
+  const outputs = order.filter((r) => call.routes.includes(r));
+  const extra = outputs.some((r) => r === 'headset' || r === 'bluetooth');
+  const theme = useTheme();
+  const [picking, setPicking] = useState(false);
+  const pick = (r: AudioRoute) => {
+    setPicking(false);
+    calls.setRoute(r);
   };
-  const speakerOn = call.route !== 'earpiece';
+  const soundIcon: IconName = extra ? ROUTE_ICON[call.route] : 'speaker';
+  const speakerOn = extra ? call.route !== 'earpiece' : call.route === 'speaker';
+  const onSound = () => (extra ? setPicking(true) : calls.setRoute(call.route === 'speaker' ? 'earpiece' : 'speaker'));
   // Share screen, like WhatsApp: in a video call once it's on.
   const canShare = call.video && call.state === 'active';
   return (
@@ -671,7 +679,7 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
       )}
       {/* One bar, with the red button at its end, like WhatsApp's. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginHorizontal: 14, paddingHorizontal: 10, paddingVertical: 10, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.1)' }}>
-        <Round icon={ROUTE_ICON[call.route]} on={speakerOn} label={`${t.speaker}: ${routeName(call.route, t)}`} onPress={() => calls.setRoute(nextRoute())} testID="call-speaker" />
+        <Round icon={soundIcon} on={speakerOn} label={extra ? `${t.audioOutput}: ${routeName(call.route, t)}` : t.speaker} onPress={onSound} testID="call-speaker" />
         {/* In a voice call it shows once the call is on, and turns it into a video call. */}
         {(call.video || call.state === 'active') && (
           <Round
@@ -687,6 +695,21 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
         <Round icon={call.muted ? 'micOff' : 'mic'} on={call.muted} label={call.muted ? t.unmute : t.muteMic} onPress={() => (tick(), calls.setMuted(!call.muted))} testID="call-mute" />
         <Round icon="endCall" color={RED} label={t.hangUp} onPress={() => void calls.hangUp()} testID="call-hangup" />
       </View>
+      <Sheet visible={picking} onClose={() => setPicking(false)} title={t.audioOutput}>
+        <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
+          {outputs.map((r) => (
+            <Pressy key={r} onPress={() => pick(r)} label={routeName(r, t)} scale={0.98} testID={`call-output-${r}`}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 16, paddingVertical: 14 }}>
+                <Icon name={ROUTE_ICON[r]} size={22} color={theme.accInk} />
+                <Txt size={15.5} style={{ flex: 1 }}>
+                  {routeName(r, t)}
+                </Txt>
+                {r === call.route && <Icon name="tick" size={20} color={theme.accInk} />}
+              </View>
+            </Pressy>
+          ))}
+        </View>
+      </Sheet>
     </View>
   );
 }
