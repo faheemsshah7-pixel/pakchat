@@ -45,7 +45,6 @@ test('sharing my screen says so, so the others show it whole', () => {
 test('a ring to someone added to a call says who else is in it', () => {
   const ring = { t: 'call', call: 'c1', op: 'ring', group: true };
   expect(parse({ ...ring, people: ['a', 'b', 'a'] })).toMatchObject({ people: ['a', 'b'] });
-  expect(parse({ ...ring, people: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] })).toBeNull();
   expect(parse({ ...ring, people: [7] })).toBeNull();
 });
 
@@ -56,4 +55,15 @@ test('a forward says how many times it was forwarded, for "Forwarded many times"
   expect(parse({ t: 'text', text: 'Hi', forwarded: true, hops: -3 })).toEqual({ ...base, t: 'text', text: 'Hi', forwarded: true });
   expect(parse({ t: 'text', text: 'Hi', hops: 9 })).toEqual({ ...base, t: 'text', text: 'Hi' });
   expect(parse({ t: 'text', text: 'Hi', forwarded: true, hops: 1e9 })).toMatchObject({ hops: 1000 });
+});
+
+test('a group call through the call server carries its key, and only a real one', () => {
+  const key = Buffer.alloc(32, 7).toString('base64');
+  expect(parse({ t: 'call', call: 'c1', op: 'ring', group: true, key })).toEqual({ ...base, t: 'call', call: 'c1', op: 'ring', group: true, key });
+  expect(parse({ t: 'call', call: 'c1', op: 'here', key: 'short' })).toBeNull();
+  expect(parse({ t: 'call', call: 'c1', op: 'here', key: 42 })).toBeNull();
+  // Up to 32 people.
+  const people = Array.from({ length: 32 }, (_, i) => `u${i}`);
+  expect(parse({ t: 'call', call: 'c1', op: 'ring', people })).toMatchObject({ people });
+  expect(parse({ t: 'call', call: 'c1', op: 'ring', people: [...people, 'u32'] })).toBeNull();
 });

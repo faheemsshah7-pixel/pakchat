@@ -1,0 +1,18 @@
+# livekit.yaml: the group call server (compose.yaml, "calls"). Each phone in a group call
+# sends its sound and picture here once, and this passes them on to the others. They are
+# locked on the phones first (a key only the people in the call have), so this server
+# can't see or hear anything. Its key and secret come from deploy/.env.
+port: 7880
+rtc:
+  # One UDP port for every call, and TCP for networks that block UDP. Both open in setup.sh
+  # and Oracle's security list (README.md, step 4).
+  udp_port: 7882
+  tcp_port: 7881
+  use_external_ip: false
+room:
+  # PakChat's biggest group call is 32 people.
+  max_participants: 32
+  empty_timeout: 60
+  departure_timeout: 20
+logging:
+  level: warn

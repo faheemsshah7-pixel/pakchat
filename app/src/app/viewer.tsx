@@ -31,7 +31,7 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, isOffline } from '../core/core';
-import { Cancelled, download, FileBroken, FileGone, haveFile, sendPicked, tagOf } from '../core/files';
+import { addPoster, Cancelled, download, FileBroken, FileGone, haveFile, sendPicked, tagOf } from '../core/files';
 import { uploadPhoto } from '../core/photos';
 import { useChat, useFileProgress, useNow, useStarred } from '../core/hooks';
 import { outsideFor } from '../core/lock';
@@ -289,7 +289,7 @@ export default function Viewer() {
           {!swapped && tapped && (
             <View style={[StyleSheet.absoluteFill, all ? { backgroundColor: '#000000' } : null]}>
               {/* (It doesn't zoom: it's about to be swapped for the list's page, which does.) */}
-              <Page m={tapped} width={width} height={pageH} active zoom={false} chrome={bars} lift={canReply ? insets.bottom + REPLY_ROW : 0} onTap={() => setChrome((c) => !c)} />
+              <Page m={tapped} width={width} height={pageH} active still zoom={false} chrome={bars} lift={canReply ? insets.bottom + REPLY_ROW : 0} onTap={() => setChrome((c) => !c)} />
             </View>
           )}
         </View>
@@ -440,9 +440,12 @@ function Page({
   onEdgeSwipe,
   onShown,
   turn = 0,
+  still,
 }: {
   /** Quarters it's turned (Rotate, from the ⋮ menu). */
   turn?: number;
+  /** A video as its still picture, without a player (the one tapped, while it grows open). */
+  still?: boolean;
   m: Message;
   width: number;
   height: number;
@@ -478,6 +481,11 @@ function Page({
   useEffect(() => {
     if (!photo) onShown?.();
   }, [photo, onShown]);
+  // A video's sharp first frame, shown until it plays. One downloaded before build 34 gets its own now.
+  const poster = f.poster ?? (f.thumb ? `data:image/jpeg;base64,${f.thumb}` : undefined);
+  useEffect(() => {
+    if (here && f.kind === 'video' && !f.poster) void addPoster(m).catch(() => {});
+  }, [here, f.kind, f.poster, m]);
 
   async function get() {
     if (progress !== undefined) return;
@@ -496,11 +504,18 @@ function Page({
 
   return (
     <View style={{ width, flex: 1 }}>
-      {here && f.kind === 'video' ? (
+      {here && f.kind === 'video' && still ? (
+        // Growing open: its picture only. The list's page plays it, so there's one player, started
+        // once, and the same picture stays up until its first frame is drawn (no flash).
+        poster ? (
+          <Image source={{ uri: poster }} style={{ width, height }} contentFit="contain" cachePolicy="memory-disk" />
+        ) : null
+      ) : here && f.kind === 'video' ? (
         // Only the one on screen has a player (they're heavy), and it stops when you swipe away.
         active ? (
           <Video
             uri={f.local!}
+            poster={poster}
             chrome={chrome}
             lift={lift}
             onTap={onTap}
@@ -563,7 +578,7 @@ type VideoZoom = {
  * A video, playing, with WhatsApp-like controls that hide and show with a tap.
  * Pinch it (or double tap) to zoom in while it plays, like a photo (Zoomable.tsx).
  */
-function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolean; lift: number; onTap: () => void; zoom: VideoZoom }) {
+function Video({ uri, poster, chrome, lift, onTap, zoom }: { uri: string; poster?: string; chrome: boolean; lift: number; onTap: () => void; zoom: VideoZoom }) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const player = useVideoPlayer(uri, (p) => {
@@ -577,6 +592,8 @@ function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolea
   const [speed, setSpeedNow] = useState(1);
   // While the line is being dragged, it shows where you are, not where the video is.
   const [dragging, setDragging] = useState<number | null>(null);
+  // Its still picture stays up until the first frame is drawn, so opening it never flashes black.
+  const [drawn, setDrawn] = useState(false);
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
   useEventListener(player, 'timeUpdate', ({ currentTime }) => setAt(currentTime));
   useEventListener(player, 'statusChange', ({ status }) => {
@@ -602,7 +619,8 @@ function Video({ uri, chrome, lift, onTap, zoom }: { uri: string; chrome: boolea
         onEdgeSwipe={zoom.onEdgeSwipe}
       >
         {/* A texture (not Android's default surface), so it moves, zooms and shrinks with your fingers. */}
-        <VideoView player={player} style={{ width: zoom.width, height: zoom.height }} nativeControls={false} contentFit="contain" surfaceType="textureView" testID="viewer-video" />
+        <VideoView player={player} style={{ width: zoom.width, height: zoom.height }} nativeControls={false} contentFit="contain" surfaceType="textureView" onFirstFrameRender={() => setDrawn(true)} testID="viewer-video" />
+        {!drawn && poster && <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="contain" cachePolicy="memory-disk" pointerEvents="none" />}
       </Zoomable>
       {(chrome || !playing) && (
         <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>

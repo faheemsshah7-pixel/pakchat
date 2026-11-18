@@ -16,6 +16,9 @@ export const ICONS = {
   settings: { d: ['M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1'], circles: [[15, 7, 2], [9, 12, 2], [17, 17, 2]] },
   forwardArrow: { d: ['M9 5l7 7-7 7'] },
   video: { d: ['M16 10l5-3v10l-5-3'], rects: [[3, 6, 13, 12, 3]] },
+  // A video call in the chat: the camera, with the way it went (like callIn and callOut).
+  videoIn: { d: ['M14 13.5l5-3v9l-5-3', 'M21.5 2.5L17 7M17 3.5V7h3.5'], rects: [[2, 9.5, 12, 11, 2.5]] },
+  videoOut: { d: ['M14 13.5l5-3v9l-5-3', 'M17 7l4.5-4.5M18 2.5h3.5V6'], rects: [[2, 9.5, 12, 11, 2.5]] },
   minus: { d: ['M5 12h14'] },
   plus: { d: ['M12 5v14M5 12h14'] },
   emoji: { d: ['M8 14s1.5 2 4 2 4-2 4-2M9 9.5h.01M15 9.5h.01'], circles: [[12, 12, 9]] },

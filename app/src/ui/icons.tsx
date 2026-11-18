@@ -104,6 +104,9 @@ const ICONS = {
   flipCamera: { d: ['M4 8h3l2-3h6l2 3h3v11H4z', 'M9 12.5a3 3 0 0 1 5.2-1.8M15 13.5a3 3 0 0 1-5.2 1.8M14.5 9v2h-2M9.5 17v-2h2'] },
   callIn: { d: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z', 'M20 4l-5 5M15 5v4h4'] },
   callOut: { d: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z', 'M15 9l5-5M16 4h4v4'] },
+  // A video call in the chat and the Calls tab: the camera, with the way it went (like callIn and callOut).
+  videoIn: { d: ['M14 13.5l5-3v9l-5-3', 'M21.5 2.5L17 7M17 3.5V7h3.5'], rects: [[2, 9.5, 12, 11, 2.5]] },
+  videoOut: { d: ['M14 13.5l5-3v9l-5-3', 'M17 7l4.5-4.5M18 2.5h3.5V6'], rects: [[2, 9.5, 12, 11, 2.5]] },
   sticker: { d: ['M14 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h8l7-7V6a3 3 0 0 0-3-3h-4', 'M14 21v-4a3 3 0 0 1 3-3h4', 'M9 9.5h.01M15 9.5h.01M9 14s1 1 3 1'] },
   // A peeled sticker with a + (save it) or a tick (saved).
   stickerAdd: { d: ['M14 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h8l7-7V6a3 3 0 0 0-3-3h-4', 'M14 21v-4a3 3 0 0 1 3-3h4', 'M11 7.5v6M8 10.5h6'] },
@@ -144,6 +147,8 @@ const ICONS = {
   target: { d: ['M12 2v3M12 19v3M2 12h3M19 12h3'], circles: [[12, 12, 7], [12, 12, 2.5]] },
   screenShare: { d: ['M8 21h8M12 17v4M12 13.5V7.5M9.2 10.2L12 7.4l2.8 2.8'], rects: [[2.5, 3.5, 19, 13.5, 2.5]] },
   dialpad: { dots: [[6, 4, 1.6], [12, 4, 1.6], [18, 4, 1.6], [6, 10, 1.6], [12, 10, 1.6], [18, 10, 1.6], [6, 16, 1.6], [12, 16, 1.6], [18, 16, 1.6], [12, 21.5, 1.6]] },
+  // A PIN: three dots in a box (Change PIN).
+  pinCode: { rects: [[3, 7, 18, 10, 3]], dots: [[8, 12, 1.4], [12, 12, 1.4], [16, 12, 1.4]] },
 } satisfies Record<string, Shape>;
 
 export type IconName = keyof typeof ICONS;

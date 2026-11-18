@@ -21,7 +21,33 @@ export type Me = {
    * except the people in `except` for that setting ("My contacts except…").
    */
   privacy: { lastSeen: string; online: string; readReceipts: boolean; photo: string; about: string; groups: string; except: PrivacyExcept };
+  /** Two-step verification is on: a new phone asks for my 6-digit PIN. */
+  pin?: boolean;
 };
+
+/**
+ * A sign-in (by number, WhatsApp or Google) that got past its code and now needs the account's
+ * two-step PIN. `ticket` goes with the PIN (good for 15 minutes); `google`: "Forgot PIN?" can use
+ * the Google account linked to PakChat; `resetAt`: when a 7-day wait asked for ends, or null.
+ */
+export type PinNeeded = { ticket: string; google: boolean; resetAt: string | null };
+
+/** The PinNeeded in a sign-in's error, or null when it's some other error. */
+export function pinNeeded(err: unknown): PinNeeded | null {
+  if (!(err instanceof ServerError) || err.reason !== 'pin_needed' || typeof err.details.ticket !== 'string') return null;
+  return { ticket: err.details.ticket, google: err.details.google === true, resetAt: typeof err.details.reset_at === 'string' ? err.details.reset_at : null };
+}
+
+/**
+ * A wrong PIN (`triesLeft` before the waits start) or a wait (`wait` seconds) after too many;
+ * null when it's some other error.
+ */
+export function pinRefused(err: unknown): { triesLeft?: number; wait?: number } | null {
+  if (!(err instanceof ServerError)) return null;
+  if (err.reason === 'wrong_pin') return { triesLeft: Number(err.details.tries_left) || 0 };
+  if (err.reason === 'pin_locked') return { wait: Number(err.details.wait) || 60 };
+  return null;
+}
 
 export type SignedIn = {
   token: string;
@@ -164,6 +190,7 @@ type WireMe = {
   about?: string | null;
   photo?: string | null;
   privacy: { last_seen: string; online: string; read_receipts: boolean; photo?: string; about?: string; groups?: string; except?: Partial<PrivacyExcept> };
+  pin?: boolean;
 };
 
 type WireBundle = {
@@ -249,6 +276,7 @@ export function meFromWire(u: WireMe): Me {
       // An older server has no lists: nobody left out.
       except: { last_seen: ids(u.privacy.except?.last_seen), photo: ids(u.privacy.except?.photo), about: ids(u.privacy.except?.about), groups: ids(u.privacy.except?.groups) },
     },
+    pin: u.pin === true,
   };
 }
 
@@ -344,6 +372,39 @@ export class HttpServer implements ServerApi {
 
   async signInWithPhone(phone: string, code: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
     return signedIn(await this.call<WireSignedIn>('POST', '/auth/phone', { phone, code, device: deviceToWire(device), ...keysToWire(keys) }));
+  }
+
+  // ---- Two-step PIN (after a sign-in threw a ServerError that pinNeeded() reads) ----
+
+  /** The PIN, with the ticket. A wrong one throws a ServerError that pinRefused() reads. */
+  async pinSignIn(ticket: string, pin: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
+    return signedIn(await this.call<WireSignedIn>('POST', '/auth/pin', { ticket, pin, device: deviceToWire(device), ...keysToWire(keys) }));
+  }
+
+  /** Forgot the PIN (signed in by number): the Google account linked to PakChat proves it's me. The PIN is removed. */
+  async pinGoogle(ticket: string, idToken: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn> {
+    return signedIn(await this.call<WireSignedIn>('POST', '/auth/pin/google', { ticket, id_token: idToken, device: deviceToWire(device), ...keysToWire(keys) }));
+  }
+
+  /** Forgot the PIN, no Google: starts the 7-day wait (`{ resetAt }`), or once it's over, signs in without it. */
+  async pinReset(ticket: string, device: DeviceKeys & { name: string }, keys: PreKeys): Promise<SignedIn | { resetAt: string }> {
+    const r = await this.call<WireSignedIn | { reset_at: string }>('POST', '/auth/pin/reset', { ticket, device: deviceToWire(device), ...keysToWire(keys) });
+    return 'token' in r ? signedIn(r) : { resetAt: r.reset_at };
+  }
+
+  /** Turns two-step verification on, or changes the PIN (`current`: the one it has now). Answers the new me. */
+  async setPin(pin: string, current?: string) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/pin', { pin, ...(current ? { current } : {}) }));
+  }
+
+  /** Turns it off; `current` is the PIN it has now (a wrong one: ServerError "wrong_current"). */
+  async removePin(current: string) {
+    return meFromWire(await this.call<WireMe>('DELETE', '/me/pin', { current }));
+  }
+
+  /** The reminder now and then: whether `pin` is mine. A right one also stops a 7-day reset someone asked for. */
+  async checkPin(pin: string) {
+    return (await this.call<{ right: boolean }>('POST', '/me/pin/check', { pin })).right;
   }
 
   // ---- Checking a number with WhatsApp (instead of an SMS code) ----
@@ -474,6 +535,11 @@ export class HttpServer implements ServerApi {
   // ---- Calls, status and GIFs ----
 
   /** Where calls find a way through (STUN), and our relay (TURN) if there is one, as WebRTC takes them. */
+  /** A pass into a group call's room on our call server: where it is, and the pass (CallController). */
+  async callRoom(chatId: string, callId: string): Promise<{ url: string; token: string }> {
+    return this.call<{ url: string; token: string }>('POST', '/calls/room', { chat: chatId, call: callId });
+  }
+
   async iceServers(): Promise<{ urls: string[]; username?: string; credential?: string }[]> {
     return (await this.call<{ ice_servers: { urls: string[]; username?: string; credential?: string }[] }>('GET', '/calls/ice')).ice_servers;
   }

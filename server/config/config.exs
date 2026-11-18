@@ -34,6 +34,11 @@ config :pakchat, Oban,
 config :pakchat, :rate_limits,
   # Sign-ins, per internet address.
   sign_in: {10, 60_000},
+  # Two-step PIN tries while signing in, per internet address (each account also
+  # counts its own wrong tries and waits longer after five, Pakchat.Pin).
+  pin: {10, 60_000},
+  # "Do you still know your PIN?" from the app, per person.
+  pin_check: {10, 600_000},
   # New QR codes for linking a website, per internet address.
   link: {20, 60_000},
   # Finding people by Gmail, per person.

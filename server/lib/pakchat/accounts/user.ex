@@ -39,6 +39,11 @@ defmodule Pakchat.Accounts.User do
     # "My contacts except…": per setting (see except_keys/0), the user ids left out.
     field :privacy_except, :map, default: %{}
     field :last_seen_at, :utc_datetime_usec
+    # Two-step verification (Pakchat.Pin): never the PIN itself, only its scrambled copy.
+    field :pin_hash, :string, redact: true
+    field :pin_failures, :integer, default: 0
+    field :pin_locked_until, :utc_datetime
+    field :pin_reset_at, :utc_datetime
 
     has_many :devices, Pakchat.Accounts.Device
     timestamps(type: :utc_datetime_usec)

@@ -9,7 +9,7 @@
 // the server for a download link, fetches the locked bytes, checks the
 // fingerprint, and unlocks them into PakChat's folder. Photos (and whatever you
 // switched on in Settings › Storage) download by themselves.
-import { nextHops, OfflineError, type ChatQuote, type FileKind, type FileUploader, type Message, type Ref } from '@pakchat/shared';
+import { nextHops, OfflineError, type ChatQuote, type FileKind, type FileUploader, type Message, type Ref, type StatusQuote } from '@pakchat/shared';
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as MediaLibrary from 'expo-media-library/legacy';
@@ -121,6 +121,8 @@ export type Picked = {
   round?: true;
   /** The photo was drawn on, cropped or turned in the editor (already a fresh copy without its camera details). */
   edited?: true;
+  /** A video drawn on in the editor: a picture of the drawing (see-through, the video's shape), put on every frame when it's sent. */
+  overlay?: string;
 };
 
 /** Photos and videos from the chat list's 📷, waiting while you choose a chat (send-to.tsx). */
@@ -197,10 +199,14 @@ async function smaller(p: Picked): Promise<Picked> {
 }
 
 /** Roughly how big a video will be once sent (for the trim strip: "about 4 MB"). */
-export function videoSizeGuess(p: Picked, lengthMs: number) {
-  if (p.hd && p.size && p.duration) return Math.round((p.size * lengthMs) / p.duration);
-  // About 2 megabits a second for the picture, and a little for the sound.
-  return Math.round(((2_000_000 + 128_000) / 8) * (lengthMs / 1000));
+export function videoSizeGuess(p: Picked, lengthMs: number, hd = !!p.hd) {
+  // As it is (HD), its own share of the file for the part kept.
+  const asIs = p.size && p.duration ? Math.round((p.size * lengthMs) / p.duration) : null;
+  // Smaller: about 2 megabits a second for the picture and a little for the sound,
+  // but never more than it was (VideoShrink.kt doesn't make a small video bigger).
+  const small = Math.round(((2_000_000 + 128_000) / 8) * (lengthMs / 1000));
+  if (hd) return asIs ?? small;
+  return asIs ? Math.min(asIs, small) : small;
 }
 
 /**
@@ -217,7 +223,7 @@ async function smallerVideo(p: Picked): Promise<Picked> {
   const attempt = async (hd: boolean) => {
     const out = new File(Paths.cache, `small-${core.newId()}.mp4`);
     try {
-      return await fileModule().shrinkVideo(p.uri, out.uri, trimmed ? p.trim!.start : 0, trimmed ? p.trim!.end : 0, hd, !!p.mute);
+      return await fileModule().shrinkVideo(p.uri, out.uri, trimmed ? p.trim!.start : 0, trimmed ? p.trim!.end : 0, hd, !!p.mute, p.overlay ?? null);
     } catch (err) {
       console.log(`[pakchat] video shrink: ${String(err)}`);
       if (out.exists) out.delete();
@@ -225,8 +231,9 @@ async function smallerVideo(p: Picked): Promise<Picked> {
     }
   };
   const r = (await attempt(!!p.hd)) ?? (p.hd ? await attempt(false) : null);
-  // Asked to go without its sound: never sent with it instead.
+  // Asked to go without its sound, or with a drawing on it: never sent without them instead.
   if (!r && p.mute) throw new Error('mute');
+  if (!r && p.overlay) throw new Error('drawing');
   if (!r) return p;
   const name = p.name ? `${p.name.replace(/\.[a-z0-9]{1,8}$/i, '')}.mp4` : undefined;
   const duration = trimmed ? p.trim!.end - p.trim!.start : p.duration;
@@ -248,7 +255,7 @@ async function posterOf(uri: string): Promise<string | undefined> {
 export class TooBig extends Error {}
 
 /** Sends a picked file to a chat (photos and videos made smaller first, unless HD). Throws TooBig over the server's limit. */
-export async function sendPicked(chatId: string, picked: Picked, caption?: string, extra: { replyTo?: Ref; quote?: ChatQuote; hold?: number } = {}) {
+export async function sendPicked(chatId: string, picked: Picked, caption?: string, extra: { replyTo?: Ref; quote?: ChatQuote; hold?: number; status?: StatusQuote } = {}) {
   const p = await smaller(picked);
   const source = new File(p.uri);
   const size = p.size ?? source.size;
@@ -275,7 +282,7 @@ export async function sendPicked(chatId: string, picked: Picked, caption?: strin
     ...(poster ? { poster } : {}),
   };
   try {
-    return await core.client.sendFile(chatId, file, { caption, replyTo: extra.replyTo, quote: extra.quote, hold: extra.hold });
+    return await core.client.sendFile(chatId, file, { caption, replyTo: extra.replyTo, quote: extra.quote, hold: extra.hold, status: extra.status });
   } finally {
     // The smaller photo or video was only needed for the copy above.
     if (p.uri !== picked.uri) {
@@ -366,8 +373,10 @@ export async function download(m: Message) {
       if (/ 404\b/.test(e.message ?? '')) throw new FileGone();
       throw new OfflineError('The download stopped');
     }
+    // A video's sharp first frame, for its bubble and while the viewer opens it (not view once).
+    const poster = f.kind === 'video' && !f.once && !f.gif ? await posterOf(out.uri) : undefined;
     await core.client.changeHere(m.chatId, m, (x) => {
-      if (x.file) x.file = { ...x.file, local: out.uri };
+      if (x.file) x.file = { ...x.file, local: out.uri, ...(poster ? { poster } : {}) };
     });
     core.emit(`messages:${m.chatId}`);
     void toGallery(m, out.uri);
@@ -410,6 +419,29 @@ export async function forgetFile(m: Message | null) {
     }
   }
 }
+
+/**
+ * A video downloaded before build 34 has no sharp first frame: made once, the first time the
+ * viewer opens it, so the next time it opens without a flash.
+ */
+export async function addPoster(m: Message) {
+  const f = m.file;
+  const tag = tagOf(m.chatId, m);
+  if (!f?.local || f.poster || f.kind !== 'video' || f.once || f.gif || posting.has(tag)) return;
+  posting.add(tag);
+  try {
+    const poster = await posterOf(f.local);
+    if (!poster) return;
+    await core.client.changeHere(m.chatId, m, (x) => {
+      if (x.file) x.file = { ...x.file, poster };
+    });
+    core.emit(`messages:${m.chatId}`);
+  } finally {
+    posting.delete(tag);
+  }
+}
+
+const posting = new Set<string>();
 
 /** Is the file there to open? (It can be deleted outside PakChat.) */
 export function haveFile(m: Message) {

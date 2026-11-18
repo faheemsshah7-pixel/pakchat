@@ -9,14 +9,19 @@
 // "media" says a mic or camera went on or off. The call messages themselves
 // go locked with Signal, like any message.
 //
+// A group chat's call goes through our call server instead (groupCall.ts, the
+// phone's app/src/core/groupCall.ts has the story): up to 32 people, each device
+// sending once, locked with the call's key that comes in "ring" (or "here").
+//
 // What the website leaves to the phone: connecting while it rings (the
 // phone just connects the usual way once it's answered), call links, adding
 // people to a call, and the earpiece.
 
-import { MAX_CALL_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device } from '@pakchat/shared';
+import { MAX_CALL_PEOPLE, MAX_MESH_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device, type Message } from '@pakchat/shared';
 
 import { chatTitle } from '../ui/format';
 import { core, openChat } from './core';
+import { GroupRoom, newCallKey, type TileSize } from './groupCall';
 import { isAppLocked } from './lock';
 import { tuneSdp } from './sdp';
 import { playTone, stopTone } from './tones';
@@ -30,7 +35,7 @@ const IN_CALL_OPS: readonly CallSignal['op'][] = ['join', 'here', 'offer', 'answ
 export type CallState = 'outgoing' | 'incoming' | 'connecting' | 'active' | 'ended';
 export type EndReason = 'hungUp' | 'theyHungUp' | 'declined' | 'busy' | 'noAnswer' | 'missed' | 'failed' | 'elsewhere' | 'offline' | 'full' | 'permission';
 
-export type PeerView = { key: string; userId: string; state: 'connecting' | 'connected' | 'reconnecting'; audio: boolean; video: boolean; screen: boolean; stream: MediaStream | null; rev: number };
+export type PeerView = { key: string; userId: string; state: 'connecting' | 'connected' | 'reconnecting'; audio: boolean; video: boolean; screen: boolean; stream: MediaStream | null; rev: number; speaking: boolean };
 
 export type CallView = {
   id: string;
@@ -51,6 +56,10 @@ export type CallView = {
   sharing: boolean;
   /** The call window is made small (a bar above the chat list). */
   small: boolean;
+  /** Through our call server (a group chat's call): up to 32 people. */
+  viaRoom: boolean;
+  /** I'm talking now (through the call server). */
+  speaking: boolean;
   waiting: { id: string; chatId: string; from: string; video: boolean; group: boolean } | null;
 };
 
@@ -71,22 +80,28 @@ type Peer = {
   giveUp: ReturnType<typeof setTimeout> | null;
 };
 
-type Live = Omit<CallView, 'peers' | 'local' | 'waiting'> & {
+type Live = Omit<CallView, 'peers' | 'local' | 'waiting' | 'speaking'> & {
   fromDevice: number;
   peers: Map<string, Peer>;
   localStream: MediaStream | null;
   screenStream: MediaStream | null;
   joined: boolean;
   connectedOnce: boolean;
+  /** Who I was ever connected to (a group call's record says who took part). */
+  talked: Set<string>;
   declined: Set<string>;
   members: string[];
   links: Map<string, string>;
   timers: ReturnType<typeof setTimeout>[];
   done: boolean;
   alert: Notification | null;
+  /** Through the call server: the call's key (null until it arrives), its room, and who's talking. */
+  key: string | null;
+  room: GroupRoom | null;
+  speakers: Set<string>;
 };
 
-type Ringing = { id: string; chatId: string; from: string; fromDevice: number; video: boolean; group: boolean; until: number; extra: string[] };
+type Ringing = { id: string; chatId: string; from: string; fromDevice: number; video: boolean; group: boolean; until: number; extra: string[]; key?: string };
 
 const keyOf = (d: Device) => `${d.userId}:${d.deviceId}`;
 
@@ -137,8 +152,10 @@ class Calls {
       extra: [...c.extra],
       sharing: c.sharing,
       small: c.small,
+      viaRoom: c.viaRoom,
+      speaking: c.speakers.has(keyOf(core.client.device)),
       local: c.localStream && c.camera && !c.sharing ? c.localStream : null,
-      peers: [...c.peers.values()].map((p) => ({ key: p.key, userId: p.userId, state: p.state, audio: p.audio, video: p.video, screen: p.screen, stream: p.stream, rev: p.rev })),
+      peers: [...c.peers.values()].map((p) => ({ key: p.key, userId: p.userId, state: p.state, audio: p.audio, video: p.video, screen: p.screen, stream: p.stream, rev: p.rev, speaking: c.speakers.has(p.key) })),
       waiting: w && !c.done ? { id: w.id, chatId: w.chatId, from: w.from, video: w.video, group: w.group } : null,
     };
     return this.snapshot;
@@ -159,7 +176,8 @@ class Calls {
     if (!core.client.isConnected) return 'offline';
     const me = core.client.device;
     void this.iceServers();
-    const c = this.fresh({ id: crypto.randomUUID(), chatId, group: chat.kind === 'group', video, direction: 'out', state: 'outgoing', from: me.userId, fromDevice: me.deviceId, joined: true, members: othersIn(chat) });
+    const c = this.fresh({ id: crypto.randomUUID(), chatId, group: chat.kind === 'group', video, direction: 'out', state: 'outgoing', from: me.userId, fromDevice: me.deviceId, joined: true, members: othersIn(chat), viaRoom: chat.kind === 'group' });
+    if (c.viaRoom) c.key = newCallKey();
     this.call = c;
     this.emit();
     if (!(await this.media(c))) {
@@ -167,11 +185,12 @@ class Calls {
       this.end(c, 'permission');
       return 'permission';
     }
-    if (!(await this.send(c, { op: 'ring', video, group: c.group }, undefined, true))) {
+    if (!(await this.send(c, { op: 'ring', video, group: c.group, ...(c.key ? { key: c.key } : {}) }, undefined, true))) {
       if (!c.done) this.end(c, 'offline');
       return c.done && c.endReason !== 'offline' ? 'started' : 'offline';
     }
     if (c.done) return 'started';
+    if (c.viaRoom) void this.enterRoom(c);
     c.timers.push(
       setTimeout(() => {
         if (c.done || c.connectedOnce || c.peers.size) return;
@@ -182,11 +201,14 @@ class Calls {
     return 'started';
   }
 
-  private fresh(x: Pick<Live, 'id' | 'chatId' | 'group' | 'video' | 'direction' | 'state' | 'from' | 'fromDevice' | 'joined' | 'members'> & { extra?: string[] }): Live {
+  private fresh(x: Pick<Live, 'id' | 'chatId' | 'group' | 'video' | 'direction' | 'state' | 'from' | 'fromDevice' | 'joined' | 'members' | 'viaRoom'> & { extra?: string[]; key?: string | null }): Live {
     return {
       extra: [],
       links: new Map(),
+      key: null,
       ...x,
+      room: null,
+      speakers: new Set(),
       startedAt: null,
       peers: new Map(),
       localStream: null,
@@ -198,6 +220,7 @@ class Calls {
       ringing: false,
       small: false,
       connectedOnce: false,
+      talked: new Set(),
       declined: new Set(),
       timers: [],
       done: false,
@@ -233,6 +256,7 @@ class Calls {
     this.emit();
     if (!(await this.media(c))) return this.end(c, 'permission');
     if (c.done) return;
+    if (c.viaRoom) void this.enterRoom(c);
     if (!(await this.send(c, { op: 'join', video: c.camera, audio: true }, undefined, true))) return this.end(c, 'offline');
     c.timers.push(
       setTimeout(() => {
@@ -259,7 +283,7 @@ class Calls {
   }
 
   private ring(r: Ringing, ms: number, announce: boolean) {
-    const c = this.fresh({ id: r.id, chatId: r.chatId, group: r.group, video: r.video, direction: 'in', state: 'incoming', from: r.from, fromDevice: r.fromDevice, joined: false, members: [], extra: r.extra });
+    const c = this.fresh({ id: r.id, chatId: r.chatId, group: r.group, video: r.video, direction: 'in', state: 'incoming', from: r.from, fromDevice: r.fromDevice, joined: false, members: [], extra: r.extra, viaRoom: !!r.key, key: r.key ?? null });
     this.call = c;
     void core.storage.getChat(r.chatId).then((chat) => {
       if (chat) c.members = othersIn(chat);
@@ -373,6 +397,10 @@ class Calls {
         return this.someoneJoined(c, from, s);
       case 'here':
         if (!c?.joined) return;
+        if (c.viaRoom && !c.key && s.key) {
+          c.key = s.key;
+          void this.enterRoom(c);
+        }
         return this.meet(c, from, s);
       case 'offer':
         if (!c?.joined || !s.sdp) return;
@@ -423,7 +451,7 @@ class Calls {
     const fresh = age < RING_MS - 3_000 || Math.abs(age) > 120_000;
     const left = Math.abs(age) > 120_000 ? 30_000 : Math.max(10_000, RING_MS - Math.max(0, age));
     const extra = (s.people ?? []).filter((u) => u !== core.myId && u !== e.from);
-    const ringing: Ringing = { id: s.call, chatId: e.chatId, from: e.from, fromDevice: e.fromDevice, video: !!s.video, group: !!s.group || extra.length > 0, extra, until: Date.now() + left };
+    const ringing: Ringing = { id: s.call, chatId: e.chatId, from: e.from, fromDevice: e.fromDevice, video: !!s.video, group: !!s.group || extra.length > 0, extra, until: Date.now() + left, ...(s.key ? { key: s.key } : {}) };
     const now = this.call && !this.call.done ? this.call : null;
     if (now) {
       // We called each other at once: the smaller id wins, on both sides.
@@ -454,11 +482,11 @@ class Calls {
 
   private someoneJoined(c: Live, from: Device, s: CallSignal) {
     const key = keyOf(from);
-    if (!c.peers.has(key) && c.peers.size >= MAX_CALL_PEOPLE - 1) {
+    if (!c.peers.has(key) && c.peers.size >= (c.viaRoom ? MAX_CALL_PEOPLE : MAX_MESH_PEOPLE) - 1) {
       void this.send(c, { op: 'busy' }, [from]);
       return;
     }
-    void this.send(c, { op: 'here', video: c.camera, audio: !c.muted }, [from]);
+    void this.send(c, { op: 'here', video: c.camera, audio: !c.muted, ...(c.viaRoom && c.key ? { key: c.key } : {}) }, [from]);
     this.meet(c, from, s);
   }
 
@@ -475,6 +503,13 @@ class Calls {
         }, CONNECT_MS),
       );
     }
+    // Through the call server: they're connected once they're in its room.
+    if (c.viaRoom) {
+      if (c.room?.connected && p.state !== 'connected' && c.room.stream(p.key)) this.connectedTo(c, p);
+      void this.enterRoom(c);
+      this.emit();
+      return;
+    }
     this.emit();
     // The device whose name sorts first makes the offer (the same rule as the phone's).
     if (keyOf(core.client.device) < p.key && !p.pc) void this.offer(c, p);
@@ -485,6 +520,10 @@ class Calls {
     let p = c.peers.get(key);
     if (!p) {
       p = { key, userId: from.userId, deviceId: from.deviceId, pc: null, stream: null, state: 'connecting', audio: true, video: c.video, screen: false, pending: [], rev: 0, giveUp: null };
+      if (c.viaRoom) {
+        const stream = c.room?.stream(key);
+        if (stream) p.stream = stream;
+      }
       c.peers.set(key, p);
     }
     return p;
@@ -499,6 +538,7 @@ class Calls {
     if (p) {
       this.closePeer(p);
       c.peers.delete(p.key);
+      if (c.viaRoom) this.applyTiles(c);
       this.emit();
     }
     if (c.extra.includes(from.userId) && ![...c.peers.values()].some((x) => x.userId === from.userId)) c.extra = c.extra.filter((u) => u !== from.userId);
@@ -551,6 +591,7 @@ class Calls {
   }
 
   private async offer(c: Live, p: Peer, restart = false) {
+    if (c.viaRoom) return;
     try {
       const pc = await this.connection(c, p);
       if (c.done) return;
@@ -564,6 +605,7 @@ class Calls {
   }
 
   private async gotOffer(c: Live, from: Device, sdp: string) {
+    if (c.viaRoom) return;
     const p = this.peer(c, from);
     const pc = await this.connection(c, p);
     if (c.done) return;
@@ -608,17 +650,8 @@ class Calls {
   private connectionChanged(c: Live, p: Peer) {
     const state = p.pc?.connectionState;
     if (c.done || !state) return;
-    if (state === 'connected') {
-      p.state = 'connected';
-      if (p.giveUp) clearTimeout(p.giveUp);
-      p.giveUp = null;
-      if (!c.connectedOnce) {
-        c.connectedOnce = true;
-        c.startedAt = Date.now();
-        c.state = 'active';
-        stopTone();
-      }
-    } else if (state === 'disconnected' || state === 'failed') {
+    if (state === 'connected') this.connectedTo(c, p);
+    else if (state === 'disconnected' || state === 'failed') {
       if (p.state === 'connected') p.state = 'reconnecting';
       if (state === 'failed' && keyOf(core.client.device) < p.key) void this.offer(c, p, true);
       p.giveUp ??= setTimeout(() => {
@@ -630,6 +663,102 @@ class Calls {
       }, RECONNECT_MS);
     }
     this.emit();
+  }
+
+  private connectedTo(c: Live, p: Peer) {
+    p.state = 'connected';
+    if (p.giveUp) clearTimeout(p.giveUp);
+    p.giveUp = null;
+    c.talked.add(p.userId);
+    if (c.viaRoom) this.applyTiles(c);
+    if (!c.connectedOnce) {
+      c.connectedOnce = true;
+      c.startedAt = Date.now();
+      c.state = 'active';
+      stopTone();
+    }
+    this.emit();
+  }
+
+  // ---- Through our call server ----
+
+  private async enterRoom(c: Live) {
+    if (c.done || c.room || !c.key || !c.joined || !c.localStream) return;
+    const me = keyOf(core.client.device);
+    const allowed = (id: string) => id !== me && /^[^:]+:\d+$/.test(id);
+    this.tiles = null;
+    const room: GroupRoom = new GroupRoom(allowed, {
+      state: (st) => {
+        if (c.done || c.room !== room) return;
+        if (st === 'gone') {
+          c.room = null;
+          room.close();
+          void this.send(c, { op: 'leave' });
+          return this.end(c, 'failed');
+        }
+        for (const p of c.peers.values()) {
+          if (st === 'reconnecting' && p.state === 'connected') p.state = 'reconnecting';
+          else if (st === 'connected' && p.state === 'reconnecting') p.state = 'connected';
+        }
+        this.emit();
+      },
+      person: (id, here) => {
+        if (c.done || c.room !== room) return;
+        const [userId, device] = id.split(':');
+        const from: Device = { userId: userId ?? '', deviceId: Number(device) };
+        if (!here) return this.someoneLeft(c, from);
+        const p = this.peer(c, from);
+        p.stream = room.stream(id);
+        this.connectedTo(c, p);
+      },
+      media: (id) => {
+        const p = c.peers.get(id);
+        if (!p || c.room !== room) return;
+        p.stream = room.stream(id);
+        p.rev++;
+        if (p.state !== 'connected' && p.stream) this.connectedTo(c, p);
+        this.emit();
+      },
+      speaking: (ids) => {
+        if (c.room !== room) return;
+        c.speakers = new Set(ids);
+        this.emit();
+      },
+    });
+    c.room = room;
+    try {
+      const [{ url, token }, iceServers] = await Promise.all([core.server.callRoom(c.chatId, c.id), this.iceServers()]);
+      if (c.done || c.room !== room) return room.close();
+      await room.connect(url, token, c.key, iceServers);
+      if (c.done || c.room !== room) return room.close();
+      const local = c.localStream;
+      const mic = local?.getAudioTracks()[0];
+      if (mic) await room.publish(mic, 'audio');
+      const video = c.screenStream?.getVideoTracks()[0] ?? local?.getVideoTracks()[0];
+      if (video) await room.publish(video, 'video');
+      this.applyTiles(c);
+    } catch (err) {
+      console.log(`[pakchat] call room: ${String(err)}`);
+      if (c.room === room) {
+        c.room = null;
+        room.close();
+      }
+      if (!c.done && !c.connectedOnce) this.end(c, 'failed');
+    }
+  }
+
+  private tiles: Set<string> | null = null;
+
+  /** Which tiles the call window shows, so only their pictures come. */
+  showTiles(keys: string[] | null) {
+    this.tiles = keys ? new Set(keys) : null;
+    if (this.call) this.applyTiles(this.call);
+  }
+
+  private applyTiles(c: Live) {
+    const n = c.peers.size + 1;
+    const size: TileSize = n <= 2 ? 'big' : n <= 8 ? 'medium' : 'small';
+    c.room?.setTiles(n > 8 ? this.tiles : null, size);
   }
 
   private closePeer(p: Peer) {
@@ -688,6 +817,7 @@ class Calls {
     c.video = true;
     c.camera = true;
     this.emit();
+    if (c.room) void c.room.publish(track, 'video').catch(() => {});
     for (const p of c.peers.values()) {
       if (!p.pc) continue;
       p.pc.addTrack(track, local);
@@ -716,6 +846,7 @@ class Calls {
     c.screenStream = stream;
     c.sharing = true;
     const camera = local.getVideoTracks()[0];
+    if (c.room) void c.room.publish(screen, 'video').catch(() => {});
     for (const p of c.peers.values()) {
       if (!p.pc) continue;
       const sender = camera && p.pc.getSenders().find((x) => x.track?.id === camera.id);
@@ -742,6 +873,7 @@ class Calls {
     c.screenStream = null;
     c.sharing = false;
     if (!c.done) {
+      if (c.room) void (camera ? c.room.replaceVideo(camera) : c.room.dropVideo()).catch(() => {});
       for (const p of c.peers.values()) {
         const sender = p.pc?.getSenders().find((x) => x.track?.id === screen?.id);
         if (!p.pc || !sender) continue;
@@ -769,6 +901,8 @@ class Calls {
     c.alert?.close();
     for (const t of c.timers) clearTimeout(t);
     c.timers = [];
+    c.room?.close();
+    c.room = null;
     for (const p of c.peers.values()) this.closePeer(p);
     c.screenStream?.getTracks().forEach((t) => t.stop());
     c.screenStream = null;
@@ -809,6 +943,10 @@ class Calls {
     const at = Date.now() - seconds * 1000;
     await addToLog({ id: c.id, chatId: c.chatId, with: withWho, direction: c.direction, video: c.video, group: c.group, at, seconds, missed });
     await core.client.noteCall(c.chatId, c.id, { by: c.from, video: c.video, group: c.group, missed, seconds }, at).catch(() => {});
+    // I started it: the record for everyone in the chat and all our devices (the bubble in the chat).
+    // (Not when it never rang anyone: no mic, or no connection.)
+    const rang = c.connectedOnce || (c.endReason !== 'permission' && c.endReason !== 'offline');
+    if (c.direction === 'out' && rang) await core.client.sendCallRecord(c.chatId, c.id, { video: c.video, group: c.group, seconds, joined: [...c.talked] }, at).catch(() => {});
     if (missed && c.endReason !== 'declined') void this.missedAlert(c.chatId, c.from, c.video, c.group);
   }
 
@@ -891,16 +1029,59 @@ export async function callLog(): Promise<CallLogEntry[]> {
   return (await core.storage.getValue<CallLogEntry[]>(LOG)) ?? [];
 }
 
-async function addToLog(e: CallLogEntry) {
-  const list = (await callLog()).filter((x) => x.id !== e.id);
-  await core.storage.setValue(LOG, [e, ...list].slice(0, LOG_MAX));
-  for (const fn of logListeners) fn();
+// One change to the list at a time (a call's record can come in while this device logs the same call).
+let logLane: Promise<unknown> = Promise.resolve();
+function inLogLane<T>(work: () => Promise<T>): Promise<T> {
+  const next = logLane.then(work, work);
+  logLane = next.catch(() => {});
+  return next;
 }
 
-export async function clearCallLog(ids?: string[]) {
-  const list = ids ? (await callLog()).filter((x) => !ids.includes(x.id)) : [];
-  await core.storage.setValue(LOG, list);
-  for (const fn of logListeners) fn();
+function addToLog(e: CallLogEntry) {
+  return inLogLane(async () => {
+    const list = (await callLog()).filter((x) => x.id !== e.id);
+    await core.storage.setValue(LOG, [e, ...list].slice(0, LOG_MAX));
+    for (const fn of logListeners) fn();
+  });
+}
+
+/**
+ * A call's record (the caller's, in the chat) that this device has no entry for: it goes in
+ * the Calls tab too, like WhatsApp's call history on every linked device. A call answered or
+ * made on my phone shows on my website, and the other way round. This device's own entry wins.
+ */
+export function logRecord(m: Message) {
+  if (m.kind !== 'system' || m.event?.event !== 'call' || m.seq === null || !m.id.startsWith('call-')) return;
+  const id = m.id.slice('call-'.length);
+  void inLogLane(async () => {
+    const list = await callLog();
+    if (list.some((x) => x.id === id)) return;
+    const chat = await core.storage.getChat(m.chatId);
+    if (!chat || chat.callLink || chat.kind === 'status') return;
+    const out = m.author === core.myId;
+    const e = m.event!;
+    const entry: CallLogEntry = {
+      id,
+      chatId: m.chatId,
+      with: out ? chat.members.map((x) => x.userId).filter((u) => u !== core.myId) : [m.author],
+      direction: out ? 'out' : 'in',
+      video: e.video === true,
+      group: e.group === true,
+      at: m.sentAt,
+      seconds: Number(e.seconds ?? 0),
+      missed: !out && e.missed === true,
+    };
+    await core.storage.setValue(LOG, [...list, entry].sort((a, b) => b.at - a.at).slice(0, LOG_MAX));
+    for (const fn of logListeners) fn();
+  }).catch(() => {});
+}
+
+export function clearCallLog(ids?: string[]) {
+  return inLogLane(async () => {
+    const list = ids ? (await callLog()).filter((x) => !ids.includes(x.id)) : [];
+    await core.storage.setValue(LOG, list);
+    for (const fn of logListeners) fn();
+  });
 }
 
 export function onCallLog(fn: () => void) {

@@ -174,9 +174,54 @@ export function bodyLine(m: Message, t: Strings) {
   return plainText(m.text ?? '');
 }
 
+/** How long a call lasted, like WhatsApp's: "45 sec", "12 min", "1 hr 5 min". */
+export function callLength(seconds: number, t: Strings) {
+  const s = Math.max(1, Math.round(seconds));
+  if (s < 60) return fill(t.callSeconds, { n: String(s) });
+  const min = Math.round(s / 60);
+  if (min < 60) return fill(t.callMinutes, { n: String(min) });
+  return fill(t.callHours, { h: String(Math.floor(min / 60)), m: String(min % 60) });
+}
+
+/** A call note (calls.ts, or the caller's record of it): is it one? */
+export const isCallNote = (m: Message | null | undefined): boolean => !!m && m.kind === 'system' && m.event?.event === 'call';
+
+/**
+ * A call in the chat: what its bubble and the chat list say. Mine: I started it ("No
+ * answer", or how long). Someone else's: missed (red, "Tap to call back") or how long.
+ */
+export function callInfo(m: Message, t: Strings) {
+  const e = m.event ?? { event: 'call', by: m.author };
+  const video = e.video === true;
+  const group = e.group === true;
+  const out = m.author === core.myId;
+  const missed = !out && e.missed === true;
+  const seconds = Number(e.seconds ?? 0);
+  const title = missed
+    ? group
+      ? video
+        ? t.missedGroupVideoCall
+        : t.missedGroupCall
+      : video
+        ? t.missedVideoCall
+        : t.missedVoiceCall
+    : group
+      ? video
+        ? t.groupVideoCall
+        : t.groupVoiceCall
+      : video
+        ? t.videoCall
+        : t.voiceCall;
+  const sub = missed ? t.tapToCallBack : seconds > 0 ? callLength(seconds, t) : out ? t.noAnswer : '';
+  const icon = video ? (out ? 'videoOut' : 'videoIn') : out ? 'callOut' : 'callIn';
+  return { title, sub, missed, out, video, icon } as const;
+}
+
 /** The one line under a chat's name in the list. */
 export function preview(m: Message | null, t: Strings, group: boolean) {
   if (!m) return '';
+  // A call: just what it was ("Missed voice call", "Video call"), with its icon beside it (ChatRow).
+  if (isCallNote(m)) return callInfo(m, t).title;
   if (m.kind === 'system') return systemText(m, t);
   if (m.deleted) return m.author === core.myId ? t.youDeleted : t.deleted;
   const body = bodyLine(m, t);

@@ -9,7 +9,7 @@
 // one file (AudioJoin.kt) to listen back and to send. While recording, how
 // loud you are is sampled ten times a second; those become the bars drawn on
 // the voice note (its "waveform"), which travel with it, locked like the sound.
-import type { Ref } from '@pakchat/shared';
+import type { Ref, StatusQuote } from '@pakchat/shared';
 import { AudioModule, setAudioModeAsync, type AudioRecorder, type RecordingOptions } from 'expo-audio';
 import { Directory, File, Paths } from 'expo-file-system';
 
@@ -220,7 +220,8 @@ export class VoiceSession {
 }
 
 /** Sends a finished voice note: it moves into PakChat's own folder first, like any file. */
-export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref, hold?: number) {
+/** `status`: a voice reply to someone's status (it carries a little copy of it). */
+export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref, hold?: number, status?: StatusQuote) {
   const files = new Directory(Paths.document, 'files');
   if (!files.exists) files.create({ intermediates: true, idempotent: true });
   const copy = new File(files, `${core.newId()}.m4a`);
@@ -237,6 +238,6 @@ export async function sendVoice(chatId: string, v: Recorded, replyTo?: Ref, hold
       ...(v.waveform ? { waveform: v.waveform } : {}),
       ...(v.once ? { once: true as const } : {}),
     },
-    { replyTo, hold },
+    { replyTo, hold, status },
   );
 }

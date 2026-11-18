@@ -30,7 +30,7 @@ import {
 } from '@pakchat/shared';
 import { lockFile, unlockFile } from '@pakchat/shared/web';
 
-import { calls } from './calls';
+import { calls, logRecord } from './calls';
 import { IdbStorage, openIdb } from './idbStorage';
 import { isAppLocked, startLock } from './lock';
 import { workerSignal } from './workerSignal';
@@ -213,6 +213,8 @@ class WebCore {
     c.on('message', (m) => {
       this.emit(`messages:${m.chatId}`);
       this.emit('chats');
+      // A call's record: into the Calls tab too, if this computer didn't log it (answered or made on another device).
+      if (m.kind === 'system' && m.event?.event === 'call' && m.seq !== null) logRecord(m);
     });
     c.on('arrived', (m) => void this.notify(m));
     c.on('chat', () => {

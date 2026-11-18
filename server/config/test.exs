@@ -51,6 +51,8 @@ config :pakchat, :allowed_origins, ["http://localhost:5173"]
 # Every test signs in from the same address, so allow more sign-ins here.
 config :pakchat, :rate_limits,
   sign_in: {1000, 60_000},
+  pin: {1000, 60_000},
+  pin_check: {1000, 60_000},
   sms: {1000, 60_000},
   whatsapp: {1000, 60_000},
   whatsapp_claim: {1000, 60_000},
@@ -59,3 +61,6 @@ config :pakchat, :rate_limits,
 # Files from the tests go in a folder of their own.
 config :pakchat, :files_dir, Path.join(System.tmp_dir!(), "pakchat-test-files")
 config :pakchat, :file_max_mb, 1
+
+# A PIN is scrambled fewer times in the tests, so they stay quick (Pakchat.Pin).
+config :pakchat, :pin_rounds, 1_000

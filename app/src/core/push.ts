@@ -121,6 +121,16 @@ const KEEP = 7;
  * (or archived and kept archived), you're looking at it, or it's an old one caught up while PakChat is open
  * (those just show in the chat list).
  */
+/**
+ * Someone this phone has never seen (a first message from a stranger): their name is asked
+ * from the server before the alert shows, so it says "~ Sara" and not "…". At most 3 seconds:
+ * offline, the alert still comes.
+ */
+export async function know(userId: string, ms = 3_000) {
+  if (core.name(userId)) return;
+  await Promise.race([core.person(userId).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
+}
+
 export function alertFor(m: Message) {
   if (m.kind === 'system' || m.deleted || m.author === core.myId) return;
   // A muted chat, or an archived one that stays archived, is quiet; but in a group, not one for me:
@@ -144,6 +154,7 @@ export function alertFor(m: Message) {
     // A locked chat's alert says only "New message": not who, nor what (unless Settings › App lock
     // › "Show sender and message" is on, like WhatsApp's switch).
     const locked = !!prefs.lock && !core.settings.lockedAlertsShow;
+    if (!locked) await know(m.author);
     const line: Line = locked ? { name: 'PakChat', text: t.newMessage, at: m.sentAt } : { name: core.name(m.author) || '…', text: preview(m, t, false) || t.newMessage, at: m.sentAt };
     const next = { count: (was?.count ?? 0) + 1, lines: [...(was?.lines ?? []), line].slice(-KEEP) };
     await core.storage.setValue(SHOWN, { ...shown, [m.chatId]: next });
@@ -191,6 +202,7 @@ export function alertReaction(e: { message: Message; from: string; emoji: string
       if (reactions === false || isMuted(prefs) || prefs.lock || prefs.archived || e.message.author !== core.myId) return;
       if (core.viewing === chat.id && AppState.currentState === 'active') return;
       const what = preview(e.message, t, false).slice(0, 80);
+      await know(e.from);
       const who = core.name(e.from) || t.newMessage;
       await Notifications.scheduleNotificationAsync({
         identifier: `${LIKE_ALERT}${e.message.id}:${e.from}`,
@@ -204,6 +216,7 @@ export function alertReaction(e: { message: Message; from: string; emoji: string
       }).catch(() => {});
       return;
     }
+    await know(e.from);
     await Notifications.scheduleNotificationAsync({
       identifier: `${LIKE_ALERT}${e.message.id}:${e.from}`,
       content: { title: core.name(e.from) || t.newMessage, body: t.likedYourStatus, priority: Notifications.AndroidNotificationPriority.HIGH },

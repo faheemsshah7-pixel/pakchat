@@ -194,9 +194,52 @@ export function bodyLine(m: Message) {
   return plainText(m.text ?? '');
 }
 
+/** How long a call lasted, like WhatsApp's: "45 sec", "12 min", "1 hr 5 min". */
+export function callLength(seconds: number) {
+  const s = Math.max(1, Math.round(seconds));
+  if (s < 60) return tr('{n} sec', { n: s });
+  const min = Math.round(s / 60);
+  if (min < 60) return tr('{n} min', { n: min });
+  return tr('{h} hr {m} min', { h: Math.floor(min / 60), m: min % 60 });
+}
+
+/** A call note (calls.ts, or the caller's record of it): is it one? */
+export const isCallNote = (m: Message | null | undefined): boolean => !!m && m.kind === 'system' && m.event?.event === 'call';
+
+/** A call in the chat (the same as the phone's): mine ("No answer", or how long), or theirs (missed, or how long). */
+export function callInfo(m: Message) {
+  const e = m.event ?? { event: 'call', by: m.author };
+  const video = e.video === true;
+  const group = e.group === true;
+  const out = m.author === core.myId;
+  const missed = !out && e.missed === true;
+  const seconds = Number(e.seconds ?? 0);
+  const title = tr(
+    missed
+      ? group
+        ? video
+          ? 'Missed group video call'
+          : 'Missed group call'
+        : video
+          ? 'Missed video call'
+          : 'Missed voice call'
+      : group
+        ? video
+          ? 'Group video call'
+          : 'Group voice call'
+        : video
+          ? 'Video call'
+          : 'Voice call',
+  );
+  const sub = missed ? tr('Click to call back') : seconds > 0 ? callLength(seconds) : out ? tr('No answer') : '';
+  const icon = video ? (out ? 'videoOut' : 'videoIn') : out ? 'callOut' : 'callIn';
+  return { title, sub, missed, out, video, icon } as const;
+}
+
 /** The line under a chat's name. */
 export function preview(m: Message | null, group: boolean) {
   if (!m) return '';
+  if (isCallNote(m)) return callInfo(m).title;
   if (m.kind === 'system') return systemText(m);
   if (m.deleted) return tr(m.author === core.myId ? 'You deleted this message' : 'This message was deleted');
   const body = bodyLine(m);

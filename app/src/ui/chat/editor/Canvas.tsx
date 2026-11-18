@@ -11,6 +11,10 @@
 // words have a few fonts and can sit on a coloured box; and the photo can have a
 // colour filter. The photo itself is drawn in the SVG, so the filter and the blur
 // are part of the snapshot too.
+//
+// On a video (`clear`): no photo, a see-through canvas over the playing video. Its
+// snapshot (a PNG that keeps the see-through parts) is put on every frame when the
+// video is sent (VideoShrink.kt).
 import { useState, type ComponentRef, type Ref } from 'react';
 import { Image as RNImage, View } from 'react-native';
 import { GestureDetector, usePanGesture, usePinchGesture, useRotationGesture, useSimultaneousGestures, useTapGesture } from 'react-native-gesture-handler';
@@ -106,6 +110,7 @@ export function Canvas({
   onRemove,
   onEditText,
   shot,
+  clear = false,
 }: {
   uri: string;
   box: { w: number; h: number };
@@ -122,6 +127,8 @@ export function Canvas({
   onRemove: (id: string) => void;
   onEditText: (id: string) => void;
   shot: Ref<CanvasRef>;
+  /** Over a video: nothing under the drawing (see-through), and no blur pen. */
+  clear?: boolean;
 }) {
   const k = UNITS / Math.max(1, box.w);
   const unitsHigh = box.h * k;
@@ -146,14 +153,15 @@ export function Canvas({
       if (d) scheduleOnRN(onStroke, { d: d.includes('L') ? d : `${d} l0.1 0`, color, width: blur ? BLUR_PEN : penWidth, ...(blur ? { blur: true } : {}) });
     },
   });
-  const live = useAnimatedProps(() => ({ d: current.value || 'M0 0' }));
+  // Nothing being drawn: off the canvas (a lone point with round ends would show as a dot in the corner).
+  const live = useAnimatedProps(() => ({ d: current.value || 'M-500 -500' }));
 
   return (
     <GestureDetector gesture={pen}>
-      <View ref={shot} collapsable={false} style={{ width: box.w, height: box.h, overflow: 'hidden', backgroundColor: '#000' }} testID="editor-canvas">
+      <View ref={shot} collapsable={false} style={{ width: box.w, height: box.h, overflow: 'hidden', backgroundColor: clear ? 'transparent' : '#000' }} testID="editor-canvas">
         {/* The photo, in the SVG (so its filter and the blur pen go into the snapshot too). */}
         <Svg width={box.w} height={box.h} viewBox={`0 0 ${UNITS} ${unitsHigh}`} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
-          <FilteredPhoto uri={uri} w={UNITS} h={unitsHigh} filter={filter} blurs={strokes.filter((s) => s.blur)} />
+          {!clear && <FilteredPhoto uri={uri} w={UNITS} h={unitsHigh} filter={filter} blurs={strokes.filter((s) => s.blur)} />}
           {strokes.map((s, i) => (s.blur ? null : <Path key={i} d={s.d} stroke={s.color} strokeWidth={s.width} strokeLinecap="round" strokeLinejoin="round" fill="none" />))}
           {/* The line being drawn (the blur pen's shows as a pale line until it's let go). */}
           <AnimatedPath animatedProps={live} stroke={blur ? 'rgba(255,255,255,0.45)' : color} strokeWidth={blur ? BLUR_PEN : penWidth} strokeLinecap="round" strokeLinejoin="round" fill="none" />

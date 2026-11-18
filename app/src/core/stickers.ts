@@ -14,7 +14,7 @@
 // is looking), downloads the one picked, and sends it locked like any video,
 // marked `gif`, so it plays on a loop with no sound. The person who gets it
 // never contacts KLIPY.
-import type { Gif, Ref } from '@pakchat/shared';
+import type { Gif, Ref, StatusQuote } from '@pakchat/shared';
 import { Asset } from 'expo-asset';
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
@@ -194,10 +194,11 @@ async function packFile(source: number) {
 }
 
 /** Sends a sticker: one of mine (a file) or a built-in one (its `require` number). */
-export async function sendSticker(chatId: string, from: string | number, replyTo?: Ref) {
+/** `status`: a reply to someone's status (it carries a little copy of it). */
+export async function sendSticker(chatId: string, from: string | number, replyTo?: Ref, status?: StatusQuote) {
   const uri = typeof from === 'number' ? await packFile(from) : from;
   const size = new File(uri).size;
-  await sendPicked(chatId, { uri, mime: 'image/webp', kind: 'sticker', name: 'sticker.webp', size, width: STICKER_SIZE, height: STICKER_SIZE }, undefined, { replyTo });
+  await sendPicked(chatId, { uri, mime: 'image/webp', kind: 'sticker', name: 'sticker.webp', size, width: STICKER_SIZE, height: STICKER_SIZE }, undefined, { replyTo, status });
   noteRecent(from);
 }
 
@@ -215,12 +216,12 @@ export async function findGifs(q: string, lang: string, pos?: string) {
 }
 
 /** Downloads the GIF's little video and sends it, marked as a GIF. */
-export async function sendGif(chatId: string, g: Gif, replyTo?: Ref) {
+export async function sendGif(chatId: string, g: Gif, replyTo?: Ref, status?: StatusQuote) {
   const dir = new Directory(Paths.cache, 'gifs');
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
   const file = await File.downloadFileAsync(g.mp4, new File(dir, `${core.newId()}.mp4`));
   try {
-    await sendPicked(chatId, { uri: file.uri, mime: 'video/mp4', kind: 'video', size: file.size, width: g.width, height: g.height, gif: true }, undefined, { replyTo });
+    await sendPicked(chatId, { uri: file.uri, mime: 'video/mp4', kind: 'video', size: file.size, width: g.width, height: g.height, gif: true }, undefined, { replyTo, status });
   } finally {
     // sendPicked keeps its own copy.
     try {

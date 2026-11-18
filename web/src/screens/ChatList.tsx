@@ -8,7 +8,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { core, openChat } from '../core/core';
 import { type ChatRow, useLockedRows, usePrefs, useTopic, useTyping, useViewing } from '../core/hooks';
 import { Avatar, photoOf } from '../ui/Avatar';
-import { listTime, memberName, phoneOf, preview } from '../ui/format';
+import { callInfo, isCallNote, listTime, memberName, phoneOf, preview } from '../ui/format';
 import { Icon } from '../ui/Icon';
 import { askText, type MenuItem, openMenu } from '../ui/overlay';
 import { Ticks } from '../ui/Ticks';
@@ -544,6 +544,11 @@ const Row = memo(function Row({ row, top, selected, picked, dropping, onDrop }: 
     line = (
       <>
         {last && last.author === core.myId && last.kind !== 'system' && !last.deleted && <Ticks status={last.status} />}
+        {last && isCallNote(last) && (
+          <span className={`pvi ${callInfo(last).missed ? 'missed' : ''}`}>
+            <Icon name={callInfo(last).icon} size={16} />
+          </span>
+        )}
         {last?.kind === 'file' && last.file && !last.deleted && !last.file.once && (!group || last.author === core.myId) && (
           <span className="pvi">
             <Icon name={FILE_ICON[last.file.kind]} size={16} />

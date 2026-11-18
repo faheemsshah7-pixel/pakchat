@@ -17,6 +17,12 @@
 	handle @server {
 		reverse_proxy app:4000
 	}
+	# Group calls: setting up a call with the call server (LiveKit). The sound and pictures
+	# themselves go straight to it, on UDP 7882 (or TCP 7881).
+	@calls path /rtc /rtc/*
+	handle @calls {
+		reverse_proxy host.docker.internal:7880
+	}
 }
 
 # The APK and what its newest version is, which apps check for updates.

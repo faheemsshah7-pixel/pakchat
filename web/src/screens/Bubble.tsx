@@ -7,9 +7,10 @@ import { memo, useEffect, useRef, useState } from 'react';
 
 import { core, openChat } from '../core/core';
 import { useLoaded } from '../core/hooks';
-import { bodyLine, chatTitle, clock, duration, fileSize, fileWord, groupName, hash, memberName, systemText } from '../ui/format';
+import { bodyLine, callInfo, chatTitle, clock, duration, fileSize, fileWord, groupName, hash, isCallNote, memberName, systemText } from '../ui/format';
+import { startCall } from './Call';
 import { Icon, Tail } from '../ui/Icon';
-import { closeLayer, openLayer, openMenu, usePlace } from '../ui/overlay';
+import { closeLayer, confirm, openLayer, openMenu, usePlace } from '../ui/overlay';
 import { emojiOnly, parseRich, plainText, readMoreCut, type Span } from '../ui/richText';
 import { Ticks } from '../ui/Ticks';
 import { msgKey, setView, toggleSelected } from '../ui/view';
@@ -40,6 +41,7 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
     return () => removeEventListener('pakchat:react', on);
   }, [m, mine]);
 
+  if (isCallNote(m)) return <CallNote m={m} />;
   if (m.kind === 'system') {
     const text = systemText(m);
     return text ? (
@@ -133,6 +135,35 @@ export const Bubble = memo(function Bubble({ m, chat, first, canSend, flash, sel
     </div>
   );
 });
+
+/** A call, like the phone's call bubble: on the side of whoever started it, red when I missed it. Click: call back, after asking. */
+function CallNote({ m }: { m: Message }) {
+  const c = callInfo(m);
+  const side = c.out ? 'out' : 'in';
+  const callBack = async () => {
+    const chat = await core.storage.getChat(m.chatId);
+    if (!chat) return;
+    const group = m.event?.group === true;
+    const ask = group ? (c.video ? 'Start a group video call in {name}?' : 'Start a group call in {name}?') : c.video ? 'Video call {name}?' : 'Call {name}?';
+    if (await confirm(tr(ask, { name: chatTitle(chat) }), '', tr(c.video ? 'Video call' : 'Voice call'))) void startCall(m.chatId, c.video);
+  };
+  return (
+    <div className={`mrow ${side}`} data-key={msgKey(m)} data-at={m.sentAt}>
+      <div className="bubw">
+        <button className={`bub ${side} callb ${c.missed ? 'missed' : ''}`} onClick={() => void callBack()} aria-label={c.sub ? `${c.title}, ${c.sub}` : c.title}>
+          <span className="callb-i">
+            <Icon name={c.icon} size={20} />
+          </span>
+          <span className="callb-t">
+            <b>{c.title}</b>
+            {!!c.sub && <small>{c.sub}</small>}
+          </span>
+          <span className="meta">{clock(m.sentAt)}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** The time, "Edited", a star, and my ticks, in the bubble's corner. */
 function Meta({ m, over, ghost }: { m: Message; over?: boolean; ghost?: boolean }) {

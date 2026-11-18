@@ -18,6 +18,8 @@ defmodule PakchatWeb.Wire do
       name: u.name,
       about: u.about,
       photo: u.photo,
+      # Two-step verification is on (never the PIN, Pakchat.Pin).
+      pin: Pakchat.Pin.on?(u),
       privacy: %{
         last_seen: u.last_seen_visibility,
         online: u.online_visibility,

@@ -26,13 +26,27 @@ import { scheduleOnRN } from 'react-native-worklets';
 
 import { core, isOffline } from '../../core/core';
 import { download, haveFile } from '../../core/files';
-import { useStatuses, usePeople } from '../../core/hooks';
-import { replyToStatus, STATUS_BG, STATUS_FONTS, STATUS_SHOW_MS, STATUS_VIDEO_MAX_MS, STATUS_VOICE_MAX_MS, voiceColour, type StatusPerson } from '../../core/status';
-import { barsOf } from '../../core/voice';
+import { useStable, useStatuses, usePeople } from '../../core/hooks';
+import {
+  replyGifToStatus,
+  replyStickerToStatus,
+  replyToStatus,
+  replyVoiceToStatus,
+  STATUS_BG,
+  STATUS_FONTS,
+  STATUS_SHOW_MS,
+  STATUS_VIDEO_MAX_MS,
+  STATUS_VOICE_MAX_MS,
+  voiceColour,
+  type StatusPerson,
+} from '../../core/status';
+import { barsOf, type Recorded } from '../../core/voice';
 import { stopAll } from '../../core/player';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
+import { ExtrasPanel, type Tab } from '../../ui/chat/ExtrasPanel';
 import { RichWords } from '../../ui/chat/RichText';
+import { useVoiceRecorder } from '../../ui/chat/VoiceRecorder';
 import { listTime, whenLabel } from '../../ui/format';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { Icon } from '../../ui/icons';
@@ -45,7 +59,7 @@ const QUICK = ['😍', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯'];
 
 export default function StatusViewer() {
   const t = useT();
-  const { lang, rtl } = useLook();
+  const { lang, rtl, theme } = useLook();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // `at`: start at this one of mine (from the My status page).
@@ -84,6 +98,23 @@ export default function StatusViewer() {
   const at = Math.min(index ?? initial, Math.max(0, items.length - 1));
   const item: Message | null = items[at] ?? null;
 
+  // Replies to theirs, like WhatsApp's: words, a voice note (hold the mic) or a sticker (or GIF).
+  // Each goes to my chat with them, with a little copy of the status on top.
+  const [extras, setExtras] = useState(false);
+  const [extrasTab, setExtrasTab] = useState<Tab>('emoji');
+  const [reply, setReply] = useState('');
+  const replied = useStable(async (send: (m: Message) => Promise<void>) => {
+    if (!item) return;
+    try {
+      await send(item);
+      toast(t.replySent);
+    } catch (err) {
+      toast(isOffline(err) ? t.offline : t.couldNot);
+    }
+  });
+  const voice = useVoiceRecorder({ chatId: '', enabled: !mine && !!item && !reply.trim(), onSend: (v: Recorded) => void replied((m) => replyVoiceToStatus(m, v)) });
+  const recording = voice.mode !== 'idle';
+
   const [holding, setHolding] = useState(false);
   // Held down (not just tapped): everything over the picture fades away, as on WhatsApp, and back when let go.
   const ui = useSharedValue(1);
@@ -102,11 +133,10 @@ export default function StatusViewer() {
   const [quiet, setQuiet] = useState(false);
   const replyBox = useRef<TextInputInstance>(null);
   const [ready, setReady] = useState(false);
-  const [reply, setReply] = useState('');
   // Forwarding it: the chats to send to show over it, so it waits until back here.
   const [away, setAway] = useState(false);
   useFocusEffect(useCallback(() => setAway(false), []));
-  const paused = holding || typing || seenBy || deleting || away || menu || reporting || !ready;
+  const paused = holding || typing || seenBy || deleting || away || menu || reporting || extras || recording || !ready;
 
   // Nothing (left) to show: close.
   useEffect(() => {
@@ -196,6 +226,8 @@ export default function StatusViewer() {
   const side = useSharedValue(0);
   const axis = useSharedValue(0); // 0 not yet, 1 up and down, 2 sideways
   const pan = usePanGesture({
+    // Not while recording a voice reply: the mic has the finger (slide to cancel isn't a swipe).
+    enabled: !recording && !extras,
     activeOffsetY: [-18, 18],
     activeOffsetX: [-18, 18],
     onUpdate: (e) => {
@@ -274,6 +306,8 @@ export default function StatusViewer() {
               setHolding(false);
               if (hidden) hide(false);
             }}
+            // (Not while a voice reply is recording: it's for the status showing now.)
+            disabled={recording}
             onPress={(e) => (e.nativeEvent.locationX < width / 3 ? prev() : next())}
             delayLongPress={250}
             onLongPress={() => hide(true)}
@@ -340,25 +374,95 @@ export default function StatusViewer() {
                     ))}
                   </Animated.View>
                 )}
+                {/* Like WhatsApp's: emoji, the box and the sticker button in one pill, then the heart and the
+                    mic (hold to record a voice reply). Typing turns the mic into send. */}
+                {voice.lockHint}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
-                  <TextInput
-                    ref={replyBox}
-                    value={reply}
-                    onChangeText={setReply}
-                    onFocus={() => setTyping(true)}
-                    onBlur={() => setTyping(false)}
-                    placeholder={t.replyToStatus}
-                    placeholderTextColor="rgba(255,255,255,0.65)"
-                    multiline
-                    maxLength={4000}
-                    cursorColor="#FFFFFF"
-                    style={[fontStyle(reply || null, lang, 15.5, '400'), { flex: 1, color: '#FFFFFF', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', paddingHorizontal: 16, paddingVertical: 10, maxHeight: 110 }]}
-                    testID="status-reply"
-                  />
-                  {reply.trim() ? (
-                    <IconButton icon="send" label={t.send} onPress={() => void sendReply()} color="#FFFFFF" flip testID="status-reply-send" />
+                  {recording ? (
+                    <View style={{ flex: 1, minHeight: 48, justifyContent: 'center', borderRadius: 24, backgroundColor: theme.glassStrong, paddingHorizontal: 4 }}>{voice.strip}</View>
                   ) : (
-                    <IconButton icon="heart" label={t.likeStatus} onPress={like} color={liked ? '#E5484D' : '#FFFFFF'} testID="status-like" />
+                    <View
+                      style={{
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'flex-end',
+                        minHeight: 48,
+                        borderRadius: 24,
+                        borderWidth: 1,
+                        borderColor: 'rgba(255,255,255,0.3)',
+                        backgroundColor: 'rgba(16,18,22,0.55)',
+                        paddingHorizontal: 2,
+                      }}
+                    >
+                      <IconButton
+                        icon="emoji"
+                        label={t.emoji}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setExtrasTab('emoji');
+                          setExtras(true);
+                        }}
+                        color="rgba(255,255,255,0.9)"
+                        size={44}
+                        testID="status-reply-emoji"
+                      />
+                      <TextInput
+                        ref={replyBox}
+                        value={reply}
+                        onChangeText={setReply}
+                        onFocus={() => setTyping(true)}
+                        onBlur={() => setTyping(false)}
+                        placeholder={t.replyToStatus}
+                        placeholderTextColor="rgba(255,255,255,0.65)"
+                        multiline
+                        maxLength={4000}
+                        cursorColor="#FFFFFF"
+                        style={[fontStyle(reply || null, lang, 15.5, '400'), { flex: 1, color: '#FFFFFF', paddingHorizontal: 2, paddingVertical: 12, maxHeight: 110 }]}
+                        testID="status-reply"
+                      />
+                      <IconButton
+                        icon="sticker"
+                        label={t.stickers}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setExtrasTab('sticker');
+                          setExtras(true);
+                        }}
+                        color="rgba(255,255,255,0.9)"
+                        size={44}
+                        testID="status-reply-sticker"
+                      />
+                    </View>
+                  )}
+                  {reply.trim() ? (
+                    <Pressy onPress={() => void sendReply()} label={t.send} testID="status-reply-send">
+                      <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon name="send" size={21} color="#FFFFFF" flip />
+                      </View>
+                    </Pressy>
+                  ) : (
+                    <>
+                      {!recording && (
+                        <Pressy onPress={like} label={t.likeStatus} round testID="status-like">
+                          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(16,18,22,0.55)', alignItems: 'center', justifyContent: 'center' }}>
+                            <Icon name="heart" size={23} color={liked ? '#E5484D' : '#FFFFFF'} />
+                          </View>
+                        </Pressy>
+                      )}
+                      <GestureDetector gesture={voice.gesture}>
+                        <Animated.View style={voice.micStyle}>
+                          <View
+                            accessible
+                            accessibilityRole="button"
+                            accessibilityLabel={t.voiceNote}
+                            testID="status-reply-mic"
+                            style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            <Icon name={voice.mode === 'locked' || voice.mode === 'paused' ? 'send' : 'mic'} size={21} color="#FFFFFF" flip={voice.mode === 'locked' || voice.mode === 'paused'} />
+                          </View>
+                        </Animated.View>
+                      </GestureDetector>
+                    </>
                   )}
                 </View>
               </>
@@ -366,6 +470,28 @@ export default function StatusViewer() {
           </Animated.View>
         </KeyboardAvoidingView>
 
+        {/* The smiley and sticker buttons: the chat's own panel (emoji, GIFs, stickers), like WhatsApp's. */}
+        <Sheet visible={extras} onClose={() => setExtras(false)}>
+          <View style={{ paddingBottom: 8 }}>
+            <ExtrasPanel
+              key={extrasTab}
+              start={extrasTab}
+              onEmoji={(e) => {
+                setExtras(false);
+                setReply((r) => r + e);
+                setTimeout(() => replyBox.current?.focus(), 250);
+              }}
+              onGif={(g) => {
+                setExtras(false);
+                void replied((m) => replyGifToStatus(m, g));
+              }}
+              onSticker={(from) => {
+                setExtras(false);
+                void replied((m) => replyStickerToStatus(m, from));
+              }}
+            />
+          </View>
+        </Sheet>
         <Sheet visible={seenBy} onClose={() => setSeenBy(false)} title={fill(t.seenByCount, { n: viewers.length })}>
           {viewers.length ? (
             viewers.map((u) => (

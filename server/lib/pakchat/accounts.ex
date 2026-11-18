@@ -5,7 +5,7 @@ defmodule Pakchat.Accounts do
   """
   import Ecto.Query
   alias Pakchat.Accounts.{Block, Device, GoogleToken, User}
-  alias Pakchat.{Phone, PhoneCodes, Repo}
+  alias Pakchat.{Phone, PhoneCodes, Pin, Repo}
 
   # One phone plus up to 4 linked devices, like WhatsApp.
   @max_linked 4
@@ -66,14 +66,99 @@ defmodule Pakchat.Accounts do
   end
 
   # Both ways of signing in end here: this phone takes over the account and
-  # the old devices are told to sign out.
-  defp sign_in_as(claims, device_attrs) do
-    token = new_token()
+  # the old devices are told to sign out. An account with a two-step PIN first
+  # answers {:error, {:pin_needed, info}}, and nothing changes until the PIN
+  # comes (sign_in_with_pin/3); the old phone stays signed in meanwhile.
+  defp sign_in_as(claims, device_attrs, pin_done \\ false) do
+    with {:ok, reset?} <- pin_gate(claims, pin_done) do
+      token = new_token()
 
-    with {:ok, {user, device, old, new?}} <-
-           Repo.transaction(fn -> take_over(claims, device_attrs, token) end) do
-      Enum.each(old, &disconnect/1)
-      {:ok, %{user: user, device: device, token: token, new_account: new?}}
+      with {:ok, {user, device, old, new?}} <-
+             Repo.transaction(fn -> take_over(claims, device_attrs, token) end) do
+        Enum.each(old, &disconnect/1)
+        # In without the PIN after the 7-day wait: the PIN is gone, like WhatsApp's.
+        user = if reset?, do: elem(Pin.remove(user), 1), else: user
+        {:ok, %{user: user, device: device, token: token, new_account: new?}}
+      end
+    end
+  end
+
+  defp pin_gate(_claims, true), do: {:ok, false}
+
+  defp pin_gate(claims, false) do
+    case existing_user(claims) do
+      %User{} = user ->
+        cond do
+          not Pin.on?(user) ->
+            {:ok, false}
+
+          Pin.reset_ready?(user) ->
+            {:ok, true}
+
+          true ->
+            {:error,
+             {:pin_needed,
+              %{
+                ticket: Pin.ticket(user, claims),
+                # "Forgot PIN?" with Google: only when they came in by number (Google
+                # can't be both the way in and the proof).
+                google: user.google_sub != nil and not Map.has_key?(claims, "sub"),
+                reset_at: Pin.reset_ready_at(user)
+              }}}
+        end
+
+      nil ->
+        {:ok, false}
+    end
+  end
+
+  defp existing_user(%{"phone" => phone}), do: Repo.get_by(User, phone: phone)
+  defp existing_user(%{"sub" => sub}), do: Repo.get_by(User, google_sub: sub)
+
+  ## Two-step PIN while signing in (Pakchat.Pin)
+
+  @doc "The PIN, with the ticket the first answer gave. Wrong tries are counted on the account."
+  def sign_in_with_pin(ticket, pin, device_attrs) do
+    with {:ok, user, claims} <- ticket_user(ticket),
+         :ok <- Pin.try_pin(user, pin) do
+      sign_in_as(claims, device_attrs, true)
+    end
+  end
+
+  @doc "Forgot the PIN, signed in by number: the Google account linked to PakChat proves it's them."
+  def sign_in_with_pin_google(ticket, id_token, device_attrs) do
+    with {:ok, user, claims} <- ticket_user(ticket),
+         true <- not Map.has_key?(claims, "sub") || {:error, :forbidden},
+         {:ok, google} <- GoogleToken.verify(id_token),
+         true <-
+           (user.google_sub != nil and google["sub"] == user.google_sub) ||
+             {:error, :wrong_google},
+         {:ok, _} <- Pin.remove(user) do
+      sign_in_as(claims, device_attrs, true)
+    end
+  end
+
+  @doc """
+  Forgot the PIN, no Google: starts the 7-day wait ({:ok, {:waiting, ready_at}}),
+  or once it's over, signs in without it.
+  """
+  def sign_in_after_pin_reset(ticket, device_attrs) do
+    with {:ok, user, claims} <- ticket_user(ticket) do
+      if Pin.reset_ready?(user) do
+        sign_in_as(claims, device_attrs)
+      else
+        {:ok, user} = Pin.start_reset(user)
+        {:ok, {:waiting, Pin.reset_ready_at(user)}}
+      end
+    end
+  end
+
+  defp ticket_user(ticket) do
+    with {:ok, id, claims} <- Pin.read_ticket(ticket),
+         %User{} = user <- Repo.get(User, id) do
+      {:ok, user, claims}
+    else
+      _ -> {:error, :bad_ticket}
     end
   end
 

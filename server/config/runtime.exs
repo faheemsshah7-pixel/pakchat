@@ -97,6 +97,10 @@ if config_env() != :test do
     stun_urls: list.("STUN_URLS", ["stun:stun.l.google.com:19302"]),
     turn_urls: list.("TURN_URLS", []),
     turn_secret: System.get_env("TURN_SECRET"),
+    # Group calls through our call server (LiveKit, deploy/compose.yaml): off until all three are set.
+    livekit_url: System.get_env("LIVEKIT_URL"),
+    livekit_key: System.get_env("LIVEKIT_API_KEY"),
+    livekit_secret: System.get_env("LIVEKIT_API_SECRET"),
     # GIFs: PakChat's free KLIPY key. Without it the app hides its GIF tab.
     klipy_key: System.get_env("KLIPY_KEY")
 end

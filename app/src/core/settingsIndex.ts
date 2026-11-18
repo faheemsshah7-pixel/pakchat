@@ -41,6 +41,7 @@ function entries(t: Strings, showServer: boolean): Entry[] {
     { title: t.signInWays, icon: 'key', ...account },
     { title: t.linkGoogle, icon: 'globe', ...account },
     { title: t.linkPhone, icon: 'calls', ...account },
+    { title: t.twoStep, icon: 'lock', where: t.accountWord, to: '/settings/two-step' },
     ...(showServer ? [{ title: t.serverAddress, icon: 'server' as const, ...account }] : []),
     { title: t.logOut, icon: 'logout', ...account },
     { title: t.deleteAccount, icon: 'trash', where: t.accountWord, to: '/settings/delete-account' },

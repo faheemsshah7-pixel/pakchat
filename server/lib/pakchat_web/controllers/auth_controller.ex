@@ -29,6 +29,10 @@ defmodule PakchatWeb.AuthController do
         {:error, %Ecto.Changeset{}} = error ->
           error
 
+        # Two-step PIN: the app asks for it (Pakchat.Pin).
+        {:error, {:pin_needed, _}} = error ->
+          error
+
         {:error, _why} ->
           # Don't say exactly what was wrong with the token.
           conn |> put_status(:unauthorized) |> json(%{error: "bad_token"})
@@ -66,6 +70,69 @@ defmodule PakchatWeb.AuthController do
   end
 
   def phone(_conn, _params), do: {:error, :bad_request}
+
+  @doc """
+  Two-step PIN. When an account has one, Google and phone sign-in answer 403
+  `{"error": "pin_needed", "ticket", "google": true if "Forgot PIN?" can use
+  Google, "reset_at": when a 7-day wait asked for ends, or null}` and nothing
+  changes yet. Then, with the same "device" and keys as before:
+
+  - `POST /api/auth/pin` with `"ticket", "pin"`: signed in, or 403 `wrong_pin`
+    (`tries_left`), or 429 `pin_locked` (`wait`, in seconds).
+  - `POST /api/auth/pin/google` with `"ticket", "id_token"` (forgot it): the
+    Google account linked to PakChat proves it's them, and the PIN is removed.
+  - `POST /api/auth/pin/reset` with `"ticket"` (forgot it, no Google): starts the
+    7-day wait (`{"reset_at"}`), or once it's over, signs in without the PIN.
+  """
+  def pin(conn, %{"ticket" => ticket, "pin" => pin, "device" => device} = params)
+      when is_binary(pin) do
+    with :ok <- RateLimit.hit(:pin, ip(conn)),
+         {:ok, device_attrs} <- Params.device(device),
+         {:ok, keys} <- Params.key_upload(params),
+         {:ok, result} <- Accounts.sign_in_with_pin(ticket, pin, device_attrs) do
+      signed_in(conn, result, keys)
+    end
+  end
+
+  def pin(_conn, _params), do: {:error, :bad_request}
+
+  def pin_google(conn, %{"ticket" => ticket, "id_token" => id_token, "device" => device} = params)
+      when is_binary(id_token) do
+    with :ok <- RateLimit.hit(:pin, ip(conn)),
+         {:ok, device_attrs} <- Params.device(device),
+         {:ok, keys} <- Params.key_upload(params) do
+      case Accounts.sign_in_with_pin_google(ticket, id_token, device_attrs) do
+        {:ok, result} ->
+          signed_in(conn, result, keys)
+
+        {:error, :bad_token} ->
+          conn |> put_status(:unauthorized) |> json(%{error: "bad_token"})
+
+        {:error, reason}
+        when is_atom(reason) and reason not in [:bad_ticket, :wrong_google, :forbidden] ->
+          conn |> put_status(:unauthorized) |> json(%{error: "bad_token"})
+
+        error ->
+          error
+      end
+    end
+  end
+
+  def pin_google(_conn, _params), do: {:error, :bad_request}
+
+  def pin_reset(conn, %{"ticket" => ticket, "device" => device} = params) do
+    with :ok <- RateLimit.hit(:pin, ip(conn)),
+         {:ok, device_attrs} <- Params.device(device),
+         {:ok, keys} <- Params.key_upload(params) do
+      case Accounts.sign_in_after_pin_reset(ticket, device_attrs) do
+        {:ok, {:waiting, at}} -> json(conn, %{reset_at: at})
+        {:ok, result} -> signed_in(conn, result, keys)
+        error -> error
+      end
+    end
+  end
+
+  def pin_reset(_conn, _params), do: {:error, :bad_request}
 
   defp signed_in(conn, %{user: user, device: device, token: token} = result, keys) do
     {:ok, _} = Keys.add_pre_keys(device, keys.ec, keys.kyber)

@@ -294,9 +294,9 @@ class PakchatSignalModule : Module() {
     /** Opens the maker's Autostart page, or PakChat's app settings. */
     Function("openAutostart") { Autostart.open(context()) }
 
-    /** A smaller copy of a video, for sending (VideoShrink.kt). */
-    AsyncFunction("shrinkVideo") { input: String, output: String, startMs: Double, endMs: Double, hd: Boolean, mute: Boolean, promise: Promise ->
-      VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, mute, promise)
+    /** A smaller copy of a video, for sending (VideoShrink.kt); `overlay`: a drawing to put on every frame. */
+    AsyncFunction("shrinkVideo") { input: String, output: String, startMs: Double, endMs: Double, hd: Boolean, mute: Boolean, overlay: String?, promise: Promise ->
+      VideoShrink.shrink(context(), input, output, startMs.toLong(), endMs.toLong(), hd, mute, overlay, promise)
     }
 
     /**

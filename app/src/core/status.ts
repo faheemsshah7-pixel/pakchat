@@ -10,10 +10,12 @@
 // is a reaction (to the owner only), and a reply goes to the owner's ordinary
 // chat with me, carrying a little copy of the status (shared/src/content.ts,
 // StatusQuote).
-import { statusOwner, type Chat, type Message, type StatusQuote } from '@pakchat/shared';
+import { statusOwner, type Chat, type Gif, type Message, type StatusQuote } from '@pakchat/shared';
 import KV from 'expo-sqlite/kv-store';
 
 import { core } from './core';
+import { sendGif, sendSticker } from './stickers';
+import { sendVoice, type Recorded } from './voice';
 
 /** The colours a status in words can have (the message carries the number). */
 export const STATUS_BG = ['#2F6BF0', '#7C3AED', '#DB2777', '#E11D48', '#EA580C', '#B45309', '#16A34A', '#0D9488', '#0891B2', '#4F46E5', '#334155', '#9333EA'];
@@ -35,7 +37,10 @@ export function voiceColour(id: string) {
 }
 
 /** Who sees my status: all my contacts, my contacts except some, or only some. */
-export type StatusPrivacy = { mode: 'contacts' | 'except' | 'only'; ids: string[] };
+export type StatusPrivacy = {
+  mode: 'contacts' | 'except' | 'only';
+  ids: string[];
+};
 
 export function statusPrivacy(): StatusPrivacy {
   try {
@@ -82,10 +87,20 @@ export async function readyMyStatus(): Promise<Chat> {
 }
 
 /** One person's statuses for the Status tab. */
-export type StatusPerson = { chat: Chat; owner: string; items: Message[]; latest: number; seen: boolean; muted: boolean };
+export type StatusPerson = {
+  chat: Chat;
+  owner: string;
+  items: Message[];
+  latest: number;
+  seen: boolean;
+  muted: boolean;
+};
 
 /** Everyone's live statuses (mine separately), newest first. */
-export async function loadStatuses(): Promise<{ mine: StatusPerson | null; others: StatusPerson[] }> {
+export async function loadStatuses(): Promise<{
+  mine: StatusPerson | null;
+  others: StatusPerson[];
+}> {
   const chats = (await core.client.chats()).filter((c) => c.kind === 'status');
   let mine: StatusPerson | null = null;
   const others: StatusPerson[] = [];
@@ -125,4 +140,22 @@ export function quoteOf(m: Message): StatusQuote {
 export async function replyToStatus(m: Message, text: string) {
   const chat = await core.client.openDirect(m.author);
   await core.client.sendText(chat.id, text, { status: quoteOf(m) });
+}
+
+/** A voice reply to someone's status (held mic), like WhatsApp's: a voice note in my chat with them. */
+export async function replyVoiceToStatus(m: Message, v: Recorded) {
+  const chat = await core.client.openDirect(m.author);
+  await sendVoice(chat.id, v, undefined, undefined, quoteOf(m));
+}
+
+/** A sticker reply to someone's status, like WhatsApp's. */
+export async function replyStickerToStatus(m: Message, from: string | number) {
+  const chat = await core.client.openDirect(m.author);
+  await sendSticker(chat.id, from, undefined, quoteOf(m));
+}
+
+/** A GIF reply to someone's status (from the same panel as stickers). */
+export async function replyGifToStatus(m: Message, g: Gif) {
+  const chat = await core.client.openDirect(m.author);
+  await sendGif(chat.id, g, undefined, quoteOf(m));
 }

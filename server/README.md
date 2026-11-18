@@ -81,6 +81,8 @@ cd ../shared && npm run test:server                   # in a second terminal
 | `PUT /api/me/push` | My push token, for alerts when the app is closed |
 | `PUT /api/me/google`, `POST /api/me/phone/code`, `PUT /api/me/phone` | Add a Gmail or a number to my account (refused as `taken` if it has its own account) |
 | `DELETE /api/me/google`, `DELETE /api/me/phone` | Remove one, only while another way to sign in stays |
+| `PUT /api/me/pin`, `DELETE /api/me/pin`, `POST /api/me/pin/check` | Two-step verification: make or change the 6-digit PIN, turn it off, and the reminder's "do you still know it?" |
+| `POST /api/auth/pin`, `/api/auth/pin/google`, `/api/auth/pin/reset` | After a sign-in answered `pin_needed` (403, with a ticket): the PIN, or forgot it (the linked Google account, or a 7-day wait) |
 | `POST /api/contacts/match` | Which of these hashed numbers and Gmails are on PakChat (rate-limited) |
 | `GET /api/files/limits` | The biggest file and backup allowed |
 | `POST /api/files`, `PUT <upload link>` | Start a locked file, then upload its bytes to the signed link |

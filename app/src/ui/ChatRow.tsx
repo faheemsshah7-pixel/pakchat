@@ -12,7 +12,7 @@ import { plainText } from '../core/richText';
 import type { ChatRow as Row } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
-import { listTime, preview } from './format';
+import { callInfo, isCallNote, listTime, preview } from './format';
 import { Icon } from './icons';
 import { Avatar, Pressy, Txt } from './kit';
 import { fadeIn, fadeOut, popIn, popOut } from './motion';
@@ -78,6 +78,11 @@ function ChatRowView({
     if (prefs.lock === 'list') return { text: unread ? t.newMessage : t.lockedChat, color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
     // "Draft:" in green, then the words, like WhatsApp.
     if (prefs.draft) return { label: t.draft, text: plainText(prefs.draft).replace(/\s+/g, ' '), color: theme.muted, weight: '400' as const };
+    // A call: its icon before the words, red when I missed it, like WhatsApp's.
+    if (last && isCallNote(last)) {
+      const c = callInfo(last, t);
+      return { text: c.title, color: c.missed ? theme.danger : unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const), icon: c.icon };
+    }
     return { text: preview(last, t, chat.kind === 'group'), color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
   }, [typing, prefs.draft, prefs.lock, last, chat, t, theme]);
 
@@ -148,6 +153,7 @@ function ChatRowView({
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                   {mine && <Ticks status={last.status} size={16} />}
+                  {'icon' in line && line.icon && <Icon name={line.icon} size={16} color={line.color === theme.danger ? theme.danger : theme.muted} />}
                   <View style={{ flex: 1 }}>
                     <Txt size={14} lines={1} color={line.color} weight={line.weight}>
                       {'label' in line && (

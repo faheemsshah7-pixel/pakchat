@@ -19,6 +19,7 @@ import { markListShown, TABS_DRAWN_AFTER, useAllPresence, useAllTyping, useAuth,
 import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
+import { PinReminder } from '../../ui/PinReminder';
 import { UpdatePopup } from '../../ui/UpdatePopup';
 import { ChatRow } from '../../ui/ChatRow';
 import { fromGallery } from '../../ui/chat/attachments';
@@ -655,6 +656,8 @@ export default function Chats() {
       <MuteSheet visible={muting} onClose={() => setMuting(false)} onPick={(ms) => forPicked((r) => core.mute(r.chat.id, ms))} />
       {/* A newer PakChat on the website: a pop-up, like an alert (owner, 31 Oct). */}
       <UpdatePopup />
+      {/* Two-step verification on: "Do you still know your PIN?" now and then. */}
+      <PinReminder />
     </Screen>
   );
 }

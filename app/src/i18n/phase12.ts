@@ -116,6 +116,22 @@ export const en12 = {
   refreshContacts: 'Refresh contacts',
   contactsHelp: 'Contacts help',
   contactsHelpText: "Your phone's contacts who use PakChat show here. If someone is missing, tap Refresh contacts, or pull the list down. You can also find anyone by their number or Gmail with search, even if they aren't in your contacts.",
+  // Calls in the chat (like WhatsApp's call bubbles).
+  noAnswer: 'No answer',
+  tapToCallBack: 'Tap to call back',
+  groupVoiceCall: 'Group voice call',
+  groupVideoCall: 'Group video call',
+  missedGroupVideoCall: 'Missed group video call',
+  callSeconds: '{n} sec',
+  callMinutes: '{n} min',
+  callHours: '{h} hr {m} min',
+  deleteCall: 'Delete this call from the chat?',
+  askCall: 'Call {name}?',
+  askVideoCall: 'Video call {name}?',
+  askGroupCall: 'Start a group call in {name}?',
+  askGroupVideoCall: 'Start a group video call in {name}?',
+  callPeople: '{n} people',
+  moreInCall: '{n} more',
 };
 
 export const ur12: typeof en12 = {
@@ -232,4 +248,20 @@ export const ur12: typeof en12 = {
   refreshContacts: 'رابطے دوبارہ دیکھیں',
   contactsHelp: 'رابطوں کے بارے میں مدد',
   contactsHelpText: 'آپ کے فون کے جو رابطے پاک چیٹ استعمال کرتے ہیں، وہ یہاں دکھتے ہیں۔ اگر کوئی نظر نہ آئے تو "رابطے دوبارہ دیکھیں" دبائیں، یا فہرست کو نیچے کھینچیں۔ آپ تلاش میں کسی کا بھی نمبر یا جی میل لکھ کر انہیں ڈھونڈ سکتے ہیں، چاہے وہ آپ کے رابطوں میں نہ ہوں۔',
+  // Calls in the chat (like WhatsApp's call bubbles).
+  noAnswer: 'جواب نہیں ملا',
+  tapToCallBack: 'واپس کال کرنے کے لیے دبائیں',
+  groupVoiceCall: 'گروپ کال',
+  groupVideoCall: 'گروپ ویڈیو کال',
+  missedGroupVideoCall: 'مسڈ گروپ ویڈیو کال',
+  callSeconds: '{n} سیکنڈ',
+  callMinutes: '{n} منٹ',
+  callHours: '{h} گھنٹے {m} منٹ',
+  deleteCall: 'یہ کال چیٹ سے ہٹا دیں؟',
+  askCall: '{name} کو کال کریں؟',
+  askVideoCall: '{name} کو ویڈیو کال کریں؟',
+  askGroupCall: '{name} میں گروپ کال شروع کریں؟',
+  askGroupVideoCall: '{name} میں گروپ ویڈیو کال شروع کریں؟',
+  callPeople: '{n} لوگ',
+  moreInCall: '{n} مزید',
 };

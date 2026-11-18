@@ -3,7 +3,7 @@
 // there. A Gmail or number that already has its own PakChat account can't be added
 // (later, its owner will be asked to agree).
 //
-// Also Security notifications (the "security code changed" notes), where the server is (only on a test server: change it when the Mac's Wi-Fi address
+// Also Two-step verification (settings/two-step.tsx), Security notifications (the "security code changed" notes), where the server is (only on a test server: change it when the Mac's Wi-Fi address
 // changes, no need to log out), Log out, and Delete my account (settings/delete-account.tsx).
 import { formatPhone } from '@pakchat/shared';
 import { router } from 'expo-router';
@@ -221,6 +221,10 @@ export default function Account() {
             {t.lastSignIn}
           </Txt>
         )}
+        {/* Two-step verification (settings/two-step.tsx): a PIN asked when the account signs in on a new phone. */}
+        <Glass>
+          <SettingRow icon="lock" title={t.twoStep} sub={me?.pin ? t.twoStepSubOn : t.twoStepSubOff} onPress={() => router.push('/settings/two-step')} testID="open-two-step" />
+        </Glass>
         {/* Where the server is, only on a test server (a Mac on the Wi-Fi): change it here when the
             Mac's Wi-Fi address changes (no need to log out). The live one never shows it (Phase 11). */}
         {!onBuiltInServer() && (

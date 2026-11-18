@@ -25,7 +25,9 @@ import { ChatQuoteView, ContactBody, EventBody, LinkBody, LocationBody, OnceBody
 import { AlbumBody } from './Album';
 import { BigEmoji, RichWords } from './RichText';
 import { VoiceBody } from './VoiceBody';
-import { bodyLine, clock, systemText } from '../format';
+import { bodyLine, callInfo, clock, isCallNote, systemText } from '../format';
+import { startCall } from '../CallBar';
+import { Dialog } from '../overlays';
 import { Icon } from '../icons';
 import { haveFile } from '../../core/files';
 import { Avatar, fontStyle, hasUrdu, Pressy, Txt } from '../kit';
@@ -70,6 +72,7 @@ type Props = {
 
 export const Bubble = memo(function Bubble(p: Props) {
   const { m } = p;
+  if (isCallNote(m)) return <CallNote m={m} selecting={p.selecting} onLongPress={p.onLongPress} />;
   if (m.kind === 'system') return <SystemNote m={m} />;
   return <ChatBubble {...p} />;
 });
@@ -87,6 +90,93 @@ function ReplyArrow({ x }: { x: SharedValue<number> }) {
         <Icon name="reply" size={17} color={theme.accInk} flip />
       </View>
     </Animated.View>
+  );
+}
+
+/**
+ * A call, like WhatsApp's call bubble: on the side of whoever started it, with the
+ * way it went, and red when I missed it. Tap: call back (after asking). Hold: take it out of the chat.
+ */
+function CallNote({ m, selecting, onLongPress }: { m: Message; selecting: boolean; onLongPress: (m: Message) => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const c = callInfo(m, t);
+  const mine = c.out;
+  const ink = c.missed ? theme.danger : mine ? theme.bubbleMineText : theme.text;
+  const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
+  const box = c.missed ? 'rgba(239,68,68,0.15)' : theme.dark ? 'rgba(255,255,255,0.1)' : 'rgba(11,27,54,0.06)';
+  const R = 10;
+  // Asks first, like WhatsApp: a stray tap while scrolling mustn't ring anyone (a whole group).
+  const [ask, setAsk] = useState<string | null>(null);
+  const group = m.event?.group === true;
+  return (
+    <View style={{ marginTop: 6, flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+      <Dialog
+        visible={ask !== null}
+        onClose={() => setAsk(null)}
+        title={fill(group ? (c.video ? t.askGroupVideoCall : t.askGroupCall) : c.video ? t.askVideoCall : t.askCall, { name: ask ?? '' })}
+        buttons={[
+          {
+            label: c.video ? t.videoCall : t.voiceCall,
+            testID: 'call-note-call',
+            onPress: () => {
+              setAsk(null);
+              void startCall(m.chatId, c.video, t);
+            },
+          },
+          { label: t.cancel, onPress: () => setAsk(null) },
+        ]}
+      />
+      <Pressy
+        onPress={() => {
+          if (selecting) return;
+          void core.storage.getChat(m.chatId).then((chat) => {
+            if (chat) setAsk(core.chatTitle(chat));
+          });
+        }}
+        onLongPress={() => onLongPress(m)}
+        label={c.sub ? `${c.title}, ${c.sub}` : c.title}
+        scale={0.98}
+        style={{ borderRadius: R }}
+        testID="call-note"
+      >
+        <View
+          style={{
+            minWidth: 210,
+            maxWidth: 290,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            paddingStart: 8,
+            paddingEnd: 12,
+            paddingVertical: 8,
+            borderRadius: R,
+            borderTopStartRadius: mine ? R : 3,
+            borderTopEndRadius: mine ? 3 : R,
+            backgroundColor: mine ? middle(theme.bubbleMine) : theme.bubbleIn,
+            boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)',
+          }}
+        >
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: box, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name={c.icon} size={21} color={ink} />
+          </View>
+          {/* Room at the end for the time, under it. */}
+          <View style={{ flexShrink: 1, paddingEnd: 38 }}>
+            <Txt size={15} weight="700" color={ink} lines={1}>
+              {c.title}
+            </Txt>
+            {!!c.sub && (
+              <Txt size={12.5} color={meta} lines={1}>
+                {c.sub}
+              </Txt>
+            )}
+          </View>
+          <Txt size={11} color={meta} style={{ position: 'absolute', end: 10, bottom: 6 }}>
+            {clock(m.sentAt)}
+          </Txt>
+        </View>
+      </Pressy>
+    </View>
   );
 }
 
@@ -405,6 +495,12 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                     {quoted && (
                       <View style={{ maxWidth: 236, padding: 4, borderRadius: 12, backgroundColor: theme.bubbleIn }}>
                         <Quote m={quoted} mine={false} onPress={() => (selecting ? onPress(m) : onQuote(quoted))} />
+                      </View>
+                    )}
+                    {/* A sticker sent as a reply to a status: which status, as in a normal bubble. */}
+                    {m.statusReply && !m.deleted && (
+                      <View style={{ width: 236, paddingHorizontal: 4, paddingTop: 2, paddingBottom: 0, borderRadius: 12, backgroundColor: theme.bubbleIn }}>
+                        <StatusQuoteView q={m.statusReply} mine={false} />
                       </View>
                     )}
                     {big > 0 ? (

@@ -36,6 +36,10 @@ defmodule PakchatWeb.Router do
     post "/auth/google", AuthController, :google
     post "/auth/phone/code", AuthController, :phone_code
     post "/auth/phone", AuthController, :phone
+    # Two-step PIN, after a sign-in answered "pin_needed" (with its ticket).
+    post "/auth/pin", AuthController, :pin
+    post "/auth/pin/google", AuthController, :pin_google
+    post "/auth/pin/reset", AuthController, :pin_reset
     # Checking a number with WhatsApp instead of an SMS code (see WhatsAppController).
     get "/auth/whatsapp", WhatsAppController, :show
     post "/auth/whatsapp", WhatsAppController, :start
@@ -71,6 +75,9 @@ defmodule PakchatWeb.Router do
     post "/me/phone/code", MeController, :phone_code
     put "/me/phone", MeController, :link_phone
     delete "/me", MeController, :delete
+    put "/me/pin", MeController, :set_pin
+    delete "/me/pin", MeController, :remove_pin
+    post "/me/pin/check", MeController, :check_pin
     delete "/me/:what", MeController, :unlink
 
     # The phone approving a QR code, and its linked devices.
@@ -136,6 +143,7 @@ defmodule PakchatWeb.Router do
 
     get "/calls/ice", CallController, :ice
     post "/calls/links", CallController, :create_link
+    post "/calls/room", CallController, :room
     put "/status/audience", StatusController, :audience
     get "/gifs", GifController, :index
 

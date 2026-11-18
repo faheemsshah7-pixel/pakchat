@@ -9,6 +9,48 @@ defmodule PakchatWeb.MeController do
   def show(conn, _params), do: json(conn, Wire.me(conn.assigns.user))
 
   @doc """
+  `PUT /api/me/pin` with `{"pin": "123456"}`: two-step verification on, or a new PIN
+  (Pakchat.Pin). Changing it needs the one it has now too, as `"current"` (403
+  `wrong_current` if it isn't).
+  """
+  def set_pin(conn, %{"pin" => pin} = params) do
+    with :ok <- current_pin(conn, params),
+         {:ok, user} <- Pakchat.Pin.set(conn.assigns.user, pin),
+         do: json(conn, Wire.me(user))
+  end
+
+  def set_pin(_conn, _params), do: {:error, :bad_request}
+
+  @doc "`DELETE /api/me/pin` with `{\"current\"}`: two-step verification off."
+  def remove_pin(conn, params) do
+    with :ok <- current_pin(conn, params),
+         {:ok, user} <- Pakchat.Pin.remove(conn.assigns.user),
+         do: json(conn, Wire.me(user))
+  end
+
+  # Tries are limited like the reminder's, so the PIN can't be guessed from a phone left unlocked.
+  defp current_pin(conn, params) do
+    user = conn.assigns.user
+
+    cond do
+      not Pakchat.Pin.on?(user) -> :ok
+      RateLimit.hit(:pin_check, user.id) != :ok -> {:error, :rate_limited}
+      Pakchat.Pin.mine?(user, params["current"]) -> :ok
+      true -> {:error, :wrong_current}
+    end
+  end
+
+  @doc "`POST /api/me/pin/check` with `{\"pin\"}`: `{\"right\": true | false}` (the reminder now and then)."
+  def check_pin(conn, %{"pin" => pin}) do
+    with :ok <- RateLimit.hit(:pin_check, conn.assigns.user.id),
+         {:ok, right} <- Pakchat.Pin.check_mine(conn.assigns.user, pin) do
+      json(conn, %{right: right})
+    end
+  end
+
+  def check_pin(_conn, _params), do: {:error, :bad_request}
+
+  @doc """
   `PATCH /api/me` with any of: name, about, photo, and
   `privacy: {last_seen: "everyone" | "contacts" | "nobody",
   online: "everyone" | "same", photo: "everyone" | "contacts" | "nobody",

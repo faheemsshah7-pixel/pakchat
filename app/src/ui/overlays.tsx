@@ -14,7 +14,7 @@
 // the first time it shows (whenOpened), so a screen with many of them opens fast.
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
+import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { Easing, FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming, type WithTimingConfig } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -206,7 +206,8 @@ export const Sheet = whenOpened(function Sheet({ visible, onClose, children: now
   if (!mounted) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end', direction: rtl ? 'rtl' : 'ltr' }} onLayout={(e) => setSpace(e.nativeEvent.layout.height)}>
+      {/* A pop-up is a window of its own: it needs its own gesture root for the drag down to work. */}
+      <GestureHandlerRootView style={{ flex: 1, justifyContent: 'flex-end', direction: rtl ? 'rtl' : 'ltr' }} onLayout={(e) => setSpace(e.nativeEvent.layout.height)}>
         <Backdrop p={p} onClose={onClose} />
         <Animated.View
           style={[
@@ -235,7 +236,7 @@ export const Sheet = whenOpened(function Sheet({ visible, onClose, children: now
           </GestureDetector>
           {children}
         </Animated.View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 });

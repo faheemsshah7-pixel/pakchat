@@ -45,6 +45,10 @@ open -p udp --dport 443
 open -p tcp --dport 3478
 open -p udp --dport 3478
 open -p udp --dport 49160:51159
+# Group calls (LiveKit): the calls themselves, and Caddy (inside Docker) reaching it to set them up.
+open -p udp --dport 7882
+open -p tcp --dport 7881
+open -p tcp --dport 7880 -s 172.16.0.0/12
 # SSH on 2222 as well as 22: some internet companies (the owner's home one) block port 22.
 open -p tcp --dport 2222
 netfilter-persistent save
@@ -57,10 +61,13 @@ fi
 
 echo "5/6 Secrets"
 [ -f .env ] || cp .env.example .env
-fill() { grep -q "^$1=." .env || sed -i "s|^$1=.*|$1=$(openssl rand -hex 32)|" .env; }
+# Each empty or missing secret gets a new one (an older .env may not have the line yet).
+fill() { grep -q "^$1=." .env || { sed -i "/^$1=/d" .env; echo "$1=${2:-}$(openssl rand -hex "${3:-32}")" >> .env; }; }
 fill DB_PASSWORD
 fill SECRET_KEY_BASE
 fill TURN_SECRET
+fill LIVEKIT_API_KEY pakchat 6
+fill LIVEKIT_API_SECRET
 chmod 600 .env
 mkdir -p secrets backups site
 chown -R "$owner" .

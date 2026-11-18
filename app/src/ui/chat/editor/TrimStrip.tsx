@@ -14,7 +14,9 @@ import { duration as clock, fileSize } from '../../format';
 import { Txt } from '../../kit';
 
 const FRAMES = 8;
-const HANDLE = 16;
+const HANDLE = 18;
+/** Room around each handle that still takes the finger (it's thin to look at). */
+const GRAB = { left: 18, right: 18, top: 10, bottom: 10 };
 /** The shortest part you can keep. */
 const MIN_MS = 1000;
 
@@ -54,6 +56,7 @@ export function TrimStrip({ p, length, max, onChange }: { p: Picked; length: num
   const left = usePanGesture({
     runOnJS: true,
     minDistance: 0,
+    hitSlop: GRAB,
     onBegin: () => (base.current = { start, end }),
     onUpdate: (e) => {
       const next = Math.max(0, Math.min(base.current.end - MIN_MS, base.current.start + e.translationX * msPerPt));
@@ -64,6 +67,7 @@ export function TrimStrip({ p, length, max, onChange }: { p: Picked; length: num
   const right = usePanGesture({
     runOnJS: true,
     minDistance: 0,
+    hitSlop: GRAB,
     onBegin: () => (base.current = { start, end }),
     onUpdate: (e) => {
       const next = Math.min(length, Math.max(base.current.start + MIN_MS, base.current.end + e.translationX * msPerPt));
@@ -88,12 +92,12 @@ export function TrimStrip({ p, length, max, onChange }: { p: Picked; length: num
         <View pointerEvents="none" style={{ position: 'absolute', top: 2, bottom: 2, left: x1, right: HANDLE, backgroundColor: 'rgba(0,0,0,0.6)' }} />
         <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, left: x0 + HANDLE, width: Math.max(0, x1 - x0 - HANDLE), borderTopWidth: 2, borderBottomWidth: 2, borderColor: theme.acc }} />
         <GestureDetector gesture={left}>
-          <View hitSlop={14} accessibilityLabel={t.trimStart} style={{ position: 'absolute', top: 0, bottom: 0, left: x0, width: HANDLE, borderTopLeftRadius: 8, borderBottomLeftRadius: 8, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }} testID="trim-start">
+          <View accessibilityLabel={t.trimStart} style={{ position: 'absolute', top: 0, bottom: 0, left: x0, width: HANDLE, borderTopLeftRadius: 8, borderBottomLeftRadius: 8, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }} testID="trim-start">
             <View style={{ width: 3, height: 16, borderRadius: 2, backgroundColor: '#FFFFFF' }} />
           </View>
         </GestureDetector>
         <GestureDetector gesture={right}>
-          <View hitSlop={14} accessibilityLabel={t.trimEnd} style={{ position: 'absolute', top: 0, bottom: 0, left: x1, width: HANDLE, borderTopRightRadius: 8, borderBottomRightRadius: 8, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }} testID="trim-end">
+          <View accessibilityLabel={t.trimEnd} style={{ position: 'absolute', top: 0, bottom: 0, left: x1, width: HANDLE, borderTopRightRadius: 8, borderBottomRightRadius: 8, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }} testID="trim-end">
             <View style={{ width: 3, height: 16, borderRadius: 2, backgroundColor: '#FFFFFF' }} />
           </View>
         </GestureDetector>

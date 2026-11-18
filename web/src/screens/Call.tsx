@@ -124,8 +124,12 @@ function CallWindow({ call }: { call: CallView }) {
   const name = typeof t === 'string' ? t : t.name;
   const id = typeof t === 'string' ? call.chatId : t.id;
   const now = useNow(1000);
-  const status = statusWord(call) || (call.startedAt ? timer(now - call.startedAt) : '');
+  const count = call.peers.filter((p) => p.state !== 'connecting').length + 1;
+  const time = call.startedAt ? timer(now - call.startedAt) : '';
+  const status = statusWord(call) || (call.group && call.state === 'active' ? `${tr('{n} people', { n: count })} · ${time}` : time);
   const seeing = call.peers.filter((p) => p.video && p.stream);
+  // A bigger group call with pictures: everyone in a grid that scrolls, me too.
+  const many = call.group && call.peers.length > 3 && (call.video || seeing.length > 0);
   const live = call.state !== 'ended';
 
   // Esc makes it small; the call carries on.
@@ -146,7 +150,9 @@ function CallWindow({ call }: { call: CallView }) {
         </button>
       </div>
 
-      {seeing.length ? (
+      {many ? (
+        <Grid call={call} />
+      ) : seeing.length ? (
         <div className={`tiles n${Math.min(seeing.length, 4)}`}>
           {seeing.map((p) => (
             <Tile key={p.key} peer={p} />
@@ -160,7 +166,7 @@ function CallWindow({ call }: { call: CallView }) {
           {call.group && call.peers.length > 0 && (
             <div className="people">
               {call.peers.map((p) => (
-                <span key={p.key} className={p.state !== 'connected' ? 'dim' : ''}>
+                <span key={p.key} className={p.state !== 'connected' ? 'dim' : p.speaking ? 'talk' : ''}>
                   {core.nameOf(p.userId)}
                   {!p.audio && <Icon name="micOff" size={14} />}
                 </span>
@@ -169,7 +175,7 @@ function CallWindow({ call }: { call: CallView }) {
           )}
         </div>
       )}
-      {seeing.length > 0 && (
+      {(many || seeing.length > 0) && (
         <div className="vstatus">
           <b>{name}</b> {status}
         </div>
@@ -182,7 +188,7 @@ function CallWindow({ call }: { call: CallView }) {
           <Sound key={p.key} stream={p.stream!} rev={p.rev} />
         ))}
 
-      {call.local && <Mirror stream={call.local} />}
+      {call.local && !many && <Mirror stream={call.local} />}
       {call.sharing && <div className="sharing"><Icon name="screenShare" size={16} />{' '}{tr('You\'re sharing your screen')}</div>}
 
       {call.waiting && <Waiting w={call.waiting} />}
@@ -208,6 +214,80 @@ function Round({ label, icon, on, disabled, run }: { label: string; icon: Parame
   );
 }
 
+/** Everyone's tile; only the pictures of the tiles in view come (with more than 8 people). */
+function Grid({ call }: { call: CallView }) {
+  const box = useRef<HTMLDivElement>(null);
+  // A tile that turns from a face into a picture is a new element, so it's watched anew.
+  const keys = call.peers.map((p) => `${p.key}${p.video && p.stream ? '+' : ''}`).join(',');
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const shown = new Set<string>();
+    let wait = 0;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const k = (e.target as HTMLElement).dataset.key;
+          if (!k) continue;
+          if (e.isIntersecting) shown.add(k);
+          else shown.delete(k);
+        }
+        clearTimeout(wait);
+        wait = window.setTimeout(() => calls.showTiles([...shown]), 150);
+      },
+      { root: el, rootMargin: '200px 0px' },
+    );
+    el.querySelectorAll<HTMLElement>('[data-key]').forEach((t) => io.observe(t));
+    return () => {
+      io.disconnect();
+      clearTimeout(wait);
+    };
+  }, [keys]);
+  useEffect(() => () => calls.showTiles(null), []);
+  return (
+    <div className="grid" ref={box}>
+      {call.local && (
+        <div className={`tile ${call.speaking ? 'talk' : ''}`}>
+          {call.camera ? <Mirror stream={call.local} /> : <Face id={core.myId} />}
+          <span className="tname">
+            {tr('You')}
+            {call.muted && <Icon name="micOff" size={14} />}
+          </span>
+        </div>
+      )}
+      {call.peers.map((p) => (p.video && p.stream ? <Tile key={p.key} peer={p} /> : <FaceTile key={p.key} peer={p} />))}
+    </div>
+  );
+}
+
+function Face({ id }: { id: string }) {
+  const name = core.nameOf(id);
+  return (
+    <div className="face">
+      <Avatar id={id} name={name} photo={photoOf(id)} />
+    </div>
+  );
+}
+
+function FaceTile({ peer }: { peer: PeerView }) {
+  return (
+    <div className={`tile ${peer.speaking ? 'talk' : ''} ${peer.state !== 'connected' ? 'dim' : ''}`} data-key={peer.key}>
+      <Face id={peer.userId} />
+      <Name peer={peer} />
+    </div>
+  );
+}
+
+function Name({ peer }: { peer: PeerView }) {
+  return (
+    <span className="tname">
+      {core.nameOf(peer.userId)}
+      {!peer.audio && <Icon name="micOff" size={14} />}
+      {peer.state === 'reconnecting' && ` · ${tr('Reconnecting…')}`}
+    </span>
+  );
+}
+
 function Tile({ peer }: { peer: PeerView }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -217,13 +297,9 @@ function Tile({ peer }: { peer: PeerView }) {
   const [swapped, setSwapped] = useState(false);
   const fit = peer.screen !== swapped;
   return (
-    <div className="tile" onDoubleClick={() => setSwapped((f) => !f)}>
+    <div className={`tile ${peer.speaking ? 'talk' : ''}`} data-key={peer.key} onDoubleClick={() => setSwapped((f) => !f)}>
       <video ref={ref} autoPlay playsInline className={fit ? 'fit' : ''} />
-      <span className="tname">
-        {core.nameOf(peer.userId)}
-        {!peer.audio && <Icon name="micOff" size={14} />}
-        {peer.state === 'reconnecting' && ' · Reconnecting…'}
-      </span>
+      <Name peer={peer} />
     </div>
   );
 }

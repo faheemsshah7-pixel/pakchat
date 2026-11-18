@@ -41,6 +41,71 @@ defmodule PakchatWeb.CallController do
     end
   end
 
+  @doc """
+  `POST /api/calls/room` with `{chat, call}`: a pass into a group call's room on our
+  call server (LiveKit, deploy/livekit.yaml), answered `{url, token}`.
+
+  Group calls pass through that server: each phone sends its sound and picture
+  there once, and it passes them on to the others, so 32 people fit (phone to
+  phone, each would send 31 copies). Everything is locked on the phones first,
+  with a key that travels only in the call's own locked messages, so the call
+  server can't see or hear anything either.
+
+  Only someone in the chat gets a pass, and only for that chat's calls (the room
+  is named after both). It names the phone ("user id:device id"), nothing else:
+  no names. Good for two hours of joining; the call server keeps a phone that's
+  in the call connected for as long as the call lasts.
+  """
+  def room(conn, %{"chat" => chat_id, "call" => call_id})
+      when is_binary(chat_id) and is_binary(call_id) do
+    me = conn.assigns.user
+    url = Application.get_env(:pakchat, :livekit_url)
+    key = Application.get_env(:pakchat, :livekit_key)
+    secret = Application.get_env(:pakchat, :livekit_secret)
+
+    with :ok <-
+           if(Enum.all?([url, key, secret], &(is_binary(&1) and &1 != "")),
+             do: :ok,
+             else: {:error, :not_found}
+           ),
+         :ok <-
+           if(String.match?(call_id, ~r/^[A-Za-z0-9_-]{1,64}$/),
+             do: :ok,
+             else: {:error, :bad_request}
+           ),
+         :ok <- RateLimit.hit(:calls, me.id),
+         {:ok, chat} <- Chats.get_chat(me, chat_id),
+         :ok <- if(chat.kind == "status", do: {:error, :not_found}, else: :ok) do
+      identity = "#{me.id}:#{conn.assigns.device.device_id}"
+      json(conn, %{url: url, token: room_token(key, secret, identity, "#{chat.id}:#{call_id}")})
+    end
+  end
+
+  def room(_conn, _params), do: {:error, :bad_request}
+
+  @doc false
+  def room_token(key, secret, identity, room) do
+    now = System.system_time(:second)
+
+    claims = %{
+      iss: key,
+      sub: identity,
+      nbf: now - 10,
+      exp: now + 2 * 3600,
+      video: %{
+        room: room,
+        roomJoin: true,
+        canPublish: true,
+        canSubscribe: true,
+        canPublishData: false
+      }
+    }
+
+    part = &Base.url_encode64(Jason.encode!(&1), padding: false)
+    body = part.(%{alg: "HS256", typ: "JWT"}) <> "." <> part.(claims)
+    body <> "." <> Base.url_encode64(:crypto.mac(:hmac, :sha256, secret, body), padding: false)
+  end
+
   @doc false
   def ice_servers(user_id) do
     stun = Application.get_env(:pakchat, :stun_urls, ["stun:stun.l.google.com:19302"])

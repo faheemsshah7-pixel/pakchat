@@ -35,11 +35,12 @@ const HEIGHT = 300;
 /** The tab used last (Emoji until another is used), kept while the app runs. */
 let lastTab: Tab = 'emoji';
 
-export function ExtrasPanel({ onEmoji, onGif, onSticker }: { onEmoji: (e: string) => void; onGif: (g: Gif) => void; onSticker: (from: string | number) => void }) {
+export function ExtrasPanel({ onEmoji, onGif, onSticker, start }: { onEmoji: (e: string) => void; onGif: (g: Gif) => void; onSticker: (from: string | number) => void; start?: Tab }) {
   const t = useT();
   const { theme } = useLook();
-  // It opens on Emoji the first time, then on whichever tab you used last, like WhatsApp's.
-  const [tab, setTabNow] = useState<Tab>(lastTab);
+  // It opens on Emoji the first time, then on whichever tab you used last, like WhatsApp's
+  // (or on the one asked for: a status reply's smiley opens Emoji).
+  const [tab, setTabNow] = useState<Tab>(start ?? lastTab);
   const setTab = (next: Tab) => {
     lastTab = next;
     setTabNow(next);

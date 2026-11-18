@@ -1,11 +1,12 @@
-// Sharing your screen in a call (core/calls.ts shareScreen), like WhatsApp.
-// Android only lets an app capture the screen while it shows a "sharing"
-// alert (a foreground service of the mediaProjection kind). react-native-webrtc
-// brings that service, but only starts it when asked to, here, as the app
-// starts; and Android 14 wants the app to ask for that kind of service too.
+// Calls' setup as the app starts. LiveKit's (group calls, core/groupCall.ts) sets up
+// the WebRTC library's sound for calls, and screen sharing (core/calls.ts
+// shareScreen), like WhatsApp: Android only lets an app capture the screen while
+// it shows a "sharing" alert (a foreground service of the mediaProjection kind).
+// The library brings that service and LiveKit's setup turns it on; Android 14
+// wants the app to ask for that kind of service too.
 const { AndroidConfig, withAndroidManifest, withMainApplication } = require('expo/config-plugins');
 
-const MARK = '// pakchat: screen sharing in calls (plugins/withScreenShare.js)';
+const MARK = '// pakchat: calls\' sound, group calls and screen sharing (plugins/withScreenShare.js)';
 
 module.exports = function withScreenShare(config) {
   config = withAndroidManifest(config, (cfg) => {
@@ -19,7 +20,7 @@ module.exports = function withScreenShare(config) {
     const at = src.indexOf('    super.onCreate()\n');
     if (at < 0) throw new Error('withScreenShare: MainApplication.onCreate not found');
     const end = at + '    super.onCreate()\n'.length;
-    src = src.slice(0, end) + `    ${MARK}\n    com.oney.WebRTCModule.WebRTCModuleOptions.getInstance().enableMediaProjectionService = true\n` + src.slice(end);
+    src = src.slice(0, end) + `    ${MARK}\n    com.livekit.reactnative.LiveKitReactNative.setup(this)\n` + src.slice(end);
     cfg.modResults.contents = src;
     return cfg;
   });

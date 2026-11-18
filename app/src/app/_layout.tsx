@@ -252,6 +252,7 @@ function App() {
           <Stack.Screen name="wallpaper" />
           <Stack.Screen name="locked" />
           <Stack.Screen name="settings/lock" />
+          <Stack.Screen name="settings/two-step" />
           <Stack.Screen name="calllink/[code]" />
           <Stack.Screen name="send-to" />
         </Stack.Protected>
@@ -260,6 +261,8 @@ function App() {
           {/* Like WhatsApp: your number, then checking it, each its own screen. */}
           <Stack.Screen name="sign-in-number" />
           <Stack.Screen name="sign-in-verify" />
+          {/* The account's two-step PIN, when it has one (core.pinStep). */}
+          <Stack.Screen name="sign-in-pin" />
         </Stack.Protected>
       </Stack>
       {state === 'signedIn' && <CallBar />}

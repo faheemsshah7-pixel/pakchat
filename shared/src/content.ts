@@ -113,11 +113,19 @@ export type CallSignal = {
    * (no sound, no picture) until the call is answered. Older phones leave it out.
    */
   early?: boolean;
+  /**
+   * ring, join, here: a group call through our call server (LiveKit): the key that locks
+   * its sound and pictures (base64, 32 random bytes). Only ever inside these locked
+   * messages, so the call server never has it. Made by whoever starts the call.
+   */
+  key?: string;
   sdp?: string;
   cand?: IceCandidate;
 };
-/** A call has room for this many people (each phone sends to every other). */
-export const MAX_CALL_PEOPLE = 8;
+/** A group call has room for this many people (through our call server). */
+export const MAX_CALL_PEOPLE = 32;
+/** A call straight from phone to phone (each sends to every other) has room for this many. */
+export const MAX_MESH_PEOPLE = 8;
 
 /** Things that show up as a message bubble. */
 export type Body =
@@ -183,7 +191,17 @@ const MAX_SYNC_BYTES = 256_000;
 /** A locked history part on the server: where it is, its key and digest, and its size before locking. */
 export type HistoryFile = { id: string; key: string; digest: string; size: number };
 
-export type Payload = Body | Change | Control;
+/**
+ * A call, for the chat (like WhatsApp's "Missed voice call" bubble): sent by
+ * whoever started it, when it ends, to everyone in the chat and their other
+ * devices. Its id is "call-" and the call's id, the same as the note each
+ * phone makes for itself (so it takes that note's place, never adds a second).
+ *   seconds: how long it lasted; 0: nobody answered.
+ *   joined:  a group call: who took part (anyone else missed it).
+ */
+export type CallRecord = { t: 'callRecord'; call: string; video: boolean; seconds: number; group?: true; joined?: string[] };
+
+export type Payload = Body | Change | Control | CallRecord;
 
 /**
  * One locked message's inside.
@@ -328,6 +346,10 @@ function checkCall(x: Record<string, unknown>): CallSignal | null {
     if (!isIdList(x.people, MAX_CALL_PEOPLE)) return null;
     out.people = [...new Set(x.people)];
   }
+  if (x.key !== undefined) {
+    if (typeof x.key !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(x.key)) return null;
+    out.key = x.key;
+  }
   if (x.sdp !== undefined) {
     if (!isText(x.sdp, MAX_SDP)) return null;
     out.sdp = x.sdp;
@@ -466,6 +488,16 @@ function checkPayload(x: Record<string, unknown>): Payload | null {
       }
       if (x.general === true) out.general = true;
       if (x.call === true) out.call = true;
+      return out;
+    }
+    case 'callRecord': {
+      if (!isId(x.call) || typeof x.video !== 'boolean' || !isCount(x.seconds) || x.seconds > 7 * 24 * 3600) return null;
+      if (x.joined !== undefined && !isIdList(x.joined, MAX_CALL_PEOPLE * 4)) return null;
+      const out: CallRecord = { t: 'callRecord', call: x.call, video: x.video, seconds: x.seconds };
+      if (x.group === true) {
+        out.group = true;
+        out.joined = [...new Set((x.joined as string[] | undefined) ?? [])];
+      }
       return out;
     }
     case 'edit':

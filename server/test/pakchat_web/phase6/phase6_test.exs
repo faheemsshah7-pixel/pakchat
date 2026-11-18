@@ -274,6 +274,83 @@ defmodule PakchatWeb.Phase6Test do
     end
   end
 
+  describe "group call rooms" do
+    setup do
+      Application.put_env(:pakchat, :livekit_url, "wss://example.test")
+      Application.put_env(:pakchat, :livekit_key, "pakchatkey")
+      Application.put_env(:pakchat, :livekit_secret, "a-long-secret-only-the-servers-know")
+
+      on_exit(fn ->
+        for k <- [:livekit_url, :livekit_key, :livekit_secret],
+            do: Application.delete_env(:pakchat, k)
+      end)
+    end
+
+    test "someone in the chat gets a pass for that chat's call, naming only their phone", %{
+      ali: ali,
+      sara: sara
+    } do
+      {:ok, group} = Chats.create_group(ali.user, %{"title" => "Trip"}, [sara.user.id])
+
+      body =
+        as(sara)
+        |> post("/api/calls/room", %{chat: group.id, call: "abc_123"})
+        |> json_response(200)
+
+      assert body["url"] == "wss://example.test"
+      [head, claims, sig] = String.split(body["token"], ".")
+
+      assert sig ==
+               Base.url_encode64(
+                 :crypto.mac(
+                   :hmac,
+                   :sha256,
+                   "a-long-secret-only-the-servers-know",
+                   head <> "." <> claims
+                 ),
+                 padding: false
+               )
+
+      claims = claims |> Base.url_decode64!(padding: false) |> Jason.decode!()
+      assert claims["iss"] == "pakchatkey"
+      assert claims["sub"] == "#{sara.user.id}:#{sara.device.device_id}"
+
+      assert claims["video"] == %{
+               "room" => "#{group.id}:abc_123",
+               "roomJoin" => true,
+               "canPublish" => true,
+               "canSubscribe" => true,
+               "canPublishData" => false
+             }
+
+      refute Map.has_key?(claims, "name")
+      assert claims["exp"] > System.system_time(:second) + 3600
+    end
+
+    test "nobody outside the chat, no odd call ids, and nothing until it's set up", %{
+      ali: ali,
+      sara: sara,
+      bilal: bilal
+    } do
+      {:ok, group} = Chats.create_group(ali.user, %{"title" => "Trip"}, [sara.user.id])
+
+      assert as(bilal)
+             |> post("/api/calls/room", %{chat: group.id, call: "abc"})
+             |> json_response(404)
+
+      assert as(ali)
+             |> post("/api/calls/room", %{chat: group.id, call: "a/../b"})
+             |> json_response(400)
+
+      assert as(ali) |> post("/api/calls/room", %{chat: group.id}) |> json_response(400)
+      Application.delete_env(:pakchat, :livekit_secret)
+
+      assert as(ali)
+             |> post("/api/calls/room", %{chat: group.id, call: "abc"})
+             |> json_response(404)
+    end
+  end
+
   ## Status
 
   describe "status" do

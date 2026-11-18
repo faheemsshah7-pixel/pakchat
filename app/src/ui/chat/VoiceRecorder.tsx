@@ -88,8 +88,9 @@ export function useVoiceRecorder({ chatId, enabled, onSend }: { chatId: string; 
   }, [recording, mode]);
 
   // While recording, they see "recording audio…" (said again every few seconds, as typing is).
+  // (No chat yet, as for a reply to a status: nobody to tell.)
   useEffect(() => {
-    if (!recording) return;
+    if (!recording || !chatId) return;
     core.client.typing(chatId, true, true);
     const id = setInterval(() => core.client.typing(chatId, true, true), 4_000);
     return () => {

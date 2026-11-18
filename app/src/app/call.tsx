@@ -18,7 +18,7 @@ import { FlatList, Pressable, useWindowDimensions, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeOut, interpolateColor, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import { RTCView } from 'react-native-webrtc';
+import { RTCView } from '@livekit/react-native-webrtc';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
@@ -36,6 +36,8 @@ import { useTheme } from '../theme/ThemeProvider';
 
 const INK = '#FFFFFF';
 const SOFT = 'rgba(255,255,255,0.72)';
+/** The edge round whoever is talking in a group call. */
+const TALKING = '#2DD4BF';
 const RED = '#E5484D';
 const GREEN = '#22A35A';
 
@@ -125,8 +127,9 @@ export default function CallScreen() {
         if (navigation.isFocused()) router.replace('/');
       }, 1_000);
     };
-    // Once the call is cleared away, at once; while "Call ended" shows, after a moment.
-    const wait = setTimeout(close, call ? 1_200 : 0);
+    // Once the call is cleared away, at once; while "Call ended" shows, after a moment. A video
+    // call closes sooner, like WhatsApp's (its picture is gone already): almost at once if I hung up.
+    const wait = setTimeout(close, !call ? 0 : !call.video ? 1_200 : call.endReason === 'hungUp' ? 350 : 700);
     return () => clearTimeout(wait);
   }, [call, ended, gone, navigation]);
   useEffect(
@@ -324,7 +327,9 @@ function Header({ call, t }: { call: CallView; t: Strings }) {
             ? t.connectingWord
             : call.peers.some((p) => p.state === 'reconnecting')
               ? t.reconnecting
-              : duration(now - (call.startedAt ?? now));
+              : call.group
+                ? `${fill(t.callPeople, { n: String(call.peers.length + 1) })} · ${duration(now - (call.startedAt ?? now))}`
+                : duration(now - (call.startedAt ?? now));
   return (
     <View style={{ alignItems: 'center', gap: 8, paddingHorizontal: 60 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -458,27 +463,102 @@ const SELF_W = 110;
 const SELF_H = 160;
 
 /**
- * Everyone in a group call (me first), filling the space it's given: two
- * people one above the other, more in two columns. Sized to its own space,
- * so it never runs under the name or the buttons.
+ * Everyone in a group call (me first). Up to 8 fill the space they're given: two
+ * people one above the other, more in two columns. More than 8 (through the call
+ * server, up to 32): a video call has two columns of tiles to scroll, and a voice
+ * call four across of photos, with "8 more" while some are out of sight. Only the
+ * pictures on the screen are sent to this phone. Sized to its own space, so it
+ * never runs under the name or the buttons.
  */
 function Tiles({ call }: { call: CallView }) {
+  const t = useT();
   const [box, setBox] = useState({ w: 0, h: 0 });
   const tiles: (PeerView | 'me')[] = ['me', ...call.peers];
-  const cols = tiles.length <= 2 ? 1 : 2;
-  const rows = Math.ceil(tiles.length / cols);
+  const many = tiles.length > 8;
   const gap = 8;
+  const list = useRef<FlatList<PeerView | 'me'>>(null);
+  const [below, setBelow] = useState(0);
+  const cols = many ? (call.video ? 2 : 4) : tiles.length <= 2 ? 1 : 2;
+  const rows = Math.ceil(tiles.length / cols);
   const w = (box.w - gap * (cols - 1)) / cols;
-  const h = (box.h - gap * (rows - 1)) / rows;
+  const h = many ? (call.video ? w * 1.15 : 104) : (box.h - gap * (rows - 1)) / rows;
+  // Only the pictures in sight come to this phone (a voice call's photos need none).
+  // (A list can't be given a new one of these once it's showing, so it reads the count from a ref.)
+  const count = useRef(tiles.length);
+  useEffect(() => {
+    count.current = tiles.length;
+  });
+  const [seen] = useState(() => ({ viewableItems }: { viewableItems: { item: PeerView | 'me'; index?: number | null }[] }) => {
+    calls.showTiles(viewableItems.map((v) => (v.item === 'me' ? '' : v.item.key)).filter(Boolean));
+    const last = Math.max(-1, ...viewableItems.map((v) => v.index ?? -1));
+    setBelow(Math.max(0, count.current - 1 - last));
+  });
+  useEffect(() => {
+    if (!many) calls.showTiles(null);
+  }, [many]);
   return (
     <View style={{ flex: 1, marginTop: 18, marginBottom: 22, marginHorizontal: 12 }} onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
-      {box.h > 0 && (
+      {box.h > 0 && !many && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
           {tiles.map((p) => (
             <Tile key={p === 'me' ? 'me' : p.key} call={call} peer={p} w={w} h={h} />
           ))}
         </View>
       )}
+      {box.h > 0 && many && (
+        <FlatList
+          ref={list}
+          key={cols}
+          data={tiles}
+          numColumns={cols}
+          keyExtractor={(p) => (p === 'me' ? 'me' : p.key)}
+          columnWrapperStyle={{ gap: call.video ? gap : 0 }}
+          contentContainerStyle={{ gap: call.video ? gap : 14, paddingTop: 6, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          onViewableItemsChanged={seen}
+          viewabilityConfig={{ itemVisiblePercentThreshold: 20 }}
+          renderItem={({ item }) => (call.video ? <Tile call={call} peer={item} w={w} h={h} /> : <Face call={call} peer={item} w={w} />)}
+          testID="call-tiles"
+        />
+      )}
+      {many && below > 0 && (
+        <View style={{ position: 'absolute', bottom: 6, alignSelf: 'center' }}>
+          <Pressy ripple="light" onPress={() => list.current?.scrollToEnd({ animated: true })} label={fill(t.moreInCall, { n: String(below) })} scale={0.95} testID="call-more">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.18)' }}>
+              <Icon name="down" size={14} color={INK} />
+              <Txt size={12.5} weight="700" color={INK}>
+                {fill(t.moreInCall, { n: String(below) })}
+              </Txt>
+            </View>
+          </Pressy>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** Someone in a big voice call: their photo (a green ring while they talk, a red mic when muted), and their name. */
+function Face({ call, peer, w }: { call: CallView; peer: PeerView | 'me'; w: number }) {
+  const t = useT();
+  const me = peer === 'me';
+  const userId = me ? core.myId : peer.userId;
+  const name = (me ? t.youWord : core.name(userId) || '…').replace(/^~ /, '');
+  const muted = me ? call.muted : !peer.audio;
+  const talking = me ? call.speaking : peer.speaking;
+  const away = !me && peer.state !== 'connected';
+  return (
+    <View style={{ width: w, alignItems: 'center', gap: 6, opacity: away ? 0.55 : 1 }} testID="call-face">
+      <View style={{ width: 68, height: 68, borderRadius: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: talking ? TALKING : 'transparent' }}>
+        <Avatar id={userId} name={name} size={58} />
+        {muted && (
+          <View style={{ position: 'absolute', end: -2, bottom: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: '#E5484D', borderWidth: 2, borderColor: '#0E1A30', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="micOff" size={11} color={INK} />
+          </View>
+        )}
+      </View>
+      <Txt size={12.5} weight="600" color={INK} lines={1} style={{ maxWidth: w - 6 }}>
+        {name}
+      </Txt>
     </View>
   );
 }
@@ -490,6 +570,7 @@ function Tile({ call, peer, w, h }: { call: CallView; peer: PeerView | 'me'; w: 
   const name = me ? t.youWord : core.name(userId) || '…';
   const stream = me ? call.local : peer.video ? peer.stream : null;
   const muted = me ? call.muted : !peer.audio;
+  const talking = me ? call.speaking : peer.speaking;
   return (
     <View style={{ width: w, height: h, borderRadius: 18, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }} testID="call-tile">
       {me && call.sharing ? (
@@ -512,6 +593,7 @@ function Tile({ call, peer, w, h }: { call: CallView; peer: PeerView | 'me'; w: 
           </Txt>
         )}
       </View>
+      {talking && <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, borderRadius: 18, borderWidth: 3, borderColor: TALKING }} />}
     </View>
   );
 }
@@ -658,6 +740,15 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
   const onSound = () => (extra ? setPicking(true) : calls.setRoute(call.route === 'speaker' ? 'earpiece' : 'speaker'));
   // Share screen, like WhatsApp: in a video call once it's on.
   const canShare = call.video && call.state === 'active';
+  // Every button fits on the bar, even on a narrow phone with all six showing (up to 58 each).
+  const { width } = useWindowDimensions();
+  const showCamera = call.video || call.state === 'active';
+  const showFlip = call.video && call.camera && !call.sharing;
+  const count = 3 + (showCamera ? 1 : 0) + (showFlip ? 1 : 0) + (canShare ? 1 : 0);
+  const size = Math.max(40, Math.min(58, Math.floor((width - 28 - 20 - (count - 1) * 6) / count)));
+  // On a big phone or tablet the bar is only as wide as its buttons need (with a little room),
+  // like WhatsApp's, not stretched across the screen with wide gaps.
+  const barWidth = Math.min(width - 28, count * size + (count - 1) * 14 + 20);
   return (
     <View style={{ gap: 22, opacity: over ? 0.5 : 1 }} pointerEvents={over ? 'none' : 'auto'}>
       {call.sharing && (
@@ -678,11 +769,12 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
         </Animated.View>
       )}
       {/* One bar, with the red button at its end, like WhatsApp's. */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginHorizontal: 14, paddingHorizontal: 10, paddingVertical: 10, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.1)' }}>
-        <Round icon={soundIcon} on={speakerOn} label={extra ? `${t.audioOutput}: ${routeName(call.route, t)}` : t.speaker} onPress={onSound} testID="call-speaker" />
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginHorizontal: 14, paddingHorizontal: 10, paddingVertical: 10, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.1)', width: barWidth, alignSelf: 'center' }}>
+        <Round size={size} icon={soundIcon} on={speakerOn} label={extra ? `${t.audioOutput}: ${routeName(call.route, t)}` : t.speaker} onPress={onSound} testID="call-speaker" />
         {/* In a voice call it shows once the call is on, and turns it into a video call. */}
-        {(call.video || call.state === 'active') && (
+        {showCamera && (
           <Round
+            size={size}
             icon={call.camera || !call.video ? 'video' : 'videoOff'}
             on={call.video && !call.camera}
             label={call.camera ? t.cameraOff : t.cameraOn}
@@ -690,10 +782,10 @@ function Controls({ call, t }: { call: CallView; t: Strings }) {
             testID="call-camera"
           />
         )}
-        {call.video && call.camera && !call.sharing && <Round icon="flipCamera" label={t.flipCamera} onPress={() => calls.flipCamera()} testID="call-flip" />}
-        {canShare && <Round icon="screenShare" on={call.sharing} label={call.sharing ? t.stopSharing : t.shareScreen} onPress={() => (call.sharing ? calls.stopSharing() : void calls.shareScreen())} testID="call-share-screen" />}
-        <Round icon={call.muted ? 'micOff' : 'mic'} on={call.muted} label={call.muted ? t.unmute : t.muteMic} onPress={() => (tick(), calls.setMuted(!call.muted))} testID="call-mute" />
-        <Round icon="endCall" color={RED} label={t.hangUp} onPress={() => void calls.hangUp()} testID="call-hangup" />
+        {showFlip && <Round size={size} icon="flipCamera" label={t.flipCamera} onPress={() => calls.flipCamera()} testID="call-flip" />}
+        {canShare && <Round size={size} icon="screenShare" on={call.sharing} label={call.sharing ? t.stopSharing : t.shareScreen} onPress={() => (call.sharing ? calls.stopSharing() : void calls.shareScreen())} testID="call-share-screen" />}
+        <Round size={size} icon={call.muted ? 'micOff' : 'mic'} on={call.muted} label={call.muted ? t.unmute : t.muteMic} onPress={() => (tick(), calls.setMuted(!call.muted))} testID="call-mute" />
+        <Round size={size} icon="endCall" color={RED} label={t.hangUp} onPress={() => void calls.hangUp()} testID="call-hangup" />
       </View>
       <Sheet visible={picking} onClose={() => setPicking(false)} title={t.audioOutput}>
         <View style={{ paddingHorizontal: 8, paddingBottom: 6 }}>
@@ -718,8 +810,8 @@ function routeName(r: AudioRoute, t: Strings) {
   return r === 'speaker' ? t.speaker : r === 'headset' ? t.headphones : r === 'bluetooth' ? t.bluetooth : t.phoneEar;
 }
 
-function Round({ icon, label, onPress, color, on, big, testID }: { icon: IconName; label: string; onPress: () => void; color?: string; on?: boolean; big?: boolean; testID?: string }) {
-  const size = big ? 70 : 58;
+function Round({ icon, label, onPress, color, on, big, size: fit, testID }: { icon: IconName; label: string; onPress: () => void; color?: string; on?: boolean; big?: boolean; size?: number; testID?: string }) {
+  const size = big ? 70 : (fit ?? 58);
   return (
     <Pressy ripple="light" onPress={onPress} label={label} scale={0.9} testID={testID}>
       <View
@@ -732,7 +824,7 @@ function Round({ icon, label, onPress, color, on, big, testID }: { icon: IconNam
           justifyContent: 'center',
         }}
       >
-        <Icon name={icon} size={big ? 30 : 24} color={color ? INK : on ? '#0B1424' : INK} stroke={2} />
+        <Icon name={icon} size={big ? 30 : Math.max(20, Math.round(size * 0.41))} color={color ? INK : on ? '#0B1424' : INK} stroke={2} />
       </View>
     </Pressy>
   );

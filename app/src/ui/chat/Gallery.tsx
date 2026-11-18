@@ -9,6 +9,7 @@
 // with "Allow access" and the phone's own gallery, instead of "Nothing here yet".
 import type { Picked } from '../../core/files';
 import * as MediaLibrary from 'expo-media-library/legacy';
+import { File } from 'expo-file-system';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, FlatList, Linking, Modal, ScrollView, useWindowDimensions, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -50,7 +51,17 @@ export function pickedOf(a: MediaLibrary.Asset): Picked {
   const video = a.mediaType === 'video';
   const ext = (/\.([a-z0-9]+)$/i.exec(a.filename)?.[1] ?? '').toLowerCase();
   const mime = MIMES[ext] ?? (video ? 'video/mp4' : 'image/jpeg');
-  return { uri: a.uri, mime, kind: video ? 'video' : 'image', name: a.filename, width: a.width, height: a.height, ...(video ? { duration: Math.round(a.duration * 1000) } : {}) };
+  return { uri: a.uri, mime, kind: video ? 'video' : 'image', name: a.filename, width: a.width, height: a.height, ...(video ? { duration: Math.round(a.duration * 1000), ...sizeOf(a.uri) } : {}) };
+}
+
+/** A video's size in bytes, so the quality sheet can say how big Standard and HD each send. */
+function sizeOf(uri: string): { size?: number } {
+  try {
+    const size = new File(uri).size;
+    return size > 0 ? { size } : {};
+  } catch {
+    return {};
+  }
 }
 
 /** May PakChat read the gallery? Asks once; null if not (then the phone's own picker is used). */

@@ -1,12 +1,14 @@
 // (tabs)/status.tsx: Status, updates that last 24 hours, like WhatsApp's.
 //
-// A list down the page, like WhatsApp's: "My status" (tap to see mine, or to add
-// one; ⋮ for the page of my statuses and their views), then "Recent updates",
-// "Viewed updates" and "Muted updates" (folded away; hold one to mute or unmute),
-// each with a little picture of their newest status in its ring and the time.
+// Like WhatsApp's: a row of picture cards, swipe for more. Mine first ("Add status",
+// or my newest: tap to watch, + to add another, hold for the page of my statuses and
+// their views), then people with new ones, then ones I've seen (grey ring). Each card
+// is their newest status with their photo in its ring. "Muted updates" is folded away
+// below (hold any of them to mute or unmute).
 // The two round buttons at the bottom add one: words (pencil) or a photo or video.
 import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useIsFocused } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -54,48 +56,26 @@ function Status() {
         <Txt size={27} weight="800" style={{ letterSpacing: -0.9, flex: 1 }}>
           {t.status}
         </Txt>
+        {/* My status page (each of mine and who saw it): in sight, not only by holding my card. */}
+        {mineCount > 0 && <IconButton icon="eye" label={t.myStatus} onPress={() => router.push('/status-mine')} color={theme.muted} testID="status-mine" />}
         <IconButton icon="lock" label={t.statusPrivacy} onPress={() => router.push('/settings/status-privacy')} color={theme.muted} testID="status-privacy" />
       </View>
-      {/* A list down the page, like WhatsApp's: mine, then new, seen and muted ones, each with its time. */}
+      {/* Like WhatsApp's: a row of picture cards (mine first, then new ones, then ones I've seen,
+          swipe for more), and muted ones folded away below. */}
       <ScrollView contentContainerStyle={{ paddingBottom: 170 }} testID="status-row-list">
-        <Pressy
-          onPress={() => (mineCount ? router.push({ pathname: '/status/[id]', params: { id: mine!.chat.id } }) : add())}
-          onLongPress={add}
-          label={mineCount ? t.myStatus : t.addStatus}
-          scale={0.98}
-          testID="my-status"
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 10 }}>
-            <View>
-              <Ring count={mineCount} seen={false} color={theme.acc} muted={theme.muted}>
-                {mine?.items.length ? <Thumb m={mine.items.at(-1)!} /> : <Avatar id={myId} name={me?.name ?? ''} size={PHOTO} />}
-              </Ring>
-              {!mineCount && (
-                <View style={{ position: 'absolute', end: 0, bottom: 0, width: 22, height: 22, borderRadius: 11, backgroundColor: theme.acc, borderWidth: 2, borderColor: theme.bg, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="plus" size={12} color="#FFFFFF" stroke={3} />
-                </View>
-              )}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Txt size={16} weight="600" lines={1}>
-                {t.myStatus}
-              </Txt>
-              <Txt size={13.5} color={theme.muted} lines={1}>
-                {mineCount ? listTime(mine!.latest, t) : t.tapToAddStatus}
-              </Txt>
-            </View>
-            {/* My status page: each one with its views. */}
-            {mineCount > 0 && <IconButton icon="more" label={t.myStatus} onPress={() => router.push('/status-mine')} color={theme.muted} testID="my-status-page" />}
-          </View>
-        </Pressy>
-        {fresh.length > 0 && <Head text={t.recentUpdates} />}
-        {fresh.map((p) => (
-          <StatusRow key={p.chat.id} p={p} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
-        ))}
-        {seen.length > 0 && <Head text={t.viewedUpdates} />}
-        {seen.map((p) => (
-          <StatusRow key={p.chat.id} p={p} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
-        ))}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 14, paddingTop: 6, paddingBottom: 8 }} testID="status-cards">
+          <MyCard
+            mine={mine}
+            name={me?.name ?? ''}
+            myId={myId}
+            onPress={() => (mineCount ? router.push({ pathname: '/status/[id]', params: { id: mine!.chat.id } }) : add())}
+            onAdd={add}
+            onPage={() => router.push('/status-mine')}
+          />
+          {[...fresh, ...seen].map((p) => (
+            <Card key={p.chat.id} p={p} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
+          ))}
+        </ScrollView>
         {muted.length > 0 && (
           <Pressy onPress={() => setShowMuted(!showMuted)} label={t.mutedUpdates} scale={0.98} testID="status-muted-head">
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -112,7 +92,7 @@ function Status() {
             <StatusRow key={p.chat.id} p={p} onPress={() => open(p)} onLongPress={() => setHeld(p)} />
           ))}
         {all && !others.length && (
-          <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 30, paddingHorizontal: 30 }}>
+          <Txt size={14} color={theme.muted} align="center" style={{ marginTop: 24, paddingHorizontal: 30 }}>
             {t.noStatuses}
           </Txt>
         )}
@@ -140,6 +120,106 @@ function Status() {
         )}
       </Sheet>
     </Screen>
+  );
+}
+
+const CARD_W = 96;
+const CARD_H = 156;
+
+/** Their newest status filling a card: the photo or video's picture, or words (or a mic) on its colour. */
+function CardPicture({ m }: { m: Message }) {
+  const f = m.file;
+  const uri = f ? (f.local && f.kind === 'image' ? f.local : (f.poster ?? (f.thumb ? `data:image/jpeg;base64,${f.thumb}` : null))) : null;
+  if (uri) return <Image source={{ uri }} style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} contentFit="cover" recyclingKey={m.id} />;
+  if (f?.kind === 'voice')
+    return (
+      <View style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: voiceColour(m.id), alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="mic" size={30} color="#FFFFFF" />
+      </View>
+    );
+  return (
+    <View style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, backgroundColor: STATUS_BG[m.bg ?? 0] ?? STATUS_BG[0], alignItems: 'center', justifyContent: 'center', padding: 10 }}>
+      <Txt size={13} weight="700" color="#FFFFFF" align="center" lines={4}>
+        {m.text ?? ''}
+      </Txt>
+    </View>
+  );
+}
+
+/** The name at a card's foot, readable on any picture. */
+function CardName({ text }: { text: string }) {
+  return (
+    <>
+      <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']} style={{ position: 'absolute', start: 0, end: 0, bottom: 0, height: 56 }} pointerEvents="none" />
+      <Txt size={12.5} weight="700" color="#FFFFFF" lines={2} style={{ position: 'absolute', start: 8, end: 8, bottom: 8 }}>
+        {text}
+      </Txt>
+    </>
+  );
+}
+
+/** One person's card: their newest status, their photo in its ring at the top, their name. Seen: a grey ring. */
+function Card({ p, onPress, onLongPress }: { p: StatusPerson; onPress: () => void; onLongPress: () => void }) {
+  const { theme } = useLook();
+  const name = (core.name(p.owner) || '…').replace(/^~ /, '');
+  const last = p.items.at(-1);
+  return (
+    <Pressy onPress={onPress} onLongPress={onLongPress} label={name} testID="status-row" style={{ borderRadius: 16 }}>
+      <View style={{ width: CARD_W, height: CARD_H, borderRadius: 16, overflow: 'hidden', backgroundColor: theme.glass }}>
+        {last && <CardPicture m={last} />}
+        <View style={{ position: 'absolute', top: 6, start: 6 }}>
+          <Ring count={p.items.length} seen={p.seen} color={theme.acc} muted="rgba(255,255,255,0.55)" size={34}>
+            <Avatar id={p.owner} name={name} size={26} />
+          </Ring>
+        </View>
+        <CardName text={name} />
+      </View>
+    </Pressy>
+  );
+}
+
+/** Mine, first: "Add status" with my photo and a +, or my newest one (the + still adds another). Hold: my status page. */
+function MyCard({ mine, name, myId, onPress, onAdd, onPage }: { mine: StatusPerson | null | undefined; name: string; myId: string; onPress: () => void; onAdd: () => void; onPage: () => void }) {
+  const t = useT();
+  const { theme } = useLook();
+  const last = mine?.items.at(-1);
+  return (
+    <Pressy onPress={onPress} onLongPress={last ? onPage : onAdd} label={last ? t.myStatus : t.addStatus} testID="my-status" style={{ borderRadius: 16 }}>
+      <View style={{ width: CARD_W, height: CARD_H, borderRadius: 16, overflow: 'hidden', backgroundColor: theme.glass }}>
+        {last ? (
+          <>
+            <CardPicture m={last} />
+            <View style={{ position: 'absolute', top: 6, start: 6 }}>
+              <Ring count={mine!.items.length} seen={false} color={theme.acc} muted={theme.faint} size={34}>
+                <Avatar id={myId} name={name} size={26} />
+              </Ring>
+            </View>
+            <CardName text={t.myStatus} />
+          </>
+        ) : (
+          <>
+            <View style={{ position: 'absolute', top: 0, start: 0, end: 0, height: CARD_H - 50, alignItems: 'center', justifyContent: 'center' }}>
+              <Avatar id={myId} name={name} size={58} />
+            </View>
+            <Txt size={12.5} weight="700" align="center" lines={2} style={{ position: 'absolute', start: 6, end: 6, bottom: 10 }}>
+              {t.addStatus}
+            </Txt>
+          </>
+        )}
+        {/* The +: add one (on the photo, or at the corner of my newest). */}
+        <Pressy
+          onPress={onAdd}
+          label={t.addStatus}
+          hitSlop={8}
+          testID="my-status-add"
+          style={last ? { position: 'absolute', top: 26, start: 26, borderRadius: 11 } : { position: 'absolute', top: CARD_H / 2 - 4, start: CARD_W / 2 + 10, borderRadius: 11 }}
+        >
+          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: theme.acc, borderWidth: 2, borderColor: theme.glass, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="plus" size={12} color="#FFFFFF" stroke={3} />
+          </View>
+        </Pressy>
+      </View>
+    </Pressy>
   );
 }
 
@@ -201,12 +281,12 @@ function StatusRow({ p, onPress, onLongPress }: { p: StatusPerson; onPress: () =
 }
 
 /** The ring around a picture: one piece per status, coloured until seen. */
-function Ring({ count, seen, color, muted, children }: { count: number; seen: boolean; color: string; muted: string; children: ReactNode }) {
-  const size = PHOTO + 10;
+function Ring({ count, seen, color, muted, size = PHOTO + 10, children }: { count: number; seen: boolean; color: string; muted: string; size?: number; children: ReactNode }) {
   const r = size / 2 - 2;
   const round = 2 * Math.PI * r;
-  const gap = count > 1 ? 6 : 0;
-  const piece = count ? round / count - gap : round;
+  // (Many statuses on a small ring: the gaps shrink so every piece still shows.)
+  const gap = count > 1 ? Math.min(6, round / count / 3) : 0;
+  const piece = count ? Math.max(1, round / count - gap) : round;
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       {count > 0 && (

@@ -1,7 +1,7 @@
 // status-new.tsx: a new status update.
 //
-// Words: type on a colour (tap the palette for the next colour, T for the next
-// font), then send. With nothing typed, the mic records a voice status instead
+// Words: type on a colour (pick one in the row of colours, or tap the palette for
+// the next; T for the next font), then send. With nothing typed, the mic records a voice status instead
 // (up to 30 seconds): ✕ throws it away, ➤ sends it.
 // Photos and videos, like WhatsApp's: PakChat's camera opens with your newest
 // photos under it (swipe up for the whole gallery); pick one or several, and
@@ -12,7 +12,7 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAudioRecorder } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { core, isOffline } from '../core/core';
@@ -249,14 +249,36 @@ function WordsStatus() {
         <View style={{ flex: 1 }} />
         {/* Like WhatsApp's T: the next font. */}
         <Pressy ripple="light" onPress={() => setFont((f) => (f + 1) % STATUS_FONTS.length)} label={t.statusFont} round testID="status-font">
-          <View style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.18)', alignItems: 'center', justifyContent: 'center' }}>
             <Txt size={22} weight="700" color="#FFFFFF" style={font ? STATUS_FONTS[font] : undefined}>
               T
             </Txt>
           </View>
         </Pressy>
-        <IconButton icon="palette" label={t.statusColour} onPress={() => setBg((b) => (b + 1) % STATUS_BG.length)} color="#FFFFFF" testID="status-colour" />
+        {/* Like WhatsApp's palette: the next colour (or pick one in the row below). */}
+        <Pressy ripple="light" onPress={() => setBg((b) => (b + 1) % STATUS_BG.length)} label={t.statusColour} round testID="status-colour" style={{ marginStart: 8 }}>
+          <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.18)', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="palette" size={21} color="#FFFFFF" />
+          </View>
+        </Pressy>
       </View>
+      {/* Every colour in one row, the one in use ringed in white (a calmer pick than tapping round them all). */}
+      {voice === 'off' && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ position: 'absolute', top: insets.top + 60, start: 0, end: 0 }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 4 }}
+          keyboardShouldPersistTaps="always"
+          testID="status-colours"
+        >
+          {STATUS_BG.map((c, i) => (
+            <Pressy key={c} ripple="none" onPress={() => setBg(i)} label={t.statusColour} hitSlop={4} testID={`status-colour-${i}`} style={{ borderRadius: 13 }}>
+              <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: c, borderWidth: 2, borderColor: i === bg ? '#FFFFFF' : 'rgba(255,255,255,0.35)' }} />
+            </Pressy>
+          ))}
+        </ScrollView>
+      )}
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, padding: 12, paddingBottom: insets.bottom + 12 }}>
         <View style={{ flex: 1, alignItems: 'flex-start' }}>
           <Pressy ripple="light" onPress={() => router.push('/settings/status-privacy')} label={who} testID="status-audience">

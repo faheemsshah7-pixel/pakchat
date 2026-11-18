@@ -19,7 +19,7 @@ import { approveQr, LinkRefused, lockProvision } from '../../src/link';
 import { linkThisBrowser } from '../../src/linkWebsite';
 import { lockFile, unlockFile } from '../../src/web/fileLock';
 import { phoenixConnection } from '../../src/connection';
-import { HttpServer, REQUESTED, ServerError, type ServerChat, type SignedIn } from '../../src/server';
+import { HttpServer, pinNeeded, pinRefused, REQUESTED, ServerError, type ServerChat, type SignedIn } from '../../src/server';
 import type { SignalApi } from '../../src/signal';
 import { MemoryStorage, type Message } from '../../src/storage';
 import { type Kind, make } from '../signals';
@@ -325,6 +325,34 @@ describe('against the real server', () => {
     await ali.client.sendText(chat.id, 'New phone?');
     await eventually(async () => expect(await texts(fresh, chat.id)).toEqual(['Ali: New phone?']));
     expect(changed).toContain(sara.id);
+  });
+
+  test('two-step PIN: a new phone needs it, a wrong one is counted, and the keys made once still chat', async () => {
+    const ali = await person('Ali', 'node');
+    const sara = await person('Sara', 'node');
+    expect((await sara.server.setPin('246810')).pin).toBe(true);
+    const chat = await ali.client.openDirect(sara.id);
+
+    // Same Google account on a new phone: the PIN first, and the old phone stays in meanwhile.
+    const { client, signal, storage, server } = newClient('wasm');
+    const { id_token } = await helper<{ id_token: string }>('/google_token', { name: 'Sara', key: (sara as Person & { key: string }).key });
+    const asked = pinNeeded(await client.signIn(id_token).catch((e) => e));
+    expect(asked).toMatchObject({ google: false, resetAt: null });
+    expect((await sara.server.me()).pin).toBe(true);
+
+    const wrong = await client.signInWith((d, k) => server.pinSignIn(asked!.ticket, '111111', d, k)).catch((e) => e);
+    expect(pinRefused(wrong)).toEqual({ triesLeft: 4 });
+    const s = await client.signInWith((d, k) => server.pinSignIn(asked!.ticket, '246810', d, k));
+    expect(s.userId).toBe(sara.id);
+    const fresh = { name: 'Sara', client, signal, storage, server, id: s.userId };
+    people.push(fresh);
+    await connected(client);
+
+    await ali.client.sendText(chat.id, 'Got your PIN right?');
+    await eventually(async () => expect(await texts(fresh, chat.id)).toEqual(['Ali: Got your PIN right?']));
+    await fresh.client.sendText(chat.id, 'Yes');
+    await eventually(async () => expect((await texts(ali, chat.id)).at(-1)).toBe('Sara: Yes'));
+    expect(await server.checkPin('246810')).toBe(true);
   });
 
   test('phone sign-in: a code, a new account, and the same account next time', async () => {

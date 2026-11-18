@@ -1,7 +1,8 @@
 // MediaComposer.tsx: the black, full-screen editor that photos and videos go
 // through before they're sent, like WhatsApp's.
 //
-//   Top      ✕ · 🛡 Private · HD · (photos) crop and turn, stickers, words, drawing
+//   Top      ✕ · 🛡 Private · HD · (photos) crop and turn, stickers, words, drawing;
+//            (videos) the sound, stickers, words and drawing
 //   Middle   the photo (or the video, playing, with the trim strip under it)
 //   Bottom   the row of everything picked (+ adds more), a caption for each,
 //            ① view once, "→ Name", and the round send button
@@ -13,9 +14,10 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useEffect, useRef, useState } from 'react';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Image as RNImage, Keyboard, KeyboardAvoidingView, Modal, PixelRatio, Pressable, ScrollView, TextInput, useWindowDimensions, View, type TextInputInstance } from 'react-native';
-import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
+import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
 import Svg from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -99,9 +101,14 @@ export function MediaComposer({
   const [discard, setDiscard] = useState(false);
   const [emoji, setEmoji] = useState(false);
   const shot = useRef<CanvasRef>(null);
+  // Where a video shows on screen (the drawing's canvas sits exactly on it).
+  const [videoBox, setVideoBox] = useState({ w: 0, h: 0 });
 
   const d = drafts[Math.min(at, drafts.length - 1)];
   const p = d?.p;
+  const isVideo = p?.kind === 'video' && !p.gif;
+  // No blur pen on a video (a blur needs the picture under it, and a video's moves).
+  const blurOn = blur && !isVideo;
   // The photo's own size (the gallery usually says; a fresh copy might not, so it's read).
   const [measured, setMeasured] = useState<{ uri: string; w: number; h: number } | null>(null);
   const size = p?.width && p.height ? { w: p.width, h: p.height } : measured?.uri === p?.uri && measured ? measured : { w: 0, h: 0 };
@@ -120,6 +127,7 @@ export function MediaComposer({
 
   /** Drawings, words and stickers become part of the photo (a snapshot of the canvas). */
   async function flatten(x: Draft): Promise<Draft> {
+    if (x.p.kind === 'video') return snapVideo(x);
     if (!x.strokes.length && !x.layers.length && !x.filter) return x;
     if (!shot.current || x.key !== d?.key) return x;
     const box = fit(size, area);
@@ -128,6 +136,22 @@ export function MediaComposer({
     const flat: Draft = { ...x, strokes: [], layers: [], filter: undefined, p: { ...x.p, uri: uri.startsWith('file:') ? uri : `file://${uri}`, mime: 'image/jpeg', width: Math.round(box.w * scale), height: Math.round(box.h * scale), size: undefined, edited: true } };
     setDrafts((all) => all.map((y) => (y.key === x.key ? flat : y)));
     return flat;
+  }
+
+  /**
+   * A video's drawing, words and stickers: a see-through picture of them, put on every
+   * frame when it's sent (files.ts, VideoShrink.kt). They stay on the draft too, to change
+   * when you come back to it.
+   */
+  async function snapVideo(x: Draft): Promise<Draft> {
+    const keep = (y: Draft) => {
+      setDrafts((all) => all.map((z) => (z.key === y.key ? y : z)));
+      return y;
+    };
+    if (!x.strokes.length && !x.layers.length) return x.p.overlay ? keep({ ...x, p: { ...x.p, overlay: undefined } }) : x;
+    if (!shot.current || x.key !== d?.key) return x;
+    const uri = await captureRef(shot, { format: 'png', result: 'tmpfile' });
+    return keep({ ...x, p: { ...x.p, overlay: uri.startsWith('file:') ? uri : `file://${uri}` } });
   }
 
   async function goTo(i: number) {
@@ -234,7 +258,7 @@ export function MediaComposer({
   }
 
   function addLayer(l: NewLayer) {
-    const box = fit(size, area);
+    const box = isVideo ? videoBox : fit(size, area);
     const k = UNITS / Math.max(1, box.w);
     change(d.key, { layers: [...d.layers, { ...l, id: core.newId(), x: (box.w / 2) * k, y: (box.h / 2.4) * k, scale: 1, rot: 0 } as Layer] });
   }
@@ -244,7 +268,7 @@ export function MediaComposer({
     if (drafts.length !== 1 || p?.kind !== 'video' || p.gif) return null;
     const len = p.trim ? p.trim.end - p.trim.start : p.duration;
     if (!len) return null;
-    return fill(t.aboutSize, { size: fileSize(on ? Math.max(p.size ?? 0, videoSizeGuess(p, len)) : videoSizeGuess(p, len)) });
+    return fill(t.aboutSize, { size: fileSize(videoSizeGuess(p, len, on)) });
   }
 
   if (!d) return null;
@@ -252,21 +276,50 @@ export function MediaComposer({
   const canOnce = !noOnce && drafts.length === 1 && squeezable(p);
   const canHd = drafts.some((x) => squeezable(x.p));
 
-  const top: { icon: IconName; label: string; on: () => void; active?: boolean; id: string }[] = editable(p)
+  type Tb = { icon: IconName; label: string; on: () => void; active?: boolean; id: string };
+  // Stickers, words and the pen: on photos and videos alike.
+  const drawTools: Tb[] = [
+    { icon: 'sticker', label: t.sticker, on: () => setTool('sticker'), active: tool === 'sticker', id: 'tool-sticker' },
+    { icon: 'text', label: t.textWord, on: () => (setTool('text'), setWriting({ id: null, text: '', font: 0, box: false })), active: tool === 'text', id: 'tool-text' },
+    { icon: 'draw', label: t.drawWord, on: () => setTool(tool === 'draw' ? null : 'draw'), active: tool === 'draw', id: 'tool-draw' },
+  ];
+  const top: Tb[] = editable(p)
     ? [
         { icon: 'crop', label: t.cropWord, on: () => setTool(tool === 'crop' ? null : 'crop'), active: tool === 'crop', id: 'tool-crop' },
         { icon: 'filters', label: t.filtersWord, on: () => setTool(tool === 'filter' ? null : 'filter'), active: tool === 'filter', id: 'tool-filter' },
-        { icon: 'sticker', label: t.sticker, on: () => setTool('sticker'), active: tool === 'sticker', id: 'tool-sticker' },
-        { icon: 'text', label: t.textWord, on: () => (setTool('text'), setWriting({ id: null, text: '', font: 0, box: false })), active: tool === 'text', id: 'tool-text' },
-        { icon: 'draw', label: t.drawWord, on: () => setTool(tool === 'draw' ? null : 'draw'), active: tool === 'draw', id: 'tool-draw' },
+        ...drawTools,
       ]
-    : p.kind === 'video' && !p.gif
-      ? // A video: send it without its sound, like WhatsApp's speaker button.
-        [{ icon: p.mute ? 'speakerOff' : 'speaker', label: p.mute ? t.soundOff : t.soundOn, on: () => (tick(), changeP(d.key, { mute: !p.mute })), active: !!p.mute, id: 'video-mute' }]
+    : isVideo
+      ? // A video: send it without its sound, like WhatsApp's speaker button; and the pen, words and stickers.
+        [{ icon: p.mute ? 'speakerOff' : 'speaker', label: p.mute ? t.soundOff : t.soundOn, on: () => (tick(), changeP(d.key, { mute: !p.mute })), active: !!p.mute, id: 'video-mute' }, ...drawTools]
       : [];
+
+  // The canvas's part (the same on a photo and over a video).
+  const canvasProps = {
+    strokes: d.strokes,
+    layers: d.layers,
+    drawing: tool === 'draw',
+    color,
+    pen: PENS[pen],
+    shot,
+    onStroke: (s: Stroke) => change(d.key, { strokes: [...d.strokes, s] }),
+    onMove: (id: string, x: number, y: number, scale: number, rot: number) => change(d.key, { layers: d.layers.map((l) => (l.id === id ? { ...l, x, y, scale, rot } : l)) }),
+    onRemove: (id: string) => change(d.key, { layers: d.layers.filter((l) => l.id !== id) }),
+    onEditText: (id: string) => {
+      const l = d.layers.find((x) => x.id === id);
+      if (l?.kind === 'text') {
+        setColor(l.color);
+        setWriting({ id, text: l.text, font: l.font ?? 0, box: !!l.box });
+        setTool('text');
+      }
+    },
+  };
 
   return (
     <Modal visible animationType="slide" onRequestClose={() => (tool ? setTool(null) : tryClose())} statusBarTranslucent navigationBarTranslucent>
+      {/* A pop-up is a window of its own: without its own gesture root, the pen, the trim strip,
+          crop, and moving stickers and words get no touches on Android (owner, 18 Nov). */}
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: '#000' }}>
         {/* Top: close, Private, HD, and the photo tools. */}
         <View style={{ paddingTop: insets.top + 6, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4, zIndex: 3 }}>
@@ -307,30 +360,7 @@ export function MediaComposer({
         <GestureDetector gesture={swipe}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
           {p.kind === 'image' && box.w > 0 && editable(p) ? (
-            <Canvas
-              key={d.key + p.uri}
-              uri={p.uri}
-              box={box}
-              strokes={d.strokes}
-              layers={d.layers}
-              drawing={tool === 'draw'}
-              color={color}
-              pen={PENS[pen]}
-              blur={blur}
-              filter={d.filter}
-              shot={shot}
-              onStroke={(s) => change(d.key, { strokes: [...d.strokes, s] })}
-              onMove={(id, x, y, scale, rot) => change(d.key, { layers: d.layers.map((l) => (l.id === id ? { ...l, x, y, scale, rot } : l)) })}
-              onRemove={(id) => change(d.key, { layers: d.layers.filter((l) => l.id !== id) })}
-              onEditText={(id) => {
-                const l = d.layers.find((x) => x.id === id);
-                if (l?.kind === 'text') {
-                  setColor(l.color);
-                  setWriting({ id, text: l.text, font: l.font ?? 0, box: !!l.box });
-                  setTool('text');
-                }
-              }}
-            />
+            <Canvas key={d.key + p.uri} uri={p.uri} box={box} blur={blur} filter={d.filter} {...canvasProps} />
           ) : p.kind === 'image' ? (
             <Image source={{ uri: p.uri }} style={{ width: '100%', height: '100%' }} contentFit="contain" />
           ) : p.kind === 'video' ? (
@@ -339,6 +369,9 @@ export function MediaComposer({
               p={p}
               max={maxVideoMs}
               quiet={!!p.mute}
+              busy={!!tool}
+              onBox={setVideoBox}
+              overlay={isVideo ? (vbox) => <Canvas key={d.key} uri={p.uri} box={vbox} clear {...canvasProps} /> : undefined}
               onTrim={(trim) => changeP(d.key, { trim })}
               onLength={(ms) => !p.duration && setDrafts((all) => all.map((x) => (x.key === d.key ? { ...x, p: capped({ ...x.p, duration: ms }, maxVideoMs) } : x)))}
             />
@@ -356,23 +389,25 @@ export function MediaComposer({
           {tool === 'draw' && (
             <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', end: 10, top: 10, gap: 10, alignItems: 'center' }}>
               <Round icon="undo" label={t.undoWord} onPress={() => change(d.key, { strokes: d.strokes.slice(0, -1) })} id="draw-undo" />
-              {!blur && <ColourSlider color={color} onPick={setColor} />}
+              {!blurOn && <ColourSlider color={color} onPick={setColor} />}
             </Animated.View>
           )}
           {tool === 'draw' && (
             <Animated.View entering={fadeIn} exiting={fadeOut} style={{ position: 'absolute', bottom: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)' }}>
               {PENS.map((w, i) => (
                 <Pressy key={w} ripple="light" onPress={() => (setPen(i), setBlur(false))} label={`${t.penSize} ${i + 1}`} round testID={`pen-${i}`}>
-                  <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: !blur && pen === i ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: !blurOn && pen === i ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
                     <View style={{ width: 6 + i * 6, height: 6 + i * 6, borderRadius: 10, backgroundColor: color }} />
                   </View>
                 </Pressy>
               ))}
-              <Pressy ripple="light" onPress={() => setBlur(!blur)} label={t.blurPen} round testID="pen-blur">
-                <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: blur ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
-                  <Icon name="blurPen" size={20} color="#FFFFFF" />
-                </View>
-              </Pressy>
+              {!isVideo && (
+                <Pressy ripple="light" onPress={() => setBlur(!blur)} label={t.blurPen} round testID="pen-blur">
+                  <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: blur ? 'rgba(255,255,255,0.22)' : 'transparent' }}>
+                    <Icon name="blurPen" size={20} color="#FFFFFF" />
+                  </View>
+                </Pressy>
+              )}
             </Animated.View>
           )}
 
@@ -574,6 +609,7 @@ export function MediaComposer({
           </Animated.View>
         )}
       </KeyboardAvoidingView>
+      </GestureHandlerRootView>
 
       <Sheet visible={hdSheet} onClose={() => setHdSheet(false)} title={t.mediaQuality}>
         {(
@@ -723,9 +759,50 @@ function soundOff(player: ReturnType<typeof useVideoPlayer>, quiet: boolean) {
   player.muted = quiet;
 }
 
-/** A video playing over and over (only the part that's kept), with the trim strip under it. */
-function VideoPart({ p, max, quiet, onTrim, onLength }: { p: Picked; max?: number; quiet: boolean; onTrim: (trim: { start: number; end: number }) => void; onLength: (ms: number) => void }) {
+/**
+ * A video playing over and over (only the part that's kept), with the trim strip under it.
+ * `overlay`: the drawing's canvas, laid exactly on the picture (`onBox` says where that is).
+ * `busy`: a tool is open (no tap to stop it, and the trim strip hidden under the pens).
+ */
+function VideoPart({
+  p,
+  max,
+  quiet,
+  busy,
+  overlay,
+  onBox,
+  onTrim,
+  onLength,
+}: {
+  p: Picked;
+  max?: number;
+  quiet: boolean;
+  busy?: boolean;
+  overlay?: (box: { w: number; h: number }) => ReactNode;
+  onBox?: (box: { w: number; h: number }) => void;
+  onTrim: (trim: { start: number; end: number }) => void;
+  onLength: (ms: number) => void;
+}) {
   const t = useT();
+  // Its shape as it's seen (a first frame comes turned the right way; the player's size doesn't).
+  const [shape, setShape] = useState<{ w: number; h: number } | null>(null);
+  const [room, setRoom] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    if (!overlay) return;
+    let on = true;
+    VideoThumbnails.getThumbnailAsync(p.uri, { time: 0, quality: 0.1 })
+      .then((f) => on && f.width > 0 && f.height > 0 && setShape({ w: f.width, h: f.height }))
+      .catch(() => {});
+    return () => {
+      on = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.uri, !!overlay]);
+  const box = shape ? fit(shape, room) : null;
+  useEffect(() => {
+    if (box) onBox?.(box);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box?.w, box?.h]);
   const player = useVideoPlayer({ uri: p.uri }, (pl) => {
     pl.loop = true;
     pl.muted = false;
@@ -753,19 +830,32 @@ function VideoPart({ p, max, quiet, onTrim, onLength }: { p: Picked; max?: numbe
   const gif = !!p.gif;
   return (
     <View style={{ flex: 1, alignSelf: 'stretch' }}>
-      {/* A tap stops and starts it, with ▶ in the middle while stopped (like WhatsApp). */}
-      <Pressable style={{ flex: 1 }} onPress={() => (playing ? player.pause() : player.play())} accessibilityLabel={playing ? t.pause : t.play}>
-        <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} testID="editor-video" />
-        {!playing && (
+      <View style={{ flex: 1 }} onLayout={(e) => setRoom({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+        {/* A tap stops and starts it, with ▶ in the middle while stopped (like WhatsApp). The player
+            itself never gets a touch: Android's player view takes the finger away from the pen. */}
+        <Pressable style={{ flex: 1 }} disabled={busy} onPress={() => (playing ? player.pause() : player.play())} accessibilityLabel={playing ? t.pause : t.play}>
+          <View pointerEvents="none" style={{ flex: 1 }}>
+            <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} testID="editor-video" />
+          </View>
+        </Pressable>
+        {!playing && !busy && (
           <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="play" size={28} color="#FFFFFF" />
             </View>
           </Animated.View>
         )}
-      </Pressable>
+        {/* The drawing, on top of the picture (not inside the tap above). */}
+        {overlay && box && box.w > 0 && (
+          <View pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>
+            {overlay(box)}
+          </View>
+        )}
+      </View>
+      {/* While drawing, the strip only steps out of the way (its room stays), so the picture and
+          the drawing on it keep the same size. */}
       {!gif && length > 1500 && (
-        <Animated.View style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2 }}>
+        <View pointerEvents={busy ? 'none' : 'auto'} style={{ paddingHorizontal: 30, paddingTop: 10, paddingBottom: 2, opacity: busy ? 0 : 1 }}>
           <TrimStrip
             p={p}
             length={length}
@@ -775,7 +865,7 @@ function VideoPart({ p, max, quiet, onTrim, onLength }: { p: Picked; max?: numbe
               player.seekBy(trim.start / 1000 - player.currentTime);
             }}
           />
-        </Animated.View>
+        </View>
       )}
       {gif && (
         <Txt size={13} color="rgba(255,255,255,0.7)" align="center" style={{ paddingVertical: 6 }}>

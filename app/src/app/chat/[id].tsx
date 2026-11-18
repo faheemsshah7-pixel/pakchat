@@ -56,7 +56,7 @@ import { ScheduledBar } from '../../ui/chat/ScheduledBar';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { MuteSheet } from '../../ui/MuteSheet';
 import { SchedulePicker } from '../../ui/SchedulePicker';
-import { bodyLine, dayLabel, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
+import { bodyLine, dayLabel, isCallNote, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
@@ -154,6 +154,7 @@ function ChatScreen() {
   const [pollKey, setPollKey] = useState(0);
   const [timerOpen, setTimerOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [callToDelete, setCallToDelete] = useState<Message | null>(null);
   const [clearing, setClearing] = useState(false);
   const [leftChoices, setLeftChoices] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
@@ -168,7 +169,7 @@ function ChatScreen() {
   const arrived = useRef(new Set<string>());
   // The kinds of row the list keeps apart, so a row is only reused for one built the same way.
   const itemType = useCallback(
-    (it: Item) => (it.kind !== 'msg' ? it.kind : it.m.kind === 'system' ? 'system' : `${it.m.author === core.myId ? 'mine' : 'theirs'}${it.m.sentAt > openedAt ? '-new' : ''}`),
+    (it: Item) => (it.kind !== 'msg' ? it.kind : isCallNote(it.m) ? 'call' : it.m.kind === 'system' ? 'system' : `${it.m.author === core.myId ? 'mine' : 'theirs'}${it.m.sentAt > openedAt ? '-new' : ''}`),
     [openedAt],
   );
   const listRef = useRef<FlashListRef<Item>>(null);
@@ -539,17 +540,30 @@ function ChatScreen() {
     [albums],
   );
 
+  // How many are picked, for the tap and hold below: read when used, so picking one more
+  // doesn't make every bubble in a long chat draw again.
+  const pickedCount = useRef(0);
+  useEffect(() => {
+    pickedCount.current = picked.size;
+  }, [picked.size]);
+
   // A tap picks while picking. Otherwise a tap on a sticker shows it big, with Save, like WhatsApp.
   const [stickerShown, setStickerShown] = useState<Message | null>(null);
   const onPress = useCallback(
     (m: Message) => {
-      if (picked.size) toggle(m);
+      if (pickedCount.current) toggle(m);
       else if (!m.deleted && m.file?.kind === 'sticker' && haveFile(m)) setStickerShown(m);
     },
-    [picked.size, toggle],
+    [toggle],
   );
   const onLongPress = useCallback(
     (m: Message) => {
+      // A call in the chat: held, it asks to take it out of the chat (not picked with messages).
+      if (isCallNote(m) && !pickedCount.current) {
+        thud();
+        setCallToDelete(m);
+        return;
+      }
       if (m.kind === 'system') return;
       thud();
       toggle(m);
@@ -1356,6 +1370,26 @@ function ChatScreen() {
           </View>
         )}
       </Sheet>
+
+      {/* Taking a call out of the chat (held). */}
+      <Dialog
+        visible={!!callToDelete}
+        onClose={() => setCallToDelete(null)}
+        title={t.deleteCall}
+        buttons={[
+          {
+            label: t.delete,
+            danger: true,
+            testID: 'delete-call',
+            onPress: () => {
+              const m = callToDelete;
+              setCallToDelete(null);
+              if (m) void act(() => core.deleteForMe([m]));
+            },
+          },
+          { label: t.cancel, onPress: () => setCallToDelete(null) },
+        ]}
+      />
 
       {/* Deleting picked messages. */}
       <Dialog

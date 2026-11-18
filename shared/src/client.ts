@@ -15,7 +15,7 @@
 // the person who left can't read what comes next.
 
 import type { Connection, ConnectionFactory, WireEnvelope } from './connection';
-import type { Attachment, Body, CallPlan, CallSignal, Change, ChatQuote, Content, HistoryFile, LinkPreview, SyncChange, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
+import type { Attachment, Body, CallPlan, CallRecord, CallSignal, Change, ChatQuote, Content, HistoryFile, LinkPreview, SyncChange, SharedContact, Payload, Place, Ref, StatusQuote } from './content';
 import { isBody, isChange, LIVE_MAX_MS, parseContent, writeContent } from './content';
 import type { HistoryBundle } from './history';
 import { importHistory } from './history';
@@ -123,6 +123,8 @@ const MAX_HELD = 500;
 const HOLD_MS = 7 * 24 * 3600_000;
 
 const deviceKey = (d: Device) => `${d.userId}:${d.deviceId}`;
+/** What counts as unread: messages, and missed calls (not group notes, nor calls I made or answered). */
+const countsUnread = (m: Message) => m.kind !== 'system' || (m.event?.event === 'call' && m.event.missed === true);
 // Reactions, votes, "opened" and live location moves never wake a phone (the server lets them
 // through as reactions, which also go in groups where only admins send).
 const kindFor = (p: Payload): OutboxItem['kind'] => (p.t === 'react' || p.t === 'vote' || p.t === 'opened' || p.t === 'live' ? 'reaction' : 'message');
@@ -132,6 +134,8 @@ const fromB64 = (b64: string) => atob(b64);
 
 export class PakChat {
   private session: Session | null = null;
+  /** This device's keys, made for a sign-in the server hasn't taken yet (see signInWith). */
+  private fresh: Promise<{ handle: string; device: DeviceKeys & { name: string }; keys: PreKeys }> | null = null;
   private conn: Connection | null = null;
   private connected = false;
   /** Everything that touches Signal or storage runs here, one thing at a time. */
@@ -225,10 +229,19 @@ export class PakChat {
   async signInWith(register: (device: DeviceKeys & { name: string }, keys: PreKeys) => Promise<SignedIn>): Promise<Session> {
     const { signal, storage, server } = this.o;
     // We don't know our user id until the server tells us, so start with a temporary name.
-    let handle = await signal.createDevice(`new-${this.newId()}`, 1);
-    const device = { ...(await signal.deviceKeys(handle)), name: this.o.deviceName ?? 'Phone' };
-    const signedIn = await register(device, await signal.newPreKeys(handle, 100));
-    handle = await signal.setAddress(handle, signedIn.user.id, signedIn.deviceId);
+    // Keys the server didn't take (a sign-in that asked for the two-step PIN, or a wrong PIN)
+    // are used again on the next try, so each try doesn't make 100 new ones.
+    this.fresh ??= (async () => {
+      const made = await signal.createDevice(`new-${this.newId()}`, 1);
+      return { handle: made, device: { ...(await signal.deviceKeys(made)), name: this.o.deviceName ?? 'Phone' }, keys: await signal.newPreKeys(made, 100) };
+    })();
+    const fresh = await this.fresh.catch((err: unknown) => {
+      this.fresh = null;
+      throw err;
+    });
+    const signedIn = await register(fresh.device, fresh.keys);
+    this.fresh = null;
+    const handle = await signal.setAddress(fresh.handle, signedIn.user.id, signedIn.deviceId);
     this.session = {
       token: signedIn.token,
       userId: signedIn.user.id,
@@ -781,8 +794,44 @@ export class PakChat {
     await this.inLane(async () => {
       const chat = await this.o.storage.getChat(chatId);
       if (!chat || chat.kind === 'status') return;
+      // The caller's record of it came first: that's the one to keep.
+      const had = await this.o.storage.getMessage(chatId, info.by, `call-${callId}`);
+      if (had && had.seq !== null) return;
       await this.note(chat, `call-${callId}`, { event: 'call', ...info }, at);
+      // A call moves the chat up the list, like a message (like WhatsApp's).
+      const fresh = (await this.o.storage.getChat(chatId)) ?? chat;
+      if (fresh.lastActivity < at) {
+        const moved = { ...fresh, lastActivity: at };
+        await this.o.storage.putChat(moved);
+        this.emit('chat', moved);
+      }
     });
+  }
+
+  /**
+   * I started this call and it ended: its record goes to everyone in the chat
+   * and their other devices (and mine), in place of the note each device made
+   * for itself, so every phone and computer shows the same bubble (content.ts,
+   * CallRecord). `at`: when it started (or rang).
+   */
+  async sendCallRecord(chatId: string, callId: string, info: { video: boolean; group: boolean; seconds: number; joined?: string[] }, at: number) {
+    const record: CallRecord = { t: 'callRecord', call: callId, video: info.video, seconds: Math.max(0, Math.round(info.seconds)) };
+    if (info.group) {
+      record.group = true;
+      record.joined = [...new Set(info.joined ?? [])];
+    }
+    const content = { ...record, v: 1, id: `call-${callId}`, chat: chatId, at } as Content;
+    if (!parseContent(writeContent(content))) return;
+    const queued = await this.inLane(async () => {
+      const chat = await this.o.storage.getChat(chatId);
+      // Not in a status, a call link's own group, a chat I've left, or a group where only admins send (unless I am one).
+      if (!chat || chat.kind === 'status' || chat.callLink || chat.left || !maySend(chat, this.s.userId, 'text')) return false;
+      // My own note of it becomes the record (it gets its number when it's sent).
+      if (!(await this.o.storage.getMessage(chatId, this.s.userId, content.id))) return false;
+      await this.queue(content, 'message', { author: this.s.userId, id: content.id });
+      return true;
+    });
+    if (queued) void this.flush();
   }
 
   /** This device, as call messages name it. */
@@ -1053,7 +1102,8 @@ export class PakChat {
           const chat = await storage.getChat(item.chatId);
           m.seq = seq;
           m.order = seq;
-          m.sentAt = sentAt;
+          // A call's record keeps the call's own time (when it started).
+          if (m.kind !== 'system') m.sentAt = sentAt;
           // Paused just as it went: it went, so it shows as sent.
           if (m.status === 'queued' || m.status === 'failed' || m.status === 'paused') m.status = 'sent';
           if (chat?.kind === 'status') m.expiresAt = sentAt + STATUS_MS;
@@ -1371,6 +1421,10 @@ export class PakChat {
     // Anything else must not pretend to be a call message.
     if (e.kind === 'call') return;
     const { storage } = this.o;
+    if (c.t === 'callRecord') {
+      if (chat.kind !== 'status') await storage.transaction(() => this.gotCallRecord(chat, e, c, at));
+      return;
+    }
     if (isBody(c)) {
       // A file that was never uploaded can't be shown (a broken or odd sender).
       if (c.t === 'file' && (c.file.id === PENDING || !c.file.key || !c.file.digest)) return;
@@ -1561,11 +1615,51 @@ export class PakChat {
     if (chat) await this.note(chat, `code-${userId}-${at}`, { event: 'code_changed', by: userId }, at);
   }
 
+  /**
+   * A call's record from whoever started it (content.ts, CallRecord): it takes
+   * the place of this device's own note of the call, if there's one. Missed:
+   * I didn't answer (anywhere) or, in a group, didn't take part.
+   */
+  private async gotCallRecord(chat: Chat, e: WireEnvelope, c: Content & CallRecord, at: number) {
+    const { storage } = this.o;
+    const had = await storage.getMessage(chat.id, e.from, c.id);
+    if (had && had.seq !== null) return; // sent again: already have it
+    if (c.id !== `call-${c.call}`) return; // a record is only ever for its own call
+    const me = this.s.userId;
+    // This device's own note says I took part (a group call I joined after the caller left,
+    // say): that stays, with my own time. The caller's list only knows who it talked to.
+    const mine = had?.event?.event === 'call' && had.event.missed === false ? had.event : null;
+    const missed = !mine && e.from !== me && (c.group ? !(c.joined ?? []).includes(me) : c.seconds === 0);
+    const seconds = c.group && mine && typeof mine.seconds === 'number' ? mine.seconds : c.seconds;
+    // When it started, by the caller's clock: never later than the server got it, nor a day before.
+    const started = Math.min(at, Math.max(c.at, at - 86_400_000));
+    const m: Message = {
+      chatId: chat.id,
+      id: c.id,
+      author: e.from,
+      authorDevice: e.from_device ?? 0,
+      seq: e.seq,
+      order: e.seq ?? had?.order ?? QUEUED + at,
+      sentAt: started,
+      kind: 'system',
+      event: { event: 'call', by: e.from, video: c.video, group: !!c.group, missed, seconds },
+    };
+    if (chat.timer) m.expiresAt = at + chat.timer * 1000;
+    await storage.putMessage(m);
+    const fresh = (await storage.getChat(chat.id)) ?? chat;
+    fresh.lastActivity = Math.max(fresh.lastActivity, at);
+    // A missed call counts as unread, like WhatsApp's (a call I made or answered doesn't).
+    if (missed && (e.seq ?? 0) > fresh.readUpTo) fresh.unread++;
+    await storage.putChat(fresh);
+    this.emit('message', m);
+    this.emit('chat', fresh);
+  }
+
   /** A note in the chat from this device itself, like "messages now disappear after 7 days". */
   private async note(chat: Chat, id: string, event: SystemEvent, at: number) {
     // It goes just after the newest sent message, so later messages still come under it.
     const recent = await this.o.storage.listMessages(chat.id, { limit: 50 });
-    const last = recent.find((x) => x.seq !== null)?.seq ?? 0;
+    const last = Math.max(0, ...recent.map((x) => x.seq ?? 0));
     const m: Message = { chatId: chat.id, id, author: event.by, authorDevice: 0, seq: null, order: last + 0.5, sentAt: at, kind: 'system', event };
     await this.o.storage.putMessage(m);
     this.emit('message', m);
@@ -1672,7 +1766,7 @@ export class PakChat {
     const fresh = (await storage.getChat(chat.id)) ?? chat;
     fresh.readUpTo = Math.max(fresh.readUpTo, upTo);
     const recent = await storage.listMessages(chat.id, { limit: 1000 });
-    fresh.unread = recent.filter((m) => m.kind !== 'system' && m.author !== this.s.userId && (m.seq ?? 0) > fresh.readUpTo).length;
+    fresh.unread = recent.filter((m) => countsUnread(m) && m.author !== this.s.userId && (m.seq ?? 0) > fresh.readUpTo).length;
     await storage.putChat(fresh);
     this.emit('chat', fresh);
   }

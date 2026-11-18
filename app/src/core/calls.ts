@@ -37,20 +37,30 @@
 //      quietly if they've never chatted; an empty chat isn't listed). Their
 //      "ring" carries who else is in the call, so they connect to everyone.
 //
+//   7. A group chat's call (and a call link's) goes through our call server
+//      (groupCall.ts, LiveKit) instead of phone to phone, so up to 32 people fit:
+//      each phone sends once, and the call server passes it on. The messages above
+//      still ring, join and hang up; "ring" carries the call's key (and "here",
+//      for anyone joining late), which locks everything before it leaves the phone,
+//      so the call server never sees or hears it. Calls made one to one (and people
+//      added to them) stay phone to phone.
+//
 // Only one call at a time. Its state lives here, outside any screen, so the
 // call carries on while you look at your chats; the call screen
 // (app/call.tsx) and the green bar on the chat list just show it.
-import { MAX_CALL_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device } from '@pakchat/shared';
+import { MAX_CALL_PEOPLE, MAX_MESH_PEOPLE, OfflineError, type CallEvent, type CallSignal, type Chat, type Device, type Message } from '@pakchat/shared';
 import { router } from 'expo-router';
 import KV from 'expo-sqlite/kv-store';
-import { AppState, Dimensions, PermissionsAndroid, Vibration } from 'react-native';
-import { mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, type MediaStreamTrack } from 'react-native-webrtc';
+import { AppState, PermissionsAndroid, Vibration } from 'react-native';
+import { mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, type MediaStreamTrack } from '@livekit/react-native-webrtc';
 
 import { fileModule, type AudioRoute } from '../../modules/pakchat-signal';
 import { en, ur, type Strings } from '../i18n/strings';
 import { avatarTint, initials } from '../ui/letters';
 import { core } from './core';
+import { GroupRoom, newCallKey, type TileSize } from './groupCall';
 import { stopAll } from './player';
+import { know } from './push';
 import { tuneSdp } from './sdp';
 import { toneName } from './tones';
 
@@ -67,7 +77,8 @@ async function mediaAllowed(video: boolean) {
 /** How long a call rings before it's "missed" (the same on both sides). */
 export const RING_MS = 45_000;
 /** A group call has room for this many phones. */
-export const MAX_IN_CALL = MAX_CALL_PEOPLE;
+/** A call made one to one, with people added (phone to phone): room for this many. */
+export const MAX_IN_CALL = MAX_MESH_PEOPLE;
 /** How long to wait for the other phone after answering before giving up. */
 const CONNECT_MS = 25_000;
 /** The call messages that mean someone is in the call (not leaving or saying no). */
@@ -76,7 +87,7 @@ const IN_CALL_OPS: readonly CallSignal['op'][] = ['join', 'here', 'offer', 'answ
 const RECONNECT_MS = 15_000;
 
 /** A call going on in a call link's chat, as this phone has heard of it. */
-type LinkCall = { id: string; from: string; fromDevice: number; video: boolean; at: number; people: Set<string> };
+type LinkCall = { id: string; from: string; fromDevice: number; video: boolean; at: number; people: Set<string>; key?: string };
 /** A call link's call is taken to be over this long after it started, if nobody said they left. */
 const LINK_CALL_MS = 6 * 3_600_000;
 
@@ -95,6 +106,8 @@ export type PeerView = {
   stream: string | null;
   /** Goes up each time their sound or picture arrives anew, so the screen redraws it. */
   rev: number;
+  /** Talking now (a group call through the call server). */
+  speaking: boolean;
 };
 
 /** The call, as the screen shows it. */
@@ -126,6 +139,10 @@ export type CallView = {
   canAdd: boolean;
   /** I'm sharing my screen: everyone sees it instead of my camera. */
   sharing: boolean;
+  /** Through our call server (a group chat's call): up to 32 people, and who's talking shows. */
+  viaRoom: boolean;
+  /** I'm talking now (through the call server). */
+  speaking: boolean;
   /** Call waiting: someone else calling while I'm on this call (End & accept, or Decline). */
   waiting: { id: string; chatId: string; from: string; video: boolean; group: boolean } | null;
 };
@@ -171,6 +188,8 @@ type Live = Omit<CallView, 'peers' | 'local' | 'waiting'> & {
   joined: boolean;
   /** Ever connected to anyone. */
   connectedOnce: boolean;
+  /** Who I was ever connected to (a group call's record says who took part). */
+  talked: Set<string>;
   /** Who said no (group calls end when everyone has). */
   declined: Set<string>;
   members: string[];
@@ -182,11 +201,16 @@ type Live = Omit<CallView, 'peers' | 'local' | 'waiting'> & {
   done: boolean;
   /** The connection made while it rings, until it's answered (one-to-one calls; see 2b at the top). */
   early: Peer | null;
+  /** Through the call server (see 7 at the top): the call's key (null until it arrives), and its room. */
+  key: string | null;
+  room: GroupRoom | null;
+  /** Who's talking (phones' names, mine too). */
+  speakers: Set<string>;
 };
 
 /** A ringing call, kept so it survives PakChat being started by the ringing alert. */
 type IceServer = { urls: string[]; username?: string; credential?: string };
-type Ringing = { id: string; chatId: string; from: string; fromDevice: number; video: boolean; group: boolean; until: number; extra?: string[]; canAdd?: boolean };
+type Ringing = { id: string; chatId: string; from: string; fromDevice: number; video: boolean; group: boolean; until: number; extra?: string[]; canAdd?: boolean; key?: string; viaRoom?: boolean };
 const RINGING = 'call:ringing';
 
 // ---- Small helpers ----
@@ -200,19 +224,6 @@ type PcEvents = {
 /** The camera's picture: smaller and slower with "Use less data for calls". */
 function cameraSize() {
   return core.settings.lessDataCalls ? { width: 320, height: 240, frameRate: 15 } : { width: 640, height: 480, frameRate: 24 };
-}
-
-/**
- * How a shared screen is captured. The whole screen, never just one app (Android 14
- * and later offer "one app" first; that app's picture freezes once you leave it).
- * And at most 1280 pixels on its longer side, about what WhatsApp sends: a phone's
- * full screen (nearly 3000 pixels tall on a Pixel 8 Pro) is more than many phones'
- * video encoders take, and then the other phone only sees a frozen picture.
- */
-function screenSize() {
-  const { width, height, scale } = Dimensions.get('screen');
-  const longest = Math.max(width, height) * scale;
-  return { createConfigForDefaultDisplay: true, resolutionScale: longest > 1280 ? 1280 / longest : 1 };
 }
 
 type TrackEvents = { addEventListener(type: 'ended', fn: () => void): void };
@@ -295,7 +306,7 @@ class Calls {
   view(): CallView | null {
     const c = this.call;
     if (!c) return null;
-    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, early: _e, mediaReady: _mr, ...rest } = c;
+    const { fromDevice: _f, peers, localStream, screenStream: _s, joined: _j, connectedOnce: _c, declined: _d, members: _m, links: _l, cancel: _x, done: _done, early: _e, mediaReady: _mr, key: _k, room: _r, speakers, ...rest } = c;
     const w = this.waiting;
     return {
       ...rest,
@@ -303,7 +314,8 @@ class Calls {
       extra: [...c.extra],
       // While I share my screen, my own tile says so (like WhatsApp) instead of showing it back to me.
       local: localStream && c.camera && !c.sharing ? localStream.toURL() : null,
-      peers: [...peers.values()].map((p) => ({ key: p.key, userId: p.userId, state: p.state, audio: p.audio, video: p.video, screen: p.screen, stream: p.stream ? p.stream.toURL() : null, rev: p.rev })),
+      speaking: speakers.has(keyOf(core.client.device)),
+      peers: [...peers.values()].map((p) => ({ key: p.key, userId: p.userId, state: p.state, audio: p.audio, video: p.video, screen: p.screen, stream: p.stream ? p.stream.toURL() : null, rev: p.rev, speaking: speakers.has(p.key) })),
     };
   }
 
@@ -333,8 +345,10 @@ class Calls {
       joined: true,
       members: this.othersIn(chat),
       canAdd: chat.kind === 'direct',
+      viaRoom: chat.kind === 'group',
     });
     c.invite = chat.kind === 'direct' ? invite : [];
+    if (c.viaRoom) c.key = newCallKey();
     this.call = c;
     this.emit();
     ready?.(c.id);
@@ -358,7 +372,7 @@ class Calls {
     audio.callAudioStart(video);
     // No ringing sound yet: it starts when their phone says it's ringing (like WhatsApp's "Calling…" then "Ringing…").
     // Everyone in the chat rings; closed phones are woken for it. A call link's call rings nobody: people join from the link.
-    const rang = await this.send(c, { op: 'ring', video, group: c.group }, undefined, !chat.callLink);
+    const rang = await this.send(c, { op: 'ring', video, group: c.group, ...(c.key ? { key: c.key } : {}) }, undefined, !chat.callLink);
     // Hung up already (before the ring got out): it's over.
     if (c.done) return 'started';
     if (!rang) {
@@ -373,8 +387,10 @@ class Calls {
     if (c.done) return 'started';
     this.watchAudio(c);
     this.ongoing(c);
+    // Into the call's room now, so it's ready as they answer.
+    if (c.viaRoom) void this.enterRoom(c);
     if (chat.callLink) {
-      this.linkCalls.set(chatId, { id: c.id, from: me.userId, fromDevice: me.deviceId, video, at: Date.now(), people: new Set([me.userId]) });
+      this.linkCalls.set(chatId, { id: c.id, from: me.userId, fromDevice: me.deviceId, video, at: Date.now(), people: new Set([me.userId]), key: c.key ?? undefined });
       return 'started';
     }
     c.cancel.push(
@@ -388,12 +404,16 @@ class Calls {
     return 'started';
   }
 
-  private fresh(x: Pick<Live, 'id' | 'chatId' | 'group' | 'video' | 'direction' | 'state' | 'from' | 'fromDevice' | 'joined' | 'members' | 'canAdd'> & { extra?: string[] }): Live {
+  private fresh(x: Pick<Live, 'id' | 'chatId' | 'group' | 'video' | 'direction' | 'state' | 'from' | 'fromDevice' | 'joined' | 'members' | 'canAdd' | 'viaRoom'> & { extra?: string[]; key?: string | null }): Live {
     return {
       extra: [],
       links: new Map(),
       invite: [],
+      key: null,
       ...x,
+      room: null,
+      speakers: new Set(),
+      speaking: false,
       startedAt: null,
       peers: new Map(),
       localStream: null,
@@ -408,6 +428,7 @@ class Calls {
       endReason: null,
       ringing: false,
       connectedOnce: false,
+      talked: new Set(),
       declined: new Set(),
       cancel: [],
       done: false,
@@ -517,6 +538,7 @@ class Calls {
     if (!(await media)) return this.end(c, 'permission');
     if (c.done) return;
     this.watchAudio(c);
+    if (c.viaRoom) void this.enterRoom(c);
     if (early) {
       await this.sendTracks(c, early);
       if (!c.done && early.pc?.connectionState === 'connected') this.connectionChanged(c, early);
@@ -562,20 +584,20 @@ class Calls {
       if (now && now.id !== s.call) {
         if (now.joined && (now.peers.size || now.connectedOnce)) {
           // Someone started a second call here: tell them about ours, so they come to it.
-          void this.sendTo(e.chatId, now.id, { op: 'ring', video: now.video, group: true }, [from]);
+          void this.sendTo(e.chatId, now.id, { op: 'ring', video: now.video, group: true, ...(now.key ? { key: now.key } : {}) }, [from]);
           return true;
         }
         // I'm alone in mine, and theirs has someone: mine goes, and I join theirs (the smaller id wins a tie).
         if (now.direction === 'out' && !now.peers.size && (!known || known.id !== now.id || s.call < now.id)) {
           this.end(now, 'hungUp', true);
           void this.send(now, { op: 'leave' });
-          this.linkCalls.set(e.chatId, { id: s.call, from: e.from, fromDevice: e.fromDevice, video: !!s.video, at: e.at, people: new Set([e.from]) });
+          this.linkCalls.set(e.chatId, { id: s.call, from: e.from, fromDevice: e.fromDevice, video: !!s.video, at: e.at, people: new Set([e.from]), key: s.key });
           void this.joinLink(e.chatId, now.video, (id) => this.screenOpen && router.setParams({ id }));
           return true;
         }
         return true;
       }
-      if (!known || known.id !== s.call) this.linkCalls.set(e.chatId, { id: s.call, from: e.from, fromDevice: e.fromDevice, video: !!s.video, at: e.at, people: new Set([e.from]) });
+      if (!known || known.id !== s.call) this.linkCalls.set(e.chatId, { id: s.call, from: e.from, fromDevice: e.fromDevice, video: !!s.video, at: e.at, people: new Set([e.from]), key: s.key });
       core.emit('calls');
       return true;
     }
@@ -595,7 +617,8 @@ class Calls {
     const k = this.linkCalls.get(chatId)!;
     const extra = l.people.filter((u) => u !== core.myId);
     knowNames(extra);
-    this.ring({ id: k.id, chatId, from: k.from, fromDevice: k.fromDevice, video, group: true, extra: [], canAdd: false, until: Date.now() + RING_MS }, RING_MS, false);
+    // A call link's call goes through the call server; its key comes with the ring, or from whoever is in it ("here").
+    this.ring({ id: k.id, chatId, from: k.from, fromDevice: k.fromDevice, video, group: true, extra: [], canAdd: false, until: Date.now() + RING_MS, key: k.key, viaRoom: true }, RING_MS, false);
     ready?.(k.id);
     await this.answer();
     return 'started';
@@ -668,8 +691,10 @@ class Calls {
     if (c.state === 'incoming') return this.decline();
     // Before anyone answered, their phones may be closed and ringing: wake them to stop.
     const ringing = !c.connectedOnce;
-    this.end(c, 'hungUp');
-    await this.send(c, { op: 'leave' }, undefined, ringing);
+    // "leave" starts on its way first, so their side ends as soon as it can.
+    const leaving = this.send(c, { op: 'leave' }, undefined, ringing);
+    this.end(c, 'hungUp', false, leaving);
+    await leaving;
   }
 
   /** Decline or Hang up pressed on the call's alert (background.ts). */
@@ -696,7 +721,7 @@ class Calls {
 
   /** Rings here. `announce`: show the ringing alert and the call screen (not when restoring one, or answering at once). */
   private ring(r: Ringing, ms: number, announce: boolean) {
-    const c = this.fresh({ id: r.id, chatId: r.chatId, group: r.group, video: r.video, direction: 'in', state: 'incoming', from: r.from, fromDevice: r.fromDevice, joined: false, members: [], extra: r.extra ?? [], canAdd: r.canAdd ?? false });
+    const c = this.fresh({ id: r.id, chatId: r.chatId, group: r.group, video: r.video, direction: 'in', state: 'incoming', from: r.from, fromDevice: r.fromDevice, joined: false, members: [], extra: r.extra ?? [], canAdd: r.canAdd ?? false, viaRoom: !!r.viaRoom || !!r.key, key: r.key ?? null });
     this.call = c;
     void core.storage.getChat(r.chatId).then((chat) => {
       if (chat) c.members = this.othersIn(chat);
@@ -729,6 +754,8 @@ class Calls {
   private async showRing(c: Live) {
     const t = words();
     const chat = await core.storage.getChat(c.chatId);
+    // A stranger's first call: their name, if the server answers quickly (it mustn't hold up the ringing).
+    if (chat?.kind !== 'group') await know(c.from, 1_500);
     const title = chat?.kind === 'group' ? `${core.chatTitle(chat)}` : core.name(c.from) || t.unknownCaller;
     fileModule().callRing(
       JSON.stringify({
@@ -802,9 +829,11 @@ class Calls {
         // I answered on another of my phones: this one stops ringing.
         if (mine && c.state === 'incoming') return this.end(c, 'elsewhere');
         if (!c.joined) return;
+        this.gotKey(c, s.key);
         return this.someoneJoined(c, from, s);
       case 'here': {
         if (!c?.joined) return;
+        this.gotKey(c, s.key);
         const p = c.peers.get(keyOf(from));
         // I kept the connection made while it rang, but they didn't: start again the usual way.
         if (p?.early && !s.early) this.dropEarly(p);
@@ -876,7 +905,7 @@ class Calls {
     const extra = (s.people ?? []).filter((u) => u !== core.myId && u !== e.from);
     knowNames(extra);
     const canAdd = (await core.storage.getChat(e.chatId))?.kind === 'direct';
-    const ringing = { id: s.call, chatId: e.chatId, from: e.from, fromDevice: e.fromDevice, video: !!s.video, group: !!s.group || extra.length > 0, extra, canAdd };
+    const ringing: Omit<Ringing, 'until'> = { id: s.call, chatId: e.chatId, from: e.from, fromDevice: e.fromDevice, video: !!s.video, group: !!s.group || extra.length > 0, extra, canAdd, ...(s.key ? { key: s.key, viaRoom: true } : {}) };
     const now = this.call && !this.call.done ? this.call : null;
     if (now) {
       // We called each other at the same moment: the call with the smaller id wins, on both phones.
@@ -913,7 +942,7 @@ class Calls {
 
   private someoneJoined(c: Live, from: Device, s: CallSignal) {
     const key = keyOf(from);
-    if (!c.peers.has(key) && c.peers.size >= MAX_IN_CALL - 1) {
+    if (!c.peers.has(key) && c.peers.size >= (c.viaRoom ? MAX_CALL_PEOPLE : MAX_IN_CALL) - 1) {
       // The call is full: "busy" to them.
       void this.send(c, { op: 'busy' }, [from]);
       return;
@@ -931,7 +960,7 @@ class Calls {
       } else this.closePeer(e);
     }
     // "I'm here": they connect with me (and with everyone else who answers the same).
-    void this.send(c, { op: 'here', video: c.camera, audio: !c.muted, ...(early ? { early: true } : {}) }, [from]);
+    void this.send(c, { op: 'here', video: c.camera, audio: !c.muted, ...(early ? { early: true } : {}), ...(c.viaRoom && c.key ? { key: c.key } : {}) }, [from]);
     this.meet(c, from, s);
     if (early) {
       void this.sendTracks(c, early).then(() => {
@@ -954,6 +983,13 @@ class Calls {
           if (!c.done && !c.connectedOnce) this.end(c, 'failed');
         }),
       );
+    }
+    // Through the call server: there's nothing to connect to them; they're connected once they're in its room.
+    if (c.viaRoom) {
+      if (c.room?.connected && p.state !== 'connected' && c.room.stream(p.key)) this.connectedTo(c, p);
+      void this.enterRoom(c);
+      this.emit();
+      return;
     }
     this.emit();
     // The phone whose name sorts first makes the offer.
@@ -1050,6 +1086,7 @@ class Calls {
     if (p) {
       this.closePeer(p);
       c.peers.delete(p.key);
+      if (c.viaRoom) this.applyTiles(c);
       this.emit();
     }
     this.dropInvite(c, from.userId);
@@ -1163,6 +1200,7 @@ class Calls {
   }
 
   private async offer(c: Live, p: Peer, restart = false) {
+    if (c.viaRoom) return;
     try {
       const pc = await this.connection(c, p);
       if (c.done) return;
@@ -1177,6 +1215,7 @@ class Calls {
   }
 
   private async gotOffer(c: Live, from: Device, sdp: string) {
+    if (c.viaRoom) return;
     const p = this.find(c, from) ?? this.peer(c, from);
     const pc = await this.connection(c, p);
     if (c.done) return;
@@ -1238,24 +1277,8 @@ class Calls {
       }
       return;
     }
-    if (state === 'connected') {
-      p.state = 'connected';
-      p.giveUp?.();
-      p.giveUp = null;
-      if (!c.connectedOnce) {
-        c.connectedOnce = true;
-        c.startedAt = Date.now();
-        c.state = 'active';
-        fileModule().callStopTone();
-        this.ongoing(c);
-        // A new group call: everyone else rings now.
-        if (c.invite.length) {
-          const invite = c.invite;
-          c.invite = [];
-          void this.add(invite);
-        }
-      }
-    } else if (state === 'disconnected' || state === 'failed') {
+    if (state === 'connected') this.connectedTo(c, p);
+    else if (state === 'disconnected' || state === 'failed') {
       if (p.state === 'connected') p.state = 'reconnecting';
       // The phone that offered tries a new way through (a different network, the relay).
       if (state === 'failed' && keyOf(core.client.device) < p.key) void this.offer(c, p, true);
@@ -1268,6 +1291,136 @@ class Calls {
       });
     }
     this.emit();
+  }
+
+  /** Sound flows with them now: the call is on (the timer starts with the first one). */
+  private connectedTo(c: Live, p: Peer) {
+    p.state = 'connected';
+    p.giveUp?.();
+    p.giveUp = null;
+    c.talked.add(p.userId);
+    if (c.viaRoom) this.applyTiles(c);
+    if (!c.connectedOnce) {
+      c.connectedOnce = true;
+      c.startedAt = Date.now();
+      c.state = 'active';
+      fileModule().callStopTone();
+      this.ongoing(c);
+      // A new group call: everyone else rings now.
+      if (c.invite.length) {
+        const invite = c.invite;
+        c.invite = [];
+        void this.add(invite);
+      }
+    }
+    this.emit();
+  }
+
+  // ---- Through our call server (see 7 at the top) ----
+
+  /** The call's key, from whoever is in it (joining a call link's call late): into the room with it. */
+  private gotKey(c: Live, key: string | undefined) {
+    if (!c.viaRoom || c.key || !key) return;
+    c.key = key;
+    void this.enterRoom(c);
+  }
+
+  /** Into the call's room on the call server, with my mic (and camera). Once; again only if it was lost. */
+  private async enterRoom(c: Live) {
+    if (c.done || c.room || !c.key || !c.joined) return;
+    if (c.mediaReady && !c.localStream) await c.mediaReady;
+    if (c.done || c.room || !c.localStream) return;
+    const me = keyOf(core.client.device);
+    // Everyone else's phones (the server only lets the chat's members in, and only a phone
+    // with the call's key can make out anything).
+    const allowed = (id: string) => id !== me && /^[^:]+:\d+$/.test(id);
+    this.tiles = null;
+    const room = new GroupRoom(allowed, {
+      state: (st) => this.roomState(c, room, st),
+      person: (id, here) => this.roomPerson(c, room, id, here),
+      media: (id) => {
+        const p = c.peers.get(id);
+        if (!p || c.room !== room) return;
+        p.stream = room.stream(id);
+        p.rev++;
+        if (p.state !== 'connected' && p.stream) this.connectedTo(c, p);
+        this.emit();
+      },
+      speaking: (ids) => {
+        if (c.room !== room) return;
+        c.speakers = new Set(ids);
+        this.emit();
+      },
+    });
+    c.room = room;
+    try {
+      const [{ url, token }, iceServers] = await Promise.all([core.server.callRoom(c.chatId, c.id), this.iceServers()]);
+      if (c.done || c.room !== room) return room.close();
+      await room.connect(url, token, c.key, iceServers);
+      if (c.done || c.room !== room) return room.close();
+      const less = !!core.settings.lessDataCalls;
+      const local = c.localStream;
+      const mic = local?.getAudioTracks()[0];
+      if (mic) await room.publish(mic, 'audio', less);
+      const video = c.screenStream?.getVideoTracks()[0] ?? local?.getVideoTracks()[0];
+      if (video) await room.publish(video, 'video', less);
+      this.applyTiles(c);
+    } catch (err) {
+      console.log(`[pakchat] call room: ${String(err)}`);
+      if (c.room === room) {
+        c.room = null;
+        room.close();
+      }
+      // Nobody can be reached: like a call that never connects.
+      if (!c.done && !c.connectedOnce) this.end(c, 'failed');
+    }
+  }
+
+  private roomState(c: Live, room: GroupRoom, st: 'connected' | 'reconnecting' | 'gone') {
+    if (c.done || c.room !== room) return;
+    if (st === 'gone') {
+      // The call server let go of me for good (not while it's trying again): the call is over here.
+      c.room = null;
+      room.close();
+      void this.send(c, { op: 'leave' });
+      return this.end(c, 'failed');
+    }
+    for (const p of c.peers.values()) {
+      if (st === 'reconnecting' && p.state === 'connected') p.state = 'reconnecting';
+      else if (st === 'connected' && p.state === 'reconnecting') p.state = 'connected';
+    }
+    this.emit();
+  }
+
+  private roomPerson(c: Live, room: GroupRoom, id: string, here: boolean) {
+    if (c.done || c.room !== room) return;
+    const [userId, device] = id.split(':');
+    const from: Device = { userId: userId ?? '', deviceId: Number(device) };
+    if (here) {
+      const p = this.peer(c, from);
+      p.stream = room.stream(id);
+      this.connectedTo(c, p);
+      knowNames([from.userId]);
+      return;
+    }
+    // Left the call server (hung up, or lost for good): same as their "leave".
+    this.someoneLeft(c, from);
+  }
+
+  /** Which tiles the call screen shows, so only their pictures come (and small ones for small tiles). */
+  showTiles(keys: string[] | null) {
+    const c = this.call;
+    if (!c?.room) return;
+    this.tiles = keys ? new Set(keys) : null;
+    this.applyTiles(c);
+  }
+
+  private tiles: Set<string> | null = null;
+
+  private applyTiles(c: Live) {
+    const n = c.peers.size + 1;
+    const size: TileSize = n <= 2 ? 'big' : n <= 8 ? 'medium' : 'small';
+    c.room?.setTiles(n > 8 ? this.tiles : null, size);
   }
 
   private closePeer(p: Peer) {
@@ -1343,7 +1496,9 @@ class Calls {
     c.front = true;
     fileModule().callVideo(true);
     this.emit();
-    // Each connection gets the picture, then is set up again with it.
+    // Through the call server: it goes there once. Phone to phone: each connection gets
+    // the picture, then is set up again with it.
+    if (c.room) void c.room.publish(track, 'video', !!core.settings.lessDataCalls).catch(() => {});
     for (const p of c.peers.values()) {
       if (!p.pc) continue;
       p.pc.addTrack(track, local);
@@ -1363,7 +1518,8 @@ class Calls {
     if (!c || c.done || c.state !== 'active' || c.sharing || !c.localStream) return false;
     let stream: MediaStream;
     try {
-      stream = await mediaDevices.getDisplayMedia({ android: screenSize() });
+      // The whole screen, at a size every phone can take (scripts/fix-webrtc.js).
+      stream = await mediaDevices.getDisplayMedia();
     } catch {
       return false;
     }
@@ -1376,6 +1532,7 @@ class Calls {
     c.screenStream = stream;
     c.sharing = true;
     const camera = local.getVideoTracks()[0];
+    if (c.room) void c.room.publish(screen, 'video', !!core.settings.lessDataCalls).catch(() => {});
     for (const p of c.peers.values()) {
       if (!p.pc) continue;
       const sender = camera && p.pc.getSenders().find((x) => x.track?.id === camera.id);
@@ -1405,6 +1562,8 @@ class Calls {
     c.sharing = false;
     const swaps: Promise<unknown>[] = [];
     if (!c.done) {
+      // Through the call server: my camera again (or no picture, in a voice call).
+      if (c.room) swaps.push((camera ? c.room.replaceVideo(camera) : c.room.dropVideo()).catch(() => {}));
       for (const p of c.peers.values()) {
         const sender = p.pc?.getSenders().find((x) => x.track?.id === screen?.id);
         if (!p.pc || !sender) continue;
@@ -1502,7 +1661,8 @@ class Calls {
 
   // ---- Ending ----
 
-  private end(c: Live, reason: EndReason, quiet = false) {
+  /** `after`: the camera and connections close once this is done ("leave" sent), or a second at most. */
+  private end(c: Live, reason: EndReason, quiet = false, after?: Promise<unknown>) {
     if (c.done) return;
     c.done = true;
     c.endReason = reason;
@@ -1522,24 +1682,32 @@ class Calls {
     step('ringing', () => fm.callStopRing(c.id));
     for (const stop of c.cancel) step('timer', stop);
     c.cancel = [];
-    for (const p of c.peers.values()) step('connection', () => this.closePeer(p));
+    // Closing the connections and the camera takes a while in a video call (the camera can hold
+    // PakChat up for a second as it shuts), so it happens just after: the screen says "Call ended"
+    // at once, and my "leave" is on its way first, so the other phone ends at once too.
+    const peers = [...c.peers.values()];
     const early = c.early;
-    if (early) step('early connection', () => this.closePeer(early));
     c.early = null;
-    if (c.screenStream) {
-      const screen = c.screenStream;
-      step('screen', () => screen.release());
-      c.screenStream = null;
-      c.sharing = false;
-    }
-    if (c.localStream) {
-      const local = c.localStream;
-      step('camera and mic', () => {
-        for (const t of local.getTracks()) t.stop();
-        local.release();
-      });
-      c.localStream = null;
-    }
+    const screen = c.screenStream;
+    c.screenStream = null;
+    c.sharing = false;
+    const local = c.localStream;
+    c.localStream = null;
+    const room = c.room;
+    c.room = null;
+    const close = () => {
+      if (room) step('call server', () => room.close());
+      for (const p of peers) step('connection', () => this.closePeer(p));
+      if (early) step('early connection', () => this.closePeer(early));
+      if (screen) step('screen', () => screen.release());
+      if (local)
+        step('camera and mic', () => {
+          for (const t of local.getTracks()) t.stop();
+          local.release();
+        });
+    };
+    if (after) void Promise.race([after.catch(() => {}), new Promise((r) => setTimeout(r, 1_000))]).then(close);
+    else setTimeout(close, 0);
     step('sound watch', () => this.audioWatch?.remove());
     this.audioWatch = null;
     if (c.direction === 'out' && (reason === 'busy' || reason === 'declined')) fm.callTone('busy');
@@ -1585,7 +1753,12 @@ class Calls {
     if (c.endReason === 'elsewhere') return;
     const withWho = c.direction === 'in' ? [c.from] : [...c.members, ...c.extra];
     await addToLog({ id: c.id, chatId: c.chatId, with: withWho, direction: c.direction, video: c.video, group: c.group, at: Date.now() - seconds * 1000, seconds, missed });
-    await core.client.noteCall(c.chatId, c.id, { by: c.from, video: c.video, group: c.group, missed, seconds }, Date.now() - seconds * 1000).catch(() => {});
+    const at = Date.now() - seconds * 1000;
+    await core.client.noteCall(c.chatId, c.id, { by: c.from, video: c.video, group: c.group, missed, seconds }, at).catch(() => {});
+    // I started it: the record for everyone in the chat and all our devices (the bubble in the chat).
+    // (Not when it never rang anyone: no mic, or no connection.)
+    const rang = c.connectedOnce || (c.endReason !== 'permission' && c.endReason !== 'offline');
+    if (c.direction === 'out' && rang) await core.client.sendCallRecord(c.chatId, c.id, { video: c.video, group: c.group, seconds, joined: [...c.talked] }, at).catch(() => {});
     if (missed && c.endReason !== 'declined') void this.missedAlert(c.chatId, c.from, c.video, c.group);
   }
 
@@ -1599,6 +1772,7 @@ class Calls {
     if (AppState.currentState === 'active') return;
     const t = words();
     const chat = await core.storage.getChat(chatId);
+    if (!group) await know(from);
     const title = group && chat ? core.chatTitle(chat) : core.name(from) || t.unknownCaller;
     const count = (await missedCount(chatId)) + 1;
     await core.storage.setValue(`app:missedCalls:${chatId}`, count);
@@ -1699,16 +1873,59 @@ export async function callLog(): Promise<CallLogEntry[]> {
   return (await core.storage.getValue<CallLogEntry[]>(LOG)) ?? [];
 }
 
-async function addToLog(e: CallLogEntry) {
-  const list = (await callLog()).filter((x) => x.id !== e.id);
-  await core.storage.setValue(LOG, [e, ...list].slice(0, LOG_MAX));
-  for (const fn of logListeners) fn();
+// One change to the list at a time (a call's record can come in while this device logs the same call).
+let logLane: Promise<unknown> = Promise.resolve();
+function inLogLane<T>(work: () => Promise<T>): Promise<T> {
+  const next = logLane.then(work, work);
+  logLane = next.catch(() => {});
+  return next;
 }
 
-export async function clearCallLog(ids?: string[]) {
-  const list = ids ? (await callLog()).filter((x) => !ids.includes(x.id)) : [];
-  await core.storage.setValue(LOG, list);
-  for (const fn of logListeners) fn();
+function addToLog(e: CallLogEntry) {
+  return inLogLane(async () => {
+    const list = (await callLog()).filter((x) => x.id !== e.id);
+    await core.storage.setValue(LOG, [e, ...list].slice(0, LOG_MAX));
+    for (const fn of logListeners) fn();
+  });
+}
+
+/**
+ * A call's record (the caller's, in the chat) that this device has no entry for: it goes in
+ * the Calls tab too, like WhatsApp's call history on every linked device. A call answered or
+ * made on my phone shows on my website, and the other way round. This device's own entry wins.
+ */
+export function logRecord(m: Message) {
+  if (m.kind !== 'system' || m.event?.event !== 'call' || m.seq === null || !m.id.startsWith('call-')) return;
+  const id = m.id.slice('call-'.length);
+  void inLogLane(async () => {
+    const list = await callLog();
+    if (list.some((x) => x.id === id)) return;
+    const chat = await core.storage.getChat(m.chatId);
+    if (!chat || chat.callLink || chat.kind === 'status') return;
+    const out = m.author === core.myId;
+    const e = m.event!;
+    const entry: CallLogEntry = {
+      id,
+      chatId: m.chatId,
+      with: out ? chat.members.map((x) => x.userId).filter((u) => u !== core.myId) : [m.author],
+      direction: out ? 'out' : 'in',
+      video: e.video === true,
+      group: e.group === true,
+      at: m.sentAt,
+      seconds: Number(e.seconds ?? 0),
+      missed: !out && e.missed === true,
+    };
+    await core.storage.setValue(LOG, [...list, entry].sort((a, b) => b.at - a.at).slice(0, LOG_MAX));
+    for (const fn of logListeners) fn();
+  }).catch(() => {});
+}
+
+export function clearCallLog(ids?: string[]) {
+  return inLogLane(async () => {
+    const list = ids ? (await callLog()).filter((x) => !ids.includes(x.id)) : [];
+    await core.storage.setValue(LOG, list);
+    for (const fn of logListeners) fn();
+  });
 }
 
 export function onCallLog(fn: () => void) {

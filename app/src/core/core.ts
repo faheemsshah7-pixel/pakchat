@@ -13,6 +13,8 @@ import {
   OfflineError,
   PakChat,
   phoenixConnection,
+  pinNeeded,
+  type PinNeeded,
   ServerError,
   type Chat,
   type ContactCard,
@@ -35,7 +37,7 @@ import { fileModule, loadSignal } from '../../modules/pakchat-signal';
 import type { SqliteStorage } from '../data/sqliteStorage';
 import { openStorage } from './db';
 import { backUpIfDue, forgetBackup } from './backup';
-import { calls } from './calls';
+import { calls, logRecord } from './calls';
 import { forgetFile, maybeDownload, uploader } from './files';
 import { alertFor, alertReaction, startPush, words } from './push';
 import { startLock } from './lock';
@@ -191,6 +193,8 @@ type Topic =
   | 'broadcasts'
   | 'lock'
   | 'photos'
+  // A sign-in asking for the two-step PIN (sign-in-pin.tsx).
+  | 'pin'
   // Linked devices: one was added, removed, or finished getting its chats.
   | 'devices'
   | `messages:${string}`
@@ -251,6 +255,9 @@ if (typeof AbortSignal !== 'undefined' && !(AbortSignal as { timeout?: unknown }
 }
 
 // ---- The core ----
+
+/** A 7-day PIN reset was started: nothing signs in yet (Core.pinReset). */
+class PinWait extends Error {}
 
 class Core {
   storage!: SqliteStorage;
@@ -387,6 +394,8 @@ class Core {
       // My message just went, in the chat that's open: its little sound.
       if (m.author === this.myId && m.status === 'sent' && m.chatId === this.viewing && Date.now() - m.sentAt < 30_000) sentTone(`${m.chatId}:${m.id}`);
       if (m.kind === 'event' && m.plan) void import('./plans').then((p) => p.notePlan(m)).catch(() => {});
+      // A call's record: into the Calls tab too, if this phone didn't log it (answered or made on another device).
+      if (m.kind === 'system' && m.event?.event === 'call' && m.seq !== null) logRecord(m);
     });
     this.client.on('arrived', (m) => {
       // "Keep chats archived" off: someone writing brings the chat back to the list.
@@ -732,16 +741,85 @@ class Core {
   /** Signs in with a number and its code. True when the account is new (ask for a name). */
   async signInWithPhone(phone: string, code: string) {
     const session = await this.signInWith(() => this.client.signInWithPhone(phone, code));
-    return session.newAccount === true;
+    return session?.newAccount === true;
   }
 
-  private async signInWith(signIn: () => Promise<Session>) {
+  // ---- Two-step PIN while signing in ----
+
+  /**
+   * The sign-in that asked for the account's two-step PIN (sign-in-pin.tsx), or null. Its ticket
+   * lasts 15 minutes; after that the person goes back and checks their number again.
+   */
+  pinStep: PinNeeded | null = null;
+
+  /** The PIN. A wrong one throws a ServerError (pinRefused() reads it); the screen says so. */
+  async pinSignIn(pin: string) {
+    const step = this.needStep();
+    const session = await this.signInWith(() => this.client.signInWith((device, keys) => this.server.pinSignIn(step.ticket, pin, device, keys)), false);
+    // Just typed it: the reminder (PinReminder.tsx) needn't ask for a while.
+    if (session) KV.setItemSync(`pinAsked:${session.userId}`, String(Date.now()));
+    return session;
+  }
+
+  /** Forgot it: the Google account linked to PakChat proves it's them (the PIN is removed). */
+  pinGoogle(idToken: string) {
+    const step = this.needStep();
+    return this.signInWith(() => this.client.signInWith((device, keys) => this.server.pinGoogle(step.ticket, idToken, device, keys)), false);
+  }
+
+  /** Forgot it, no Google: starts the 7-day wait (answers when it ends), or signs in once it's over. */
+  async pinReset(): Promise<string | null> {
+    const step = this.needStep();
+    let waitUntil: string | null = null;
+    await this.signInWith(
+      () =>
+        this.client.signInWith(async (device, keys) => {
+          const r = await this.server.pinReset(step.ticket, device, keys);
+          if ('token' in r) return r;
+          waitUntil = r.resetAt;
+          // Nothing signed in: back out without keeping anything.
+          throw new PinWait();
+        }),
+      false,
+    ).catch((err: unknown) => {
+      if (!(err instanceof PinWait)) throw err;
+    });
+    if (waitUntil) {
+      this.pinStep = { ...step, resetAt: waitUntil };
+      this.emit('pin');
+    }
+    return waitUntil;
+  }
+
+  private needStep() {
+    if (!this.pinStep) throw new ServerError('bad_ticket', 401);
+    return this.pinStep;
+  }
+
+  /**
+   * Every way of signing in ends here. `fresh`: start a new client (the server address may have
+   * been changed on the sign-in screen); the PIN step keeps the one its sign-in started, so its keys
+   * are used again. An account with a two-step PIN answers null and opens the PIN screen.
+   */
+  private async signInWith(signIn: () => Promise<Session>, fresh = true): Promise<Session | null> {
     await this.init();
-    // A different server address may have been typed in on the sign-in screen.
-    this.client.stop();
-    this.makeClient();
+    if (fresh) {
+      this.client.stop();
+      this.makeClient();
+    }
     const previous = await this.storage.getValue<string>('app:lastUser');
-    const session = await signIn();
+    let session: Session;
+    try {
+      session = await signIn();
+    } catch (err) {
+      const step = pinNeeded(err);
+      if (!step) throw err;
+      this.pinStep = step;
+      this.emit('pin');
+      void import('expo-router').then(({ router }) => router.push('/sign-in-pin'));
+      return null;
+    }
+    this.pinStep = null;
     // Someone else on this phone: start with a clean slate.
     if (previous && previous !== session.userId) {
       await this.forgetEverything();
@@ -871,7 +949,7 @@ class Core {
     this.meCheckedAt = Date.now();
     try {
       const me = await this.server.me();
-      if (me.name !== was.name || me.about !== was.about || me.photo !== was.photo || me.phone !== was.phone || me.email !== was.email) await this.saveMe(me);
+      if (me.name !== was.name || me.about !== was.about || me.photo !== was.photo || me.phone !== was.phone || me.email !== was.email || me.pin !== was.pin) await this.saveMe(me);
     } catch {
       // Offline: next time.
     }
@@ -904,6 +982,26 @@ class Core {
 
   async linkPhone(phone: string, code: string, move = false) {
     await this.saveMe(await this.server.linkPhone(phone, code, move));
+  }
+
+  // ---- Two-step verification (settings/two-step.tsx) ----
+
+  /** Turns it on, or changes the PIN (`current`: the one it has now). */
+  async setPin(pin: string, current?: string) {
+    await this.saveMe(await this.server.setPin(pin, current));
+    KV.setItemSync(`pinAsked:${this.myId}`, String(Date.now()));
+  }
+
+  /** Turns it off: needs the PIN it has now. */
+  async removePin(current: string) {
+    await this.saveMe(await this.server.removePin(current));
+  }
+
+  /** The reminder now and then (PinReminder.tsx): whether it's my PIN. */
+  async checkPin(pin: string) {
+    const right = await this.server.checkPin(pin);
+    if (right) KV.setItemSync(`pinAsked:${this.myId}`, String(Date.now()));
+    return right;
   }
 
   /** Takes the Gmail or number off my account. The server refuses if it's the last way in. */
