@@ -25,7 +25,7 @@ import { ChatQuoteView, ContactBody, EventBody, LinkBody, LocationBody, OnceBody
 import { AlbumBody } from './Album';
 import { BigEmoji, RichWords } from './RichText';
 import { VoiceBody } from './VoiceBody';
-import { bodyLine, callInfo, clock, isCallNote, systemText } from '../format';
+import { bodyLine, callInfo, clock, heldNames, isCallNote, systemText } from '../format';
 import { startCall } from '../CallBar';
 import { Dialog } from '../overlays';
 import { Icon } from '../icons';
@@ -477,7 +477,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
           <GestureDetector gesture={pan}>
             <Animated.View style={[{ maxWidth: '80%' }, slide]}>
               <Pressy
-                onPress={() => (m.status === 'failed' && !selecting ? onRetry(m) : onPress(m))}
+                onPress={() => ((m.status === 'failed' || !!m.heldFor?.length) && !selecting ? onRetry(m) : onPress(m))}
                 onLongPress={() => onLongPress(m)}
                 scale={0.98}
                 label={m.text ?? ''}
@@ -557,6 +557,12 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               {m.status === 'failed' && (
                 <Txt size={11.5} weight="600" color={theme.danger} align="end" style={{ marginTop: 3 }}>
                   {t.notSent}
+                </Txt>
+              )}
+              {/* Asked for again with a new security code, after they had it: waits for a tap (shared client, sendHeld). */}
+              {!!m.heldFor?.length && m.status !== 'failed' && (
+                <Txt size={11.5} weight="600" color={theme.danger} align="end" style={{ marginTop: 3 }} testID="msg-held">
+                  {fill(t.heldNotSent, { name: heldNames(m.heldFor) })}
                 </Txt>
               )}
               {/* A reused bubble's reactions just show (or go); one added or taken away pops. */}

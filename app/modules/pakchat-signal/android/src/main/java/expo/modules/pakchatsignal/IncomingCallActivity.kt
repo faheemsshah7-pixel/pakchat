@@ -146,7 +146,7 @@ class IncomingCallActivity : Activity() {
     CallAlerts.stopRing(this, callId)
     // PakChat's call screen may show over the lock screen from now on (before it opens).
     CallLockScreen.show(true)
-    val uri = "pakchat://call/${Uri.encode(callId)}?chat=${Uri.encode(chatId)}&answer=1"
+    val uri = "pakchat://call/${Uri.encode(callId)}?chat=${Uri.encode(chatId)}&answer=1&k=${AnswerKeys.make(this, callId)}"
     startActivity(
       Intent(Intent.ACTION_VIEW, Uri.parse(uri))
         .setPackage(packageName)

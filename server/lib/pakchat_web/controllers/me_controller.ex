@@ -6,6 +6,20 @@ defmodule PakchatWeb.MeController do
 
   action_fallback PakchatWeb.FallbackController
 
+  # How the account signs in (Gmail, number) and its PIN change only from the phone
+  # (device 1), never from a linked website: a browser left signed in could
+  # otherwise add its own Gmail and then take the account to a new phone.
+  plug :main_phone
+       when action in [:set_pin, :remove_pin, :link_google, :phone_code, :link_phone, :unlink]
+
+  defp main_phone(conn, _opts) do
+    if conn.assigns.device.device_id == 1 do
+      conn
+    else
+      conn |> PakchatWeb.FallbackController.call({:error, :forbidden}) |> halt()
+    end
+  end
+
   def show(conn, _params), do: json(conn, Wire.me(conn.assigns.user))
 
   @doc """
@@ -66,6 +80,7 @@ defmodule PakchatWeb.MeController do
     attrs =
       params
       |> Map.take(["name", "about", "photo"])
+      |> Files.only_own_photo(conn.assigns.user)
       |> put_if(privacy, "last_seen", "last_seen_visibility")
       |> put_if(privacy, "online", "online_visibility")
       |> put_if(privacy, "photo", "photo_visibility")
@@ -96,10 +111,15 @@ defmodule PakchatWeb.MeController do
 
   @doc """
   `PUT /api/me/google` with `{id_token, move?}`: adds a Gmail to my account (I signed in
-  by phone). 409 `taken` if it has its own account; `move: true` moves it here.
+  by phone). 409 `taken` if it has its own account; `move: true` moves it here. When that
+  account has a two-step PIN, `pin` must be its PIN (403 `pin_needed` / `wrong_pin`).
   """
   def link_google(conn, %{"id_token" => id_token} = p) when is_binary(id_token) do
-    with {:ok, user} <- Accounts.link_google(conn.assigns.user, id_token, move: p["move"] == true) do
+    with {:ok, user} <-
+           Accounts.link_google(conn.assigns.user, id_token,
+             move: p["move"] == true,
+             pin: p["pin"]
+           ) do
       json(conn, Wire.me(user))
     end
   end
@@ -116,11 +136,14 @@ defmodule PakchatWeb.MeController do
 
   def phone_code(_conn, _params), do: {:error, :bad_request}
 
-  @doc "`PUT /api/me/phone` with `{phone, code, move?}`: adds the number to my account."
+  @doc "`PUT /api/me/phone` with `{phone, code, move?, pin?}`: adds the number to my account (`pin` as for a Gmail)."
   def link_phone(conn, %{"phone" => phone, "code" => code} = p)
       when is_binary(phone) and is_binary(code) do
     with {:ok, user} <-
-           Accounts.link_phone(conn.assigns.user, phone, code, move: p["move"] == true) do
+           Accounts.link_phone(conn.assigns.user, phone, code,
+             move: p["move"] == true,
+             pin: p["pin"]
+           ) do
       json(conn, Wire.me(user))
     end
   end

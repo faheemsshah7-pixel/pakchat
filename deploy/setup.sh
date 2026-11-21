@@ -15,7 +15,7 @@ echo "1/6 Updates and Docker"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get -y upgrade
-apt-get install -y docker.io docker-compose-v2 unattended-upgrades iptables-persistent openssl git rsync
+apt-get install -y docker.io docker-compose-v2 unattended-upgrades iptables-persistent openssl git rsync age
 systemctl enable --now docker
 usermod -aG docker "$owner"
 

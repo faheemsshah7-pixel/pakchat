@@ -7,6 +7,8 @@ defmodule Pakchat.PhoneCodes.Code do
     field :purpose, :string
     field :code_hash, :binary, redact: true
     field :tries, :integer, default: 0
+    # Sent by SMS (false: proved by the WhatsApp check, which costs nothing).
+    field :sms, :boolean, default: true
     field :expires_at, :utc_datetime_usec
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end

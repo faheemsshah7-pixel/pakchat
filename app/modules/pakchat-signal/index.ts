@@ -88,6 +88,8 @@ export type FileModule = {
   setSecure(on: boolean): void;
   /** When the screen last went off (ms), or 0. */
   screenOffAt(): number;
+  /** True once if `key` is the one-time Answer key our own call alert made for this call (CallAlerts.kt AnswerKeys). */
+  takeAnswerKey(callId: string, key: string): boolean;
   /** An exported chat as one zip: `text` as `textName`, then each file (paths[i] as names[i]). Answers its size. */
   zipChat(out: string, textName: string, text: string, paths: string[], names: string[]): Promise<number>;
   scheduleAlarm(id: string, at: number): void;

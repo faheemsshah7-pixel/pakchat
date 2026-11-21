@@ -49,6 +49,9 @@ defmodule Pakchat.Files do
       not room?(size) ->
         {:error, :storage_full}
 
+      not bytes_left?(me, size) ->
+        {:error, :quota_full}
+
       true ->
         %Stored{
           owner_id: me.id,
@@ -76,6 +79,12 @@ defmodule Pakchat.Files do
           (Ecto.UUID.cast(chat_id) == :error or Chats.role(chat_id, me.id) != "admin") ->
         {:error, :not_found}
 
+      not room?(size) ->
+        {:error, :storage_full}
+
+      started_today(me, "photo") >= day_limit(:photos_per_day, 30) ->
+        {:error, :quota_full}
+
       true ->
         Repo.insert(%Stored{owner_id: me.id, chat_id: chat_id, kind: "photo", size: size})
     end
@@ -83,10 +92,15 @@ defmodule Pakchat.Files do
 
   def start_photo(_, _, _), do: {:error, :bad_request}
 
-  @doc "Deletes the file behind a `photo` value that's no longer used (nothing for any other value)."
+  @doc """
+  Deletes the file behind a `photo` value that's no longer used (nothing for any
+  other value). A file some person, group or community still shows is kept.
+  """
   def forget_photo("pk1:" <> rest) do
     with [id | _] <- String.split(rest, ":"),
-         %Stored{kind: "photo"} <- get(id) do
+         {:ok, _} <- Ecto.UUID.cast(id),
+         %Stored{kind: "photo"} <- get(id),
+         false <- photo_in_use?(id) do
       from(f in Stored, where: f.id == ^id) |> delete_all()
     end
 
@@ -95,16 +109,83 @@ defmodule Pakchat.Files do
 
   def forget_photo(_), do: :ok
 
+  defp photo_in_use?(id) do
+    like = "pk1:" <> id <> ":%"
+
+    Repo.exists?(from u in User, where: like(u.photo, ^like)) or
+      Repo.exists?(from c in Chats.Chat, where: like(c.photo, ^like))
+  end
+
+  @doc """
+  `attrs` without a `photo` that names someone else's photo file: a photo can
+  only be set to one I uploaded myself (or taken off).
+  """
+  def only_own_photo(attrs, %User{id: me}) when is_map(attrs) do
+    Enum.reduce(["photo", :photo], attrs, fn key, attrs ->
+      case Map.fetch(attrs, key) do
+        {:ok, value} -> if own_photo?(value, me), do: attrs, else: Map.delete(attrs, key)
+        :error -> attrs
+      end
+    end)
+  end
+
+  def only_own_photo(attrs, _me), do: attrs
+
+  defp own_photo?(value, _me) when value in [nil, ""], do: true
+
+  defp own_photo?("pk1:" <> rest, me) do
+    with [id | _] <- String.split(rest, ":"),
+         {:ok, _} <- Ecto.UUID.cast(id),
+         %Stored{kind: "photo", owner_id: ^me} <- get(id) do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp own_photo?(_value, _me), do: false
+
   @doc "Makes room for my next backup."
   def start_backup(%User{} = me, size) when is_integer(size) and size > 0 do
     cond do
       size > max_backup() + @overhead -> {:error, :too_big}
       not room?(size) -> {:error, :storage_full}
+      started_today(me, "backup") >= day_limit(:backups_per_day, 3) -> {:error, :quota_full}
       true -> Repo.insert(%Stored{owner_id: me.id, kind: "backup", size: size})
     end
   end
 
   def start_backup(_, _), do: {:error, :bad_request}
+
+  ## Daily limits per person, so a few accounts with a script can't fill the disk
+  # (and then stop everyone else sending files). Counted from the files table
+  # itself, so a restart doesn't clear them. Settings: UPLOAD_DAY_MB,
+  # PHOTOS_PER_DAY, BACKUPS_PER_DAY.
+
+  defp day_limit(key, default), do: Application.get_env(:pakchat, key, default)
+
+  defp day_ago, do: DateTime.add(DateTime.utc_now(), -1, :day)
+
+  defp started_today(%User{id: me}, kind) do
+    Repo.aggregate(
+      from(f in Stored,
+        where: f.owner_id == ^me and f.kind == ^kind and f.inserted_at > ^day_ago()
+      ),
+      :count
+    )
+  end
+
+  # Photos, videos, voice notes and documents I started in the last day, in bytes.
+  defp bytes_left?(%User{id: me}, size) do
+    sent =
+      Repo.one(
+        from f in Stored,
+          where: f.owner_id == ^me and f.kind == "attachment" and f.inserted_at > ^day_ago(),
+          select: type(coalesce(sum(f.size), 0), :integer)
+      )
+
+    sent + size <= day_limit(:upload_day_mb, 2048) * 1024 * 1024
+  end
 
   @doc """
   Whether the disk has room for `size` more bytes and still keeps `MIN_FREE_MB` free
@@ -273,15 +354,38 @@ defmodule Pakchat.Files do
     |> delete_all()
   end
 
-  @doc "Deletes attachments past their 30 days, and uploads that never finished in a day."
+  @doc """
+  Deletes attachments past their 30 days, uploads that never finished in a day,
+  and photos nobody uses a day after they came.
+  """
   def delete_expired do
     now = DateTime.utc_now()
     day_ago = DateTime.add(now, -1, :day)
 
-    from(f in Stored,
-      where: f.expires_at < ^now or (not f.uploaded and f.inserted_at < ^day_ago)
-    )
-    |> delete_all()
+    expired =
+      from(f in Stored,
+        where: f.expires_at < ^now or (not f.uploaded and f.inserted_at < ^day_ago)
+      )
+      |> delete_all()
+
+    # Photos uploaded a day ago or more that no person, group or community uses.
+    unused_photos =
+      from(f in Stored,
+        where: f.kind == "photo" and f.inserted_at < ^day_ago,
+        where:
+          fragment(
+            "NOT EXISTS (SELECT 1 FROM users u WHERE u.photo LIKE 'pk1:' || ?::text || ':%')",
+            f.id
+          ),
+        where:
+          fragment(
+            "NOT EXISTS (SELECT 1 FROM chats c WHERE c.photo LIKE 'pk1:' || ?::text || ':%')",
+            f.id
+          )
+      )
+      |> delete_all()
+
+    expired + unused_photos
   end
 
   # Deletes the rows and their bytes. Returns how many.

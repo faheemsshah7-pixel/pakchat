@@ -2,7 +2,8 @@ defmodule Pakchat.Privacy do
   @moduledoc """
   Who may see someone's "online" and "last seen".
 
-  * Last seen: everyone, my contacts (people I have a one-to-one chat with),
+  * Last seen: everyone, my contacts (people I started a one-to-one chat with,
+    or wrote back to: Chats.contacts?/2),
     my contacts except some people ("except"), or nobody.
   * Online: everyone, or the same people as last seen.
   * Fair's fair, as in WhatsApp: if you hide your last seen from everyone,

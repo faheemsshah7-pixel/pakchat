@@ -77,43 +77,65 @@ defmodule Pakchat.Pin do
   `{:error, {:pin_locked, seconds}}` while it has to wait.
   """
   def try_pin(%User{} = user, pin) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    cond do
-      not on?(user) ->
-        :ok
+    if on?(user) do
+      case claim_check(user.id, now) do
+        {:ok, fresh} -> check_claimed(fresh, pin, now)
+        {:locked, until} -> {:error, {:pin_locked, max(DateTime.diff(until, now), 1)}}
+      end
+    else
+      :ok
+    end
+  end
 
-      user.pin_locked_until && DateTime.compare(user.pin_locked_until, now) == :gt ->
-        {:error, {:pin_locked, DateTime.diff(user.pin_locked_until, now)}}
+  # One check at a time per account: the try first takes the account's check
+  # slot in one database step (pin_locked_until a short way ahead, only when it
+  # isn't locked now). Many tries sent at the same moment then can't all be
+  # checked (more than 5 free guesses, and the heavy hashing each).
+  @busy_seconds 30
 
-      right?(user.pin_hash, pin) ->
-        {:ok, _} =
-          user
-          |> change(pin_failures: 0, pin_locked_until: nil, pin_reset_at: nil)
-          |> Repo.update()
+  defp claim_check(id, now) do
+    busy = DateTime.add(now, @busy_seconds, :second)
 
-        :ok
+    query =
+      from u in User,
+        where: u.id == ^id and (is_nil(u.pin_locked_until) or u.pin_locked_until <= ^now),
+        select: u
 
-      true ->
-        # Counted in the database itself, so two tries at once can't both slip through.
-        {1, [failures]} =
-          Repo.update_all(
-            from(u in User, where: u.id == ^user.id, select: u.pin_failures),
-            inc: [pin_failures: 1]
-          )
+    case Repo.update_all(query, set: [pin_locked_until: busy]) do
+      {1, [fresh]} ->
+        {:ok, fresh}
 
+      {0, _} ->
+        until = Repo.one(from u in User, where: u.id == ^id, select: u.pin_locked_until)
+        {:locked, until || busy}
+    end
+  end
+
+  defp check_claimed(%User{} = user, pin, now) do
+    if right?(user.pin_hash, pin) do
+      Repo.update_all(from(u in User, where: u.id == ^user.id),
+        set: [pin_failures: 0, pin_locked_until: nil, pin_reset_at: nil]
+      )
+
+      :ok
+    else
+      failures = user.pin_failures + 1
+
+      {until, error} =
         if failures >= @free_tries do
           wait = min(60 * Integer.pow(2, failures - @free_tries), @longest_wait)
-          until = DateTime.add(now, wait, :second) |> DateTime.truncate(:second)
-
-          Repo.update_all(from(u in User, where: u.id == ^user.id),
-            set: [pin_locked_until: until]
-          )
-
-          {:error, {:pin_locked, wait}}
+          {DateTime.add(now, wait, :second), {:pin_locked, wait}}
         else
-          {:error, {:wrong_pin, @free_tries - failures}}
+          {nil, {:wrong_pin, @free_tries - failures}}
         end
+
+      Repo.update_all(from(u in User, where: u.id == ^user.id),
+        set: [pin_failures: failures, pin_locked_until: until]
+      )
+
+      {:error, error}
     end
   end
 
@@ -136,6 +158,19 @@ defmodule Pakchat.Pin do
   end
 
   def start_reset(%User{} = user), do: {:ok, user}
+
+  @doc """
+  The account's own phone is in use (it connected): a reset someone started
+  stops. Whoever asked for it would have to start over, and the phone hears again.
+  """
+  def cancel_reset(user_id) do
+    {count, _} =
+      Repo.update_all(from(u in User, where: u.id == ^user_id and not is_nil(u.pin_reset_at)),
+        set: [pin_reset_at: nil]
+      )
+
+    if count > 0, do: :cancelled, else: :ok
+  end
 
   ## The ticket: "this sign-in got past its code, and only needs the PIN"
 

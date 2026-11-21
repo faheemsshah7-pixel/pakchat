@@ -43,8 +43,8 @@ export default function SignInNumber() {
   return (
     <Screen>
       <TopBar title={t.numberTitle} onBack={() => router.back()} />
-      <View style={{ paddingHorizontal: 22, paddingTop: 22, gap: 18 }}>
-        <Txt size={15} color={theme.muted} align="center">
+      <View style={{ paddingHorizontal: 10, paddingTop: 22, gap: 18 }}>
+        <Txt size={15} color={theme.muted} align="center" style={{ paddingHorizontal: 12 }}>
           {t.numberText}
         </Txt>
 
@@ -71,6 +71,8 @@ export default function SignInNumber() {
               onChangeText={(v) => (setTyped(v), setProblem(''))}
               placeholder={country.code === 'PK' ? '300 1234567' : t.numberPlaceholder}
               keyboardType="phone-pad"
+              // Numbers read left to right in Urdu too, next to the +92 box.
+              style={{ textAlign: 'left', writingDirection: 'ltr' }}
               autoComplete="tel"
               autoFocus
               returnKeyType="next"
@@ -87,7 +89,7 @@ export default function SignInNumber() {
         )}
       </View>
 
-      <Animated.View style={[{ position: 'absolute', start: 22, end: 22 }, lift]}>
+      <Animated.View style={[{ position: 'absolute', start: 10, end: 10 }, lift]}>
         <Button title={t.numberNext} onPress={next} disabled={!typed.replace(/\D/g, '')} testID="number-next" />
       </Animated.View>
 

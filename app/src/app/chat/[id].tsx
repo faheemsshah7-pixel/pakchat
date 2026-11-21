@@ -56,7 +56,7 @@ import { ScheduledBar } from '../../ui/chat/ScheduledBar';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { MuteSheet } from '../../ui/MuteSheet';
 import { SchedulePicker } from '../../ui/SchedulePicker';
-import { bodyLine, dayLabel, isCallNote, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
+import { bodyLine, dayLabel, heldNames, isCallNote, lastSeen, sameDay, TIMERS, timerLabel, whenLabel } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Glass, IconButton, Pressy, Screen, Txt } from '../../ui/kit';
 import { Marquee } from '../../ui/Marquee';
@@ -117,6 +117,8 @@ function ChatScreen() {
 
   const [picked, setPicked] = useState<Map<string, Message>>(new Map());
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  // "Not sent to Ali's new phone. Tap to send." tapped: asked first.
+  const [held, setHeld] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   // "Reply privately" from a group: the group message this answers.
   const [quote, setQuote] = useState<ChatQuote | null>(() => {
@@ -795,6 +797,7 @@ function ChatScreen() {
 
   const retry = useCallback(
     (m: Message) => {
+      if (m.heldFor?.length && m.status !== 'failed') return setHeld(m);
       void (async () => {
         await core.deleteForMe([m], true);
         if (m.kind === 'file' && m.file?.local) {
@@ -1370,6 +1373,26 @@ function ChatScreen() {
           </View>
         )}
       </Sheet>
+
+      {/* A message held after someone's security code changed (shared client, sendHeld). */}
+      <Dialog
+        visible={!!held}
+        onClose={() => setHeld(null)}
+        title={fill(t.heldTitle, { name: heldNames(held?.heldFor ?? []) })}
+        text={fill(t.heldText, { name: heldNames(held?.heldFor ?? []) })}
+        buttons={[
+          {
+            label: t.heldSend,
+            testID: 'send-held',
+            onPress: () => {
+              const m = held;
+              setHeld(null);
+              if (m) void core.client.sendHeld(m.chatId, m.id).catch(() => toast(t.couldNot));
+            },
+          },
+          { label: t.cancel, onPress: () => setHeld(null) },
+        ]}
+      />
 
       {/* Taking a call out of the chat (held). */}
       <Dialog

@@ -39,7 +39,7 @@ import { openStorage } from './db';
 import { backUpIfDue, forgetBackup } from './backup';
 import { calls, logRecord } from './calls';
 import { forgetFile, maybeDownload, uploader } from './files';
-import { alertFor, alertReaction, startPush, words } from './push';
+import { alertFor, alertPinReset, alertReaction, startPush, words } from './push';
 import { startLock } from './lock';
 import { receivedTone, sentTone } from './tones';
 
@@ -138,6 +138,8 @@ export type AppSettings = {
   reactionAlerts?: boolean;
   /** Settings › Account › Security notifications: the "security code changed" note in chats (default on). */
   securityNotes?: boolean;
+  /** Someone asked to reset my PIN with my number (stopped, this phone is in use): when, until "OK" on screen. */
+  pinResetAt?: number;
   /** Settings › Notifications: alerts pop up at the top of the screen (default on), like WhatsApp's "high priority". */
   highPriority?: boolean;
   /** Settings › Notifications › Groups: the same three for groups (each default on). */
@@ -212,13 +214,15 @@ export const GOOGLE_WEB_CLIENT_ID = extra.googleWebClientId ?? '';
 const EMULATOR_SERVER = 'http://10.0.2.2:4000';
 
 /**
- * The server's address. On a phone that's the Mac's address on the Wi-Fi, set on the sign-in screen.
- * On an emulator it starts as the Mac itself, so the emulator tests never have to type it in.
+ * The server's address: the live one the app was built with, or one set on the sign-in screen
+ * (a Mac on the Wi-Fi). A debug build on an emulator starts as the Mac itself, so the emulator tests
+ * never have to type it in. A release build always starts on the live server, emulators included
+ * (Google Play's test phones are emulators too).
  */
 export function serverUrl(): string {
   const saved = KV.getItemSync('serverUrl');
   if (saved) return saved;
-  if (!Device.isDevice) return EMULATOR_SERVER;
+  if (!Device.isDevice && (__DEV__ || !extra.serverUrl)) return EMULATOR_SERVER;
   return extra.serverUrl ?? 'http://localhost:4000';
 }
 
@@ -434,6 +438,12 @@ class Core {
     // Calls: ringing, answering, connecting (calls.ts).
     this.client.on('call', (e) => calls.onSignal(e));
     this.client.on('sync', (e) => this.takeSync(e));
+    // Someone started a PIN reset with my number. The server already stopped it (this
+    // phone is in use); say so, on screen (PinResetNotice) and, if PakChat isn't open, as an alert.
+    this.client.on('pinReset', () => {
+      this.setSettings({ pinResetAt: Date.now() });
+      if (AppState.currentState !== 'active') void alertPinReset();
+    });
   }
 
   /** Keeps a group's or community's photo value where Avatar finds it. */
@@ -972,16 +982,17 @@ class Core {
    * Adds a Gmail to my account (Google's token proves it's mine). Fails with "taken" if
    * it has its own account; `move` then moves it here (owner, 31 Oct, "Move it here").
    */
-  async linkGoogle(idToken: string, move = false) {
-    await this.saveMe(await this.server.linkGoogle(idToken, move));
+  async linkGoogle(idToken: string, move = false, pin?: string) {
+    await this.saveMe(await this.server.linkGoogle(idToken, move, pin));
   }
 
   sendLinkCode(phone: string, move = false) {
     return this.server.sendLinkCode(phone, move);
   }
 
-  async linkPhone(phone: string, code: string, move = false) {
-    await this.saveMe(await this.server.linkPhone(phone, code, move));
+  /** `pin`: moving a number whose account has a two-step PIN needs that PIN ("pin_needed"). */
+  async linkPhone(phone: string, code: string, move = false, pin?: string) {
+    await this.saveMe(await this.server.linkPhone(phone, code, move, pin));
   }
 
   // ---- Two-step verification (settings/two-step.tsx) ----

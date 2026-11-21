@@ -147,10 +147,28 @@ defmodule Pakchat.Accounts do
       if Pin.reset_ready?(user) do
         sign_in_as(claims, device_attrs)
       else
+        started? = is_nil(user.pin_reset_at)
         {:ok, user} = Pin.start_reset(user)
-        {:ok, {:waiting, Pin.reset_ready_at(user)}}
+        at = Pin.reset_ready_at(user)
+        if started?, do: tell_pin_reset(user, at)
+        {:ok, {:waiting, at}}
       end
     end
+  end
+
+  # Anyone with the number's code can start a reset, so the account's devices are
+  # told at once ("pin_reset" on their connection), and the phone is woken: the
+  # phone connecting again cancels the reset (PakchatWeb.DeviceChannel), so only
+  # a phone that is really gone lets the 7 days run out.
+  defp tell_pin_reset(%User{id: id}, at) do
+    devices = Repo.all(from d in Device, where: d.user_id == ^id, select: {d.id, d.device_id})
+
+    for {uuid, _} <- devices do
+      Phoenix.PubSub.broadcast(Pakchat.PubSub, "relay:" <> uuid, {:pin_reset, at})
+    end
+
+    for {uuid, 1} <- devices, do: Pakchat.Push.wake(uuid)
+    :ok
   end
 
   defp ticket_user(ticket) do
@@ -225,14 +243,15 @@ defmodule Pakchat.Accounts do
   it's mine. If that Gmail already has its own PakChat account, it's refused
   (`:taken`) unless `move: true`: then it moves here (owner, 31 Oct, "Move it
   here"), and that other account is deleted if the Gmail was its only way in.
+  When that account has a two-step PIN, `pin:` must be its PIN (see free_or_move/5).
   """
   def link_google(%User{} = user, id_token, opts \\ []) do
-    move? = Keyword.get(opts, :move, false)
+    move = move_opts(opts)
 
     with {:ok, claims} <- GoogleToken.verify(id_token),
          email = String.downcase(claims["email"] || ""),
-         :ok <- free_or_move(:google_sub, claims["sub"], user, move?, :google),
-         :ok <- free_or_move(:email, email, user, move?, :google) do
+         :ok <- free_or_move(:google_sub, claims["sub"], user, move, :google),
+         :ok <- free_or_move(:email, email, user, move, :google) do
       user
       |> User.link_google_changeset(%{google_sub: claims["sub"], email: claims["email"]})
       |> Repo.update()
@@ -253,29 +272,56 @@ defmodule Pakchat.Accounts do
   @doc """
   Adds the number to my account, once the code proves it's mine. With
   `move: true` a number that has its own account moves here, as for a Gmail;
-  nothing is moved until the code checks out.
+  nothing is moved until the code checks out, and (when that account has a
+  two-step PIN) its PIN comes as `pin:`.
   """
   def link_phone(%User{} = user, phone, code, opts \\ []) do
-    move? = Keyword.get(opts, :move, false)
+    move = move_opts(opts)
 
     with {:ok, phone} <- Phone.normalize(phone),
-         :ok <- if(move?, do: :ok, else: free(User, :phone, phone, user)),
+         :ok <- if(move.move?, do: :ok, else: free(User, :phone, phone, user)),
          :ok <- PhoneCodes.check(phone, "link", code),
-         :ok <- free_or_move(:phone, phone, user, move?, :phone) do
+         :ok <- keep_code_for_pin(free_or_move(:phone, phone, user, move, :phone), phone, code) do
       user |> User.link_phone_changeset(%{phone: phone}) |> Repo.update()
     end
   end
+
+  # The code was right, but that account's PIN is still needed (or was wrong): the
+  # same code stays good, so the app can ask for the PIN and send both again.
+  defp keep_code_for_pin({:error, reason} = refused, phone, code)
+       when reason == :pin_needed or
+              (is_tuple(reason) and elem(reason, 0) in [:wrong_pin, :pin_locked]) do
+    PhoneCodes.allow(phone, "link", code)
+    refused
+  end
+
+  defp keep_code_for_pin(result, _phone, _code), do: result
 
   # The Gmail or number is free, or mine already: fine. Someone else's account:
   # refused, or (moving) taken off that account, which is deleted if it was its only way in.
   defp free_or_move(_field, value, _me, _move?, _what) when value in [nil, ""], do: :ok
 
-  defp free_or_move(field, value, %User{id: my_id}, move?, what) do
+  # Holding the SIM (or the Gmail) is not enough to take it off an account with a
+  # two-step PIN: like signing in on a new phone, that account's PIN is needed
+  # (tries counted on it), unless its 7-day reset has run out.
+  defp free_or_move(field, value, %User{id: my_id}, %{move?: move?, pin: pin}, what) do
     case Repo.get_by(User, [{field, value}]) do
       nil -> :ok
       %User{id: ^my_id} -> :ok
       %User{} when not move? -> {:error, :taken}
-      %User{} = other -> release(other, what)
+      %User{} = other -> with :ok <- move_pin(other, pin), do: release(other, what)
+    end
+  end
+
+  defp move_opts(opts),
+    do: %{move?: Keyword.get(opts, :move, false), pin: Keyword.get(opts, :pin)}
+
+  defp move_pin(%User{} = other, pin) do
+    cond do
+      not Pin.on?(other) -> :ok
+      Pin.reset_ready?(other) -> :ok
+      not is_binary(pin) -> {:error, :pin_needed}
+      true -> Pin.try_pin(other, pin)
     end
   end
 
@@ -333,19 +379,22 @@ defmodule Pakchat.Accounts do
   @doc """
   The Delete account web page (`/delete-account`, which Google Play asks for): WhatsApp
   proved the number (Pakchat.WhatsApp, purpose "delete"), and its one-time code deletes
-  the account on it. `{:error, :no_account}` when no PakChat account has that number.
+  the account on it. An account with a two-step PIN also needs `pin` (unless its 7-day
+  reset has run out), as when it signs in on a new phone. `{:error, :no_account}` when no PakChat account has that number.
   """
-  def delete_by_phone(phone, code) when is_binary(phone) and is_binary(code) do
+  def delete_by_phone(phone, code, pin \\ nil)
+
+  def delete_by_phone(phone, code, pin) when is_binary(phone) and is_binary(code) do
     with {:ok, phone} <- Phone.normalize(phone),
          :ok <- PhoneCodes.check(phone, "delete", code) do
       case Repo.get_by(User, phone: phone) do
         nil -> {:error, :no_account}
-        %User{} = user -> delete_account(user)
+        %User{} = user -> with :ok <- move_pin(user, pin), do: delete_account(user)
       end
     end
   end
 
-  def delete_by_phone(_phone, _code), do: {:error, :bad_request}
+  def delete_by_phone(_phone, _code, _pin), do: {:error, :bad_request}
 
   defp my_chats(user_id, kind) do
     Repo.all(

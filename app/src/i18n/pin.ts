@@ -53,6 +53,18 @@ export const enPin = {
   pinCurrentOffText: 'Type your PIN to turn two-step verification off.',
   pinCurrentWrong: "That isn't your PIN.",
   pinTooMany: 'Too many tries. Wait a few minutes and try again.',
+  // Security fixes (build 35): a reset someone else asked for, and moving a number or Gmail that has a PIN.
+  pinResetTitle: 'PIN reset asked for',
+  pinResetText: "Someone asked to reset your PakChat PIN with your number. If it wasn't you, just keep using PakChat on this phone and nothing changes.",
+  pinResetNote: 'Someone asked to reset your PIN.',
+  movePinTitle: "Enter that account's PIN",
+  movePinPhone: '{what} has two-step verification on. Type its 6-digit PIN to move the number here.',
+  movePinGoogle: '{what} has two-step verification on. Type its 6-digit PIN to move the Gmail here.',
+  // A message held after someone's security code changed (shared client, sendHeld).
+  heldNotSent: "Not sent to {name}'s new phone. Tap to send.",
+  heldTitle: "Send to {name}'s new phone?",
+  heldText: "{name}'s security code changed, so PakChat held this message. Send it if you're sure this is {name}.",
+  heldSend: 'Send',
 };
 
 export const urPin: typeof enPin = {
@@ -107,4 +119,14 @@ export const urPin: typeof enPin = {
   pinCurrentOffText: 'دو مرحلہ تصدیق آف کرنے کے لیے اپنا PIN لکھیں۔',
   pinCurrentWrong: 'یہ آپ کا PIN نہیں ہے۔',
   pinTooMany: 'بہت زیادہ کوششیں۔ چند منٹ رک کر دوبارہ کوشش کریں۔',
+  pinResetTitle: 'PIN ری سیٹ کی درخواست',
+  pinResetText: 'کسی نے آپ کے نمبر سے آپ کا PakChat PIN ری سیٹ کرنے کو کہا۔ اگر یہ آپ نہیں تھے تو بس اسی فون پر PakChat استعمال کرتے رہیں، کچھ نہیں بدلے گا۔',
+  pinResetNote: 'کسی نے آپ کا PIN ری سیٹ کرنے کو کہا۔',
+  movePinTitle: 'اُس اکاؤنٹ کا PIN لکھیں',
+  movePinPhone: '{what} پر دو مرحلہ تصدیق آن ہے۔ نمبر یہاں منتقل کرنے کے لیے اس کا 6 ہندسوں کا PIN لکھیں۔',
+  movePinGoogle: '{what} پر دو مرحلہ تصدیق آن ہے۔ Gmail یہاں منتقل کرنے کے لیے اس کا 6 ہندسوں کا PIN لکھیں۔',
+  heldNotSent: '{name} کے نئے فون پر نہیں گیا۔ بھیجنے کے لیے دبائیں۔',
+  heldTitle: '{name} کے نئے فون پر بھیجیں؟',
+  heldText: '{name} کا سیکیورٹی کوڈ بدل گیا ہے، اس لیے PakChat نے یہ پیغام روک لیا۔ اگر آپ کو یقین ہے کہ یہ {name} ہی ہیں تو بھیج دیں۔',
+  heldSend: 'بھیجیں',
 };

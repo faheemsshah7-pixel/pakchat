@@ -30,6 +30,8 @@ export type ConnectionHandlers = {
   envelopes(list: WireEnvelope[]): void;
   typing(event: TypingEvent): void;
   presence(event: Record<string, unknown>): void;
+  /** Someone started a 7-day PIN reset with this account's number (the server stopped it: this phone is in use). */
+  pinReset?(): void;
   /** True once joined (again), false when the connection drops. */
   status(connected: boolean): void;
 };
@@ -86,6 +88,7 @@ export function phoenixConnection(socketUrl: string): ConnectionFactory {
         channel.on('envelopes', (p: { envelopes: WireEnvelope[] }) => h.envelopes(p.envelopes));
         channel.on('typing', (p: TypingEvent) => h.typing(p));
         channel.on('presence', (p: Record<string, unknown>) => h.presence(p));
+        channel.on('pin_reset', () => h.pinReset?.());
         channel.onError(() => dropped(h));
         // Phoenix calls this again every time it rejoins after a drop.
         const mine = channel;

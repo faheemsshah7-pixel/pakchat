@@ -462,10 +462,11 @@ export class HttpServer implements ServerApi {
   /**
    * Adds a Gmail to my account. Google's token proves it's mine. If it has its own
    * PakChat account the server answers "taken"; `move` moves it here (that account is
-   * deleted if the Gmail was its only way in).
+   * deleted if the Gmail was its only way in). When that account has a two-step PIN,
+   * moving needs it: "pin_needed", then `pin` ("wrong_pin" / "pin_locked" as for a sign-in).
    */
-  async linkGoogle(idToken: string, move = false) {
-    return meFromWire(await this.call<WireMe>('PUT', '/me/google', { id_token: idToken, move }));
+  async linkGoogle(idToken: string, move = false, pin?: string) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/google', { id_token: idToken, move, ...(pin ? { pin } : {}) }));
   }
 
   /** Sends a code to a number I want to add to my account (`move`: even one with its own account). */
@@ -474,8 +475,9 @@ export class HttpServer implements ServerApi {
     return { phone: r.phone, resendAfter: r.resend_after };
   }
 
-  async linkPhone(phone: string, code: string, move = false) {
-    return meFromWire(await this.call<WireMe>('PUT', '/me/phone', { phone, code, move }));
+  /** Adds a number whose code I have (`move` and `pin` as for a Gmail; the code stays good while the PIN is asked). */
+  async linkPhone(phone: string, code: string, move = false, pin?: string) {
+    return meFromWire(await this.call<WireMe>('PUT', '/me/phone', { phone, code, move, ...(pin ? { pin } : {}) }));
   }
 
   /** Takes the Gmail or the number off my account (the other must stay). */

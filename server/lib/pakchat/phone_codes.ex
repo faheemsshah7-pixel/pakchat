@@ -2,7 +2,9 @@ defmodule Pakchat.PhoneCodes do
   @moduledoc """
   Sign-in codes sent by SMS, with limits, because every SMS costs money:
 
-    * a whole-server cap per day (`SMS_DAILY_CAP`, 100 unless set),
+    * a whole-server cap per day (`SMS_DAILY_CAP`, 100 unless set), counting only
+      codes really sent by SMS (not ones the WhatsApp check proved),
+    * a few a day per address block (the `sms_day` limit, see the auth controller),
     * at most 5 codes a day to one number, and one every 30 seconds,
     * 5 tries per code, and each code lasts 10 minutes.
 
@@ -22,7 +24,8 @@ defmodule Pakchat.PhoneCodes do
     now = DateTime.utc_now()
     day_ago = DateTime.add(now, -1, :day)
 
-    sent_today = Repo.aggregate(from(c in Code, where: c.inserted_at > ^day_ago), :count)
+    sent_today =
+      Repo.aggregate(from(c in Code, where: c.sms and c.inserted_at > ^day_ago), :count)
 
     to_number =
       Repo.all(
@@ -65,6 +68,7 @@ defmodule Pakchat.PhoneCodes do
     Repo.insert!(%Code{
       phone: phone,
       purpose: purpose,
+      sms: false,
       code_hash: hash(phone, code),
       expires_at: DateTime.add(DateTime.utc_now(), @lasts_minutes, :minute)
     })
@@ -88,12 +92,12 @@ defmodule Pakchat.PhoneCodes do
       latest == nil ->
         {:error, :wrong_code}
 
-      latest.tries >= @tries ->
+      # The try is counted first, in one step that only works while tries are
+      # left, so many guesses sent at once can't get past the 5.
+      not take_try(latest) ->
         {:error, :too_many_tries}
 
       true ->
-        Repo.update_all(from(c in Code, where: c.id == ^latest.id), inc: [tries: 1])
-
         ok? =
           if latest.code_hash,
             do: Plug.Crypto.secure_compare(latest.code_hash, hash(phone, String.trim(code))),
@@ -109,6 +113,13 @@ defmodule Pakchat.PhoneCodes do
   end
 
   def check(_, _, _), do: {:error, :wrong_code}
+
+  defp take_try(%Code{id: id}) do
+    {count, _} =
+      Repo.update_all(from(c in Code, where: c.id == ^id and c.tries < @tries), inc: [tries: 1])
+
+    count == 1
+  end
 
   @doc "Deletes codes older than two days (they only count towards the daily caps)."
   def delete_old do

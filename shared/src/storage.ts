@@ -127,6 +127,12 @@ export type Message = {
   played?: boolean;
   /** Groups, my voice notes: who has played them. */
   playedBy?: string[];
+  /**
+   * Mine: people who already had it and then asked for it again with a new security
+   * code. It waits until I tap "send" (Client.sendHeld): a hacked server could ask
+   * this way to get a copy of what they already read.
+   */
+  heldFor?: string[];
 };
 
 /** A file in a message, plus what only this device knows about it. */

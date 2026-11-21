@@ -92,7 +92,7 @@ test('a computer calls another computer: it rings, it connects, the camera goes 
   a = await linkedSite(ali);
   s = await linkedSite(sara);
   for (const [page, other] of [[a, 'Sara Ahmed'], [s, 'Ali Khan']] as const) {
-    await page.locator('.row').filter({ has: page.locator('.nm', { hasText: new RegExp(`^${other}$`) }) }).click({ timeout: 20_000 });
+    await page.locator('.row').filter({ has: page.locator('.nm', { hasText: new RegExp(`^(~ )?${other}$`) }) }).click({ timeout: 20_000 });
     await page.locator('.bub', { hasText: 'Haan karo' }).waitFor();
   }
 
@@ -133,7 +133,7 @@ test('a computer calls another computer: it rings, it connects, the camera goes 
   for (const p of [a, s]) await p.locator('.callwin').waitFor({ state: 'detached', timeout: 10_000 });
 
   // The chat says so, and the Calls tab lists it.
-  await s.locator('.sys', { hasText: /Voice call|Video call/ }).first().waitFor({ timeout: 10_000 });
+  await s.locator('.callb-t', { hasText: /Voice call|Video call/ }).first().waitFor({ timeout: 10_000 });
   await s.locator('button[aria-label="Calls"]').click();
   await s.locator('.callrow', { hasText: 'Ali Khan' }).waitFor();
   expect(await s.locator('.callrow').first().textContent()).toContain('Incoming');
@@ -151,7 +151,7 @@ test('a computer calls another computer: it rings, it connects, the camera goes 
 
 test('a voice message keeps recording when another chat is opened, and sends from the small recorder', async () => {
   await a.locator('button[aria-label="Chats"]').click();
-  await a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^Sara Ahmed$/ }) }).click();
+  await a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^(~ )?Sara Ahmed$/ }) }).click();
   await a.locator('button[aria-label="Voice message"]').click();
   await a.locator('.cpill.rec').waitFor();
   await a.waitForTimeout(1500);
@@ -193,7 +193,7 @@ test('chat settings stay the same on the phone and the website, both ways', asyn
   const fromSite: unknown[] = [];
   ali.client.on('sync', (e) => fromSite.push(e));
   const groupRow = a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^Study group$/ }) });
-  const saraRow = a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^Sara Ahmed$/ }) });
+  const saraRow = a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^(~ )?Sara Ahmed$/ }) });
   await a.locator('button[aria-label="Chats"]').click();
   await groupRow.waitFor();
 
@@ -224,7 +224,7 @@ test('chat settings stay the same on the phone and the website, both ways', asyn
 });
 
 test('locked chats open with the phone’s secret code, and App lock asks for its password', async () => {
-  const saraRow = a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^Sara Ahmed$/ }) });
+  const saraRow = a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^(~ )?Sara Ahmed$/ }) });
   const groupRow = a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^Study group$/ }) });
   const groupId = (await ali.client.chats()).find((c) => c.title === 'Study group')!.id;
   const sum = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('pakchat-locked:1234'));
@@ -346,7 +346,7 @@ test('the website in Urdu: right to left, with the same words as the phone', asy
   await a.waitForFunction(() => document.documentElement.dir === 'rtl', null, { timeout: 15_000 });
   await a.locator('button[aria-label="چیٹس"]').click();
   await a.locator('.row').first().waitFor({ timeout: 15_000 });
-  await a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^Sara Ahmed$/ }) }).click();
+  await a.locator('.row').filter({ has: a.locator('.nm', { hasText: /^(~ )?Sara Ahmed$/ }) }).click();
   await a.waitForTimeout(800);
   await a.screenshot({ path: `${SHOTS}catchup-urdu.png` });
   await a.locator('button[aria-label="Menu"], button[aria-label="مینو"]').first().click();

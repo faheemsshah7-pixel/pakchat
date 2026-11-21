@@ -259,6 +259,23 @@ export function watchTaps(fn: () => void) {
   };
 }
 
+const PIN_RESET = 'pakchat:pin-reset';
+
+/** Someone asked to reset my PIN with my number (the server woke this phone, which stopped it). */
+export async function alertPinReset() {
+  const t = words();
+  await Notifications.scheduleNotificationAsync({
+    identifier: PIN_RESET,
+    content: { title: 'PakChat', body: t.pinResetNote, priority: Notifications.AndroidNotificationPriority.HIGH },
+    trigger: { channelId: CHANNEL },
+  }).catch(() => {});
+}
+
+/** Seen on screen: the alert can go. */
+export function dismissPinReset() {
+  void Notifications.dismissNotificationAsync(PIN_RESET).catch(() => {});
+}
+
 /** A wake-up came but the server couldn't be reached: say there's something, without the words. */
 export async function alertPlain() {
   const t = words();

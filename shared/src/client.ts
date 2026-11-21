@@ -78,6 +78,8 @@ export type Events = {
   typing: (e: { chatId: string; userId: string; typing: boolean; audio?: boolean }) => void;
   presence: (p: Record<string, unknown>) => void;
   connection: (connected: boolean) => void;
+  /** Someone asked to reset this account's PIN with its number (stopped, since this phone is in use). */
+  pinReset: () => void;
   /** Someone's security code changed (they reinstalled, or a new device). */
   securityCodeChanged: (e: { userId: string }) => void;
   /** A call message (ringing, connecting, hanging up). Never saved: the app's call code handles it. */
@@ -280,6 +282,7 @@ export class PakChat {
       envelopes: (list) => this.receive(list),
       typing: (e) => this.emit('typing', { chatId: e.chat_id, userId: e.user_id, typing: e.typing, audio: e.audio === true }),
       presence: (p) => this.emit('presence', p),
+      pinReset: () => this.emit('pinReset'),
       status: (connected) => {
         this.connected = connected;
         this.emit('connection', connected);
@@ -1875,10 +1878,30 @@ export class PakChat {
     const chat = await storage.getChat(e.chat_id);
     if (!record || !chat || !chat.members.some((m) => m.userId === e.from)) return;
     await storage.setValue(once, true);
+    const content = parseContent(record.content);
+    const before = await this.o.signal.identityKey(this.s.handle, device.userId, device.deviceId);
 
     // Start a fresh session with that device either way: if it was reinstalled,
     // the old one can't reach it.
     await this.o.signal.deleteSession(this.s.handle, device.userId, device.deviceId);
+
+    // They already had it, and now ask again with a new security code: a reinstalled
+    // phone never asks for what it already took in, but a hacked server could, with
+    // its own key, to get a copy. So it waits for me to tap "send" (sendHeld).
+    const sent = content && (await storage.getMessage(chat.id, this.s.userId, content.id));
+    if (sent && before && device.userId !== this.s.userId && this.hadIt(chat, sent, device.userId)) {
+      await this.ensureSessions([device]);
+      const after = await this.o.signal.identityKey(this.s.handle, device.userId, device.deviceId);
+      if (after && after !== before) {
+        const key = `held:${chat.id}:${sent.id}`;
+        const waiting = (await storage.getValue<Device[]>(key)) ?? [];
+        await storage.setValue(key, [...waiting.filter((d) => deviceKey(d) !== deviceKey(device)), device]);
+        const fresh = { ...sent, heldFor: [...new Set([...(sent.heldFor ?? []), device.userId])] };
+        await storage.putMessage(fresh);
+        this.emit('message', fresh);
+        return;
+      }
+    }
     if (c.why === 'groupKey') {
       const key = await this.groupKey(chat.id);
       key.sharedWith = key.sharedWith.filter((k) => k !== deviceKey(device));
@@ -1886,8 +1909,34 @@ export class PakChat {
     }
     // Send it to just that device, locked for it alone. Same content, same id,
     // so it shows once even if the first one turns up after all.
-    const content = parseContent(record.content);
     if (content) await this.queue(content, 'control', undefined, [device], `resend:${content.id}:${deviceKey(device)}`);
+    void this.flush();
+  }
+
+  /** Did this person already have my message (its ticks say so)? */
+  private hadIt(chat: Chat, m: Message, userId: string) {
+    if (chat.kind === 'direct') return m.status === 'delivered' || m.status === 'read';
+    return !!(m.deliveredTo?.includes(userId) || m.readBy?.includes(userId));
+  }
+
+  /**
+   * "Tap to send" on a message held for a new security code (see onRetry): sends it
+   * to those new phones after all.
+   */
+  async sendHeld(chatId: string, id: string) {
+    const { storage } = this.o;
+    const key = `held:${chatId}:${id}`;
+    const devices = (await storage.getValue<Device[]>(key)) ?? [];
+    const m = await storage.getMessage(chatId, this.s.userId, id);
+    const record = m && ((await storage.getValue<SentRecord[]>('sent')) ?? []).find((r) => r.chatId === chatId && r.seq === m.seq);
+    const content = record && parseContent(record.content);
+    if (content) for (const d of devices) await this.queue(content, 'control', undefined, [d], `resend:${content.id}:${deviceKey(d)}`);
+    await storage.setValue(key, null);
+    if (m) {
+      const { heldFor: _held, ...rest } = m;
+      await storage.putMessage(rest);
+      this.emit('message', rest);
+    }
     void this.flush();
   }
 

@@ -146,6 +146,8 @@ class PakchatSignalModule : Module() {
     /** When the screen last went off (ms), for "App lock: when the phone locks". */
     Function("screenOffAt") { ScreenWatch.offAt.toDouble() }
 
+    Function("takeAnswerKey") { callId: String, key: String -> AnswerKeys.take(context(), callId, key) }
+
     /** Writes an exported chat (its words, then its files) as one zip. Answers its size. */
     AsyncFunction("zipChat") { out: String, textName: String, text: String, paths: List<String>, names: List<String>, promise: Promise ->
       slowly(promise) { Zipper.zip(path(out), textName, text, paths.map { path(it) }.zip(names)).toDouble() }

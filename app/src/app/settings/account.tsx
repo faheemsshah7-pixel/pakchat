@@ -5,19 +5,20 @@
 //
 // Also Two-step verification (settings/two-step.tsx), Security notifications (the "security code changed" notes), where the server is (only on a test server: change it when the Mac's Wi-Fi address
 // changes, no need to log out), Log out, and Delete my account (settings/delete-account.tsx).
-import { formatPhone } from '@pakchat/shared';
+import { formatPhone, pinRefused } from '@pakchat/shared';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
-import { core, onBuiltInServer, reasonOf, serverUrl } from '../../core/core';
+import { core, isOffline, onBuiltInServer, reasonOf, serverUrl } from '../../core/core';
 import { googleIdToken } from '../../core/google';
 import { useAuth, useSettings } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
-import { Button, Divider, Field, Glass, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
+import { Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { phoneError } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
+import { PinBoxes, pinWrongText, waitClock } from '../../ui/Pin';
 import { WhatsAppCheck } from '../../ui/WhatsAppCheck';
 
 export default function Account() {
@@ -38,6 +39,55 @@ export default function Account() {
   /** Said yes to moving this number: its code is sent, and adding it moves it. */
   const moveOk = useRef(false);
   const [leaving, setLeaving] = useState(false);
+  // Moving one whose account has a two-step PIN: that PIN is asked too (security fix, build 35).
+  const [pinFor, setPinFor] = useState<{ kind: 'google'; token: string } | { kind: 'phone'; number: string; code: string } | null>(null);
+  const [movePin, setMovePin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinUntil, setPinUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Too many wrong tries: the boxes wait, with the time left (as when signing in).
+  useEffect(() => {
+    if (pinUntil <= Date.now()) return;
+    const id = setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() >= pinUntil) setPinUntil(0);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [pinUntil]);
+  const pinWaiting = pinUntil > now;
+
+  /** That account has a PIN: ask for it (the code or Google's token stays good meanwhile). */
+  function askPin(m: { kind: 'google'; token: string } | { kind: 'phone'; number: string; code: string }) {
+    setAdding(false);
+    setMovePin('');
+    setPinError('');
+    setPinFor(m);
+  }
+
+  async function moveWithPin(typed: string) {
+    const m = pinFor;
+    if (!m || pinBusy || pinWaiting) return;
+    setPinBusy(true);
+    setPinError('');
+    try {
+      if (m.kind === 'google') await core.linkGoogle(m.token, true, typed);
+      else await core.linkPhone(m.number, m.code, true, typed);
+      setPinFor(null);
+      toast(t.linked2);
+    } catch (err) {
+      setMovePin('');
+      const refused = pinRefused(err);
+      if (refused?.wait) {
+        setPinUntil(Date.now() + refused.wait * 1000);
+        setNow(Date.now());
+      } else if (refused) setPinError(pinWrongText(t, refused.triesLeft ?? 0));
+      else setPinError(isOffline(err) ? t.serverError : m.kind === 'google' && reasonOf(err) === 'unknown' ? t.googleError : phoneError(t, err));
+    } finally {
+      setPinBusy(false);
+    }
+  }
 
   async function saveServer() {
     const typed = (server ?? '').trim();
@@ -133,6 +183,10 @@ export default function Account() {
       try {
         await core.linkPhone(sentTo, code, moveOk.current);
       } catch (err) {
+        if (reasonOf(err) === 'pin_needed') {
+          askPin({ kind: 'phone', number: sentTo, code });
+          return;
+        }
         if (reasonOf(err) !== 'taken') throw err;
         setMoving({ kind: 'phone', number: sentTo, code });
         return;
@@ -164,6 +218,7 @@ export default function Account() {
         toast(t.linked2);
       }
     } catch (err) {
+      if (reasonOf(err) === 'pin_needed' && m.kind !== 'sendCode') return askPin(m);
       toast(m.kind === 'google' && reasonOf(err) === 'unknown' ? t.googleError : phoneError(t, err));
     }
   }
@@ -330,6 +385,33 @@ export default function Account() {
           { label: t.cancel, onPress: () => setMoving(null) },
         ]}
       />
+      <Sheet visible={!!pinFor} onClose={() => setPinFor(null)} title={t.movePinTitle}>
+        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 14 }}>
+          <Txt size={14} color={theme.muted}>
+            {pinFor?.kind === 'google' ? fill(t.movePinGoogle, { what: emailIn(pinFor.token) }) : fill(t.movePinPhone, { what: pinFor ? formatPhone(pinFor.number) : '' })}
+          </Txt>
+          <PinBoxes
+            value={movePin}
+            onChange={setMovePin}
+            onDone={(v) => void moveWithPin(v)}
+            error={!!pinError}
+            disabled={pinBusy || pinWaiting}
+            label={t.movePinTitle}
+            testID="move-pin-field"
+          />
+          {(!!pinError || pinWaiting) && (
+            <Txt size={14} weight="500" color={theme.danger} align="center" testID="move-pin-error">
+              {pinWaiting ? fill(t.pinWait, { time: waitClock((pinUntil - now) / 1000) }) : pinError}
+            </Txt>
+          )}
+          <Button title={t.moveHere} onPress={() => void moveWithPin(movePin)} busy={pinBusy} disabled={movePin.length < 6 || pinWaiting} testID="move-pin-save" />
+          <Pressy onPress={() => setPinFor(null)} label={t.cancel} style={{ alignSelf: 'center' }} testID="move-pin-cancel">
+            <Txt size={15} weight="600" color={theme.accInk} style={{ padding: 6 }}>
+              {t.cancel}
+            </Txt>
+          </Pressy>
+        </View>
+      </Sheet>
       <Dialog
         visible={!!removing}
         onClose={() => setRemoving(null)}

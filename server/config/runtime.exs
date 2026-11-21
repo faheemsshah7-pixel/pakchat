@@ -78,6 +78,12 @@ if config_env() != :test do
     backup_max_mb: int.("BACKUP_MAX_MB", 2048),
     # New files and backups are refused once the disk would have less than this free (MB).
     min_free_mb: int.("MIN_FREE_MB", 2048),
+    # Per person per day: bytes of files sent, new photos, new backups.
+    upload_day_mb: int.("UPLOAD_DAY_MB", 2048),
+    photos_per_day: int.("PHOTOS_PER_DAY", 30),
+    backups_per_day: int.("BACKUPS_PER_DAY", 3),
+    # Websites waiting to be linked at once (their keys are kept in memory).
+    link_waiting_max: int.("LINK_WAITING_MAX", 500),
     # Where files and backups are kept (locked), until launch moves them to S3-style storage.
     files_dir: System.get_env("FILES_DIR", "priv/files"),
     # Firebase's service account key file, for push alerts. Never put it in git.

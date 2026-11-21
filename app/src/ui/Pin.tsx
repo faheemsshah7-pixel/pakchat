@@ -38,12 +38,26 @@ export function PinBoxes({
   const [focused, setFocused] = useState(false);
 
   // Coming back from a wait (or a wrong PIN cleared it): the keyboard comes back too.
+  // Asked again a little later too: a pop-up still closing (like "Turn off?") can take the
+  // keyboard away from the first try.
   useEffect(() => {
-    if (!disabled) setTimeout(() => input.current?.focus(), 250);
+    if (disabled) return;
+    const tries = [250, 700].map((ms) => setTimeout(() => wake(), ms));
+    return () => tries.forEach(clearTimeout);
   }, [disabled]);
 
+  /** Focus, and the keyboard up (when the box already had focus but the keyboard went away, focus alone doesn't bring it back). */
+  function wake() {
+    const box = input.current;
+    if (!box) return;
+    if (box.isFocused()) {
+      box.blur();
+      setTimeout(() => input.current?.focus(), 50);
+    } else box.focus();
+  }
+
   return (
-    <Pressable onPress={() => input.current?.focus()} disabled={disabled} accessible={false}>
+    <Pressable onPress={wake} disabled={disabled} accessible={false}>
       {/* Digits always run left to right, in Urdu too. */}
       <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center', direction: 'ltr', opacity: disabled ? 0.5 : 1 }}>
         {[0, 1, 2, 3, 4, 5].map((i) => {

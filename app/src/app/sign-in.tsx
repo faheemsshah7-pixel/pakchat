@@ -114,7 +114,7 @@ export default function SignIn() {
 
   const features = [
     { icon: 'lock' as const, text: t.featLocked },
-    { icon: 'sun' as const, text: t.featLight },
+    { icon: 'flash' as const, text: t.featLight },
     { icon: 'globe' as const, text: t.featUrdu },
   ];
 
@@ -140,7 +140,8 @@ export default function SignIn() {
             </View>
           </Pressy>
           <View>
-            <Txt size={36} weight="800" align="center" style={{ marginTop: 10, letterSpacing: -1 }}>
+            {/* Tighter letters look neat in English; Nastaliq's joined letters need their own spacing. */}
+            <Txt size={36} weight="800" align="center" style={{ marginTop: 10, letterSpacing: lang === 'ur' ? 0 : -1 }}>
               {t.appName}
             </Txt>
           </View>

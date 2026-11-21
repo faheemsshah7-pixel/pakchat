@@ -44,12 +44,12 @@ defmodule PakchatWeb.Build6Test do
   end
 
   test "who can add me to groups", %{ali: ali, sara: sara, bilal: bilal} do
-    # Sara lets only her contacts add her: Bilal has no chat with her, Ali does.
+    # Sara lets only her contacts add her: she started a chat with Ali, Bilal has none.
     as(sara)
     |> patch(~p"/api/me", %{"privacy" => %{"groups" => "contacts"}})
     |> json_response(200)
 
-    {:ok, _} = Pakchat.Chats.get_or_create_direct(ali.user, sara.user.id)
+    {:ok, _} = Pakchat.Chats.get_or_create_direct(sara.user, ali.user.id)
 
     by_bilal = group(bilal, "Hockey", [sara, ali])
     assert ids(by_bilal) == Enum.sort([bilal.user.id, ali.user.id])

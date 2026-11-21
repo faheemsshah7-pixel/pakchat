@@ -48,6 +48,7 @@ defmodule PakchatWeb.AuthController do
   """
   def phone_code(conn, %{"phone" => phone}) when is_binary(phone) do
     with :ok <- RateLimit.hit(:sms, ip(conn)),
+         :ok <- RateLimit.hit(:sms_day, RateLimit.ip_block(conn.remote_ip)),
          {:ok, info} <- Accounts.send_sign_in_code(phone) do
       json(conn, info)
     end
@@ -146,7 +147,7 @@ defmodule PakchatWeb.AuthController do
     })
   end
 
-  defp ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
+  defp ip(conn), do: Pakchat.RateLimit.ip_key(conn.remote_ip)
 
   @doc """
   `GET /api/auth/test/code?phone=...`: the last code printed for a number, so
@@ -201,12 +202,13 @@ defmodule PakchatWeb.AuthController do
   `POST /api/account/delete` with `{phone, code}`, from the Delete account web page: the
   code is the secret of a WhatsApp check with purpose "delete" that number has sent
   (Pakchat.WhatsApp). Deletes that number's account: 204, or 404 `no_account` when
-  no PakChat account has it, 422 `wrong_code` when the code doesn't fit.
+  no PakChat account has it, 422 `wrong_code` when the code doesn't fit. An account with
+  a two-step PIN needs `pin` too: 403 `pin_needed` or `wrong_pin` (tries counted).
   """
-  def delete_account(conn, %{"phone" => phone, "code" => code})
+  def delete_account(conn, %{"phone" => phone, "code" => code} = params)
       when is_binary(phone) and is_binary(code) do
     with :ok <- RateLimit.hit(:sign_in, ip(conn)) do
-      case Accounts.delete_by_phone(phone, code) do
+      case Accounts.delete_by_phone(phone, code, params["pin"]) do
         :ok -> send_resp(conn, 204, "")
         {:error, :no_account} -> conn |> put_status(404) |> json(%{error: "no_account"})
         error -> error

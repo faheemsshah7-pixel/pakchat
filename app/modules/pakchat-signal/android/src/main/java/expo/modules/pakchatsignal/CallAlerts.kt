@@ -233,7 +233,8 @@ object CallAlerts {
 
   /** Opens the call screen; `answer` picks up at the same time. */
   private fun open(context: Context, callId: String, chatId: String, answer: Boolean): PendingIntent {
-    val uri = "pakchat://call/${Uri.encode(callId)}?chat=${Uri.encode(chatId)}" + if (answer) "&answer=1" else ""
+    val uri = "pakchat://call/${Uri.encode(callId)}?chat=${Uri.encode(chatId)}" +
+      if (answer) "&answer=1&k=${AnswerKeys.make(context, callId)}" else ""
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
       .setPackage(context.packageName)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -267,5 +268,36 @@ object CallAlerts {
     } catch (e: Exception) {
       Log.w(TAG, "Couldn't show the call: ${e.message}")
     }
+  }
+}
+
+/**
+ * One-time keys that prove an Answer tap came from our own call alert. Any app
+ * (or web page) can open pakchat://call/<id>?answer=1; without the key that
+ * only opens the ringing screen (app/src/core/callLink.ts). One key is kept, for
+ * the call ringing now, in this app's private storage, so it survives the app
+ * being closed between the alert and the tap.
+ */
+object AnswerKeys {
+  private const val PREFS = "pakchat_answer_key"
+
+  /** The key for this call; the same one each time it is asked for while it rings. */
+  fun make(context: Context, callId: String): String {
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (prefs.getString("call", null) == callId) prefs.getString("key", null)?.let { return it }
+    val bytes = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+    val key = android.util.Base64.encodeToString(bytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+    prefs.edit().putString("call", callId).putString("key", key).commit()
+    return key
+  }
+
+  /** True once, when `key` is this call's key; the key is used up either way. */
+  fun take(context: Context, callId: String, key: String): Boolean {
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val wantCall = prefs.getString("call", null) ?: return false
+    val want = prefs.getString("key", null) ?: return false
+    if (wantCall != callId) return false
+    prefs.edit().clear().commit()
+    return java.security.MessageDigest.isEqual(want.toByteArray(), key.toByteArray())
   }
 }

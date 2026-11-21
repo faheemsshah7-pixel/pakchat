@@ -269,7 +269,11 @@ defmodule Pakchat.WhatsApp do
     text =
       case result do
         :checked ->
-          "✅ Done! Go back to PakChat. It carries on by itself."
+          # Someone may have talked them into sending a code that was never theirs
+          # (reverse code phishing): the reply says so, and how to stop it.
+          "✅ Done! Go back to PakChat. It carries on by itself.\n\n" <>
+            "If someone else gave you this code, they are trying to get into your PakChat. " <>
+            "Open PakChat on your phone and turn on Two-step verification in Settings › Account."
 
         :expired ->
           "⌛ That code has run out. Open PakChat and tap Continue with WhatsApp again."

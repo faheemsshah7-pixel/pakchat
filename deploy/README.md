@@ -81,11 +81,23 @@ region = ap-mumbai-1
 force_path_style = true
 no_check_bucket = true
 ```
-and add `BACKUP_BUCKET=pakchat-backups` to `.env`. To also keep people's chat backups there,
+and add `BACKUP_BUCKET=pakchat-backups` to `.env`.
+
+The copies in the bucket are locked first (the database holds phone numbers, emails and PIN
+hashes), with [age](https://age-encryption.org). Make the key on your own computer, never on the
+server: `brew install age`, then `age-keygen -o ~/pakchat-secrets/backup-key.txt`. It prints
+`Public key: age1...`: put that line's key in `.env` as `BACKUP_PUBLIC_KEY=age1...`. The file
+`backup-key.txt` is the only thing that opens the bucket's copies, so keep a second copy of it
+somewhere safe (a USB stick); without it they can't be opened. Without `BACKUP_PUBLIC_KEY`,
+`backup.sh` sends nothing to the bucket and says so in `backups/backup.log`.
+
+To also keep people's chat backups there,
 add `BACKUP_CHAT_BACKUPS=yes` (only changed ones are sent; the free Object Storage is 10 GB
 (Oracle's page, 31 Oct), so check the bucket's size now and then).
 
-Restore (on a fresh server, after step 7):
+Restore (on a fresh server, after step 7). A copy from the bucket is unlocked first, on your own
+computer: `age -d -i ~/pakchat-secrets/backup-key.txt -o <file>.dump <file>.dump.age` (the same
+for the photos `.tar.age`), then copied to the server's `deploy/backups`.
 ```sh
 docker compose exec -T db pg_restore -U pakchat -d pakchat --clean < backups/<file>.dump
 docker compose exec -T app tar -C /data/files -xf - < backups/<photos file>.tar

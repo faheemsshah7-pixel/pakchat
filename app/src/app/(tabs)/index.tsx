@@ -20,6 +20,7 @@ import { fill, useT, type Strings } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { AlertsCard } from '../../ui/AlertsCard';
 import { PinReminder } from '../../ui/PinReminder';
+import { PinResetNotice } from '../../ui/PinResetNotice';
 import { UpdatePopup } from '../../ui/UpdatePopup';
 import { ChatRow } from '../../ui/ChatRow';
 import { fromGallery } from '../../ui/chat/attachments';
@@ -658,6 +659,8 @@ export default function Chats() {
       <UpdatePopup />
       {/* Two-step verification on: "Do you still know your PIN?" now and then. */}
       <PinReminder />
+      {/* Someone asked to reset my PIN with my number (already stopped): said once. */}
+      <PinResetNotice />
     </Screen>
   );
 }

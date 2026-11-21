@@ -17,19 +17,23 @@ defmodule PakchatWeb.Endpoint do
   # don't need to check which website it comes from. (The phone app's
   # connection library also sends the server's own address as its "origin",
   # which a strict check would wrongly refuse.)
+  # log: false keeps the connect line (with its token) out of the logs.
   socket "/socket", PakchatWeb.DeviceSocket,
-    websocket: [check_origin: false],
+    websocket: [check_origin: false, log: false],
     longpoll: false
 
   # A website waiting to be linked by QR code (see channels/link_socket.ex).
   # It holds a private id and secret, so the same reasoning applies.
   socket "/link", PakchatWeb.LinkSocket,
-    websocket: [check_origin: false],
+    websocket: [check_origin: false, log: false],
     longpoll: false
 
-  socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+  # Only the development dashboard uses LiveView: not open on the live server.
+  if Application.compile_env(:pakchat, :dev_routes) do
+    socket "/live", Phoenix.LiveView.Socket,
+      websocket: [connect_info: [session: @session_options]],
+      longpoll: [connect_info: [session: @session_options]]
+  end
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -52,9 +56,11 @@ defmodule PakchatWeb.Endpoint do
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :pakchat
   end
 
-  plug Phoenix.LiveDashboard.RequestLogger,
-    param_key: "request_logger",
-    cookie_key: "request_logger"
+  if Application.compile_env(:pakchat, :dev_routes) do
+    plug Phoenix.LiveDashboard.RequestLogger,
+      param_key: "request_logger",
+      cookie_key: "request_logger"
+  end
 
   plug Plug.RequestId
   # Each visitor's own address, not Caddy's (see plugs/real_ip.ex).

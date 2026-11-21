@@ -38,9 +38,20 @@ defmodule Pakchat.Linking do
 
   @doc """
   Starts a link request for a website's keys. Returns
-  `%{id, secret, code, expires_in}` (seconds).
+  `%{id, secret, code, expires_in}` (seconds), or `{:error, :unavailable}` when
+  too many websites are waiting already.
   """
   def start(device_attrs, keys) do
+    # Each waiting website keeps its keys here for a few minutes: a total cap
+    # (LINK_WAITING_MAX) so a script from many addresses can't eat the memory.
+    if :ets.select_count(@table, [{{{:id, :_}, :_}, [], [true]}]) >= waiting_max(),
+      do: {:error, :unavailable},
+      else: do_start(device_attrs, keys)
+  end
+
+  defp waiting_max, do: Application.get_env(:pakchat, :link_waiting_max, 500)
+
+  defp do_start(device_attrs, keys) do
     id = random(16)
     secret = random(32)
     code = random(16)

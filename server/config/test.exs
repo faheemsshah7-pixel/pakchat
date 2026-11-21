@@ -54,6 +54,7 @@ config :pakchat, :rate_limits,
   pin: {1000, 60_000},
   pin_check: {1000, 60_000},
   sms: {1000, 60_000},
+  sms_day: {1000, 60_000},
   whatsapp: {1000, 60_000},
   whatsapp_claim: {1000, 60_000},
   link: {1000, 60_000}

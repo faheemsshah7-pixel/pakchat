@@ -714,8 +714,12 @@ defmodule PakchatWeb.DeviceChannelTest do
     assert %{online: false, last_seen: nil} = watch(a, sara.user)
   end
 
-  test "last seen: my contacts (people I have a chat with)", ctx do
+  test "last seen: my contacts (people I chose to talk to)", ctx do
     %{ali: ali, sara: sara, bilal: bilal} = ctx
+    # Ali started their chat and Sara wrote back, so he is her contact (Chats.contacts?/2).
+    Repo.update_all(from(c in Pakchat.Chats.Chat, where: c.id == ^ctx.chat.id),
+      set: [answered: true]
+    )
 
     {:ok, _} =
       Accounts.update_profile(sara.user, %{
@@ -726,7 +730,7 @@ defmodule PakchatWeb.DeviceChannelTest do
     Accounts.touch_last_seen(sara.user.id)
     online(sara.token, sara.device)
 
-    # Ali has a chat with Sara; Bilal doesn't.
+    # Ali is Sara's contact; Bilal isn't.
     a = online(ali.token, ali.device)
     b = online(bilal.token, bilal.device)
     assert %{online: true, last_seen: %DateTime{}} = watch(a, sara.user)

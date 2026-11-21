@@ -17,6 +17,7 @@ defmodule Pakchat.Relay do
   alias Pakchat.Chats
   alias Pakchat.Chats.Chat
   alias Pakchat.Push
+  alias Pakchat.RateLimit
   alias Pakchat.Relay.Envelope
   alias Pakchat.Repo
 
@@ -63,7 +64,8 @@ defmodule Pakchat.Relay do
          :ok <- may_send(chat, sender.user_id, kind, role),
          devices = Enum.reject(devices, fn {_user, _dev, id} -> id == sender.id end),
          :ok <- status_viewer(chat, sender.user_id, devices, envelopes, group),
-         :ok <- check_devices(chat, kind, devices, envelopes, group, params[:devices]) do
+         :ok <- check_devices(chat, kind, devices, envelopes, group, params[:devices]),
+         :ok <- storage(sender, envelopes, group, devices) do
       # In a one-to-one chat, someone who blocked you never gets your
       # messages. You aren't told, as in WhatsApp: it just stays on one tick.
       blocked = blocked_by(chat, sender.user_id)
@@ -136,6 +138,20 @@ defmodule Pakchat.Relay do
   end
 
   # The group message, copied once for every device in the group.
+  # What this message makes the server store: refused when the disk is nearly full,
+  # and counted against the sender's byte limits (config :rate_limits).
+  defp storage(sender, envelopes, group, devices) do
+    copies = if group, do: byte_size(group.body) * length(devices), else: 0
+    bytes = Enum.reduce(envelopes, copies, &(byte_size(&1.body) + &2))
+
+    cond do
+      not Pakchat.Files.room?(bytes) -> {:error, :storage_full}
+      RateLimit.hit(:stored_bytes, sender.user_id, bytes) != :ok -> {:error, :rate_limited}
+      RateLimit.hit(:stored_bytes_day, sender.user_id, bytes) != :ok -> {:error, :rate_limited}
+      true -> :ok
+    end
+  end
+
   defp group_rows(_base, nil, _devices, _blocked), do: []
 
   defp group_rows(base, group, devices, blocked) do
@@ -249,7 +265,8 @@ defmodule Pakchat.Relay do
 
     with {:ok, chat} <- member_chat(sender.user_id, chat_id),
          :ok <- callable(chat),
-         :ok <- validate_call(envelopes) do
+         :ok <- validate_call(envelopes),
+         :ok <- ring_limit(params[:ring] == true, sender) do
       blocked = blocked_by(chat, sender.user_id)
       now = DateTime.utc_now()
       base = base_row(chat.id, nil, sender, "call", now, {@call_seconds, :second})
@@ -263,6 +280,11 @@ defmodule Pakchat.Relay do
       :ok
     end
   end
+
+  # A ring wakes the phones it goes to, even locked: limited per caller
+  # (config :rate_limits, rings), so nobody can make a phone ring over and over.
+  defp ring_limit(false, _sender), do: :ok
+  defp ring_limit(true, sender), do: RateLimit.hit(:rings, sender.user_id)
 
   defp callable(%Chat{kind: kind}) when kind in ["direct", "group"], do: :ok
   defp callable(_chat), do: {:error, :bad_request}

@@ -43,10 +43,25 @@ config :pakchat, :rate_limits,
   link: {20, 60_000},
   # Finding people by Gmail, per person.
   lookup: {30, 60_000},
+  # ... and per day, so a script can't list everyone's number and name.
+  lookup_day: {300, 86_400_000},
+  # Different people "Which of my contacts are on PakChat?" may find, per person
+  # per day (the same phone book again is free).
+  found_day: {3000, 86_400_000},
   # Taking someone's keys to start a chat, per person.
   keys: {60, 60_000},
   # Sending messages, per device.
   send: {100, 10_000},
+  # The other events on the live connection, per device: "typing…", asking for
+  # everything waiting again ("sync"), and the rest (ticks, acks, watch, active).
+  typing: {30, 10_000},
+  sync: {20, 60_000},
+  live_events: {600, 10_000},
+  # Bytes a person's messages make the server store (a group message is stored
+  # once per member's device), per hour and per day, so a few accounts can't
+  # fill the database by spamming a big group.
+  stored_bytes: {300 * 1024 * 1024, 3_600_000},
+  stored_bytes_day: {2048 * 1024 * 1024, 86_400_000},
   # Making groups, per person.
   groups: {20, 60_000},
   # Looking up and using invite links, per person.
@@ -54,6 +69,9 @@ config :pakchat, :rate_limits,
   # Asking for SMS codes, per internet address (or per person, when linking a number).
   # Codes also have daily caps of their own (Pakchat.PhoneCodes).
   sms: {5, 600_000},
+  # SMS codes per address block (IPv4 /24, IPv6 /48) per day, so a script can't
+  # use up the whole-server SMS cap (WhatsApp sign-in still works then).
+  sms_day: {10, 86_400_000},
   # Starting a WhatsApp number check, per internet address.
   whatsapp: {10, 600_000},
   # The app asking "has my code arrived?" (every 2 seconds while it waits), per check.
@@ -63,6 +81,8 @@ config :pakchat, :rate_limits,
   # Call messages (ringing, connection details), per device. A call sends
   # a burst of network routes as it starts.
   calls: {600, 60_000},
+  # Calls that ring (wake the phones they go to), per person.
+  rings: {10, 60_000},
   # Changing who sees my status, per person.
   status: {30, 60_000},
   # GIF searches, per person.
@@ -96,6 +116,13 @@ config :phoenix_live_view,
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id]
+
+# Request parameters in the logs: only these plain ids are shown, every other
+# value (session tokens, link secrets, codes, PINs, PIN tickets, Google tokens,
+# file link keys, phone numbers, emails) is written as [FILTERED].
+config :phoenix,
+       :filter_parameters,
+       {:keep, ["chat_id", "device_id", "user_id", "id", "platform", "lang", "purpose", "pos"]}
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason

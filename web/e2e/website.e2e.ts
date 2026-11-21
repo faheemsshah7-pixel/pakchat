@@ -160,7 +160,7 @@ test('a phone links the website by QR, its chats arrive, and the website chats w
   await page.keyboard.press('Enter');
   await eventually(async () => expect(await texts(sara, chat.id)).toContain('Haan! Bilkul 😄'));
   await sara.client.markRead(chat.id);
-  await page.locator('.mrow.out', { hasText: 'Haan! Bilkul' }).locator('.tk.read').waitFor({ timeout: 15_000 });
+  await page.locator('.mrow.out', { hasText: 'Haan! Bilkul' }).locator('.meta:not(.mghost) .tk.read').waitFor({ timeout: 15_000 });
   await page.screenshot({ path: `${SHOTS}5-phone-off.png` });
 
   // Sara sends a photo: the website downloads it, unlocks it and shows it.
@@ -282,13 +282,13 @@ test('everyday actions: reply, edit, delete for everyone, forward, star, search,
 
   // Edit it: Sara sees the new words, marked Edited.
   // (Edit shows once the server has it.)
-  await bub('Haan reload ke baad bhi').locator('.tk[aria-label="Sent"], .tk[aria-label="Delivered"], .tk[aria-label="Read"]').waitFor();
+  await bub('Haan reload ke baad bhi').locator('.meta:not(.mghost) .tk[aria-label="Sent"], .meta:not(.mghost) .tk[aria-label="Delivered"], .meta:not(.mghost) .tk[aria-label="Read"]').waitFor();
   await menuOn('Haan reload ke baad bhi');
   await pick('Edit');
   await box.fill('Haan, reload ke baad bhi chal raha hai');
   await page.keyboard.press('Enter');
   await saraHas(chat.id, (m) => m.text === 'Haan, reload ke baad bhi chal raha hai' && !!m.editedAt);
-  await bub('reload ke baad bhi chal raha hai').locator('text=Edited').waitFor();
+  await bub('reload ke baad bhi chal raha hai').locator('.meta:not(.mghost) .ed').waitFor();
 
   // Delete for everyone: gone for Sara too.
   await box.fill('Galti se bheja');
@@ -420,7 +420,7 @@ test('everyday actions: reply, edit, delete for everyone, forward, star, search,
   await page.screenshot({ path: `${SHOTS}14-select.png` });
   await page.locator('.selbar button[aria-label="Star"]').click();
   await page.locator('.selbar').waitFor({ state: 'detached' });
-  await bub('Salam Sara!').locator('.meta svg').first().waitFor();
+  await bub('Salam Sara!').locator('.meta:not(.mghost) svg').first().waitFor();
   expect(await page.evaluate(() => document.querySelectorAll('.mrow.sel').length)).toBe(0);
 
   // Pin a message: the bar shows under the header, and Sara's copy is pinned too.
@@ -548,7 +548,7 @@ test('everyday actions: reply, edit, delete for everyone, forward, star, search,
     ali.client.start();
   });
   await sendHistory(ali, linked!.deviceId);
-  await page.locator('.row[aria-label="Sara Ahmed"]').waitFor({ timeout: 20_000 });
+  await page.locator('.row').filter({ has: page.locator('.nm', { hasText: /^(~ )?Sara Ahmed$/ }) }).waitFor({ timeout: 20_000 });
   await page.screenshot({ path: `${SHOTS}21-relinked.png` });
   await ali.server.removeDevice(linked!.deviceId);
   await page.locator('[data-qr^="PAKCHAT1,"]').waitFor({ timeout: 40_000 });

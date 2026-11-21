@@ -77,7 +77,7 @@ export default function SignInVerify() {
   return (
     <Screen>
       <TopBar title={fill(t.verifyNumberTitle, { phone: shown })} onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 22, paddingBottom: 24, gap: 16 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingTop: 22, paddingBottom: 24, gap: 16 }} keyboardShouldPersistTaps="handled">
         <Pressy onPress={() => router.back()} label={t.wrongNumberLink} testID="wrong-number" style={{ alignSelf: 'center' }}>
           <Txt size={15} weight="600" color={theme.accInk} style={{ padding: 6 }}>
             {t.wrongNumberLink}

@@ -48,6 +48,50 @@ export function fontStyle(text: string | null, lang: 'en' | 'ur', size: number, 
   return { fontWeight: weight, fontSize: size, lineHeight: Math.round(size * 1.38), includeFontPadding: false };
 }
 
+// Nastaliq reaches far above and below its line (پ's third dot, گ's top stroke), further than the
+// line height we give it, and Android cuts off whatever is outside the text's own box. So Urdu text
+// gets this much more room above and below, taken back with negative margins: nothing moves, the
+// letters just aren't cut. (The font's tallest letters, measured: 1.85 above, 0.68 below, in em.)
+const URDU_ROOM_TOP = 0.25;
+const URDU_ROOM_BOTTOM = 0.35;
+
+const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+
+/** The extra room for Urdu letters, added to whatever padding and margin the caller gave. */
+function urduRoom(size: number, style: StyleProp<TextStyle>): TextStyle {
+  const s = (StyleSheet.flatten(style) ?? {}) as TextStyle;
+  const top = Math.ceil(size * URDU_ROOM_TOP);
+  const bottom = Math.ceil(size * URDU_ROOM_BOTTOM);
+  return {
+    paddingTop: num(s.paddingTop ?? s.paddingVertical ?? s.padding) + top,
+    paddingBottom: num(s.paddingBottom ?? s.paddingVertical ?? s.padding) + bottom,
+    marginTop: num(s.marginTop ?? s.marginVertical ?? s.margin) - top,
+    marginBottom: num(s.marginBottom ?? s.marginVertical ?? s.margin) - bottom,
+  };
+}
+
+const LATIN = /[A-Za-z][A-Za-z0-9'’.\- ]*[A-Za-z0-9]|[A-Za-z]/g;
+const latinCount = (text: string) => (text.match(/[A-Za-z]/g) ?? []).length;
+const urduCount = (text: string) => (text.match(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/g) ?? []).length;
+
+/** Urdu words with English ones in them: the English in the phone's own font, not Nastaliq's
+ * old-fashioned Latin letters, so "English" looks the same as on the English screens. */
+function withLatinRuns(text: string, weight: Weight): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(LATIN)) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(
+      <Text key={m.index} style={{ fontFamily: 'sans-serif', fontWeight: weight }}>
+        {m[0]}
+      </Text>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 function plainText(children: ReactNode): string | null {
   if (typeof children === 'string' || typeof children === 'number') return String(children);
   if (Array.isArray(children) && children.every((c) => typeof c === 'string' || typeof c === 'number')) return children.join('');
@@ -80,6 +124,9 @@ export function Txt({
   const text = plainText(children);
   const textAlign: TextStyle['textAlign'] =
     align === 'center' ? 'center' : align === 'auto' ? 'auto' : align === 'end' ? (rtl ? 'left' : 'right') : rtl ? 'right' : 'left';
+  // Mostly English with a little Urdu ("English and اردو"): the phone's own font for all of it.
+  const font = text !== null && latinCount(text) > urduCount(text) ? fontStyle(null, 'en', size, weight) : fontStyle(text, lang, size, weight);
+  const nastaliq = font.fontFamily === 'NotoNastaliqUrdu';
   return (
     <Text
       testID={testID}
@@ -87,9 +134,9 @@ export function Txt({
       numberOfLines={lines}
       // Android's biggest font sizes still fit the pills and rows (the settings' own sizes go on top).
       maxFontSizeMultiplier={1.3}
-      style={[fontStyle(text, lang, size, weight), { color: color ?? theme.text, textAlign }, style]}
+      style={[font, { color: color ?? theme.text, textAlign }, style, nastaliq && urduRoom(size, style)]}
     >
-      {children}
+      {nastaliq && text !== null && latinCount(text) > 0 ? withLatinRuns(text, weight) : children}
     </Text>
   );
 }
@@ -446,7 +493,11 @@ export function Button({
   style?: StyleProp<ViewStyle>;
 }) {
   const theme = useTheme();
-  const fg = look === 'main' ? theme.onAcc : look === 'danger' ? theme.danger : look === 'glass' ? theme.text : theme.accInk;
+  // Can't be tapped yet (nothing typed): a plain grey button with readable words, like WhatsApp's,
+  // not the coloured one faded to half (its white words almost disappeared on the light look).
+  const off = !!disabled && !busy;
+  if (off) look = 'glass';
+  const fg = off ? theme.muted : look === 'main' ? theme.onAcc : look === 'danger' ? theme.danger : look === 'glass' ? theme.text : theme.accInk;
   const inner = (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 54, paddingHorizontal: 20 }}>
       {icon && <Icon name={icon} size={20} color={fg} />}
@@ -456,7 +507,14 @@ export function Button({
     </View>
   );
   return (
-    <Pressy onPress={onPress} disabled={disabled || busy} label={title} testID={testID} style={[{ borderRadius: 18, overflow: 'hidden' }, style]}>
+    <Pressy
+      onPress={off ? undefined : onPress}
+      disabled={busy}
+      ripple={off ? 'none' : 'auto'}
+      label={title}
+      testID={testID}
+      style={[{ borderRadius: 18, overflow: 'hidden' }, style]}
+    >
       {look === 'main' ? (
         <LinearGradient
           colors={theme.grad}

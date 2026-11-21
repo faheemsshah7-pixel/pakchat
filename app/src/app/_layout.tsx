@@ -136,7 +136,7 @@ function App() {
     const call = takeTappedCall();
     if (call) {
       if (!calls.screenOpen) router.push({ pathname: '/call', params: { id: call.id, ...(call.answer ? { answer: '1' } : {}) } });
-      else if (call.answer && calls.view()?.state === 'incoming') void calls.answer();
+      else if (call.answer && calls.view()?.state === 'incoming' && calls.view()?.id === call.id) void calls.answer();
       return;
     }
     // A message alert: that chat. From inside another chat it takes that chat's

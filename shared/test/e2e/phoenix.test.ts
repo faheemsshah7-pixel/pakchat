@@ -322,10 +322,59 @@ describe('against the real server', () => {
     expect(fresh.id).toBe(sara.id);
     const changed: string[] = [];
     ali.client.on('securityCodeChanged', (e) => changed.push(e.userId));
-    await ali.client.sendText(chat.id, 'New phone?');
+    const sent = await ali.client.sendText(chat.id, 'New phone?');
     await eventually(async () => expect(await texts(fresh, chat.id)).toEqual(['Ali: New phone?']));
     expect(changed).toContain(sara.id);
+    // A normal reinstall never makes a message wait for a tap (build 35's hold).
+    expect((await ali.storage.getMessage(chat.id, ali.id, sent.id))!.heldFor).toBeUndefined();
   });
+
+  test('build 35: someone asks to reset my PIN, my phone is told and the reset stops', async () => {
+    const sara = await person('Sara', 'node');
+    expect((await sara.server.setPin('246810')).pin).toBe(true);
+    const told: number[] = [];
+    sara.client.on('pinReset', () => told.push(Date.now()));
+
+    // Someone on another phone signs in as Sara and taps Forgot PIN, Wait 7 days.
+    const thief = newClient('node');
+    const { id_token } = await helper<{ id_token: string }>('/google_token', { name: 'Sara', key: (sara as Person & { key: string }).key });
+    const asked = pinNeeded(await thief.client.signIn(id_token).catch((e) => e))!;
+    let wait: unknown = null;
+    await thief.client
+      .signInWith(async (d, k) => {
+        wait = await thief.server.pinReset(asked.ticket, d, k);
+        throw new Error('waiting');
+      })
+      .catch(() => {});
+    expect(wait).toMatchObject({ resetAt: expect.any(String) });
+
+    // Sara's phone hears at once, and the wait is gone: a new try shows no reset.
+    await eventually(async () => expect(told.length).toBeGreaterThan(0));
+    const again = pinNeeded(await newClient('node').client.signIn(id_token).catch((e) => e))!;
+    expect(again.resetAt).toBeNull();
+  });
+
+  test('build 35: moving a number that has a PIN needs that PIN, and the code stays good for it', async () => {
+    // Victim: signed in by number, with a PIN.
+    const victim = newClient('node');
+    const sent = await victim.server.sendSignInCode(newNumber());
+    await victim.client.signInWithPhone(sent.phone, await victim.server.testCode(sent.phone));
+    expect((await victim.server.setPin('135790')).pin).toBe(true);
+    victim.client.stop();
+
+    // Ali has the SIM (the code), and tries to move the number to his account.
+    const ali = await person('Ali', 'node');
+    const aliServer = new HttpServer(HTTP);
+    aliServer.useToken(ali.client.me!.token);
+    await new Promise((r) => setTimeout(r, 31_000));
+    await expect(aliServer.sendLinkCode(sent.phone)).rejects.toMatchObject({ reason: 'taken' });
+    await aliServer.sendLinkCode(sent.phone, true);
+    const code = await aliServer.testCode(sent.phone);
+    await expect(aliServer.linkPhone(sent.phone, code, true)).rejects.toMatchObject({ reason: 'pin_needed' });
+    expect(pinRefused(await aliServer.linkPhone(sent.phone, code, true, '000000').catch((e) => e))).toEqual({ triesLeft: 4 });
+    // The right PIN with the same code: it moves.
+    expect((await aliServer.linkPhone(sent.phone, code, true, '135790')).phone).toBe(sent.phone);
+  }, 60_000);
 
   test('two-step PIN: a new phone needs it, a wrong one is counted, and the keys made once still chat', async () => {
     const ali = await person('Ali', 'node');

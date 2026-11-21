@@ -73,5 +73,5 @@ defmodule PakchatWeb.WhatsAppController do
     end
   end
 
-  defp ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
+  defp ip(conn), do: Pakchat.RateLimit.ip_key(conn.remote_ip)
 end

@@ -46,6 +46,11 @@ defmodule PakchatWeb.DeviceChannel do
       # Even when the server itself is shutting down, run `terminate/2`
       # below, so "last seen" is always saved.
       Process.flag(:trap_exit, true)
+      # The phone itself is in use: a PIN reset someone started stops (Pakchat.Pin),
+      # and the phone is told, so it can say so (it was woken for this, closed).
+      if device.device_id == 1 and Pakchat.Pin.cancel_reset(device.user_id) == :cancelled,
+        do: send(self(), {:pin_reset, nil})
+
       if is_map(params["after"]), do: Relay.ack_upto(device, params["after"])
       send(self(), :after_join)
       # An app too old to say counts as on screen, as before.
@@ -155,6 +160,16 @@ defmodule PakchatWeb.DeviceChannel do
     end
   end
 
+  # Someone started a 7-day PIN reset with this account's number (Pakchat.Accounts).
+  # The phone, already connected, stops it at once too.
+  def handle_info({:pin_reset, at}, socket) do
+    if socket.assigns.device.device_id == 1,
+      do: Pakchat.Pin.cancel_reset(socket.assigns.device.user_id)
+
+    push(socket, "pin_reset", %{reset_at: at})
+    {:noreply, socket}
+  end
+
   def handle_info({:typing, payload}, socket) do
     push(socket, "typing", payload)
     {:noreply, socket}
@@ -174,7 +189,12 @@ defmodule PakchatWeb.DeviceChannel do
   # whole connection: dropped connections reconnect and add even more load.
   @impl true
   def handle_in(event, payload, socket) do
-    do_handle_in(event, payload, socket)
+    case event_limit(event, socket.assigns.device.id) do
+      :ok -> do_handle_in(event, payload, socket)
+      # "Typing…" over the limit is just dropped, as it would be if it got lost.
+      {:error, _} when event == "typing" -> {:noreply, socket}
+      {:error, reason} -> {:reply, {:error, %{reason: reason}}, socket}
+    end
   rescue
     e in DBConnection.ConnectionError ->
       Logger.warning(
@@ -183,6 +203,14 @@ defmodule PakchatWeb.DeviceChannel do
 
       {:reply, {:error, %{reason: "rate_limited"}}, socket}
   end
+
+  # Every event is limited per device (config :rate_limits): "send" and "call"
+  # have their own limits below; "typing" and "sync" (it sends everything waiting
+  # again) have tight ones; the rest share one.
+  defp event_limit(event, _device_id) when event in ["send", "call"], do: :ok
+  defp event_limit("typing", device_id), do: RateLimit.hit(:typing, device_id)
+  defp event_limit("sync", device_id), do: RateLimit.hit(:sync, device_id)
+  defp event_limit(_event, device_id), do: RateLimit.hit(:live_events, device_id)
 
   defp do_handle_in("send", payload, socket) do
     device = socket.assigns.device

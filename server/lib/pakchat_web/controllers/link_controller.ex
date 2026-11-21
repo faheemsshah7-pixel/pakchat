@@ -50,8 +50,9 @@ defmodule PakchatWeb.LinkController do
          {:ok, keys} <- Params.key_upload(params),
          true <-
            (length(keys.ec) <= 100 and length(keys.kyber) <= 100) || {:error, :too_many_keys},
-         :ok <- check_device(device_attrs) do
-      json(conn, Linking.start(device_attrs, keys))
+         :ok <- check_device(device_attrs),
+         %{} = request <- Linking.start(device_attrs, keys) do
+      json(conn, request)
     end
   end
 
@@ -198,5 +199,5 @@ defmodule PakchatWeb.LinkController do
   defp ok_or_bad({:ok, _} = ok), do: ok
   defp ok_or_bad(:error), do: {:error, :bad_request}
 
-  defp ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
+  defp ip(conn), do: Pakchat.RateLimit.ip_key(conn.remote_ip)
 end

@@ -21,7 +21,9 @@ import { listen, stopped } from './files';
 // Each account on this phone has its own password and settings.
 const PASSWORD = () => `backupPassword_${core.myId}`;
 const LAST = () => `lastBackupAt:${core.myId}`;
-export const MIN_PASSWORD = 8;
+// 12, not 8 (security review, Nov 2026): the backup sits on the server, so a short password could be guessed
+// by whoever got the file. Only new passwords are checked; an older backup still opens with its own.
+export const MIN_PASSWORD = 12;
 
 export type BackupInfo = { id: string; size: number; madeAt: number; url: string };
 

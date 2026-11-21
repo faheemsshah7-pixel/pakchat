@@ -4,6 +4,7 @@
 
 import { afterEach, describe, expect, test } from 'vitest';
 
+import { SEALED } from '../src/signal';
 import { World } from './people';
 import type { Kind } from './signals';
 
@@ -244,6 +245,34 @@ describe.each(WAYS)('chats (%s)', (_label, phone, web) => {
     await fresh.client.sendText(chat.id, 'Yes!');
     await w.settle();
     expect((await w.texts(ali, chat.id)).at(-1)).toBe('Sara: Yes!');
+  });
+
+  test('asked again for a message they already had, with a new security code: it waits for a tap', async () => {
+    const { ali, sara, chat } = await two();
+    const secret = await ali.client.sendText(chat.id, 'The door code is 4471');
+    await w.settle();
+    const seq = (await ali.storage.getMessage(chat.id, ali.id, secret.id))!.seq!;
+    expect((await ali.storage.getMessage(chat.id, ali.id, secret.id))!.status).toBe('delivered');
+    // A hacked server swaps in its own keys for Sara, and asks Ali to send it again.
+    sara.client.stop();
+    const fake = await w.person('Sara', web);
+    const retry = JSON.stringify({ v: 1, id: crypto.randomUUID(), chat: chat.id, at: Date.now(), t: 'retry', seq, why: 'session' });
+    // Its own line to the server (the client never sends this for a message it has).
+    const line = fake.client as unknown as { push(event: string, payload: Record<string, unknown>): Promise<unknown> };
+    await line.push('send', {
+      chat_id: chat.id,
+      kind: 'control',
+      envelopes: [{ user_id: ali.id, device_id: 1, type: SEALED.plain, body: Buffer.from(retry).toString('base64') }],
+    });
+    await w.settle();
+    expect(await w.texts(fake, chat.id)).toEqual([]);
+    expect((await ali.storage.getMessage(chat.id, ali.id, secret.id))!.heldFor).toEqual([sara.id]);
+
+    // Ali taps "send": now it goes.
+    await ali.client.sendHeld(chat.id, secret.id);
+    await w.settle();
+    expect(await w.texts(fake, chat.id)).toEqual(['Ali: The door code is 4471']);
+    expect((await ali.storage.getMessage(chat.id, ali.id, secret.id))!.heldFor).toBeUndefined();
   });
 
   test("a message the server moved to another chat is ignored", async () => {

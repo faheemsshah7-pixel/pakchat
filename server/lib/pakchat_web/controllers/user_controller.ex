@@ -12,6 +12,7 @@ defmodule PakchatWeb.UserController do
   """
   def lookup(conn, params) do
     with :ok <- RateLimit.hit(:lookup, conn.assigns.user.id),
+         :ok <- RateLimit.hit(:lookup_day, conn.assigns.user.id),
          %{} = user <- find(params) do
       json(conn, Wire.person(user, conn.assigns.user))
     end
@@ -32,12 +33,27 @@ defmodule PakchatWeb.UserController do
 
     with :ok <- RateLimit.hit(:contacts, conn.assigns.user.id),
          true <- length(phones) + length(emails) <= 2000 || {:error, :too_many} do
-      found =
+      matches =
         for {hash, user} <- Accounts.match_hashes(phones, emails),
             user.id != conn.assigns.user.id,
-            do: %{hash: Base.encode64(hash), user: Wire.person(user, conn.assigns.user)}
+            do: {hash, user}
 
-      json(conn, found)
+      # Anti-scraping: only so many different people found a day (the same
+      # phone book again is free).
+      with :ok <-
+             RateLimit.distinct(
+               :found_day,
+               conn.assigns.user.id,
+               Enum.map(matches, &elem(&1, 1).id)
+             ) do
+        json(
+          conn,
+          for(
+            {hash, user} <- matches,
+            do: %{hash: Base.encode64(hash), user: Wire.person(user, conn.assigns.user)}
+          )
+        )
+      end
     end
   end
 

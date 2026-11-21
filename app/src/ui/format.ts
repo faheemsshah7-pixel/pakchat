@@ -230,6 +230,11 @@ export function preview(m: Message | null, t: Strings, group: boolean) {
 }
 
 /** Words for the server's reasons to refuse a phone number or a code. */
+/** Who a held message waits for ("Ali", or "Ali, Sara" in a group). */
+export function heldNames(ids: string[]) {
+  return ids.map((id) => core.name(id) || '…').join(', ');
+}
+
 export function phoneError(t: Strings, err: unknown) {
   const reason = reasonOf(err);
   const words: Record<string, string> = {

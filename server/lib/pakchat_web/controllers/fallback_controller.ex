@@ -44,7 +44,9 @@ defmodule PakchatWeb.FallbackController do
   defp status(:bad_ticket), do: 401
   defp status(:wrong_google), do: 403
   defp status(:wrong_current), do: 403
+  defp status(:pin_needed), do: 403
   defp status(:rate_limited), do: 429
+  defp status(:quota_full), do: 429
   defp status(:unavailable), do: 503
   defp status(:storage_full), do: 507
   defp status(_), do: 422

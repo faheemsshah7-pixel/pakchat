@@ -192,7 +192,8 @@ export default function TwoStep() {
             testID: 'confirm-pin-off',
             onPress: () => {
               setOffering(false);
-              go({ kind: 'current', then: 'off' });
+              // Once the pop-up has gone, so the PIN boxes get the keyboard.
+              setTimeout(() => go({ kind: 'current', then: 'off' }), 300);
             },
           },
           { label: t.cancel, onPress: () => setOffering(false) },

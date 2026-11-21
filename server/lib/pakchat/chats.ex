@@ -70,12 +70,13 @@ defmodule Pakchat.Chats do
     )
   end
 
-  @doc ~s(Two people are "contacts" if they have a one-to-one chat, as in today's app.)
+  @doc "Is `viewer` one of `owner`'s contacts (Privacy's \"My contacts\")? See below."
   def contacts?(a, a), do: true
 
-  def contacts?(a, b) do
-    Repo.exists?(from c in Chat, where: c.direct_key == ^direct_key(a, b))
-  end
+  # `owner` counts `viewer` as a contact (Privacy's "My contacts") only when
+  # `owner` chose to talk to them: started the one-to-one chat, or wrote back in
+  # it. Anyone can open a chat with anyone, so a chat alone isn't enough.
+  def contacts?(viewer, owner), do: reached_out?(owner, viewer)
 
   @doc """
   True when `to` may see how to reach `from` (their number and Gmail), so "Add
@@ -136,6 +137,7 @@ defmodule Pakchat.Chats do
 
   @doc "Makes a group. Whoever makes it is its admin."
   def create_group(%User{} = me, attrs, member_ids) do
+    attrs = Pakchat.Files.only_own_photo(attrs, me)
     member_ids = Enum.uniq([me.id | List.wrap(member_ids)])
 
     changeset = Chat.group_changeset(%Chat{kind: "group", created_by: me.id}, attrs)
@@ -165,6 +167,8 @@ defmodule Pakchat.Chats do
   description and photo.
   """
   def update_group(%User{} = me, chat_id, attrs) do
+    attrs = Pakchat.Files.only_own_photo(attrs, me)
+
     with {:ok, chat} <- get_group(me, chat_id),
          :ok <- may_edit(chat, me.id, attrs),
          changeset = Chat.group_changeset(chat, attrs),
@@ -596,6 +600,7 @@ defmodule Pakchat.Chats do
   linked in. Everyone in those groups joins the community too, as on WhatsApp.
   """
   def create_community(%User{} = me, attrs, group_ids) do
+    attrs = Pakchat.Files.only_own_photo(attrs, me)
     changeset = Chat.group_changeset(%Chat{kind: "community", created_by: me.id}, attrs)
 
     with :ok <- check_valid(changeset),
@@ -993,6 +998,8 @@ defmodule Pakchat.Chats do
 
   @doc "A call link: a small group for it, with a link anyone can open to join its call."
   def create_call_link(%User{} = me, attrs) do
+    attrs = Pakchat.Files.only_own_photo(attrs, me)
+
     changeset =
       Chat.group_changeset(%Chat{kind: "group", created_by: me.id, call_link: true}, attrs)
 
