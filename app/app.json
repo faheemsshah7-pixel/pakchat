@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.36",
+    "version": "1.0.37",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
-      "versionCode": 36,
+      "versionCode": 37,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -211,7 +211,8 @@
     "scheme": "pakchat",
     "experiments": {
       "typedRoutes": false,
-      "tsconfigPaths": false
+      "tsconfigPaths": false,
+      "reactCompiler": false
     },
     "backgroundColor": "#EAF2FE"
   }

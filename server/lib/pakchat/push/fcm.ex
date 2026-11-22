@@ -22,6 +22,30 @@ defmodule Pakchat.Push.Fcm do
   def configured?, do: account() != nil
 
   @doc """
+  Why there's no key, in words for the log: not set, the file can't be opened
+  (22 Nov: the secrets folder was locked to the server's own user, and the log
+  only said "isn't set"), or it isn't a service account key.
+  """
+  def why_not do
+    case Application.get_env(:pakchat, :fcm_service_account) do
+      path when is_binary(path) and path != "" ->
+        case File.read(path) do
+          {:ok, text} ->
+            case Jason.decode(text) do
+              {:ok, %{"private_key" => _, "client_email" => _}} -> "the key was unreadable when first needed; restart the app"
+              _ -> "#{path} isn't a Firebase service account key"
+            end
+
+          {:error, reason} ->
+            "#{path} can't be opened (#{reason}): the server runs as nobody (65534), see deploy/setup.sh"
+        end
+
+      _ ->
+        "FCM_SERVICE_ACCOUNT isn't set"
+    end
+  end
+
+  @doc """
   Sends one alert. `:gone` means the phone's token is no longer valid.
   With `call: true` it says a call is ringing: it lives only a minute (a
   phone that was off shouldn't ring for a call that's over), and never

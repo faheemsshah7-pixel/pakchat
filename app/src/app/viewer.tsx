@@ -477,12 +477,26 @@ function Page({
     },
     [onZoomed],
   );
-  // Anything but a photo is on screen as soon as it's made.
-  useEffect(() => {
-    if (!photo) onShown?.();
-  }, [photo, onShown]);
   // A video's sharp first frame, shown until it plays. One downloaded before build 34 gets its own now.
   const poster = f.poster ?? (f.thumb ? `data:image/jpeg;base64,${f.thumb}` : undefined);
+  // A video with its picture is on screen once the picture shows; anything else but a photo, as soon as it's made.
+  const pictured = here && f.kind === 'video' && !!poster;
+  useEffect(() => {
+    if (!photo && !pictured) onShown?.();
+  }, [photo, pictured, onShown]);
+  // The playing video has drawn its first frame (or won't): its picture can go. Again from the start each time it's swiped back to.
+  const [drawn, setDrawn] = useState(false);
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    if (!active) setDrawn(false);
+  }
+  useEffect(() => {
+    if (!active) return;
+    // A video that never draws (a broken file) mustn't stay hidden under its picture.
+    const late = setTimeout(() => setDrawn(true), 1500);
+    return () => clearTimeout(late);
+  }, [active]);
   useEffect(() => {
     if (here && f.kind === 'video' && !f.poster) void addPoster(m).catch(() => {});
   }, [here, f.kind, f.poster, m]);
@@ -512,18 +526,26 @@ function Page({
         ) : null
       ) : here && f.kind === 'video' ? (
         // Only the one on screen has a player (they're heavy), and it stops when you swipe away.
-        active ? (
-          <Video
-            uri={f.local!}
-            poster={poster}
-            chrome={chrome}
-            lift={lift}
-            onTap={onTap}
-            zoom={{ width, height, picture: { width: shownW, height: shownH }, enabled: zoom, onZoomed: zoomedHere, onEdgeSwipe }}
-          />
-        ) : (
-          <Pressable style={{ flex: 1 }} onPress={onTap} />
-        )
+        <View style={{ flex: 1 }}>
+          {active ? (
+            <Video
+              uri={f.local!}
+              chrome={chrome}
+              lift={lift}
+              onTap={onTap}
+              onDrawn={() => setDrawn(true)}
+              zoom={{ width, height, picture: { width: shownW, height: shownH }, enabled: zoom, onZoomed: zoomedHere, onEdgeSwipe }}
+            />
+          ) : (
+            <Pressable style={{ flex: 1 }} onPress={onTap} />
+          )}
+          {/* Its picture, on top until the player has drawn its first frame. The same picture
+              stays up the whole time (a new one takes a frame to show), so it never flashes black
+              (owner's video, 21 Nov). */}
+          {poster && !(active && drawn) && (
+            <Image source={{ uri: poster }} style={[StyleSheet.absoluteFill, { width, height }]} contentFit="contain" cachePolicy="memory-disk" pointerEvents="none" onDisplay={onShown} />
+          )}
+        </View>
       ) : here ? (
         // Pinch anywhere on the screen to zoom; a tap shows and hides the bars. Only the one on
         // screen zooms, and swiping away from it puts it back.
@@ -578,7 +600,15 @@ type VideoZoom = {
  * A video, playing, with WhatsApp-like controls that hide and show with a tap.
  * Pinch it (or double tap) to zoom in while it plays, like a photo (Zoomable.tsx).
  */
-function Video({ uri, poster, chrome, lift, onTap, zoom }: { uri: string; poster?: string; chrome: boolean; lift: number; onTap: () => void; zoom: VideoZoom }) {
+function Video({ uri, chrome, lift, onTap, onDrawn, zoom }: {
+  uri: string;
+  chrome: boolean;
+  lift: number;
+  onTap: () => void;
+  /** Its first frame is drawn, or it can't play: the page takes its still picture away. */
+  onDrawn: () => void;
+  zoom: VideoZoom;
+}) {
   const t = useT();
   const insets = useSafeAreaInsets();
   const player = useVideoPlayer(uri, (p) => {
@@ -592,12 +622,11 @@ function Video({ uri, poster, chrome, lift, onTap, zoom }: { uri: string; poster
   const [speed, setSpeedNow] = useState(1);
   // While the line is being dragged, it shows where you are, not where the video is.
   const [dragging, setDragging] = useState<number | null>(null);
-  // Its still picture stays up until the first frame is drawn, so opening it never flashes black.
-  const [drawn, setDrawn] = useState(false);
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
   useEventListener(player, 'timeUpdate', ({ currentTime }) => setAt(currentTime));
   useEventListener(player, 'statusChange', ({ status }) => {
     if (status === 'readyToPlay' && player.duration > 0) setLength(player.duration);
+    if (status === 'error') onDrawn();
   });
   useEventListener(player, 'playToEnd', () => {
     player.seekBy(-player.currentTime);
@@ -619,8 +648,7 @@ function Video({ uri, poster, chrome, lift, onTap, zoom }: { uri: string; poster
         onEdgeSwipe={zoom.onEdgeSwipe}
       >
         {/* A texture (not Android's default surface), so it moves, zooms and shrinks with your fingers. */}
-        <VideoView player={player} style={{ width: zoom.width, height: zoom.height }} nativeControls={false} contentFit="contain" surfaceType="textureView" onFirstFrameRender={() => setDrawn(true)} testID="viewer-video" />
-        {!drawn && poster && <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="contain" cachePolicy="memory-disk" pointerEvents="none" />}
+        <VideoView player={player} style={{ width: zoom.width, height: zoom.height }} nativeControls={false} contentFit="contain" surfaceType="textureView" onFirstFrameRender={onDrawn} testID="viewer-video" />
       </Zoomable>
       {(chrome || !playing) && (
         <Animated.View entering={fadeIn} exiting={fadeOut} pointerEvents="box-none" style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0, alignItems: 'center', justifyContent: 'center' }}>

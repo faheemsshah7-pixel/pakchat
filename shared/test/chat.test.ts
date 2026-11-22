@@ -291,7 +291,7 @@ describe.each(WAYS)('chats (%s)', (_label, phone, web) => {
     const self = await ali.client.openDirect(ali.id);
     await ali.client.sendText(self.id, 'Note to self');
     await w.settle();
-    expect((await ali.client.messages(self.id))[0].status).toBe('sent');
+    expect((await ali.client.messages(self.id))[0].status).toBe('read');
     const web2 = await w.website(ali, web);
     await ali.client.sendText(self.id, 'Shopping list');
     await w.settle();

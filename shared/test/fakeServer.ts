@@ -156,8 +156,10 @@ export class FakeServer {
         open = true;
         void (async () => {
           await tick();
+          if (!open) return;
           const d = this.devices.find((x) => x.uuid === deviceUuid && x.token === token);
-          if (!d || !open) return;
+          // Like the real socket: a key the server no longer knows is refused.
+          if (!d) return h.refused?.();
           this.online.set(d.uuid, h);
           h.status(true);
           // Like the real channel: everything waiting, oldest first (or jumbled, with chaos).

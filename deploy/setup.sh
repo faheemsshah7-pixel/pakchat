@@ -71,6 +71,11 @@ fill LIVEKIT_API_SECRET
 chmod 600 .env
 mkdir -p secrets backups site
 chown -R "$owner" .
+# The server in Docker runs as "nobody" (65534): it must be able to open Firebase's key, or
+# no alerts go to closed apps (22 Nov: the folder was 700, so alerts were off for weeks).
+# The folder can be passed through but not listed; the backup's rclone.conf stays private.
+chmod 711 secrets
+[ -f secrets/firebase.json ] && chown 65534:65534 secrets/firebase.json && chmod 400 secrets/firebase.json
 
 echo "6/6 Nightly backup"
 line="15 22 * * * $(pwd)/backup.sh >> $(pwd)/backups/backup.log 2>&1"

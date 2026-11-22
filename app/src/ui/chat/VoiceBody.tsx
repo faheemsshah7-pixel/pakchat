@@ -29,6 +29,7 @@ import { useFileProgress } from '../../core/hooks';
 import { nextSpeed, pause, play, seek, useVoicePlayer } from '../../core/player';
 import { barsOf } from '../../core/voice';
 import { useT } from '../../i18n';
+import type { Strings } from '../../i18n/strings';
 import { useLook } from '../../theme/ThemeProvider';
 import { duration as clockOf } from '../format';
 import { Icon } from '../icons';
@@ -151,18 +152,8 @@ export function VoiceBody({ m, mine, metaRoom = 64, selecting, onPick }: { m: Me
     if (f.transcript) return setShown(!shown);
     if (!here || writing) return;
     setWriting(true);
-    try {
-      const words = (await fileModule().transcribe(f.local!, lang === 'ur' ? 'ur-PK' : 'en-US')).trim();
-      if (!words) return toast(t.noWordsHeard);
-      await core.client.changeHere(m.chatId, m, (x) => {
-        if (x.file) x.file.transcript = words.slice(0, 4000);
-      });
-      setShown(true);
-    } catch {
-      toast(t.couldNotTranscribe);
-    } finally {
-      setWriting(false);
-    }
+    if (await transcribeInto(m, f.local!, lang === 'ur', t)) setShown(true);
+    setWriting(false);
   }
   const showAa = f.kind === 'voice' && here && !sending && (!!f.transcript || transcriptsHere());
 
@@ -289,4 +280,22 @@ function Ring({ progress, color }: { progress: number; color: string }) {
       <Icon name="close" size={17} color={color} />
     </View>
   );
+}
+
+/** Writes a voice note out as words and keeps them on the message. False (with a toast) when it can't. */
+async function transcribeInto(m: Message, local: string, urdu: boolean, t: Strings): Promise<boolean> {
+  try {
+    const words = (await fileModule().transcribe(local, urdu ? 'ur-PK' : 'en-US')).trim();
+    if (!words) {
+      toast(t.noWordsHeard);
+      return false;
+    }
+    await core.client.changeHere(m.chatId, m, (x) => {
+      if (x.file) x.file.transcript = words.slice(0, 4000);
+    });
+    return true;
+  } catch {
+    toast(t.couldNotTranscribe);
+    return false;
+  }
 }

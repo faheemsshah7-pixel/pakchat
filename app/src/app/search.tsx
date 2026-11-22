@@ -6,7 +6,7 @@
 import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { ScrollView, SectionList, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
@@ -31,8 +31,10 @@ export default function Search() {
   const t = useT();
   const { theme, lang } = useLook();
   const [query, setQuery] = useState('');
+  // The box shows each letter at once; the results follow a moment later, without holding up typing.
+  const typed = useDeferredValue(query);
   const rows = useChatList();
-  const found = useSearch(query);
+  const found = useSearch(typed);
   const people = usePeople();
   const [filter, setFilter] = useState<Filter | null>(null);
   // A filter's messages from every chat (not statuses, nor locked chats' words).
@@ -68,7 +70,7 @@ export default function Search() {
     };
   }, [query, only]);
 
-  const q = query.trim().toLowerCase();
+  const q = typed.trim().toLowerCase();
   const chats = useMemo(() => {
     if (only || (filter && filter !== 'unread') || (!q && filter !== 'unread')) return [];
     return (rows ?? [])

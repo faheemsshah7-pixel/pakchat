@@ -80,6 +80,11 @@ export type Events = {
   connection: (connected: boolean) => void;
   /** Someone asked to reset this account's PIN with its number (stopped, since this phone is in use). */
   pinReset: () => void;
+  /**
+   * The server no longer knows this device: the account was signed in on another phone (which
+   * signs this one out, like WhatsApp), or it was signed out from there. The app signs out here too.
+   */
+  signedOutElsewhere: () => void;
   /** Someone's security code changed (they reinstalled, or a new device). */
   securityCodeChanged: (e: { userId: string }) => void;
   /** A call message (ringing, connecting, hanging up). Never saved: the app's call code handles it. */
@@ -93,6 +98,9 @@ export type Events = {
   /** Something went wrong that the app might want to log. */
   error: (err: Error) => void;
 };
+
+/** "Message yourself": a one-to-one chat with only me in it. */
+const selfChat = (chat: Chat, me: string) => chat.kind === 'direct' && chat.members.length > 0 && chat.members.every((x) => x.userId === me);
 
 /** Group notes that only tell the app to look again (its admins' lists), never a line in the chat. */
 const QUIET_NOTES = ['requested', 'request_done', 'suggested', 'suggestion_done'];
@@ -283,6 +291,7 @@ export class PakChat {
       typing: (e) => this.emit('typing', { chatId: e.chat_id, userId: e.user_id, typing: e.typing, audio: e.audio === true }),
       presence: (p) => this.emit('presence', p),
       pinReset: () => this.emit('pinReset'),
+      refused: () => void this.checkSession(),
       status: (connected) => {
         this.connected = connected;
         this.emit('connection', connected);
@@ -294,6 +303,24 @@ export class PakChat {
         }
       },
     });
+  }
+
+  private sessionChecked = 0;
+
+  /**
+   * Asks the server whether this device is still signed in (the connection was refused, say).
+   * When it isn't (signed in on another phone, which signs this one out), says so once:
+   * 'signedOutElsewhere'. No network, or the server busy: nothing (it asks again next time).
+   */
+  async checkSession() {
+    if (!this.session || Date.now() - this.sessionChecked < 15_000) return;
+    this.sessionChecked = Date.now();
+    const token = this.session.token;
+    try {
+      await this.o.server.keyCounts();
+    } catch (err) {
+      if (err instanceof ServerError && err.status === 401 && this.session?.token === token) this.emit('signedOutElsewhere');
+    }
   }
 
   stop() {
@@ -1108,7 +1135,8 @@ export class PakChat {
           // A call's record keeps the call's own time (when it started).
           if (m.kind !== 'system') m.sentAt = sentAt;
           // Paused just as it went: it went, so it shows as sent.
-          if (m.status === 'queued' || m.status === 'failed' || m.status === 'paused') m.status = 'sent';
+          // Messaging myself: read the moment it's there, two blue ticks like WhatsApp's.
+          if (m.status === 'queued' || m.status === 'failed' || m.status === 'paused') m.status = chat && selfChat(chat, this.s.userId) ? 'read' : 'sent';
           if (chat?.kind === 'status') m.expiresAt = sentAt + STATUS_MS;
           else if (chat?.timer) m.expiresAt = sentAt + chat.timer * 1000;
           await storage.putMessage(m);
@@ -1509,7 +1537,7 @@ export class PakChat {
     } else {
       m.poll = { question: c.question, options: c.options, multi: c.multi };
     }
-    if (author === this.s.userId) m.status = 'sent';
+    if (author === this.s.userId) m.status = selfChat(chat, author) ? 'read' : 'sent';
     // A status goes after a day; disappearing messages after the chat's timer.
     if (chat.kind === 'status') m.expiresAt = at + STATUS_MS;
     else if (chat.timer) m.expiresAt = at + chat.timer * 1000;

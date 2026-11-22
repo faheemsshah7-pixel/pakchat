@@ -63,12 +63,11 @@ export default function ChatsSettings() {
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 30 }}>
         <Section title={t.themeWord} />
         <Glass style={{ padding: 12, gap: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={{ flex: 1 }}>
-              <Txt size={14} weight="600">
-                {t.accentColour}
-              </Txt>
-            </View>
+          {/* The name on its own line: beside six colours it broke mid-word on smaller phones. */}
+          <Txt size={14} weight="600">
+            {t.accentColour}
+          </Txt>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             {ACCENTS.map((a) => {
               const on = accent === a;
               return (

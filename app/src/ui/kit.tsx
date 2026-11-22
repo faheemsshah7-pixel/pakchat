@@ -13,7 +13,7 @@
 //   SettingRow   one row in Settings
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { isValidElement, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { isValidElement, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions, type HostInstance, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
 import Animated, { Easing, interpolateColor, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { core } from '../core/core';
+import { slowPhone } from '../core/phone';
 import { screenDrawn } from '../core/speed';
 import { useCore } from '../core/hooks';
 import { photoUri } from '../core/photos';
@@ -209,7 +210,7 @@ export function Glass({ children, style, strong, testID }: { children?: ReactNod
           borderColor: theme.glassLine,
           borderWidth: 1,
           borderRadius: 22,
-          boxShadow: theme.dark ? undefined : `0 10px 30px -18px ${theme.shadow}`,
+          boxShadow: theme.dark || slowPhone ? undefined : `0 10px 30px -18px ${theme.shadow}`,
         },
         style,
       ]}
@@ -286,7 +287,7 @@ export function Pressy({
   // the outer Pressable too. With it only on the inner view, the Pressable shrank
   // to fit, so a `flex: 1` button (like the chat title) got no room for its text.
   // The inner view keeps the rest (colours, corners, padding) and fills the outer one.
-  const { outer, inner, corners } = useMemo(() => {
+  const { outer, inner, own } = useMemo(() => {
     const o: Record<string, unknown> = {};
     const i: Record<string, unknown> = { ...StyleSheet.flatten(style) };
     for (const k of OUTER_KEYS) {
@@ -294,13 +295,11 @@ export function Pressy({
       delete i[k];
     }
     if (o.flex !== undefined || o.flexGrow !== undefined) i.flexGrow = 1;
-    // The ripple keeps inside the round corners: the button's own, or else those of the one thing inside it.
-    const own = cornersOf(i);
-    const child = !own && isValidElement(children) ? cornersOf((children.props as { style?: unknown }).style) : null;
-    return { outer: o as ViewStyle, inner: i as ViewStyle, corners: own ?? child };
-    // (The children only matter for their corners, which don't change.)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return { outer: o as ViewStyle, inner: i as ViewStyle, own: cornersOf(i) };
   }, [style]);
+  // The ripple keeps inside the round corners: the button's own, or else those of the one thing inside it.
+  // (Only looked at once a finger is on it: nothing is worked out for a button nobody touches.)
+  const corners = () => own ?? (isValidElement(children) ? cornersOf((children.props as { style?: unknown }).style) : null);
 
   // The ripple: only made while a finger is on it (or it's fading), so a long list costs nothing.
   const box = useRef<HostInstance>(null);
@@ -334,8 +333,9 @@ export function Pressy({
   // Faint, like WhatsApp's press: a soft wash, never a grey box.
   const color = ripple === 'light' ? 'rgba(255,255,255,0.14)' : theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(11,27,54,0.06)';
   // Small things with square edges (an icon, a little button) get a round ripple, like WhatsApp's.
-  const small = !!wave && !corners && wave.w <= 64 && wave.h <= 64;
-  const shape: ViewStyle | null = wave?.box ?? ((round || small) && wave ? { borderRadius: Math.max(wave.w, wave.h) / 2 } : corners);
+  const edge = wave ? corners() : null;
+  const small = !!wave && !edge && wave.w <= 64 && wave.h <= 64;
+  const shape: ViewStyle | null = wave?.box ?? ((round || small) && wave ? { borderRadius: Math.max(wave.w, wave.h) / 2 } : edge);
 
   return (
     <Pressable
@@ -394,21 +394,21 @@ function Ripple({ wave, held, color, shape, onDone }: { wave: Wave; held: boolea
   useEffect(() => {
     grow.set(withTiming(1, { duration: 420, easing: Easing.out(Easing.quad) }));
   }, [grow]);
+  // (onDone only clears this one ripple: a newer one handed in meanwhile changes nothing here.)
+  const done = useEffectEvent(() => onDone());
   useEffect(() => {
     if (held) return;
     grow.set(withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) }));
     fade.set(
       withDelay(
         90,
-        withTiming(0, { duration: 240 }, (done) => {
+        withTiming(0, { duration: 240 }, (finished) => {
           'worklet';
-          if (done) scheduleOnRN(onDone);
+          if (finished) scheduleOnRN(done);
         }),
       ),
     );
-    // (onDone only clears this one ripple.)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [held]);
+  }, [held, grow, fade]);
   const style = useAnimatedStyle(() => ({ opacity: fade.value, transform: [{ scale: 0.08 + 0.92 * grow.value }] }));
   return (
     <View pointerEvents="none" style={[wave.box ? null : StyleSheet.absoluteFill, shape, { overflow: 'hidden' }]}>

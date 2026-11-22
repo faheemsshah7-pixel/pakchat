@@ -440,6 +440,14 @@ class Core {
     this.client.on('sync', (e) => this.takeSync(e));
     // Someone started a PIN reset with my number. The server already stopped it (this
     // phone is in use); say so, on screen (PinResetNotice) and, if PakChat isn't open, as an alert.
+    // This account was signed in on another phone, which signed this one out on the server: sign out
+    // here too and say why on the sign-in screen, like WhatsApp (owner, 21 Nov: the old phone still
+    // looked signed in, its connection quietly refused).
+    this.client.on('signedOutElsewhere', () => {
+      if (this.state !== 'signedIn') return;
+      KV.setItemSync('signedOutElsewhere', '1');
+      void this.signOut().catch(() => {});
+    });
     this.client.on('pinReset', () => {
       this.setSettings({ pinResetAt: Date.now() });
       if (AppState.currentState !== 'active') void alertPinReset();

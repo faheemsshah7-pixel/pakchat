@@ -121,13 +121,7 @@ function ChatScreen() {
   const [held, setHeld] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   // "Reply privately" from a group: the group message this answers.
-  const [quote, setQuote] = useState<ChatQuote | null>(() => {
-    try {
-      return quoteParam ? (JSON.parse(quoteParam) as ChatQuote) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [quote, setQuote] = useState<ChatQuote | null>(() => parseQuote(quoteParam));
   const [reportOf, setReportOf] = useState<Message | null | undefined>(undefined);
   // "Report and block": blocked at once, then the report sheet (closing it leaves them blocked).
   const [reportBlocked, setReportBlocked] = useState(false);
@@ -762,15 +756,7 @@ function ChatScreen() {
     // Making a video smaller takes a few seconds (longer for a long one).
     if (list.some((p) => p.kind === 'video' && !p.gif && !p.hd)) toast(t.videoGettingReady);
     void act(async () => {
-      for (const [i, p] of list.entries()) {
-        try {
-          const { caption, ...picked } = p;
-          await sendPicked(id, picked, caption, { replyTo: i === 0 ? reply : undefined, quote: i === 0 ? q : undefined });
-        } catch (err) {
-          if (err instanceof TooBig) toast(fill(t.fileTooBig, { mb: Math.floor(Number(err.message) / 1024 / 1024) }));
-          else throw err;
-        }
-      }
+      for (const [i, p] of list.entries()) await sendOne(id, p, i === 0 ? { replyTo: reply, quote: q } : {}, t);
     });
   }
 
@@ -1859,4 +1845,25 @@ function WhoReacted({ m, tab, onTab, onClose, onRemove }: { m: Message | null; t
       })}
     </Sheet>
   );
+}
+
+/** "Reply privately": the group message handed in as a parameter (nothing if it can't be read). */
+function parseQuote(p: string | undefined): ChatQuote | null {
+  if (!p) return null;
+  try {
+    return JSON.parse(p) as ChatQuote;
+  } catch {
+    return null;
+  }
+}
+
+/** One photo or video from the editor, with its caption. Too big: says so, and the rest still go. */
+async function sendOne(chatId: string, p: Ready, extra: { replyTo?: Ref; quote?: ChatQuote }, t: ReturnType<typeof useT>) {
+  const { caption, ...picked } = p;
+  try {
+    await sendPicked(chatId, picked, caption, extra);
+  } catch (err) {
+    if (!(err instanceof TooBig)) throw err;
+    toast(fill(t.fileTooBig, { mb: Math.floor(Number(err.message) / 1024 / 1024) }));
+  }
 }

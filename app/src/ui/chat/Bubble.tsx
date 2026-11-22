@@ -154,7 +154,7 @@ function CallNote({ m, selecting, onLongPress }: { m: Message; selecting: boolea
             borderTopStartRadius: mine ? R : 3,
             borderTopEndRadius: mine ? 3 : R,
             backgroundColor: mine ? middle(theme.bubbleMine) : theme.bubbleIn,
-            boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)',
+            boxShadow: theme.dark || slowPhone ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)',
           }}
         >
           <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: box, alignItems: 'center', justifyContent: 'center' }}>
@@ -301,10 +301,13 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   ) : null;
   // In a group, the sender's photo beside the first bubble of their run (a space beside the rest).
   const face = group && !mine;
+  // Plain words (no file, poll, link…) keep nothing of their own, so a reused bubble just takes
+  // the new message's words, like WhatsApp's list: no new views as a long chat scrolls.
+  const plain = m.kind === 'text' && !m.link && !m.deleted;
   const tail = first && !bare ? <Tail mine={mine} colour={mine ? middle(theme.bubbleMine) : theme.bubbleIn} /> : null;
 
   const body = (
-    <View key={k} style={photo ? { padding: 3 } : { paddingHorizontal: 12, paddingTop: onVoice ? 5 : 7, paddingBottom: onVoice ? 5 : 6, minWidth: 72 }}>
+    <View key={plain ? undefined : k} style={photo ? { padding: 3 } : { paddingHorizontal: 12, paddingTop: onVoice ? 5 : 7, paddingBottom: onVoice ? 5 : 6, minWidth: 72 }}>
       {!!name && (
         <Txt size={13} weight="700" color={nameColour(m.author, theme.dark)} lines={1} style={[inset, photo && { paddingTop: 2, paddingBottom: 2 }]}>
           {name}
@@ -534,7 +537,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                     <View
                       style={[
                         radius,
-                        { overflow: 'hidden', boxShadow: theme.dark ? undefined : `0 4px 12px -6px ${theme.acc}` },
+                        { overflow: 'hidden', boxShadow: theme.dark || slowPhone ? undefined : `0 4px 12px -6px ${theme.acc}` },
                       ]}
                     >
                       <LinearGradient colors={theme.bubbleMine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
@@ -546,7 +549,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                   <View
                     style={[
                       radius,
-                      { backgroundColor: theme.bubbleIn, boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)' },
+                      { backgroundColor: theme.bubbleIn, boxShadow: theme.dark || slowPhone ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)' },
                     ]}
                   >
                     {body}
@@ -671,7 +674,7 @@ function Reactions({ list, mine, onPress }: { list: [string, string][]; mine: bo
             backgroundColor: theme.bubbleIn,
             borderWidth: 1,
             borderColor: theme.glassLine,
-            boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.25)',
+            boxShadow: theme.dark || slowPhone ? undefined : '0 2px 8px -3px rgba(30,64,140,0.25)',
           }}
         >
           {top.map(([emoji]) => (
@@ -825,7 +828,7 @@ export function TypingDots({ name }: { name?: string }) {
           paddingVertical: 12,
           borderRadius: 16,
           backgroundColor: theme.bubbleIn,
-          boxShadow: theme.dark ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)',
+          boxShadow: theme.dark || slowPhone ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)',
         }}
         accessibilityLabel="typing"
       >

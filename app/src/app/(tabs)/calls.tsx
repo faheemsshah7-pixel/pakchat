@@ -90,16 +90,15 @@ function Calls() {
 
   async function makeLink() {
     setBusy(true);
-    try {
-      const chat = await core.client.adopt(await core.server.createCallLink(linkTitle.trim() || t.callLinkWord));
-      setMaking(false);
-      setLinkTitle('');
-      if (chat.inviteCode) router.push({ pathname: '/calllink/[code]', params: { code: chat.inviteCode } });
-    } catch (err) {
-      toast(isOffline(err) ? t.offline : t.couldNot);
-    } finally {
-      setBusy(false);
-    }
+    const chat = await core.server
+      .createCallLink(linkTitle.trim() || t.callLinkWord)
+      .then((c) => core.client.adopt(c))
+      .catch((err: unknown) => void toast(isOffline(err) ? t.offline : t.couldNot));
+    setBusy(false);
+    if (!chat) return;
+    setMaking(false);
+    setLinkTitle('');
+    if (chat.inviteCode) router.push({ pathname: '/calllink/[code]', params: { code: chat.inviteCode } });
   }
 
   // Group names come from the chats (read once per group).

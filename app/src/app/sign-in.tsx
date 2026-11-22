@@ -14,9 +14,9 @@
 // itself (an empty space as tall as the keyboard at the bottom) and scrolls
 // down, so the box you're typing in is never hidden.
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Keyboard, Linking, ScrollView, Text, View, type ScrollViewInstance } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BackHandler, Keyboard, Linking, ScrollView, Text, View, type ScrollViewInstance } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 
 import { core, isOffline, onBuiltInServer, pageUrl, serverUrl, setServerUrl } from '../core/core';
@@ -26,6 +26,8 @@ import { useLook } from '../theme/ThemeProvider';
 import { GoogleG } from '../ui/GoogleG';
 import { Icon } from '../ui/icons';
 import { Button, Field, Glass, Pressy, Screen, Txt } from '../ui/kit';
+import { Dialog } from '../ui/overlays';
+import KV from 'expo-sqlite/kv-store';
 
 const LOGO = require('../../assets/logo.png');
 
@@ -57,6 +59,26 @@ export default function SignIn() {
   }, []);
 
   useEffect(() => console.log('[pakchat] sign-in screen drawn'), []);
+
+  // Back here closes the app, like WhatsApp's welcome, instead of going to the front door
+  // (index.tsx), which only sends you straight back here. While the server's address is being
+  // changed, Back just stops that first.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (editing) setEditing(false);
+        else BackHandler.exitApp();
+        return true;
+      });
+      return () => sub.remove();
+    }, [editing]),
+  );
+  // Signed out because the account was signed in on another phone: say so once.
+  const [elsewhere, setElsewhere] = useState(() => KV.getItemSync('signedOutElsewhere') === '1');
+  const seenElsewhere = () => {
+    KV.removeItemSync('signedOutElsewhere');
+    setElsewhere(false);
+  };
 
   // Pretend accounts only show when the Mac's server was started for the emulator tests.
   useEffect(() => {
@@ -266,6 +288,7 @@ export default function SignIn() {
         </Animated.View>
         <Animated.View style={keyboardSpace} />
       </ScrollView>
+      <Dialog visible={elsewhere} onClose={seenElsewhere} title={t.signedOutTitle} text={t.signedOutText} buttons={[{ label: t.okay, onPress: seenElsewhere, testID: 'signed-out-ok' }]} />
     </Screen>
   );
 }

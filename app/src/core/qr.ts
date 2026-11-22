@@ -14,8 +14,20 @@ export function userFromQr(text: string): string | null {
   return id ?? null;
 }
 
+// The last codes made, kept: making one is slow on a cheap phone, and your own code is shown again and again.
+const made = new Map<string, { d: string; n: number }>();
+
 /** The squares of `text`'s code as one SVG path, on a grid `n` squares wide. */
-export function qrPath(text: string) {
+export function qrPath(text: string): { d: string; n: number } {
+  const kept = made.get(text);
+  if (kept) return kept;
+  const fresh = makePath(text);
+  if (made.size >= 8) made.delete(made.keys().next().value!);
+  made.set(text, fresh);
+  return fresh;
+}
+
+function makePath(text: string) {
   const { modules } = create(text, { errorCorrectionLevel: 'M' });
   const n = modules.size;
   let d = '';

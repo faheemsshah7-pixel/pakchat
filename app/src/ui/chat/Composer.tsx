@@ -16,7 +16,7 @@ import type { Chat, ChatQuote, Gif, LinkPreview, Message } from '@pakchat/shared
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, useRef, useState } from 'react';
-import { Keyboard, TextInput, View, type TextInputInstance } from 'react-native';
+import { AppState, Keyboard, TextInput, View, type TextInputInstance } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import Animated, { interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
@@ -36,6 +36,11 @@ import { useRoundRecorder, type RoundVideo } from './RoundRecorder';
 import { useVoiceRecorder } from './VoiceRecorder';
 
 /** The message box. It only redraws when something it's given changes (the chat hands it the same functions each time). */
+/** Keeps what's typed in a chat as its draft (or takes the draft away when it's empty). */
+function saveDraftFor(chatId: string, words: string) {
+  if ((core.prefs[chatId]?.draft ?? '') !== (words.trim() ? words : '')) core.setPrefs(chatId, words.trim() ? { draft: words, draftAt: Date.now() } : { draft: undefined, draftAt: undefined });
+}
+
 export const Composer = memo(function Composer({
   chat,
   replyTo,
@@ -92,23 +97,20 @@ export const Composer = memo(function Composer({
   useEffect(() => {
     latest.current = text;
   }, [text]);
-  const saveDraft = (words: string) => {
-    if ((core.prefs[chat.id]?.draft ?? '') !== (words.trim() ? words : '')) core.setPrefs(chat.id, words.trim() ? { draft: words, draftAt: Date.now() } : { draft: undefined, draftAt: undefined });
-  };
+  const saveDraft = (words: string) => saveDraftFor(chat.id, words);
+  const chatId = chat.id;
+  // Like WhatsApp, the draft is kept when you leave the chat or PakChat goes to the background,
+  // not while you type: each save redraws the chat and re-reads the chat list behind it.
   useEffect(() => {
     if (editing) return;
-    const id = setTimeout(() => saveDraft(text), 400);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, chat.id, editing]);
-  // Leaving the chat quickly still keeps what was typed (the wait above may not have finished).
-  useEffect(
-    () => () => {
-      if (!editing) saveDraft(latest.current);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chat.id, editing],
-  );
+    const away = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') saveDraftFor(chatId, latest.current);
+    });
+    return () => {
+      away.remove();
+      saveDraftFor(chatId, latest.current);
+    };
+  }, [chatId, editing]);
 
   // Stop "typing…" when leaving the chat.
   useEffect(
@@ -136,8 +138,7 @@ export const Composer = memo(function Composer({
       live = false;
       clearTimeout(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, closed]);
+  }, [url, closed, link?.url]);
   const card = link && link.url === url && url !== closed ? link : null;
 
   function changed(next: string) {

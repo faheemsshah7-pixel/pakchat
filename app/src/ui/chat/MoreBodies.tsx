@@ -21,6 +21,7 @@ import { stopLive } from '../../core/live';
 import { stopAll } from '../../core/player';
 import { defaultTimer } from '../../core/timer';
 import { fill, useT } from '../../i18n';
+import type { Strings } from '../../i18n/strings';
 import { useLook } from '../../theme/ThemeProvider';
 import { clock, duration, whenLabel } from '../format';
 import { startCall } from '../CallBar';
@@ -204,24 +205,8 @@ export function ContactBody({ m, mine }: { m: Message; mine: boolean }) {
 
   async function message(c: SharedContact, i: number) {
     setBusy(i);
-    try {
-      let user = c.user;
-      for (const typed of user ? [] : [...c.phones, ...(c.emails ?? [])]) {
-        const found = await core.lookup(typed).catch(() => null);
-        if (found) {
-          user = found.id;
-          break;
-        }
-      }
-      if (!user) return toast(fill(t.notOnPakChatName, { name: c.name }));
-      if (user === core.myId) return toast(t.thatsYou);
-      const chat = await core.client.openDirect(user, defaultTimer());
-      router.push({ pathname: '/chat/[id]', params: { id: chat.id } });
-    } catch {
-      toast(t.couldNot);
-    } finally {
-      setBusy(null);
-    }
+    await openContact(c, t);
+    setBusy(null);
   }
 
   return (
@@ -432,4 +417,24 @@ export function ChatQuoteView({ q, mine }: { q: NonNullable<Message['quote']>; m
       {q.thumb && <Image source={{ uri: `data:image/jpeg;base64,${q.thumb}` }} style={{ width: 44, height: 52 }} contentFit="cover" />}
     </View>
   );
+}
+
+/** Opens the chat with a shared contact, finding them by phone or email if the card doesn't say. */
+async function openContact(c: SharedContact, t: Strings) {
+  try {
+    let user = c.user;
+    for (const typed of user ? [] : [...c.phones, ...(c.emails ?? [])]) {
+      const found = await core.lookup(typed).catch(() => null);
+      if (found) {
+        user = found.id;
+        break;
+      }
+    }
+    if (!user) return toast(fill(t.notOnPakChatName, { name: c.name }));
+    if (user === core.myId) return toast(t.thatsYou);
+    const chat = await core.client.openDirect(user, defaultTimer());
+    router.push({ pathname: '/chat/[id]', params: { id: chat.id } });
+  } catch {
+    toast(t.couldNot);
+  }
 }

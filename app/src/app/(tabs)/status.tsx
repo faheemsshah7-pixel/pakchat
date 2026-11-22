@@ -280,8 +280,12 @@ function StatusRow({ p, onPress, onLongPress }: { p: StatusPerson; onPress: () =
   );
 }
 
+/** The ring's size round a photo in the list. */
+const RING = PHOTO + 10;
+
 /** The ring around a picture: one piece per status, coloured until seen. */
-function Ring({ count, seen, color, muted, size = PHOTO + 10, children }: { count: number; seen: boolean; color: string; muted: string; size?: number; children: ReactNode }) {
+function Ring({ count, seen, color, muted, size: wanted, children }: { count: number; seen: boolean; color: string; muted: string; size?: number; children: ReactNode }) {
+  const size = wanted ?? RING;
   const r = size / 2 - 2;
   const round = 2 * Math.PI * r;
   // (Many statuses on a small ring: the gaps shrink so every piece still shows.)

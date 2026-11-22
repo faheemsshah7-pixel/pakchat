@@ -158,47 +158,7 @@ export default function Chats() {
       // Its parts too, one at a time so a tap meanwhile isn't kept waiting: with code loaded when
       // first used, the first chat opened still had to load the bubbles, the typing bar and the
       // rest as it drew (owner's speed check, 2 Nov: the first chat was the slowest).
-      void (async () => {
-        const parts = [
-          () => import('../chat/[id]'),
-          () => import('../../ui/chat/Bubble'),
-          () => import('../../ui/chat/RichText'),
-          () => import('../../ui/chat/FileBody'),
-          () => import('../../ui/chat/MoreBodies'),
-          () => import('../../ui/chat/Album'),
-          () => import('../../ui/chat/VoiceBody'),
-          () => import('../../ui/chat/Composer'),
-          () => import('../../ui/chat/ScheduledBar'),
-          () => import('../../ui/chat/Backdrop'),
-          // Then the screens opened most after a chat, and what they draw: someone's info, Settings,
-          // a contact, a profile photo (owner's speed check, 2 Nov: each was slow the first time).
-          () => import('../info/[id]'),
-          () => import('../../ui/ExportSheet'),
-          () => import('../../ui/TonePicker'),
-          () => import('../../ui/ReportSheet'),
-          () => import('../../ui/PhotoSheet'),
-          () => import('../settings/index'),
-          () => import('../../ui/SettingsSearch'),
-          () => import('../contact'),
-          () => import('../../core/phoneBook'),
-          () => import('../photo'),
-          () => import('../../ui/SwipeToClose'),
-          () => import('../../ui/Zoomable'),
-        ];
-        // One at a time with a pause between, and never while a screen is opening or closing, so
-        // it can't hold up a tap (owner's speed check, 3 Nov: loading them close together right
-        // after starting could keep PakChat busy for a moment).
-        const pause = (ms: number) => new Promise((go) => setTimeout(go, ms));
-        for (const part of parts) {
-          for (let waited = 0; waited < 3000 && (timing('page') || timing('chat') || timing('back') || timing('tab')); waited += 250) await pause(250);
-          try {
-            await part();
-          } catch {
-            return;
-          }
-          await pause(120);
-        }
-      })();
+      void warmScreens();
       // After the other tabs have drawn (markListShown), so a slower phone does one thing at a time.
     }, LIST_SHOWN_AFTER + TABS_DRAWN_AFTER);
     return () => clearTimeout(wait);
@@ -689,4 +649,47 @@ function archive(r: Row | Row[], t: Strings) {
 function markRead(r: Row) {
   core.setPrefs(r.chat.id, { markedUnread: false });
   if (r.chat.unread > 0) void core.client.markRead(r.chat.id).catch(() => {});
+}
+
+/** Loads the chat screen's code and its parts ahead, one at a time (see the chat list's warm-up). */
+async function warmScreens() {
+  const parts = [
+    () => import('../chat/[id]'),
+    () => import('../../ui/chat/Bubble'),
+    () => import('../../ui/chat/RichText'),
+    () => import('../../ui/chat/FileBody'),
+    () => import('../../ui/chat/MoreBodies'),
+    () => import('../../ui/chat/Album'),
+    () => import('../../ui/chat/VoiceBody'),
+    () => import('../../ui/chat/Composer'),
+    () => import('../../ui/chat/ScheduledBar'),
+    () => import('../../ui/chat/Backdrop'),
+    // Then the screens opened most after a chat, and what they draw: someone's info, Settings,
+    // a contact, a profile photo (owner's speed check, 2 Nov: each was slow the first time).
+    () => import('../info/[id]'),
+    () => import('../../ui/ExportSheet'),
+    () => import('../../ui/TonePicker'),
+    () => import('../../ui/ReportSheet'),
+    () => import('../../ui/PhotoSheet'),
+    () => import('../settings/index'),
+    () => import('../../ui/SettingsSearch'),
+    () => import('../contact'),
+    () => import('../../core/phoneBook'),
+    () => import('../photo'),
+    () => import('../../ui/SwipeToClose'),
+    () => import('../../ui/Zoomable'),
+  ];
+  // One at a time with a pause between, and never while a screen is opening or closing, so
+  // it can't hold up a tap (owner's speed check, 3 Nov: loading them close together right
+  // after starting could keep PakChat busy for a moment).
+  const pause = (ms: number) => new Promise((go) => setTimeout(go, ms));
+  for (const part of parts) {
+    for (let waited = 0; waited < 3000 && (timing('page') || timing('chat') || timing('back') || timing('tab')); waited += 250) await pause(250);
+    try {
+      await part();
+    } catch {
+      return;
+    }
+    await pause(120);
+  }
 }

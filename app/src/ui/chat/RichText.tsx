@@ -169,7 +169,9 @@ export function LinkSheetHost() {
 export function RichWords({ text, mentions, color, mine }: { text: string; mentions?: string[]; color: string; mine: boolean }) {
   const t = useT();
   const { theme } = useLook();
-  const [more, setMore] = useState(false);
+  // Which words "Read more" opened: a bubble reused for another message starts closed again.
+  const [opened, setOpened] = useState<string | null>(null);
+  const more = opened === text;
   const cut = more ? null : readMoreCut(text);
   const shown = cut === null ? text : text.slice(0, cut).trimEnd();
   const names = (mentions ?? []).map((id) => `@${core.plainName(id)}`).filter((n) => n.length > 1);
@@ -221,7 +223,7 @@ export function RichWords({ text, mentions, color, mine }: { text: string; menti
         </Fragment>
       ))}
       {cut !== null && (
-        <Text style={{ color: linkColor, fontWeight: '600' }} onPress={() => setMore(true)} testID="read-more">
+        <Text style={{ color: linkColor, fontWeight: '600' }} onPress={() => setOpened(text)} testID="read-more">
           {`… ${t.readMore}`}
         </Text>
       )}

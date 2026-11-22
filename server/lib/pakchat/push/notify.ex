@@ -41,7 +41,7 @@ defmodule Pakchat.Push.Notify do
         if Fcm.configured?() do
           send_fcm(device, token, args["call"] == true)
         else
-          Logger.info("push: FCM_SERVICE_ACCOUNT isn't set, so no alert for device #{device_id}")
+          Logger.warning("push: no alert for device #{device_id}: #{Fcm.why_not()}")
           :ok
         end
 

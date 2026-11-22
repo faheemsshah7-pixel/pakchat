@@ -12,7 +12,7 @@
 //
 // One that has never been opened costs nothing: none of its parts are made until
 // the first time it shows (whenOpened), so a screen with many of them opens fast.
-import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useEffectEvent, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { Easing, FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming, type WithTimingConfig } from 'react-native-reanimated';
@@ -40,8 +40,9 @@ export function useOpenClose(visible: boolean, open: WithTimingConfig = OPEN, cl
   const p = useSharedValue(0);
   // Opening: show it straight away (setting state while rendering is React's way to follow a prop).
   if (visible && !mounted) setMounted(true);
-  useEffect(() => {
-    if (visible) p.set(withTiming(1, open));
+  // Only showing or hiding starts it moving (the timings handed in are read as it starts).
+  const move = useEffectEvent((show: boolean) => {
+    if (show) p.set(withTiming(1, open));
     else
       p.set(
         withTiming(0, close, (done) => {
@@ -49,9 +50,8 @@ export function useOpenClose(visible: boolean, open: WithTimingConfig = OPEN, cl
           if (done) scheduleOnRN(setMounted, false);
         }),
       );
-    // The timings are the same each time.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, p]);
+  });
+  useEffect(() => move(visible), [visible]);
   return { mounted, p };
 }
 

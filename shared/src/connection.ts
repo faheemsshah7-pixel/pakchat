@@ -34,6 +34,8 @@ export type ConnectionHandlers = {
   pinReset?(): void;
   /** True once joined (again), false when the connection drops. */
   status(connected: boolean): void;
+  /** The server wouldn't take the connection (or it failed): maybe this device was signed out. */
+  refused?(): void;
 };
 
 export interface Connection {
@@ -82,6 +84,9 @@ export function phoenixConnection(socketUrl: string): ConnectionFactory {
           reconnectAfterMs: (tries: number) => [500, 1000, 2000, 5000][tries - 1] ?? 10_000,
         });
         socket.onClose(() => dropped(h));
+        // A signed-out device's key is refused here, and Phoenix would just keep trying (the
+        // browser can't tell a refusal from no network): the client asks the server which it is.
+        socket.onError(() => h.refused?.());
         socket.connect();
 
         channel = socket.channel(`device:${deviceUuid}`, () => ({ active: active?.() ?? true }));
