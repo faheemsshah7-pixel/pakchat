@@ -5,6 +5,7 @@
 // Tap the name for the whole community (every group in it, and the ones I can
 // join); tap a group to open it. "New community" sits at the top.
 import { router, useIsFocused } from 'expo-router';
+import { useMemo } from 'react';
 import { ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
@@ -20,7 +21,13 @@ const SHOWN = 3;
 
 /** Drawn once the chat list has shown after starting (useAfterStart): its turn is 3 of 3, or at once if you go to it first. */
 export default function CommunitiesTab() {
-  return useAfterStart(3, useIsFocused()) ? <Communities /> : null;
+  const ready = useAfterStart(3, useIsFocused());
+  // The same tab each time: coming to it or leaving it doesn't redraw all of it (only its own
+  // changes do). On a new day it does, so times like "10:30 pm" turn into "Yesterday".
+  const day = new Date().toDateString();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const body = useMemo(() => <Communities />, [day]);
+  return ready ? body : null;
 }
 
 function Communities() {

@@ -268,7 +268,11 @@ function ChatScreen() {
     requestAnimationFrame(() => lapTimer('chat', 'chatDrawn'));
   }, []);
   useEffect(() => {
-    if (settled) stopTimer('chat', 'chatIn');
+    if (!settled) return;
+    stopTimer('chat', 'chatIn');
+    // For the speed recordings: when the work after the slide (marking read, the rows past the
+    // screen) has been drawn, so that work can be told apart from anything later.
+    requestAnimationFrame(() => console.log('[pakchat] chat: work after the slide drawn'));
   }, [settled]);
   useEffect(() => {
     const done = () => setSettled(true);

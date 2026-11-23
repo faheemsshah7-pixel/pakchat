@@ -1299,6 +1299,11 @@ class Core {
   setPrefs(chatId: string, change: Partial<ChatPrefs>) {
     const next = { ...this.prefs[chatId], ...change };
     for (const k of Object.keys(next) as (keyof ChatPrefs)[]) if (next[k] === undefined || next[k] === false) delete next[k];
+    // Nothing really changed (opening a chat says "not marked unread" every time): no save, no
+    // redraw of the chat list and tabs, and nothing sent to linked computers.
+    const was = this.prefs[chatId] ?? {};
+    const keys = new Set([...Object.keys(was), ...Object.keys(next)] as (keyof ChatPrefs)[]);
+    if ([...keys].every((k) => Object.is(was[k], next[k]))) return;
     this.prefs = { ...this.prefs, [chatId]: next };
     void this.storage.setValue('app:prefs', this.prefs);
     this.emit('prefs');

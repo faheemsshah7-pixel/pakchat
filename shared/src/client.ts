@@ -1792,14 +1792,32 @@ export class PakChat {
     }
   }
 
-  private async markReadUpTo(chat: Chat, upTo: number) {
+  /** `recent`: the chat's newest messages if already read (see markRead), so they aren't read twice. */
+  private async markReadUpTo(chat: Chat, upTo: number, recent?: Message[]) {
     const { storage } = this.o;
     const fresh = (await storage.getChat(chat.id)) ?? chat;
+    const was = { readUpTo: fresh.readUpTo, unread: fresh.unread };
     fresh.readUpTo = Math.max(fresh.readUpTo, upTo);
-    const recent = await storage.listMessages(chat.id, { limit: 1000 });
+    recent ??= await storage.listMessages(chat.id, { limit: 1000 });
     fresh.unread = recent.filter((m) => countsUnread(m) && m.author !== this.s.userId && (m.seq ?? 0) > fresh.readUpTo).length;
+    // Already read (opening a chat with nothing new): nothing to save, and the chat list
+    // doesn't need to redraw.
+    if (fresh.readUpTo === was.readUpTo && fresh.unread === was.unread) return;
     await storage.putChat(fresh);
     this.emit('chat', fresh);
+  }
+
+  /**
+   * The chat's newest messages, enough to hold every one after `readUpTo` (the unread
+   * ones). Usually a short read; a chat with many unread reads up to a thousand, as before.
+   */
+  private async newestPast(chatId: string, readUpTo: number) {
+    const few = await this.o.storage.listMessages(chatId, { limit: 60 });
+    // Sent messages are in number order (waiting ones, with no number, come last), so once
+    // the oldest numbered one here is at or before readUpTo, nothing unread is further back.
+    const oldest = few.find((m) => m.seq != null);
+    if (few.length < 60 || (oldest && oldest.seq! <= readUpTo)) return few;
+    return this.o.storage.listMessages(chatId, { limit: 1000 });
   }
 
   /**
@@ -1811,10 +1829,11 @@ export class PakChat {
     const ticks = await this.inLane(async () => {
       const chat = await this.o.storage.getChat(chatId);
       if (!chat) return [];
-      const recent = (await this.o.storage.listMessages(chatId, { limit: 1000 })).filter((m) => upTo === undefined || (m.seq ?? 0) <= upTo);
+      const newest = await this.newestPast(chatId, chat.readUpTo);
+      const recent = newest.filter((m) => upTo === undefined || (m.seq ?? 0) <= upTo);
       const unread = recent.filter((m) => m.kind !== 'system' && m.author !== this.s.userId && m.seq != null && m.seq > chat.readUpTo);
       const top = Math.max(chat.readUpTo, ...recent.map((m) => m.seq ?? 0));
-      await this.markReadUpTo(chat, top);
+      await this.markReadUpTo(chat, top, newest);
       const byAuthor = new Map<string, number[]>();
       for (const m of unread) byAuthor.set(m.author, [...(byAuthor.get(m.author) ?? []), m.seq!]);
       return [...byAuthor];

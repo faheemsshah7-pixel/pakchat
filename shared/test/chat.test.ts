@@ -46,6 +46,38 @@ describe.each(WAYS)('chats (%s)', (_label, phone, web) => {
     expect(await w.texts(sara, chat.id)).toEqual(await w.texts(ali, chat.id));
   });
 
+  test('a long chat: opening it reads only what is new, gives blue ticks for all of it, and changes nothing when all is read', async () => {
+    const { ali, sara, chat } = await two();
+    // More unread than the short read covers (60): all of it is read, and all of it gets ticks.
+    const first: string[] = [];
+    for (let i = 1; i <= 65; i++) first.push((await ali.client.sendText(chat.id, `old ${i}`)).id);
+    await w.settle();
+    expect((await sara.storage.getChat(chat.id))!.unread).toBe(65);
+    await sara.client.markRead(chat.id);
+    await w.settle();
+    expect((await sara.storage.getChat(chat.id))!.unread).toBe(0);
+    for (const id of [first[0], first[64]]) expect((await ali.storage.getMessage(chat.id, ali.id, id))!.status).toBe('read');
+
+    // A few new ones after that: read, and ticked.
+    const fresh: string[] = [];
+    for (let i = 1; i <= 3; i++) fresh.push((await ali.client.sendText(chat.id, `new ${i}`)).id);
+    await w.settle();
+    expect((await sara.storage.getChat(chat.id))!.unread).toBe(3);
+    await sara.client.markRead(chat.id);
+    await w.settle();
+    expect((await sara.storage.getChat(chat.id))!.unread).toBe(0);
+    for (const id of fresh) expect((await ali.storage.getMessage(chat.id, ali.id, id))!.status).toBe('read');
+
+    // Opening it again with nothing new: no change to the chat, so nothing redraws.
+    let changed = 0;
+    const off = sara.client.on('chat', () => changed++);
+    await sara.client.markRead(chat.id);
+    await w.settle();
+    off();
+    expect(changed).toBe(0);
+    expect((await sara.storage.getChat(chat.id))!.unread).toBe(0);
+  });
+
   test("the server never sees the words, and both see the same safety number", async () => {
     const { ali, sara, chat } = await two();
     const words = ['Meet at the library at 4', 'My password is not this'];

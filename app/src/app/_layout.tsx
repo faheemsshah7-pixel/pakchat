@@ -12,7 +12,7 @@ import * as SystemUI from 'expo-system-ui';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
+import { ReducedMotionConfig, ReduceMotion, setDynamicFeatureFlag } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
@@ -29,6 +29,11 @@ import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+// Moving things (the photo and video viewer growing and shrinking, swipes, the typing box
+// lifting with the keyboard) change the screen directly instead of asking React to redraw
+// the whole screen each frame (package.json turns that on for Android). This line makes the
+// fade-ins and slide-ins start from where those things really are, not from a stale spot.
+setDynamicFeatureFlag('TRACK_SYNCHRONOUS_PROPS_IN_LAYOUT_ANIMATIONS', true);
 // The logo fades into the chats quickly, like WhatsApp's, not slowly (owner, 3 Nov).
 setSplashOptions({ duration: 200, fade: true });
 // Settings › Help › Speed check times opening screens and going back from the app's own taps.

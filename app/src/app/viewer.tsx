@@ -24,7 +24,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEventListener } from 'expo';
-import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
+import { createVideoPlayer, useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, FlatList, Image as RNImage, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -67,6 +67,11 @@ export default function Viewer() {
   const [all, setAll] = useState<Message[] | null>(null);
   // The one tapped, handed over by the chat so it shows at once; the rest are read once it has grown open.
   const [tapped] = useState(() => takeHanded(chat, author, id));
+  // A tapped video starts loading at once, while it grows open (and while the rest of the chat's
+  // photos and videos are read), so it's ready to play the moment it shows, like WhatsApp's.
+  // Before, its player was only made after all of that, and it froze the screen for a moment.
+  const [early] = useState(() => (tapped?.file?.kind === 'video' && haveFile(tapped) ? readyPlayer(tapped.file.local!) : null));
+  useEffect(() => () => early?.release(), [early]);
   const [spot] = useState(() => parseSpot(spotParam));
   const [clip] = useState(() => parseSpot(clipParam));
   const [opened, setOpened] = useState(false);
@@ -280,6 +285,7 @@ export default function Viewer() {
                   onZoomed={setZoomed}
                   onEdgeSwipe={edgeSwipe}
                   onShown={!swapped && i === start ? reveal : undefined}
+                  player={early && item.author === author && item.id === id ? early : undefined}
                   turn={turns[keyOf(item)] ?? 0}
                 />
               )}
@@ -441,7 +447,10 @@ function Page({
   onShown,
   turn = 0,
   still,
+  player,
 }: {
+  /** The tapped video's player, already loading (made as the viewer opened). */
+  player?: VideoPlayer;
   /** Quarters it's turned (Rotate, from the ⋮ menu). */
   turn?: number;
   /** A video as its still picture, without a player (the one tapped, while it grows open). */
@@ -530,6 +539,7 @@ function Page({
           {active ? (
             <Video
               uri={f.local!}
+              player={player}
               chrome={chrome}
               lift={lift}
               onTap={onTap}
@@ -596,32 +606,75 @@ type VideoZoom = {
   onEdgeSwipe?: (dir: -1 | 1) => void;
 };
 
-/**
- * A video, playing, with WhatsApp-like controls that hide and show with a tap.
- * Pinch it (or double tap) to zoom in while it plays, like a photo (Zoomable.tsx).
- */
-function Video({ uri, chrome, lift, onTap, onDrawn, zoom }: {
+type VideoProps = {
   uri: string;
+  /** A player made earlier (the tapped one's), used instead of a new one. */
+  player?: VideoPlayer;
   chrome: boolean;
   lift: number;
   onTap: () => void;
   /** Its first frame is drawn, or it can't play: the page takes its still picture away. */
   onDrawn: () => void;
   zoom: VideoZoom;
-}) {
-  const t = useT();
-  const insets = useSafeAreaInsets();
-  const player = useVideoPlayer(uri, (p) => {
+};
+
+/** A player for a video, loading but not playing yet. */
+function readyPlayer(uri: string) {
+  const p = createVideoPlayer(uri);
+  p.timeUpdateEventInterval = 0.25;
+  return p;
+}
+
+/**
+ * A video, playing, with WhatsApp-like controls that hide and show with a tap.
+ * Pinch it (or double tap) to zoom in while it plays, like a photo (Zoomable.tsx).
+ */
+function Video(props: VideoProps) {
+  return props.player ? <GivenVideo {...props} player={props.player} /> : <OwnVideo {...props} />;
+}
+
+/** A video with its own player, made now (and let go when it's swiped away). */
+function OwnVideo(props: VideoProps) {
+  const player = useVideoPlayer(props.uri, (p) => {
     p.timeUpdateEventInterval = 0.25;
     p.play();
   });
+  return <Playing {...props} player={player} />;
+}
+
+/** A video with a player made earlier: it plays now, and stops and goes back to the start when swiped away. */
+function GivenVideo(props: VideoProps & { player: VideoPlayer }) {
+  const { player } = props;
+  useEffect(() => {
+    player.play();
+    return () => {
+      // (When the viewer itself closes, the player may already be let go.)
+      try {
+        player.pause();
+        player.currentTime = 0;
+        player.muted = false;
+        player.playbackRate = 1;
+      } catch {}
+    };
+  }, [player]);
+  return <Playing {...props} />;
+}
+
+function Playing({ chrome, lift, onTap, onDrawn, zoom, player }: VideoProps & { player: VideoPlayer }) {
+  const t = useT();
+  const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(true);
   const [at, setAt] = useState(0);
-  const [length, setLength] = useState(0);
+  // A player made earlier may already know its length.
+  const [length, setLength] = useState(() => (player.status === 'readyToPlay' && player.duration > 0 ? player.duration : 0));
   const [muted, setMuted] = useState(false);
   const [speed, setSpeedNow] = useState(1);
   // While the line is being dragged, it shows where you are, not where the video is.
   const [dragging, setDragging] = useState<number | null>(null);
+  // A player made earlier that already failed: its still picture goes at once.
+  useEffect(() => {
+    if (player.status === 'error') onDrawn();
+  }, [player, onDrawn]);
   useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
   useEventListener(player, 'timeUpdate', ({ currentTime }) => setAt(currentTime));
   useEventListener(player, 'statusChange', ({ status }) => {

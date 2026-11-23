@@ -14,7 +14,7 @@
 // all at once. The button at the bottom starts a new call, to a contact or to a number.
 import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import type { Chat } from '@pakchat/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -38,7 +38,13 @@ import { isOffline } from '../../core/core';
 
 /** Drawn once the chat list has shown after starting (useAfterStart): its turn is 2 of 3, or at once if you go to it first. */
 export default function CallsTab() {
-  return useAfterStart(2, useIsFocused()) ? <Calls /> : null;
+  const ready = useAfterStart(2, useIsFocused());
+  // The same tab each time: coming to it or leaving it doesn't redraw all of it (only its own
+  // changes do). On a new day it does, so times like "10:30 pm" turn into "Yesterday".
+  const day = new Date().toDateString();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const body = useMemo(() => <Calls />, [day]);
+  return ready ? body : null;
 }
 
 function Calls() {

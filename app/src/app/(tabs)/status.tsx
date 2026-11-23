@@ -10,7 +10,7 @@ import type { Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useIsFocused } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
@@ -29,7 +29,13 @@ const PHOTO = 52;
 
 /** Drawn once the chat list has shown after starting (useAfterStart): its turn is 1 of 3, or at once if you go to it first. */
 export default function StatusTab() {
-  return useAfterStart(1, useIsFocused()) ? <Status /> : null;
+  const ready = useAfterStart(1, useIsFocused());
+  // The same tab each time: coming to it or leaving it doesn't redraw all of it (only its own
+  // changes do). On a new day it does, so times like "10:30 pm" turn into "Yesterday".
+  const day = new Date().toDateString();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const body = useMemo(() => <Status />, [day]);
+  return ready ? body : null;
 }
 
 function Status() {
