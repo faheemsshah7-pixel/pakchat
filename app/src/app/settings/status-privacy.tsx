@@ -20,8 +20,9 @@ import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Glass, Pressy, Screen, Section, TopBar, Txt } from '../../ui/kit';
 import { tick } from '../../ui/motion';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function StatusPrivacyScreen() {
+function StatusPrivacyScreen() {
   const t = useT();
   const { theme } = useLook();
   usePeople();
@@ -121,3 +122,5 @@ export default function StatusPrivacyScreen() {
     </Screen>
   );
 }
+
+export default slid(StatusPrivacyScreen);

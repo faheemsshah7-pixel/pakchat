@@ -16,8 +16,9 @@ import { Icon } from '../ui/icons';
 import { Button, Field, Screen, Txt } from '../ui/kit';
 import { clock, dayLabel, fileSize } from '../ui/format';
 import { Dialog, toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Restore() {
+function Restore() {
   const t = useT();
   const { theme } = useLook();
   const [b, setB] = useState<BackupInfo | null>(null);
@@ -105,3 +106,5 @@ export default function Restore() {
     </Screen>
   );
 }
+
+export default slid(Restore);

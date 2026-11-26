@@ -22,13 +22,14 @@ import { Icon, type IconName } from '../../ui/icons';
 import { Avatar, Chip, Divider, Empty, Glass, Pressy, Screen, Section, TopBar, Txt } from '../../ui/kit';
 import { tick } from '../../ui/motion';
 import { Dialog, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 const BIG = 5 * 1024 * 1024;
 
 const iconOf = (m: Message): IconName => (m.file?.kind === 'video' ? 'video' : m.file?.kind === 'image' ? 'photo' : m.file?.kind === 'voice' || m.file?.kind === 'audio' ? 'music' : 'doc');
 const keyOf = (m: Pick<Message, 'chatId' | 'author' | 'id'>) => `${m.chatId}/${m.author}/${m.id}`;
 
-export default function ManageStorage() {
+function ManageStorage() {
   const { chat, big, many } = useLocalSearchParams<{ chat?: string; big?: string; many?: string }>();
   if (chat || big || many) return <Files chatId={chat} big={!!big} many={!!many} />;
   return <Overview />;
@@ -307,3 +308,5 @@ function Files({ chatId, big, many }: { chatId?: string; big: boolean; many: boo
     </Screen>
   );
 }
+
+export default slid(ManageStorage);

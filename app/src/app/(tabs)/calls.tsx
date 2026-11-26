@@ -12,7 +12,7 @@
 // nobody). The ⋮ at the top makes them, and clears the list; the 🔍 searches it
 // by name. Hold a row to pick it, then tap more to pick them too, and remove them
 // all at once. The button at the bottom starts a new call, to a contact or to a number.
-import { router, useFocusEffect, useIsFocused } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import type { Chat } from '@pakchat/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, View } from 'react-native';
@@ -34,6 +34,7 @@ import { Avatar, Button, Empty, Fab, Field, Glass, IconButton, Pressy, Screen, S
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
 import { fadeIn, fadeOut } from '../../ui/motion';
 import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
+import { useOnFocus } from '../../ui/useOnFocus';
 import { isOffline } from '../../core/core';
 
 /** Drawn once the chat list has shown after starting (useAfterStart): its turn is 2 of 3, or at once if you go to it first. */
@@ -83,11 +84,13 @@ function Calls() {
     // One missed while you're looking at Calls is seen too.
     if (onCalls.current) seeMissed();
   }, [list, seeMissed]);
-  useFocusEffect(
+  useOnFocus(
     useCallback(() => {
       onCalls.current = true;
-      seeMissed();
+      // A moment after the tab is on screen, so the switch itself doesn't wait for it.
+      const later = setTimeout(seeMissed, 400);
       return () => {
+        clearTimeout(later);
         onCalls.current = false;
         seeMissed();
       };
@@ -129,7 +132,7 @@ function Calls() {
   // Back stops picking or searching, instead of leaving the app.
   const stoppable = picking || query !== null;
   // Only while this tab is on screen: on any other screen, Back is that screen's.
-  useFocusEffect(
+  useOnFocus(
     useCallback(() => {
       if (!stoppable) return;
       const sub = BackHandler.addEventListener('hardwareBackPress', () => {

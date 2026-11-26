@@ -26,7 +26,7 @@ import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { duration, fileSize } from '../format';
 import { Icon } from '../icons';
-import { Pressy, Txt } from '../kit';
+import { Pressy, Txt, useFit } from '../kit';
 import { toast } from '../overlays';
 import { openViewer } from '../zoom';
 
@@ -71,6 +71,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
   const { theme } = useLook();
   const f = m.file!;
   const { tap, progress, here, sending, paused, spot } = useFileTap(m, mine, selecting, onPick);
+  const fit = useFit(220);
   const ink = mine ? theme.bubbleMineText : theme.text;
   const meta = mine ? (theme.dark ? 'rgba(236,238,242,0.7)' : theme.sectionText) : theme.muted;
 
@@ -203,7 +204,7 @@ export function FileBody({ m, mine, selecting, onPick }: { m: Message; mine: boo
           padding: 8,
           borderRadius: 12,
           backgroundColor: mine ? 'rgba(255,255,255,0.16)' : theme.glass,
-          minWidth: 220,
+          minWidth: fit,
           marginBottom: 4,
         }}
       >

@@ -18,11 +18,12 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Field, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 type Key = 'last_seen' | 'photo' | 'about' | 'groups';
 const KEYS: Key[] = ['last_seen', 'photo', 'about', 'groups'];
 
-export default function PrivacyExcept() {
+function PrivacyExcept() {
   const t = useT();
   const { theme } = useLook();
   const { key: raw } = useLocalSearchParams<{ key?: string }>();
@@ -162,3 +163,5 @@ export default function PrivacyExcept() {
     </Screen>
   );
 }
+
+export default slid(PrivacyExcept);

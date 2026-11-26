@@ -14,8 +14,9 @@ import { startCall } from '../ui/CallBar';
 import { clock, dayLabel, duration } from '../ui/format';
 import { Icon, type IconName } from '../ui/icons';
 import { Avatar, Glass, IconButton, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
-export default function CallInfo() {
+function CallInfo() {
   const t = useT();
   const { theme } = useLook();
   const { chat: chatId, ids } = useLocalSearchParams<{ chat: string; ids: string }>();
@@ -98,3 +99,5 @@ export default function CallInfo() {
     </Screen>
   );
 }
+
+export default slid(CallInfo);

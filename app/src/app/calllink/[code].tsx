@@ -17,10 +17,11 @@ import { startCall } from '../../ui/CallBar';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Glass, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 export const callLinkUrl = (code: string) => `${serverUrl()}/calllink/${code}`;
 
-export default function CallLink() {
+function CallLink() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -132,3 +133,5 @@ export default function CallLink() {
     </Screen>
   );
 }
+
+export default slid(CallLink);

@@ -13,7 +13,7 @@
 // One that has never been opened costs nothing: none of its parts are made until
 // the first time it shows (whenOpened), so a screen with many of them opens fast.
 import { createContext, useContext, useEffect, useEffectEvent, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
-import { Keyboard, Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { Easing, FadeIn, FadeOut, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming, type WithTimingConfig } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -97,13 +97,23 @@ export const Popup = whenOpened(function Popup({ visible, onClose, children: now
   const t = useTheme();
   const { rtl } = useLook();
   const insets = useSafeAreaInsets();
+  const win = useWindowDimensions();
   const { mounted, p } = useOpenClose(visible);
+  // A row that's picked takes the menu away at once instead of fading it: what it opens (most often
+  // a screen, sliding in) then isn't drawn under a menu still fading on top of everything, and the
+  // menu's own window isn't taken down in the middle of that screen's slide (38k: starred).
+  const [dropped, setDropped] = useState(false);
+  const [was, setWas] = useState(visible);
+  if (visible !== was) {
+    setWas(visible);
+    if (visible) setDropped(false);
+  }
   // Like WhatsApp's ⋮ menu: it grows out of its corner as it fades in, and fades as it goes.
   const style = useAnimatedStyle(() => ({
     opacity: interpolate(p.value, [0, 0.5], [0, 1], 'clamp'),
     transform: [{ scale: interpolate(p.value, [0, 1], [0.8, 1]) }],
   }));
-  if (!mounted) return null;
+  if (!mounted || dropped) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
       <View style={{ flex: 1, direction: rtl ? 'rtl' : 'ltr' }}>
@@ -114,7 +124,10 @@ export const Popup = whenOpened(function Popup({ visible, onClose, children: now
               position: 'absolute',
               top: insets.top + top,
               end: 10,
-              minWidth: 200,
+              minWidth: Math.min(200, win.width - 20),
+              maxWidth: win.width - 20,
+              // A long menu scrolls instead of running off the bottom (a small phone, big text).
+              maxHeight: win.height - insets.top - top - insets.bottom - 16,
               paddingVertical: 8,
               // Tighter corners than a card, like WhatsApp's ⋮ menu.
               borderRadius: 12,
@@ -128,21 +141,32 @@ export const Popup = whenOpened(function Popup({ visible, onClose, children: now
             style,
           ]}
         >
-          <InMenu.Provider value>{children}</InMenu.Provider>
+          <ScrollView bounces={false} style={{ flexGrow: 0 }}>
+            <InMenu.Provider value={() => (setDropped(true), onClose())}>{children}</InMenu.Provider>
+          </ScrollView>
         </Animated.View>
       </View>
     </Modal>
   );
 });
 
-/** Inside a ⋮ menu: its rows are words only, like WhatsApp's (sheets keep their icons). */
-const InMenu = createContext(false);
+/** Inside a ⋮ menu (it says how to take the menu away at once): its rows are words only, like WhatsApp's (sheets keep their icons). */
+const InMenu = createContext<(() => void) | null>(null);
 
 export function MenuItem({ icon, label, onPress, danger, testID }: { icon?: IconName; label: string; onPress: () => void; danger?: boolean; testID?: string }) {
   const t = useTheme();
-  const menu = useContext(InMenu);
+  const drop = useContext(InMenu);
+  const menu = !!drop;
   return (
-    <Pressy onPress={onPress} label={label} testID={testID} scale={0.97}>
+    <Pressy
+      onPress={() => {
+        drop?.();
+        onPress();
+      }}
+      label={label}
+      testID={testID}
+      scale={0.97}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: menu ? 20 : 16, paddingVertical: menu ? 13 : 12 }}>
         {icon && !menu && <Icon name={icon} size={20} color={danger ? t.danger : t.accInk} />}
         <Txt size={15.5} weight={menu ? '400' : '500'} color={danger ? t.danger : t.text}>
@@ -234,7 +258,9 @@ export const Sheet = whenOpened(function Sheet({ visible, onClose, children: now
               )}
             </View>
           </GestureDetector>
-          {children}
+          {/* Can give way when the sheet reaches its tallest (a small phone, big text), so a list
+              inside it scrolls instead of being cut off at the bottom. */}
+          <View style={{ flexShrink: 1 }}>{children}</View>
         </Animated.View>
       </GestureHandlerRootView>
     </Modal>
@@ -257,6 +283,8 @@ export const Dialog = whenOpened(function Dialog(props: { visible: boolean; onCl
   // Like WhatsApp's: fades in while growing the last little bit, and fades away.
   const style = useAnimatedStyle(() => ({ opacity: interpolate(p.value, [0, 0.6], [0, 1], 'clamp'), transform: [{ scale: interpolate(p.value, [0, 1], [0.92, 1]) }] }));
   const side = buttons.length <= 2 && buttons.reduce((n, b) => n + b.label.length, 0) <= 22;
+  // A long explanation scrolls inside the box, so the buttons stay on screen (a small phone, big text).
+  const { height } = useWindowDimensions();
   if (!mounted) return null;
   return (
     <Modal transparent visible statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
@@ -271,13 +299,15 @@ export const Dialog = whenOpened(function Dialog(props: { visible: boolean; onCl
             </Txt>
           )}
           {!!text && (
-            <Txt size={15} color={t.muted}>
-              {text}
-            </Txt>
+            <ScrollView style={{ maxHeight: height * 0.55, flexGrow: 0 }}>
+              <Txt size={15} color={t.muted}>
+                {text}
+              </Txt>
+            </ScrollView>
           )}
           {/* Like WhatsApp's: word buttons at the bottom right. Two short ones sit side by side
               ("Cancel  Delete", the answer last); more, or long ones, stack on the right. */}
-          <View style={side ? { flexDirection: 'row', justifyContent: 'flex-end', gap: 4, marginTop: 6 } : { alignItems: 'flex-end', gap: 2, marginTop: 6 }}>
+          <View style={side ? { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4, marginTop: 6 } : { alignItems: 'flex-end', gap: 2, marginTop: 6 }}>
             {(side ? [...buttons].reverse() : buttons).map((b) => (
               <Pressy key={b.label} onPress={b.onPress} label={b.label} testID={b.testID} scale={0.97}>
                 <View style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>

@@ -5,7 +5,7 @@
 // archive, …); swiping sideways goes to the next tab, like WhatsApp.
 import KV from 'expo-sqlite/kv-store';
 import { router, SplashScreen, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, ScrollView, View } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Animated, { LayoutAnimationConfig } from 'react-native-reanimated';
@@ -34,7 +34,7 @@ import { fadeIn, fadeOut, thud, tick } from '../../ui/motion';
 import { Dialog, MenuItem, Popup, toast } from '../../ui/overlays';
 import { AddToListSheet } from '../../ui/AddToListSheet';
 import { ChatLockSheet } from '../../ui/ChatLockSheet';
-import { startTimer, stopTimer, timing } from '../../core/speed';
+import { startTimer, stopTimer, timing, useDrawMark } from '../../core/speed';
 
 // The chips above the chats. `list:<id>` is one of your own lists.
 type Filter = 'all' | 'unread' | 'favourites' | 'groups' | `list:${string}`;
@@ -47,7 +47,14 @@ const LOCKED_ROW = 52;
 /** How long after the chats are drawn the start's other work begins: once the logo has faded. */
 const LIST_SHOWN_AFTER = 250;
 
-export default function Chats() {
+// Kept as it is when the screens over it change (Settings opening or closing): it's drawn
+// again only for its own reasons, never because the navigator above it was (38L: going back
+// from Settings, the list was rebuilt while the slide ran).
+export default function ChatsTab() {
+  return <ChatsScreen />;
+}
+
+const ChatsScreen = memo(function Chats() {
   const t = useT();
   const { theme } = useLook();
   const { myId } = useAuth();
@@ -87,6 +94,8 @@ export default function Chats() {
   // Tapping Chats while on it: back to the top (the locked chats row stays tucked away).
   const [listHeight, setListHeight] = useState(0);
   const scrolled = useRef(0);
+  // What drew the list again, for the speed recordings.
+  useDrawMark('chat list', { rows, lists, typing, presence, settings, prefsAll, theme, myId, filter, picked, menu, peek, camera, listHeight });
   // Only near the top: coming back to a list scrolled further down leaves it where it was.
   /**
    * A locked chat (or the Locked chats folder): the fingerprint is asked here,
@@ -291,12 +300,13 @@ export default function Chats() {
   ) : (
     <Animated.View key="title" entering={fadeIn} exiting={fadeOut} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 18, paddingStart: 20, paddingEnd: 14 }}>
       <View style={{ flex: 1 }}>
-        <Txt size={27} weight="800" style={{ letterSpacing: -0.9 }}>
+        <Txt size={23.5} weight="700">
           {t.appName}
         </Txt>
       </View>
-      <IconButton icon="camera" label={t.camera} look="glass" onPress={() => setCamera(true)} testID="list-camera" />
-      <IconButton icon="more" label={t.moreOptions} look="glass" onPress={() => setMenu(true)} testID="chats-menu" />
+      {/* Plain icons, no boxes, like WhatsApp's (owner, 26 Nov: the flatter look). */}
+      <IconButton icon="camera" label={t.camera} iconSize={23} onPress={() => setCamera(true)} testID="list-camera" />
+      <IconButton icon="more" label={t.moreOptions} iconSize={23} onPress={() => setMenu(true)} testID="chats-menu" />
     </Animated.View>
   );
 
@@ -335,7 +345,7 @@ export default function Chats() {
                         <Icon name="lock" size={22} color={theme.accInk} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Txt size={15.5} weight="600">
+                        <Txt size={15.5} weight="500">
                           {t.lockedChats}
                         </Txt>
                       </View>
@@ -348,7 +358,7 @@ export default function Chats() {
               <Pressy onPress={() => router.push('/search')} label={t.search} scale={0.98} testID="open-search">
                 <Glass style={{ marginHorizontal: 14, marginTop: 16, height: 46, borderRadius: 15, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>
                   <Icon name="search" size={19} color={theme.muted} />
-                  <Txt size={15} color={theme.muted}>
+                  <Txt size={16} color={theme.muted}>
                     {t.searchHint}
                   </Txt>
                 </Glass>
@@ -391,7 +401,7 @@ export default function Chats() {
                       <Icon name="archive" size={22} color={theme.accInk} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Txt size={15.5} weight="600">
+                      <Txt size={15.5} weight="500">
                         {t.archived}
                       </Txt>
                     </View>
@@ -623,7 +633,7 @@ export default function Chats() {
       <PinResetNotice />
     </Screen>
   );
-}
+});
 
 /** The most chats that can be pinned at once (owner, 12 Nov: 5). */
 const MAX_PINNED = 5;

@@ -12,8 +12,9 @@ import { useLook } from '../theme/ThemeProvider';
 import { Ticks } from '../ui/ChatRow';
 import { clock, listTime } from '../ui/format';
 import { Avatar, Divider, Glass, Screen, Section, TopBar, Txt } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
-export default function MessageInfo() {
+function MessageInfo() {
   const { chat: chatId, author, id } = useLocalSearchParams<{ chat: string; author: string; id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -71,3 +72,5 @@ export default function MessageInfo() {
     </Screen>
   );
 }
+
+export default slid(MessageInfo);

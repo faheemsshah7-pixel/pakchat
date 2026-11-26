@@ -37,8 +37,9 @@ import { LeftGroupChoices } from '../../ui/DeleteChats';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
 import { MuteSheet, mutedLine } from '../../ui/MuteSheet';
 import { openPhoto, openViewer } from '../../ui/zoom';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Info() {
+function Info() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -749,3 +750,5 @@ function StripTile({ m }: { m: Message }) {
     </Pressy>
   );
 }
+
+export default slid(Info);

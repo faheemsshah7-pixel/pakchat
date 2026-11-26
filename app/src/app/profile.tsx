@@ -13,8 +13,9 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Avatar, Button, Field, Screen, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Profile() {
+function Profile() {
   const t = useT();
   const { theme } = useLook();
   const { me, myId } = useAuth();
@@ -59,3 +60,5 @@ export default function Profile() {
     </Screen>
   );
 }
+
+export default slid(Profile);

@@ -14,8 +14,9 @@ import { clock, dayLabel } from '../ui/format';
 import { Icon, type IconName } from '../ui/icons';
 import { Button, Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
 import { Dialog, toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function LinkedDevices() {
+function LinkedDevices() {
   const t = useT();
   const { theme } = useLook();
   const { list, syncing } = useLinkedDevices();
@@ -127,3 +128,5 @@ export default function LinkedDevices() {
 function deviceIcon(name: string): IconName {
   return /Mac|Windows|Linux|ChromeOS/i.test(name) && !/Android|iOS/i.test(name) ? 'laptop' : 'globe';
 }
+
+export default slid(LinkedDevices);

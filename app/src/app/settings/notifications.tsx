@@ -18,8 +18,9 @@ import { Icon } from '../../ui/icons';
 import { Button, Divider, Glass, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { Slider } from '../../ui/Slider';
 import { TonePicker, toneName } from '../../ui/TonePicker';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function NotificationsScreen() {
+function NotificationsScreen() {
   const t = useT();
   const { theme } = useLook();
   const [state, setState] = useState<PushState>(pushState);
@@ -148,3 +149,5 @@ export default function NotificationsScreen() {
     </Screen>
   );
 }
+
+export default slid(NotificationsScreen);

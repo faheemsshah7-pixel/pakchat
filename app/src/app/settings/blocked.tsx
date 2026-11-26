@@ -5,10 +5,11 @@ import { FlatList, View } from 'react-native';
 import { core } from '../../core/core';
 import { useBlocked } from '../../core/hooks';
 import { useT } from '../../i18n';
-import { Avatar, Button, Divider, Empty, Glass, Screen, TopBar, Txt } from '../../ui/kit';
+import { Avatar, Button, Empty, Glass, Screen, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Blocked() {
+function Blocked() {
   const t = useT();
   const blocked = useBlocked();
   return (
@@ -19,7 +20,8 @@ export default function Blocked() {
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ padding: 12 }}
         ListEmptyComponent={blocked ? <Empty icon="flag" text={t.noBlocked} /> : undefined}
-        ItemSeparatorComponent={Divider}
+        // A little room between the cards (the line between them is gone).
+        ItemSeparatorComponent={Gap}
         renderItem={({ item }) => (
           <View>
             <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 18 }}>
@@ -30,9 +32,9 @@ export default function Blocked() {
                 </Txt>
               </View>
               <Button
+                small
                 title={t.unblock}
                 look="soft"
-                style={{ minWidth: 110 }}
                 onPress={() => void core.block(item.id, false).then(() => toast(t.unblocked), () => toast(t.couldNot))}
               />
             </Glass>
@@ -41,4 +43,10 @@ export default function Blocked() {
       />
     </Screen>
   );
+}
+
+export default slid(Blocked);
+
+function Gap() {
+  return <View style={{ height: 8 }} />;
 }

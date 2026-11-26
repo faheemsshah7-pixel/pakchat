@@ -15,11 +15,12 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 /** Where Contact us writes to. */
 const SUPPORT = 'support@pakchat.com';
 
-export default function Help() {
+function Help() {
   const t = useT();
   const { theme, lang } = useLook();
   const version = Constants.expoConfig?.version ?? '';
@@ -125,3 +126,5 @@ function place(where: string | undefined, t: Strings) {
     .replace(/\//g, ' › ')
     .replace(/-/g, ' ');
 }
+
+export default slid(Help);

@@ -18,8 +18,9 @@ import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, Section, SettingRow, TopBar, Txt } from '../ui/kit';
 import { Sheet, toast } from '../ui/overlays';
 import Animated from 'react-native-reanimated';
+import { slid } from '../ui/ScreenSlide';
 
-export default function NewCall() {
+function NewCall() {
   const t = useT();
   const { theme } = useLook();
   const fav = useLocalSearchParams<{ fav?: string }>().fav === '1';
@@ -180,3 +181,5 @@ export default function NewCall() {
     </Screen>
   );
 }
+
+export default slid(NewCall);

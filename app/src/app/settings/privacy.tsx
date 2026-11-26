@@ -21,12 +21,13 @@ import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Tx
 import { TIMERS, timerLabel } from '../../ui/format';
 import { tick } from '../../ui/motion';
 import { Sheet, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 type Choice = { value: string; label: string };
 
 const NONE_LEFT_OUT: PrivacyExcept = { last_seen: [], photo: [], about: [], groups: [] };
 
-export default function Privacy() {
+function Privacy() {
   const t = useT();
   const { theme } = useLook();
   const { me } = useAuth();
@@ -228,3 +229,5 @@ export default function Privacy() {
     </Screen>
   );
 }
+
+export default slid(Privacy);

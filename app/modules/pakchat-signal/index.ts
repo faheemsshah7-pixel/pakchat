@@ -20,6 +20,8 @@ export type FileModule = {
   showChatAlert(json: string): void;
   dismissChatAlert(chatId: string): void;
   chatAlertShowing(chatId: string): boolean;
+  /** A named moment in the phone's trace (Perfetto), for speed recordings. Not on the web. */
+  traceMark?(name: string): void;
   /** Stops an upload or download by its tag; it then fails with code ERR_CANCELLED. */
   cancelTransfer(tag: string): void;
   backupKey(password: string, userId: string): Promise<string>;

@@ -23,10 +23,11 @@ import { bodyLine, clock, fileSize } from '../../ui/format';
 import { Icon } from '../../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, IconButton, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 type Item = ReturnType<typeof useBroadcastSent>[number];
 
-export default function BroadcastPage() {
+function BroadcastPage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -309,3 +310,5 @@ function Sent({ item, onPress, onLongPress }: { item: Item; onPress: () => void;
     </Pressy>
   );
 }
+
+export default slid(BroadcastPage);

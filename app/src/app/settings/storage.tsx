@@ -15,8 +15,9 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { Sheet } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Storage() {
+function Storage() {
   const t = useT();
   const { theme } = useLook();
   const [auto, setAuto] = useState<AutoDownload>(autoDownload);
@@ -139,3 +140,5 @@ export default function Storage() {
     </Screen>
   );
 }
+
+export default slid(Storage);

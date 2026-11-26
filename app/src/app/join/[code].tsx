@@ -12,8 +12,9 @@ import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Avatar, Button, Glass, Screen, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Join() {
+function Join() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -107,3 +108,5 @@ export default function Join() {
     </Screen>
   );
 }
+
+export default slid(Join);

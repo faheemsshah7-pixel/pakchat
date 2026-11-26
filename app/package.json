@@ -81,10 +81,5 @@
     "lint": "expo lint",
     "postinstall": "node scripts/fix-webrtc.js && node scripts/fix-rn-start.js && node scripts/fix-tab-pages.js"
   },
-  "private": true,
-  "reanimated": {
-    "staticFeatureFlags": {
-      "ANDROID_SYNCHRONOUSLY_UPDATE_UI_PROPS": true
-    }
-  }
+  "private": true
 }

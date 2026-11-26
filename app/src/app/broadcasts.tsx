@@ -8,9 +8,10 @@ import { useBroadcasts, usePeople } from '../core/hooks';
 import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
-import { Divider, Empty, Fab, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { Empty, Fab, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Broadcasts() {
+function Broadcasts() {
   const t = useT();
   const { theme } = useLook();
   const lists = useBroadcasts();
@@ -52,10 +53,17 @@ export default function Broadcasts() {
               </Glass>
             </View>
           )}
-          ItemSeparatorComponent={() => <Divider />}
+          // A little room between the cards (the line between them is gone).
+          ItemSeparatorComponent={Gap}
         />
       )}
       <Fab icon="plus" label={t.newBroadcast} onPress={() => router.push('/broadcast-edit')} testID="new-broadcast" />
     </Screen>
   );
+}
+
+export default slid(Broadcasts);
+
+function Gap() {
+  return <View style={{ height: 8 }} />;
 }

@@ -12,7 +12,7 @@ import * as SystemUI from 'expo-system-ui';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Pressable, ScrollView, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ReducedMotionConfig, ReduceMotion, setDynamicFeatureFlag } from 'react-native-reanimated';
+import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { core } from '../core/core';
@@ -29,11 +29,6 @@ import { GalleryHost } from '../ui/chat/Gallery';
 import { ToastHost } from '../ui/overlays';
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
-// Moving things (the photo and video viewer growing and shrinking, swipes, the typing box
-// lifting with the keyboard) change the screen directly instead of asking React to redraw
-// the whole screen each frame (package.json turns that on for Android). This line makes the
-// fade-ins and slide-ins start from where those things really are, not from a stale spot.
-setDynamicFeatureFlag('TRACK_SYNCHRONOUS_PROPS_IN_LAYOUT_ANIMATIONS', true);
 // The logo fades into the chats quickly, like WhatsApp's, not slowly (owner, 3 Nov).
 setSplashOptions({ duration: 200, fade: true });
 // Settings › Help › Speed check times opening screens and going back from the app's own taps.
@@ -172,17 +167,23 @@ function App() {
   }
   if (state === 'loading') return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
 
+  // The screens that don't slide themselves (a call, a status, signing in…) are Android's own
+  // full screens, each with its own way in, as before.
+  const own = { presentation: 'card' as const, contentStyle: { backgroundColor: theme.bg } };
+  const androidSlide = rtl ? ('ios_from_left' as const) : ('ios_from_right' as const);
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, direction: rtl ? 'rtl' : 'ltr' }}>
       <StatusBar style={theme.dark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
           headerShown: false,
-          // The new screen slides in from the side as the one under it moves a little the
-          // other way, and going back slides it out again (plugins/withScreenSlide.js sets
-          // how). Android's own way took almost half a second, which felt slow next to WhatsApp.
-          animation: rtl ? 'ios_from_left' : 'ios_from_right',
-          contentStyle: { backgroundColor: theme.bg },
+          // A screen slides itself in once it's built (ui/ScreenSlide.tsx, each screen in app/ is
+          // `slid`), not as Android's slide starts, so nothing is left to build while it moves, like
+          // WhatsApp's screens. So Android only puts it on top, over the one under it, at once.
+          animation: 'none',
+          presentation: 'transparentModal',
+          contentStyle: { backgroundColor: 'transparent' },
         }}
         // Speed check: when each screen starts and stops moving (core/speed.ts).
         screenListeners={({ navigation, route }) => ({
@@ -198,7 +199,7 @@ function App() {
         <Stack.Protected guard={state === 'signedIn'}>
           {/* The chat list is the first screen: it appears straight after the logo, like
               WhatsApp, rather than sliding in. (Going back to it still slides the other screen away.) */}
-          <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
+          <Stack.Screen name="(tabs)" options={{ animation: 'none', ...own }} />
           <Stack.Screen name="chat/[id]" />
           <Stack.Screen name="info/[id]" />
           <Stack.Screen name="verify/[id]" />
@@ -208,7 +209,7 @@ function App() {
           <Stack.Screen name="new-group" />
           <Stack.Screen name="list" />
           {/* Search fades in over the chat list, like WhatsApp's, rather than sliding. */}
-          <Stack.Screen name="search" options={{ animation: 'fade' }} />
+          <Stack.Screen name="search" options={{ animation: 'fade', ...own }} />
           <Stack.Screen name="archived" />
           <Stack.Screen name="starred" />
           <Stack.Screen name="forward" />
@@ -226,7 +227,7 @@ function App() {
           <Stack.Screen name="settings/manage-storage" />
           <Stack.Screen name="qr" />
           <Stack.Screen name="linked-devices" />
-          <Stack.Screen name="link-device" options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen name="link-device" options={{ animation: 'fade_from_bottom', ...own }} />
           <Stack.Screen name="album" />
           <Stack.Screen name="settings/chats" />
           <Stack.Screen name="settings/profile" />
@@ -236,16 +237,17 @@ function App() {
           <Stack.Screen name="restore" />
           <Stack.Screen name="contact" />
           {/* See-through, so the chat shows under a photo dragged away to close it (ui/SwipeToClose.tsx). */}
-          <Stack.Screen name="viewer" options={{ animation: 'none', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
-          <Stack.Screen name="photo" options={{ animation: 'none', presentation: 'transparentModal', contentStyle: { backgroundColor: 'transparent' } }} />
-          <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', contentStyle: { backgroundColor: '#0B1424' } }} />
+          {/* These two grow out of the photo you tapped (their own way), over the screen under them. */}
+          <Stack.Screen name="viewer" />
+          <Stack.Screen name="photo" />
+          <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', ...own, contentStyle: { backgroundColor: '#0B1424' } }} />
           {/* A status and a view once photo fade in (and out), like WhatsApp's, instead of appearing at once. */}
-          <Stack.Screen name="status/[id]" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="status/[id]" options={{ animation: 'fade', ...own, contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="status-new" />
           <Stack.Screen name="status-mine" />
           <Stack.Screen name="settings/status-privacy" />
           <Stack.Screen name="settings/privacy-except" />
-          <Stack.Screen name="once" options={{ animation: 'fade', contentStyle: { backgroundColor: '#000000' } }} />
+          <Stack.Screen name="once" options={{ animation: 'fade', ...own, contentStyle: { backgroundColor: '#000000' } }} />
           <Stack.Screen name="invite/[id]" />
           <Stack.Screen name="join/[code]" />
           <Stack.Screen name="settings/index" />
@@ -262,12 +264,13 @@ function App() {
           <Stack.Screen name="send-to" />
         </Stack.Protected>
         <Stack.Protected guard={state === 'signedOut'}>
-          <Stack.Screen name="sign-in" options={{ animation: 'none' }} />
+          {/* Signing in keeps Android's own slide (these are light, and seen once). */}
+          <Stack.Screen name="sign-in" options={{ animation: 'none', ...own }} />
           {/* Like WhatsApp: your number, then checking it, each its own screen. */}
-          <Stack.Screen name="sign-in-number" />
-          <Stack.Screen name="sign-in-verify" />
+          <Stack.Screen name="sign-in-number" options={{ animation: androidSlide, ...own }} />
+          <Stack.Screen name="sign-in-verify" options={{ animation: androidSlide, ...own }} />
           {/* The account's two-step PIN, when it has one (core.pinStep). */}
-          <Stack.Screen name="sign-in-pin" />
+          <Stack.Screen name="sign-in-pin" options={{ animation: androidSlide, ...own }} />
         </Stack.Protected>
       </Stack>
       {state === 'signedIn' && <CallBar />}

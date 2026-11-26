@@ -5,7 +5,7 @@
 // waits for the network: what's on the phone shows at once, and new things
 // slide in as they arrive.
 import type { Chat, LinkedDevice, Message } from '@pakchat/shared';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { Found } from '../data/sqliteStorage';
 import { broadcast, broadcasts, sentTo, summaryOf, type Broadcast, type BroadcastSent } from './broadcasts';
@@ -421,13 +421,16 @@ export function usePeople() {
 }
 
 /** Online and last seen, while the screen is open. */
-export function usePresence(userId: string | null | undefined): Presence | null {
+export function usePresence(userId: string | null | undefined, live = true): Presence | null {
   useEffect(() => {
-    if (!userId || userId === core.myId) return;
+    if (!live || !userId || userId === core.myId) return;
     core.watch(userId);
     return () => core.unwatch(userId);
-  }, [userId]);
-  return useCore(['presence'], () => (userId ? (core.presence[userId] ?? null) : null));
+  }, [userId, live]);
+  // Not `live` yet (a chat still sliding in): what we already knew, held still, so news about
+  // them doesn't redraw the whole chat mid-slide. It follows them from the moment it's live.
+  const [held] = useState(() => (userId ? (core.presence[userId] ?? null) : null));
+  return useCore(['presence'], () => (!live ? held : userId ? (core.presence[userId] ?? null) : null));
 }
 
 /** Everyone's online dots, for the chat list (which follows the people on screen). */
@@ -436,9 +439,11 @@ export function useAllPresence() {
 }
 
 /** Who is typing in a chat right now (not me). */
+const NOBODY: string[] = [];
 export function useTyping(chatId: string | null): string[] {
   const now = useCore(['typing'], () => (chatId ? core.typing[chatId] : undefined));
-  return now ? Object.keys(now).filter((id) => id !== core.myId) : [];
+  // The same list while nobody new starts or stops, so what uses it isn't redrawn for nothing.
+  return useMemo(() => (now ? Object.keys(now).filter((id) => id !== core.myId) : NOBODY), [now]);
 }
 
 /** Typing in every chat, for the chat list. */
@@ -447,11 +452,13 @@ export function useAllTyping() {
 }
 
 /** The people I've blocked, fetched when first asked for. */
-export function useBlocked() {
+export function useBlocked(live = true) {
   useEffect(() => {
-    void core.loadBlocked().catch(() => {});
-  }, []);
-  return useCore(['blocked'], () => core.blocked);
+    if (live) void core.loadBlocked().catch(() => {});
+  }, [live]);
+  // Not `live` yet (a chat still sliding in): what we knew already, held still, like usePresence.
+  const [held] = useState(() => core.blocked);
+  return useCore(['blocked'], () => (live ? core.blocked : held));
 }
 
 const NO_PREFS: ChatPrefs = {};

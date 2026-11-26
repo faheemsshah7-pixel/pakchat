@@ -16,8 +16,9 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt, useKeyboardLift } from '../ui/kit';
 import { popIn, popOut } from '../ui/motion';
+import { slid } from '../ui/ScreenSlide';
 
-export default function ListScreen() {
+function ListScreen() {
   // chats: a new list's first chats (from "Add to list" › New list).
   const { id, chats } = useLocalSearchParams<{ id?: string; chats?: string }>();
   const t = useT();
@@ -100,3 +101,5 @@ function startWith(chats: string | undefined): string[] {
     return [];
   }
 }
+
+export default slid(ListScreen);

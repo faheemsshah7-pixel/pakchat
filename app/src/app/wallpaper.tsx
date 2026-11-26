@@ -25,6 +25,7 @@ import { Icon } from '../ui/icons';
 import { Button, Glass, IconButton, Pressy, Screen, Section, Toggle, TopBar, Txt } from '../ui/kit';
 import { MenuItem, Sheet, toast } from '../ui/overlays';
 import { Slider } from '../ui/Slider';
+import { slid } from '../ui/ScreenSlide';
 
 /** What's open full screen: the wallpapers of one kind, and which one is showing. */
 type Looking = { list: Wallpaper[]; at: number };
@@ -43,7 +44,7 @@ function forget(uri: string | number | undefined) {
   }
 }
 
-export default function WallpaperScreen() {
+function WallpaperScreen() {
   const { chat: chatId } = useLocalSearchParams<{ chat?: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -356,3 +357,5 @@ function Tile({ label, on, onPress, children, testID }: { label: string; on: boo
     </Pressy>
   );
 }
+
+export default slid(WallpaperScreen);

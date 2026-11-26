@@ -24,6 +24,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../ui/icons';
 import { Avatar, Button, Field, IconButton, Pressy, Screen, TopBar, Txt } from '../ui/kit';
 import { Dialog, MenuItem, Popup, Sheet, toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
 type Item =
   | { kind: 'head'; title: string }
@@ -37,7 +38,7 @@ type Item =
 /** What the Find row found: someone on PakChat, or nobody. */
 type Found = { what: LookupKind; shown: string; person: { id: string; name: string } | null };
 
-export default function NewChat() {
+function NewChat() {
   const t = useT();
   const { theme } = useLook();
   const people = usePeople();
@@ -404,3 +405,5 @@ export default function NewChat() {
     </Screen>
   );
 }
+
+export default slid(NewChat);

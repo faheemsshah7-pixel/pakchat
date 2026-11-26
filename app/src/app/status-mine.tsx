@@ -16,8 +16,9 @@ import { listTime } from '../ui/format';
 import { Icon } from '../ui/icons';
 import { IconButton, Pressy, Screen, TopBar, Txt } from '../ui/kit';
 import { Dialog, toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function MyStatus() {
+function MyStatus() {
   const t = useT();
   const { theme } = useLook();
   const statuses = useStatuses();
@@ -101,3 +102,5 @@ function Small({ m }: { m: Message }) {
     </View>
   );
 }
+
+export default slid(MyStatus);

@@ -12,8 +12,9 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Pressy, Screen, TopBar, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function BroadcastEdit() {
+function BroadcastEdit() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -105,3 +106,5 @@ export default function BroadcastEdit() {
     </Screen>
   );
 }
+
+export default slid(BroadcastEdit);

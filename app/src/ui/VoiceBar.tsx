@@ -3,7 +3,7 @@
 // Tap it to go back to the chat. Paused when you leave the chat, it doesn't show. A locked chat's voice note stops once the chat locks again.
 import { router, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, FadeInUp, FadeOutUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,6 +24,8 @@ export function VoiceBar() {
   const now = useAnyVoice();
   const path = usePathname();
   const insets = useSafeAreaInsets();
+  // 300 wide, or a little less than the screen on a small phone.
+  const { width: screen } = useWindowDimensions();
   const call = useCall();
   const [chatId, author] = (now.key ?? '').split('/');
   // Not in its own chat (the bubble is right there), and only while it's on (playing or paused part way).
@@ -55,7 +57,7 @@ export function VoiceBar() {
       pointerEvents="box-none"
     >
       <Pressy onPress={() => router.push({ pathname: '/chat/[id]', params: { id: chatId } })} label={who} scale={0.97} testID="voice-bar">
-        <View style={{ width: 300, height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: theme.dark ? '#1E2633' : '#FFFFFF', boxShadow: '0 6px 18px -6px rgba(0,0,0,0.35)' }}>
+        <View style={{ width: Math.min(300, screen - 24), height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: theme.dark ? '#1E2633' : '#FFFFFF', boxShadow: '0 6px 18px -6px rgba(0,0,0,0.35)' }}>
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6 }}>
             <Pressy onPress={() => (now.playing ? pause() : resume())} label={now.playing ? t.pause : t.play} round testID="voice-bar-play">
               <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accSoft }}>

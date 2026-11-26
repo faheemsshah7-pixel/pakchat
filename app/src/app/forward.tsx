@@ -18,6 +18,7 @@ import { Icon } from '../ui/icons';
 import { Avatar, Button, Divider, Pressy, Screen, Section, TopBar, Txt } from '../ui/kit';
 import { popIn, popOut } from '../ui/motion';
 import { toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
 /** WhatsApp's limit: forwarding goes to at most this many chats at once. */
 const MAX = 5;
@@ -26,7 +27,7 @@ const LATELY = 28 * 86_400_000;
 
 type Item = { kind: 'head'; key: string; title: string } | { kind: 'row'; key: string; row: ChatRow };
 
-export default function Forward() {
+function Forward() {
   const { texts, files, hops: hopsParam, others } = useLocalSearchParams<{ texts?: string; files?: string; hops?: string; others?: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -158,3 +159,5 @@ function parse<T>(json: string | undefined): T[] {
     return [];
   }
 }
+
+export default slid(Forward);

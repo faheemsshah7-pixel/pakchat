@@ -2,7 +2,7 @@
   "expo": {
     "name": "PakChat",
     "slug": "pakchat",
-    "version": "1.0.38",
+    "version": "1.0.39",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.pakchat.app"
     },
     "android": {
-      "versionCode": 38,
+      "versionCode": 39,
       "adaptiveIcon": {
         "backgroundColor": "#2F6BF0",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -41,6 +41,8 @@
       "./plugins/withFastScreen",
       "./plugins/withSplashBars",
       "./plugins/withNetworkSecurity",
+      "./plugins/withProfileable",
+      "./plugins/withSpeedProfile",
       "expo-router",
       [
         "expo-splash-screen",

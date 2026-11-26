@@ -16,13 +16,14 @@ import { useLook } from '../../theme/ThemeProvider';
 import { whenLabel } from '../../ui/format';
 import { Avatar, Button, Chip, Divider, Glass, Screen, Section, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { Dialog, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 const EXPIRES = [0, 3_600, 86_400, 7 * 86_400, 30 * 86_400];
 const USES = [0, 1, 5, 10, 50, 100];
 
 export const inviteUrl = (code: string) => `${serverUrl()}/join/${code}`;
 
-export default function Invite() {
+function Invite() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -167,3 +168,5 @@ export default function Invite() {
     </Screen>
   );
 }
+
+export default slid(Invite);

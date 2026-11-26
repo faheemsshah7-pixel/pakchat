@@ -21,8 +21,9 @@ import { ChatRow } from '../ui/ChatRow';
 import { Empty, IconButton, Pressy, Screen, SettingRow, Toggle, TopBar, Txt } from '../ui/kit';
 import { MenuItem, Popup, Sheet, toast } from '../ui/overlays';
 import { fadeIn, fadeOut, tick } from '../ui/motion';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Archived() {
+function Archived() {
   const t = useT();
   const { theme } = useLook();
   const all = useChatList();
@@ -185,3 +186,5 @@ function markRead(r: Row) {
   core.setPrefs(r.chat.id, { markedUnread: false });
   if (r.chat.unread > 0) void core.client.markRead(r.chat.id).catch(() => {});
 }
+
+export default slid(Archived);

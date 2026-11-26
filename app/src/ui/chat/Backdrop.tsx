@@ -83,6 +83,8 @@ const TILES: Record<'light' | 'dark' | 'colourLight' | 'colourDark', ImageSource
 };
 /** One square's size, in points. */
 const TILE = 176;
+/** How strongly the doodles show: fainter than they were drawn, like WhatsApp's (owner, 26 Nov: the flatter look). */
+const DOODLE_STRENGTH = 0.6;
 
 /**
  * Faint drawings behind the messages, like WhatsApp's: the same small square side by
@@ -97,7 +99,7 @@ function Doodles({ tile }: { tile: ImageSourcePropType }) {
   const down = Math.ceil(size.height / TILE);
   return (
     <View
-      style={[FILL, { overflow: 'hidden' }]}
+      style={[FILL, { overflow: 'hidden', opacity: DOODLE_STRENGTH }]}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
         if (Math.ceil(width / TILE) !== across || Math.ceil(height / TILE) !== down) setSize({ width, height });

@@ -9,8 +9,9 @@ import { useLook, type Lang } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Glass, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
 import { popIn, tick } from '../../ui/motion';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Language() {
+function Language() {
   const t = useT();
   const { theme, lang, setPrefs } = useLook();
   const options: { key: Lang; label: string; sample: string }[] = [
@@ -47,3 +48,5 @@ export default function Language() {
     </Screen>
   );
 }
+
+export default slid(Language);

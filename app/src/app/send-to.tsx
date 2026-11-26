@@ -8,8 +8,9 @@ import { dropHandOff } from '../core/files';
 import { useChatList } from '../core/hooks';
 import { useT } from '../i18n';
 import { Avatar, Divider, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
-export default function SendTo() {
+function SendTo() {
   const t = useT();
   const rows = (useChatList() ?? []).filter((r) => !r.chat.left);
 
@@ -45,3 +46,5 @@ export default function SendTo() {
     </Screen>
   );
 }
+
+export default slid(SendTo);

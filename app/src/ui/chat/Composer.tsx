@@ -351,7 +351,7 @@ export const Composer = memo(function Composer({
                     returnKeyType={enterSends ? 'send' : 'default'}
                     onSubmitEditing={enterSends ? send : undefined}
                     style={[
-                      fontStyle(text || null, lang, 16, '400'),
+                      fontStyle(text || null, lang, 18, '400'),
                       { flex: 1, color: theme.text, maxHeight: 132, minHeight: 42, paddingVertical: 9, paddingHorizontal: 2, textAlign: rtl ? 'right' : 'left', textAlignVertical: 'center' },
                     ]}
                   />

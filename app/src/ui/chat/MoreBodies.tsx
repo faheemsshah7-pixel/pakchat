@@ -26,7 +26,7 @@ import { useLook } from '../../theme/ThemeProvider';
 import { clock, duration, whenLabel } from '../format';
 import { startCall } from '../CallBar';
 import { Icon } from '../icons';
-import { Pressy, Txt } from '../kit';
+import { Pressy, Txt, useFit } from '../kit';
 import { toast } from '../overlays';
 import { MapTiles } from './MapTiles';
 
@@ -202,6 +202,7 @@ export function ContactBody({ m, mine }: { m: Message; mine: boolean }) {
   const { theme } = useLook();
   const cards = m.contacts ?? [];
   const [busy, setBusy] = useState<number | null>(null);
+  const fit = useFit(220);
 
   async function message(c: SharedContact, i: number) {
     setBusy(i);
@@ -210,7 +211,7 @@ export function ContactBody({ m, mine }: { m: Message; mine: boolean }) {
   }
 
   return (
-    <View style={{ gap: 8, minWidth: 220, marginBottom: 2 }}>
+    <View style={{ gap: 8, minWidth: fit, marginBottom: 2 }}>
       {cards.map((c, i) => (
         <View key={i} style={{ gap: 8, paddingBottom: i < cards.length - 1 ? 8 : 0, borderBottomWidth: i < cards.length - 1 ? 1 : 0, borderColor: mine ? 'rgba(255,255,255,0.2)' : theme.divider }} testID="contact-card">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>

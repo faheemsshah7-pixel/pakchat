@@ -14,8 +14,9 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Button, Field, Glass, Screen, TopBar, Txt } from '../../ui/kit';
 import { Dialog, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function DeleteAccount() {
+function DeleteAccount() {
   const t = useT();
   const { theme } = useLook();
   const { me } = useAuth();
@@ -111,3 +112,5 @@ export default function DeleteAccount() {
     </Screen>
   );
 }
+
+export default slid(DeleteAccount);

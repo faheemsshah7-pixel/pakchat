@@ -11,8 +11,9 @@ import { useLook } from '../theme/ThemeProvider';
 import { GroupPicker } from '../ui/GroupPicker';
 import { Avatar, Button, Field, Glass, Screen, Section, TopBar, Txt } from '../ui/kit';
 import { toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function NewCommunity() {
+function NewCommunity() {
   const t = useT();
   const { theme } = useLook();
   const [title, setTitle] = useState('');
@@ -58,3 +59,5 @@ export default function NewCommunity() {
     </Screen>
   );
 }
+
+export default slid(NewCommunity);

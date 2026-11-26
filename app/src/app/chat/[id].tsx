@@ -7,9 +7,9 @@ import type { ChatQuote, Gif, LinkPreview, Message, Place, Ref, SharedContact } 
 import { EDIT_MINUTES, editable, nextHops, UNSEND_HOURS, roleOf } from '@pakchat/shared';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AppState, BackHandler, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { AppState, BackHandler, Keyboard, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import Animated, { Easing, FadeIn, FadeOut, KeyboardState, LayoutAnimationConfig, useAnimatedKeyboard, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ import { startLive } from '../../core/live';
 import { allowExactAlarms, exactAlarms, plan, SOONEST_MS } from '../../core/scheduled';
 import { addShortcut } from '../../core/shortcut';
 import { saveSticker, sendGif, sendSticker, unsaveSticker } from '../../core/stickers';
-import { lapTimer, startTimer, stopTimer, timing } from '../../core/speed';
+import { lapTimer, mark, startTimer, stopTimer, timing, useDrawMark } from '../../core/speed';
 import { sendVoice, type Recorded } from '../../core/voice';
 import { calls } from '../../core/calls';
 import { slowPhone } from '../../core/phone';
@@ -33,6 +33,8 @@ import { chatOpen, leftChat } from '../../core/lock';
 import { LeftGroupChoices } from '../../ui/DeleteChats';
 import { AddToListSheet } from '../../ui/AddToListSheet';
 import { LockedGate } from '../../ui/LockedGate';
+import { ScreenSlide, SlideReadyNow, useScreenSlide } from '../../ui/ScreenSlide';
+import { useOnFocus } from '../../ui/useOnFocus';
 import { ExportSheet } from '../../ui/ExportSheet';
 import { ScheduleCallSheet } from '../../ui/ScheduleCallSheet';
 import { fill, useT } from '../../i18n';
@@ -82,22 +84,38 @@ const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 /** Asked once per run of PakChat to allow exact alarms (scheduled messages on time). */
 let askedExact = false;
 
+const OVERRIDE = { isInvertedVirtualizedList: true, initialDrawBatchSize: 12 };
+
 export default function ChatRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const prefs = useChatPrefs(id);
   const lock = !!prefs.lock;
   const open = useCore(['lock', 'prefs'], () => !lock || chatOpen(id));
   useEffect(() => (lock ? () => leftChat(id) : undefined), [id, lock]);
-  if (!open) return <LockedGate chatId={id} />;
-  return <ChatScreen />;
+  useDrawMark('chat route', { id, prefs, open });
+  // The chat is built and drawn first, then slides in (ScreenSlide.tsx); it says itself when it's ready.
+  return (
+    <ScreenSlide manual>
+      {open ? (
+        <ChatScreen />
+      ) : (
+        <>
+          <LockedGate chatId={id} />
+          <SlideReadyNow />
+        </>
+      )}
+    </ScreenSlide>
+  );
 }
 
-function ChatScreen() {
+// memo: the chat redraws only for its own reasons, not each time the route around it does.
+const ChatScreen = memo(function ChatScreen() {
   // jump: "author/id" of a message to scroll to and flash (from search, or a photo's "Show in chat").
   // reply: "author/id" of a message to answer (a photo's Reply, in the viewer).
   const { id, quote: quoteParam, media, jump, reply: replyParam } = useLocalSearchParams<{ id: string; quote?: string; media?: string; jump?: string; reply?: string }>();
   const t = useT();
-  const { theme } = useLook();
+  const look = useLook();
+  const { theme } = look;
   const insets = useSafeAreaInsets();
   const chat = useChat(id);
   const { list, more, hasMore } = useMessages(id);
@@ -105,14 +123,19 @@ function ChatScreen() {
   const starred = useStarred();
   const prefs = useChatPrefs(id);
   const settings = useSettings();
-  usePeople();
+  const people = usePeople();
   const other = chat ? core.otherPerson(chat) : null;
-  const presence = usePresence(other);
+  // The chat slides in first, and the work that can wait waits until it has (see below), so
+  // nothing redraws the chat while it moves: the slide stays smooth on a slower phone.
+  const [settled, setSettled] = useState(false);
+  // Online and last seen: what we knew already shows at once; news about it waits for the slide.
+  const presence = usePresence(other, settled);
   // WhatsApp's "Not in your contacts" card, for a one-to-one chat with someone I haven't saved.
   const stranger = !!other && other !== core.myId && !core.isContact(other);
   const [blocking, setBlocking] = useState(false);
   // Someone I blocked: no message box, WhatsApp's "Tap to unblock" in its place.
-  const blockedList = useBlocked();
+  // Who's blocked: asked again once the chat is in, not while it slides (it redrew mid-slide in 38h).
+  const blockedList = useBlocked(settled);
   const iBlocked = !!other && other !== core.myId && !!blockedList?.some((p) => p.id === other);
 
   const [picked, setPicked] = useState<Map<string, Message>>(new Map());
@@ -260,29 +283,94 @@ function ChatScreen() {
 
   // The chat slides in first; the work that changes other screens (marking it
   // read, which redraws the chat list underneath) waits until it has, so the
-  // slide stays smooth. Half a second at most, in case the "done" never comes.
-  const navigation = useNavigation();
-  const [settled, setSettled] = useState(false);
+  // slide stays smooth (`settled`, below).
   // Timed from the tap on the chat list (Settings › Help › Speed check): drawn, then slid in.
   useEffect(() => {
     requestAnimationFrame(() => lapTimer('chat', 'chatDrawn'));
   }, []);
   useEffect(() => {
     if (!settled) return;
+    mark('chat settled');
     stopTimer('chat', 'chatIn');
     // For the speed recordings: when the work after the slide (marking read, the rows past the
     // screen) has been drawn, so that work can be told apart from anything later.
-    requestAnimationFrame(() => console.log('[pakchat] chat: work after the slide drawn'));
+    requestAnimationFrame(() => {
+      console.log('[pakchat] chat: work after the slide drawn');
+      mark('chat work after the slide drawn');
+    });
   }, [settled]);
+  // The chat comes in once it's built and drawn: the list of messages has drawn what fits on the
+  // screen (its onLoad), the chat itself is known, and any scroll it opens with (to a message, or
+  // up to the unread ones) has been done. Nothing is left to build while it moves.
+  const slide = useScreenSlide();
+  const listShown = useRef(false);
+  const chatKnown = useRef(false);
+  const scrollPending = useRef(!!jump);
+  const tryReady = useCallback(() => {
+    if (listShown.current && chatKnown.current && !scrollPending.current) slide.ready();
+  }, [slide]);
+  const onListLoad = useCallback(() => {
+    listShown.current = true;
+    tryReady();
+  }, [tryReady]);
+  const scrolled = useCallback(() => {
+    if (!scrollPending.current) return;
+    // A few frames for the list to draw where it scrolled to.
+    setTimeout(() => {
+      scrollPending.current = false;
+      tryReady();
+    }, 100);
+  }, [tryReady]);
+  const known = chat !== undefined;
   useEffect(() => {
-    const done = () => setSettled(true);
-    const off = navigation.addListener('transitionEnd' as never, done);
-    const wait = setTimeout(done, 500);
+    chatKnown.current = known;
+    // A chat that's gone has no list to wait for.
+    if (chat === null) slide.ready();
+    else tryReady();
+  }, [known, chat, slide, tryReady]);
+  useEffect(() => {
+    // A frame after the slide's last one, so this work never lands on the slide itself. At the
+    // latest, a second and a half after opening (if "in" never comes).
+    let frame = 0;
+    const done = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setSettled(true));
+    };
+    const off = slide.whenIn(done);
+    const wait = setTimeout(done, 1500);
     return () => {
       off();
       clearTimeout(wait);
+      cancelAnimationFrame(frame);
     };
-  }, [navigation]);
+  }, [slide]);
+
+  // How far past the screen the list draws ahead (so scrolling up finds messages ready). Nothing
+  // while the chat slides in; then a little more every few frames, a bubble or two at a time,
+  // instead of five at once in one frame just as the slide ends (that showed as a stutter).
+  const [reach, setReach] = useState(0);
+  // The 📎 menu is made on its own, between the chat settling and the list reaching further.
+  const [attachMade, setAttachMade] = useState(false);
+  useEffect(() => {
+    if (!settled) return;
+    const full = slowPhone ? 250 : 500;
+    // On a slower phone, a bubble at a time (38h: a step of two bubbles, one with a photo, made
+    // one slow frame).
+    const step = slowPhone ? 50 : 250;
+    let r = 0;
+    const grow = () => {
+      r = Math.min(full, r + step);
+      setReach(r);
+      if (r < full) wait = setTimeout(grow, slowPhone ? 140 : 120);
+    };
+    // The 📎 menu's second row comes 140 ms after its first (AttachMenu's `early`), so the list
+    // starts reaching further after both.
+    let wait = setTimeout(() => {
+      setAttachMade(true);
+      wait = setTimeout(grow, 300);
+    }, 160);
+    return () => clearTimeout(wait);
+  }, [settled]);
 
   // Reading the chat: blue ticks for them, and no more unread here. Only while PakChat is
   // on screen: a chat left open in the background hasn't been read.
@@ -291,7 +379,7 @@ function ChatScreen() {
     const sub = AppState.addEventListener('change', (s) => setOnScreen(s === 'active'));
     return () => sub.remove();
   }, []);
-  useFocusEffect(
+  useOnFocus(
     useCallback(() => {
       focused.current = true;
       // This chat's alert goes, and new messages here don't alert while you're looking.
@@ -445,12 +533,13 @@ function ChatScreen() {
     }
     const go = setTimeout(() => {
       setJumping(null);
+      scrolled();
       if (index < 0) return;
       setFlash(jumping);
       void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
     }, 0);
     return () => clearTimeout(go);
-  }, [jumping, items, list, hasMore, more]);
+  }, [jumping, items, list, hasMore, more, scrolled]);
   useEffect(() => {
     if (!flash) return;
     const off = setTimeout(() => setFlash(null), 1200);
@@ -463,8 +552,14 @@ function ChatScreen() {
     if (startedAtUnread.current || !unreadKey || jump) return;
     startedAtUnread.current = true;
     const index = items.findIndex((it) => it.kind === 'unread');
-    if (index > 8) setTimeout(() => void listRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false }), 60);
-  }, [unreadKey, items, jump]);
+    if (index <= 8) return;
+    // The chat waits for this scroll before it comes in, so it doesn't redraw as it moves.
+    scrollPending.current = true;
+    setTimeout(() => {
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false });
+      scrolled();
+    }, 60);
+  }, [unreadKey, items, jump, scrolled]);
 
   // ---- Searching this chat (⋮ › Search): the box in the bar, with up and down through what's found ----
   const [hits, setHits] = useState<{ author: string; id: string }[]>([]);
@@ -965,13 +1060,13 @@ function ChatScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Avatar id={id} name={title} size={38} group={group} />
             <View style={{ flex: 1 }}>
-              <Txt size={16} weight="700" lines={1}>
+              <Txt size={16.5} lines={1}>
                 {title}
               </Txt>
               {!!subtitle && (
                 <Animated.View key={subtitle} entering={fadeIn}>
                   {/* "typing…" and "online" fade in for each other; "last seen today at 4:20 pm" slides along so the time shows, like WhatsApp. */}
-                  <Marquee text={subtitle} size={12} weight="500" color={typing.length || presence?.online ? theme.acc : theme.muted} testID="chat-subtitle" />
+                  <Marquee text={subtitle} size={13} weight="400" color={typing.length || presence?.online ? theme.acc : theme.muted} testID="chat-subtitle" />
                 </Animated.View>
               )}
             </View>
@@ -986,6 +1081,11 @@ function ChatScreen() {
         <IconButton icon="more" label={t.moreOptions} size={42} onPress={() => setMenu(true)} testID="chat-menu" />
     </Animated.View>
   );
+
+  // For the speed recordings: each time the chat is drawn again, and what changed ("state": none
+  // of these, so something deeper). Its own data first, then everything it keeps.
+  useDrawMark('chat', { chat, list, more, typing, starred, prefs, settings, presence, blockedList, settled, people, look, insets, now, atBottom, bottomAt, onScreen, reach, attachMade, quoteParam, media, jump, replyParam });
+  useDrawMark('chat kept', { blocking, picked, replyTo, held, editing, quote, reportOf, reportBlocked, exportOpen, planOpen, menu, listOpen, searching, searchText, muting, pickMenu, attach, pollOpen, eventOpen, outgoing, cameraOpen, locationOpen, contactOpen, asking, askExact, pollKey, timerOpen, deleting, callToDelete, clearing, leftChoices, unreadOpen, forMeDone, jumping, lastJump, replyWanted, lastReply, flash, hits, hit, reactingTo, whoReacted, reactTab, stickerShown, pinAt, pinFor });
 
   const wallpaper = prefs.wallpaper ?? settings.wallpaper;
   const textSize = MESSAGE_TEXT[settings.fontSize ?? 'medium'];
@@ -1049,7 +1149,11 @@ function ChatScreen() {
               Each kind of row is reused only for its own kind (see itemType), and a bubble starts
               fresh for each message (Bubble.tsx). */}
           <FlashList
+            // Made again once the messages have been read, so that it says when it has drawn them
+            // (onLoad comes once per list), not when it drew nothing before they came.
+            key={list === null ? 'reading' : 'read'}
             ref={listRef}
+            onLoad={list === null ? undefined : onListLoad}
             inverted
             data={items}
             keyExtractor={(it) => it.key}
@@ -1059,7 +1163,9 @@ function ChatScreen() {
             maintainVisibleContentPosition={{ disabled: true }}
             // Upside down, Android would put the scroll bar on the left. This is React Native's own
             // fix for upside-down lists (its FlatList sets it): the bar goes back on the right, like WhatsApp.
-            overrideProps={{ isInvertedVirtualizedList: true }}
+            // initialDrawBatchSize: the bubbles that fit on the screen are made a dozen at a time (two,
+            // by default), so the chat is ready to come in sooner.
+            overrideProps={OVERRIDE}
             contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 10 }}
             onEndReached={more}
             onEndReachedThreshold={0.4}
@@ -1071,16 +1177,16 @@ function ChatScreen() {
             keyboardShouldPersistTaps="handled"
             // Until the chat has slid in, nothing past the screen is drawn, so the slide stays
             // smooth; then a little more above and below, ready for scrolling.
-            drawDistance={settled ? (slowPhone ? 250 : 500) : 0}
+            drawDistance={reach}
             ListFooterComponent={
               list && !hasMore ? (
                 <View>
-                  {/* WhatsApp's pale yellow note: a tap explains it. */}
-                  <Pressy onPress={() => setE2e(true)} label={t.e2eTitle} style={{ alignSelf: 'center', maxWidth: '88%', marginVertical: 12, borderRadius: 10 }} testID="e2e-note">
-                    <View style={{ padding: 10, borderRadius: 10, backgroundColor: theme.dark ? '#2E2A1C' : '#FFF4C7', flexDirection: 'row', gap: 8 }}>
-                      <Icon name="lock" size={14} color={theme.dark ? '#E8D9A0' : '#6B5A1E'} />
+                  {/* WhatsApp's pale yellow note, small and quiet (owner, 26 Nov: the flatter look): a tap explains it. */}
+                  <Pressy onPress={() => setE2e(true)} label={t.e2eTitle} style={{ alignSelf: 'center', maxWidth: '82%', marginVertical: 10, borderRadius: 8 }} testID="e2e-note">
+                    <View style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: theme.dark ? '#26241C' : '#FFF8DC', flexDirection: 'row', gap: 6 }}>
+                      <Icon name="lock" size={12} color={theme.dark ? '#BDB28A' : '#8A7A45'} />
                       <View style={{ flexShrink: 1 }}>
-                        <Txt size={12.5} color={theme.dark ? '#E8D9A0' : '#5C4E1A'} align="center">
+                        <Txt size={12} color={theme.dark ? '#BDB28A' : '#7A6B3A'} align="center">
                           {t.lockedNote}
                         </Txt>
                       </View>
@@ -1516,9 +1622,10 @@ function ChatScreen() {
         ]}
       />
 
-      {/* 📎: things to send, under the typing bar. Made only once the chat has slid in, so it
-          adds nothing to the first draw (opening a chat was slower in 19, owner 2 Nov). */}
-      {(settled || attach) && <AttachMenu up={attachUp} onPick={attachPicked} />}
+      {/* 📎: things to send, under the typing bar. Made only a little after the chat has slid in,
+          so it adds nothing to the first draw (opening a chat was slower in 19, owner 2 Nov), nor
+          to the frame where the chat settles (38h: those two together made one slow frame). */}
+      {(attachMade || attach) && <AttachMenu up={attachUp} onPick={attachPicked} early={!attach} />}
 
       <CameraSheet
         visible={cameraOpen}
@@ -1650,7 +1757,7 @@ function ChatScreen() {
       </Sheet>
     </Screen>
   );
-}
+});
 
 /** "Not in your contacts": who they are on PakChat, and Add or Block. */
 function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => void }) {
@@ -1672,7 +1779,8 @@ function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => voi
         </Txt>
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, alignSelf: 'stretch' }}>
           <Button title={t.block} look="danger" onPress={onBlock} style={{ flex: 1 }} testID="stranger-block" />
-          <Button title={t.addContact} onPress={() => router.push({ pathname: '/contact', params: { id: userId } })} style={{ flex: 1 }} testID="stranger-add" />
+          {/* Flat, a soft tint like Block's, no gradient (owner, 26 Nov: the flatter look). */}
+          <Button title={t.addContact} look="soft" onPress={() => router.push({ pathname: '/contact', params: { id: userId } })} style={{ flex: 1 }} testID="stranger-add" />
         </View>
       </Glass>
     </Animated.View>
@@ -1683,14 +1791,18 @@ function NotInContacts({ userId, onBlock }: { userId: string; onBlock: () => voi
 function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current?: string; onPick: (emoji: string) => void; onMore: () => void }) {
   const t = useT();
   const { theme } = useLook();
+  // Seven 42-point circles, a little smaller on a small phone so the bar always fits the screen.
+  const { width } = useWindowDimensions();
+  const cell = Math.min(42, Math.floor((width - 44) / 7));
+  const emoji = Math.round(cell * 0.57);
   return (
     <Animated.View entering={popIn} exiting={popOut} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 6, zIndex: 3, transformOrigin: mine ? 'right' : 'left' }}>
       <Glass strong style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 3, borderRadius: 26, boxShadow: `0 16px 34px -14px ${theme.shadow}` }}>
         {REACTIONS.map((e, i) => (
           <Animated.View key={e}>
             <Pressy onPress={() => onPick(e)} label={e} scale={0.8} testID={`react-${e}`}>
-              <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: current === e ? theme.accSoft : 'transparent' }}>
-                <Txt size={24} align="center">
+              <View style={{ width: cell, height: cell, borderRadius: cell / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: current === e ? theme.accSoft : 'transparent' }}>
+                <Txt size={emoji} align="center">
                   {e}
                 </Txt>
               </View>
@@ -1700,9 +1812,9 @@ function ReactionBar({ mine, current, onPick, onMore }: { mine: boolean; current
         {/* Any other emoji (or the one I picked from there, shown here). */}
         <View>
           <Pressy onPress={current && !REACTIONS.includes(current) ? () => onPick(current) : onMore} label={t.moreReactions} scale={0.8} testID="react-more">
-            <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: current && !REACTIONS.includes(current) ? theme.accSoft : theme.glass }}>
+            <View style={{ width: cell, height: cell, borderRadius: cell / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: current && !REACTIONS.includes(current) ? theme.accSoft : theme.glass }}>
               {current && !REACTIONS.includes(current) ? (
-                <Txt size={24} align="center">
+                <Txt size={emoji} align="center">
                   {current}
                 </Txt>
               ) : (

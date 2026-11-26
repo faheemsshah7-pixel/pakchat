@@ -14,10 +14,11 @@ import { Icon } from '../../ui/icons';
 import { Button, Divider, Field, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { clock, dayLabel, fileSize } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 const EVERY: BackupEvery[] = ['daily', 'weekly', 'monthly', 'never'];
 
-export default function Backup() {
+function Backup() {
   const t = useT();
   const { theme } = useLook();
   const [server, setServer] = useState<BackupInfo | null | undefined>(undefined);
@@ -161,3 +162,5 @@ export default function Backup() {
     </Screen>
   );
 }
+
+export default slid(Backup);

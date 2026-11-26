@@ -20,8 +20,9 @@ import { phoneError } from '../../ui/format';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
 import { PinBoxes, pinWrongText, waitClock } from '../../ui/Pin';
 import { WhatsAppCheck } from '../../ui/WhatsAppCheck';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Account() {
+function Account() {
   const t = useT();
   const { theme } = useLook();
   const { me } = useAuth();
@@ -247,11 +248,11 @@ export default function Account() {
             sub={me?.email ?? t.notLinked}
             chevron={false}
             testID="way-google"
-            right={
+            action={
               me?.email ? (
-                both ? <Button title={t.unlink} look="soft" onPress={() => setRemoving('google')} testID="unlink-google" /> : undefined
+                both ? <Button small title={t.unlink} look="soft" onPress={() => setRemoving('google')} testID="unlink-google" /> : undefined
               ) : (
-                <Button title={t.linkGoogle} look="soft" onPress={addGoogle} testID="link-google" />
+                <Button small title={t.linkGoogle} look="soft" onPress={addGoogle} testID="link-google" />
               )
             }
           />
@@ -262,11 +263,11 @@ export default function Account() {
             sub={me?.phone ? formatPhone(me.phone) : t.notLinked}
             chevron={false}
             testID="way-phone"
-            right={
+            action={
               me?.phone ? (
-                both ? <Button title={t.unlink} look="soft" onPress={() => setRemoving('phone')} testID="unlink-phone" /> : undefined
+                both ? <Button small title={t.unlink} look="soft" onPress={() => setRemoving('phone')} testID="unlink-phone" /> : undefined
               ) : (
-                <Button title={t.linkPhone} look="soft" onPress={startAdding} testID="link-phone" />
+                <Button small title={t.linkPhone} look="soft" onPress={startAdding} testID="link-phone" />
               )
             }
           />
@@ -436,3 +437,5 @@ function emailIn(token: string): string {
     return 'Gmail';
   }
 }
+
+export default slid(Account);

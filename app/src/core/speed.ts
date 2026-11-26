@@ -9,7 +9,10 @@
 // was on. The newest few are kept here for Settings › Help › Speed check, and
 // each also goes to the phone's log (tag ReactNativeJS), so an older phone's
 // times can be read off and compared with a newer one's.
+import { useLayoutEffect, useRef } from 'react';
 import { AppState, BackHandler } from 'react-native';
+
+import { fileModule } from '../../modules/pakchat-signal';
 
 export type Timed = { what: SpeedWhat; ms: number; at: number; where?: string };
 
@@ -56,6 +59,37 @@ export function timing(name: string) {
   return started.has(name);
 }
 
+let marking = true;
+/**
+ * A named moment in the phone's own trace, for the speed recordings (Perfetto shows it on the
+ * JavaScript thread, next to every frame). The phone's log doesn't reach those recordings on every
+ * phone (the Realme keeps it back), so this goes through the phone's trace instead. Costs nothing
+ * when nobody is recording. Never put message words or names in it.
+ */
+export function mark(name: string) {
+  if (!marking) return;
+  try {
+    fileModule().traceMark?.(`pakchat: ${name}`);
+  } catch {
+    marking = false;
+  }
+}
+
+/**
+ * Marks each time `name` (a screen) is drawn again, with which of `inputs` changed since the last
+ * time ("state" when none did: its own state), so a speed recording shows what redrew it, and when.
+ */
+export function useDrawMark(name: string, inputs: Record<string, unknown>) {
+  const last = useRef<Record<string, unknown> | null>(null);
+  useLayoutEffect(() => {
+    const was = last.current;
+    last.current = inputs;
+    if (!was) return mark(`${name} first draw`);
+    const changed = Object.keys(inputs).filter((k) => !Object.is(was[k], inputs[k]));
+    mark(`${name} drawn again: ${changed.join(',') || 'state'}`);
+  });
+}
+
 function note(what: SpeedWhat, ms: number, where?: string) {
   if (what === 'start' && !up) {
     up = true;
@@ -64,6 +98,7 @@ function note(what: SpeedWhat, ms: number, where?: string) {
   log.unshift({ what, ms: Math.round(ms), at: Date.now(), ...(where ? { where } : {}) });
   if (log.length > KEEP) log.length = KEEP;
   console.log(`[pakchat] speed: ${what}${where ? ` (${where})` : ''} ${Math.round(ms)} ms`);
+  mark(`speed ${what}${where ? ` ${where}` : ''} ${Math.round(ms)} ms`);
 }
 
 // Screens (_layout.tsx tells us as they move). A chat is timed on its own (chat/[id].tsx).

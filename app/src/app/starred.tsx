@@ -11,8 +11,9 @@ import { useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { listTime } from '../ui/format';
 import { Avatar, Empty, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Starred() {
+function Starred() {
   const { chat: only } = useLocalSearchParams<{ chat?: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -75,3 +76,5 @@ export default function Starred() {
     </Screen>
   );
 }
+
+export default slid(Starred);

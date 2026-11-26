@@ -26,6 +26,7 @@ import { Icon } from '../../ui/icons';
 import { Empty, Glass, Pressy, Screen, TopBar, Txt } from '../../ui/kit';
 import { toast } from '../../ui/overlays';
 import { openViewer } from '../../ui/zoom';
+import { slid } from '../../ui/ScreenSlide';
 
 type Tab = 'media' | 'docs' | 'links';
 
@@ -54,7 +55,7 @@ function byMonth(list: Message[], perRow: number, t: Parameters<typeof monthLabe
   return out;
 }
 
-export default function Media() {
+function Media() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
   const chat = useChat(id);
@@ -252,3 +253,5 @@ function LinkRow({ m }: { m: Message }) {
     </Glass>
   );
 }
+
+export default slid(Media);

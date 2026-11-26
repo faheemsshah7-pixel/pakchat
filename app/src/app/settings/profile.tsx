@@ -14,8 +14,9 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
 import { Sheet, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function MyProfile() {
+function MyProfile() {
   const t = useT();
   const { theme } = useLook();
   const { me, myId } = useAuth();
@@ -105,3 +106,5 @@ export default function MyProfile() {
     </Screen>
   );
 }
+
+export default slid(MyProfile);

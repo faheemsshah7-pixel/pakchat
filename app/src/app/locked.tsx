@@ -20,8 +20,9 @@ import { Empty, IconButton, Screen, TopBar, Txt } from '../ui/kit';
 import { LockedGate } from '../ui/LockedGate';
 import { MuteSheet } from '../ui/MuteSheet';
 import { toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Locked() {
+function Locked() {
   const open = useCore(['lock'], () => chatOpen(FOLDER));
   useEffect(() => () => leftChat(FOLDER), []);
   if (!open) return <LockedGate chatId={FOLDER} />;
@@ -146,3 +147,5 @@ function Folder() {
     </Screen>
   );
 }
+
+export default slid(Locked);

@@ -12,10 +12,11 @@ import { fill, useT } from '../i18n';
 import { AlbumTile } from '../ui/chat/Album';
 import { listTime } from '../ui/format';
 import { IconButton, Screen, TopBar } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
 const COLS = 3;
 
-export default function Album() {
+function Album() {
   const t = useT();
   const { chat, keys } = useLocalSearchParams<{ chat: string; keys: string }>();
   const { width } = useWindowDimensions();
@@ -70,3 +71,5 @@ export default function Album() {
     </Screen>
   );
 }
+
+export default slid(Album);

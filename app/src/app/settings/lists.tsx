@@ -8,8 +8,9 @@ import { useLists } from '../../core/hooks';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Divider, Glass, Section, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Lists() {
+function Lists() {
   const t = useT();
   const { theme } = useLook();
   const lists = useLists();
@@ -44,3 +45,5 @@ export default function Lists() {
     </Screen>
   );
 }
+
+export default slid(Lists);

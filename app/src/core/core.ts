@@ -155,7 +155,7 @@ export type AppSettings = {
 export type FontSize = 'small' | 'medium' | 'large';
 
 /** Messages' words at each font size (Bubble.tsx). Medium is what it always was. */
-export const MESSAGE_TEXT: Record<FontSize, number> = { small: 14, medium: 15.5, large: 18 };
+export const MESSAGE_TEXT: Record<FontSize, number> = { small: 15, medium: 16.5, large: 19.5 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
   conversationTones: true,
@@ -911,6 +911,7 @@ class Core {
     for (const [where, name] of [
       [Paths.document, 'files'],
       [Paths.document, 'stickers'],
+      [Paths.document, 'photos'],
       [Paths.cache, 'photos'],
       [Paths.cache, 'voice'],
       [Paths.cache, 'gifs'],
@@ -1199,6 +1200,9 @@ class Core {
 
   async loadBlocked() {
     const r = await this.call<{ blocked: Person[] }>('GET', '/blocks');
+    // The same people as before (opening a chat asks every time): nothing redraws.
+    const was = this.blocked;
+    if (was && was.length === r.blocked.length && was.every((p, i) => p.id === r.blocked[i].id && p.name === r.blocked[i].name && p.photo === r.blocked[i].photo)) return;
     this.blocked = r.blocked;
     this.emit('blocked');
   }

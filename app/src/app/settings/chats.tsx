@@ -18,8 +18,9 @@ import { Icon } from '../../ui/icons';
 import { Divider, Glass, Pressy, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { tick } from '../../ui/motion';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function ChatsSettings() {
+function ChatsSettings() {
   const t = useT();
   const { theme, accent, setPrefs } = useLook();
   const settings = useSettings();
@@ -218,3 +219,5 @@ export default function ChatsSettings() {
     </Screen>
   );
 }
+
+export default slid(ChatsSettings);

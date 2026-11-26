@@ -220,6 +220,12 @@ class PakchatSignalModule : Module() {
       ChatAlerts.dismiss(context(), chatId)
     }
 
+    /** A named moment in the phone's own trace (Perfetto), for the speed recordings: costs nothing when no one records. */
+    Function("traceMark") { name: String ->
+      android.os.Trace.beginSection(name.take(120))
+      android.os.Trace.endSection()
+    }
+
     /** Is this chat's alert still there (not swiped away)? */
     Function("chatAlertShowing") { chatId: String ->
       ChatAlerts.isShowing(context(), chatId)

@@ -21,8 +21,9 @@ import { thud } from '../ui/motion';
 import { QrCode } from '../ui/QrCode';
 import { QrScan } from '../ui/QrScan';
 import { toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
-export default function Qr() {
+function Qr() {
   const t = useT();
   const { user, tab: firstTab } = useLocalSearchParams<{ user?: string; tab?: string }>();
   const [tab, setTab] = useState<'mine' | 'scan'>(firstTab === 'scan' ? 'scan' : 'mine');
@@ -110,3 +111,5 @@ function MyCode() {
     </View>
   );
 }
+
+export default slid(Qr);

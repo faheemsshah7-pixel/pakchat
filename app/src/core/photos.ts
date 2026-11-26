@@ -20,10 +20,16 @@ function parse(value: string): Locked | null {
   return tag === 'pk1' && id && key && digest ? { id, key, digest } : null;
 }
 
+// Kept with PakChat's own files, not in the cache: Android may empty a cache whenever it likes (an
+// update did, on the owner's Realme), and then every face on the chat list showed letters until it
+// was fetched again. WhatsApp keeps them too. (The cache is where they were before build 39.)
 function folder() {
-  const d = new Directory(Paths.cache, 'photos');
+  const d = new Directory(Paths.document, 'photos');
   if (!d.exists) d.create({ intermediates: true });
   return d;
+}
+function oldFolder() {
+  return new Directory(Paths.cache, 'photos');
 }
 
 /** Photos already on the phone (id → its file), fetches under way, and ones that failed (tried again after a while). */
@@ -45,6 +51,17 @@ export function photoUri(value?: string | null): string | null {
   if (file.exists) {
     here.set(p.id, file.uri);
     return file.uri;
+  }
+  // One from before build 39, still in the cache: shown from there, and copied across for next time.
+  const old = new File(oldFolder(), `${p.id}.jpg`);
+  if (old.exists) {
+    here.set(p.id, old.uri);
+    try {
+      void Promise.resolve(old.copy(file)).catch(() => {});
+    } catch {
+      // Copied next time, or fetched again if the cache goes.
+    }
+    return old.uri;
   }
   void fetch(p, file);
   return null;

@@ -8,7 +8,7 @@ import { forwardedMany, type Message } from '@pakchat/shared';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { memo, useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, FadeOut, interpolate, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
@@ -17,6 +17,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { core } from '../../core/core';
 import { emojiOnly } from '../../core/richText';
 import { slowPhone } from '../../core/phone';
+import { mark } from '../../core/speed';
 import { fill, useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
 import { Ticks } from '../ChatRow';
@@ -30,7 +31,7 @@ import { startCall } from '../CallBar';
 import { Dialog } from '../overlays';
 import { Icon } from '../icons';
 import { haveFile } from '../../core/files';
-import { Avatar, fontStyle, hasUrdu, Pressy, Txt } from '../kit';
+import { Avatar, fontStyle, hasUrdu, Pressy, Txt, useFit } from '../kit';
 import { QuoteThumb } from './QuoteThumb';
 import { hash } from '../letters';
 import { fadeIn, fadeOut, popIn, popOut, smooth, tick } from '../motion';
@@ -72,6 +73,8 @@ type Props = {
 
 export const Bubble = memo(function Bubble(p: Props) {
   const { m } = p;
+  // For the speed recordings: each bubble made (not each time one is drawn again).
+  useLayoutEffect(() => mark('bubble made'), []);
   if (isCallNote(m)) return <CallNote m={m} selecting={p.selecting} onLongPress={p.onLongPress} />;
   if (m.kind === 'system') return <SystemNote m={m} />;
   return <ChatBubble {...p} />;
@@ -188,7 +191,7 @@ function SystemNote({ m }: { m: Message }) {
   const note = (
     <View style={{ alignSelf: 'center', maxWidth: '86%', marginVertical: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: theme.glass, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       {m.event?.event === 'code_changed' && <Icon name="shield" size={14} color={theme.accInk} />}
-      <Txt size={12.5} weight="500" color={theme.sectionText} align="center" style={{ flexShrink: 1 }}>
+      <Txt size={13} color={theme.sectionText} align="center" style={{ flexShrink: 1 }}>
         {text}
       </Txt>
     </View>
@@ -305,6 +308,15 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
   // the new message's words, like WhatsApp's list: no new views as a long chat scrolls.
   const plain = m.kind === 'text' && !m.link && !m.deleted;
   const tail = first && !bare ? <Tail mine={mine} colour={mine ? middle(theme.bubbleMine) : theme.bubbleIn} /> : null;
+  // A bubble of one plain colour (theirs; mine on a slower phone or in the dark look) is the button
+  // itself: its colour and corners go on the button, one piece on the phone instead of two (a
+  // lighter bubble, 38M). Mine with the colour fade keeps its own pieces, to clip the fade.
+  const solid = !bare && (!mine || slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]);
+  const solidLook = !solid
+    ? undefined
+    : mine
+      ? [radius, { backgroundColor: middle(theme.bubbleMine) }]
+      : [radius, { backgroundColor: theme.bubbleIn, boxShadow: theme.dark || slowPhone ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)' }];
 
   const body = (
     <View key={plain ? undefined : k} style={photo ? { padding: 3 } : { paddingHorizontal: 12, paddingTop: onVoice ? 5 : 7, paddingBottom: onVoice ? 5 : 6, minWidth: 72 }}>
@@ -391,7 +403,7 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
               // Not 'transparent': React Native reads a fully clear colour as "no colour" and gives
               // the words the message's colour instead (the time showed twice on build 24). One step
               // above clear is still invisible.
-              <Text style={{ fontSize: 11, color: 'rgba(0,0,0,0.004)' }}>
+              <Text style={{ fontSize: 11.5, color: 'rgba(0,0,0,0.004)' }}>
                 {'\u2002\u2002' +
                   (starred ? '\u2003\u2009' : '') +
                   (m.pinnedUntil && m.pinnedUntil > now ? '\u2003\u2009' : '') +
@@ -421,16 +433,16 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
         {!!m.pinnedUntil && m.pinnedUntil > now && <Icon name="pin" size={11} color={metaInk} />}
         {!!m.expiresAt && <Icon name="timer" size={11} color={metaInk} />}
         {!!m.keptBy && !m.deleted && (
-          <Txt size={11} color={metaInk}>
+          <Txt size={11.5} color={metaInk}>
             {t.keptWord}
           </Txt>
         )}
         {!!m.editedAt && !m.deleted && (
-          <Txt size={11} color={metaInk}>
+          <Txt size={11.5} color={metaInk}>
             {t.edited}
           </Txt>
         )}
-        <Txt size={11} color={metaInk}>
+        <Txt size={11.5} color={metaInk}>
           {clock(m.sentAt)}
         </Txt>
         {mine && !m.deleted && <Ticks status={m.status} size={15} color={metaInk} />}
@@ -485,6 +497,8 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                 scale={0.98}
                 label={m.text ?? ''}
                 testID={`msg-${m.text ?? m.id}`}
+                flat={solid}
+                style={solidLook}
               >
                 {bare ? (
                   <View key={k} style={{ alignItems: mine ? 'flex-end' : 'flex-start', gap: 4, borderRadius: 18 }}>
@@ -522,14 +536,14 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                       {mine && <Ticks status={m.status} size={15} color={theme.muted} />}
                     </View>
                   </View>
-                ) : mine && (slowPhone || theme.bubbleMine[0] === theme.bubbleMine[1]) ? (
-                  // One plain colour: on a slower phone (the colour fade and its clipping cost a lot
-                  // there), and in the dark look, whose "fade" is one colour anyway.
-                  <View style={[radius, { backgroundColor: middle(theme.bubbleMine) }]}>
+                ) : solid ? (
+                  // One plain colour (on a slower phone the colour fade and its clipping cost a lot,
+                  // and the dark look's "fade" is one colour anyway): the button carries it.
+                  <>
                     {body}
                     {tail}
-                  </View>
-                ) : mine ? (
+                  </>
+                ) : (
                   // The gradient can't round its own corners one by one on Android (it came
                   // out square), so a plain View with the corners clips it instead.
                   // (The tail sits outside the clipped part, so it isn't cut off.)
@@ -544,16 +558,6 @@ function ChatBubble({ m, group, quoted, first, now, starred, selecting, selected
                       {body}
                     </View>
                     {tail && <Tail mine colour={middle(theme.bubbleMine)} />}
-                  </View>
-                ) : (
-                  <View
-                    style={[
-                      radius,
-                      { backgroundColor: theme.bubbleIn, boxShadow: theme.dark || slowPhone ? undefined : '0 2px 8px -3px rgba(30,64,140,0.18)' },
-                    ]}
-                  >
-                    {body}
-                    {tail}
                   </View>
                 )}
               </Pressy>
@@ -721,6 +725,7 @@ function nameColourOrAcc(m: Message, theme: { dark: boolean; accInk: string }) {
 function Poll({ m, mine, onVote, onView }: { m: Message; mine: boolean; onVote: (i: number) => void; onView: () => void }) {
   const t = useT();
   const { theme } = useLook();
+  const fit = useFit(220);
   const poll = m.poll!;
   const votes = Object.values(m.votes ?? {});
   const mineVotes = m.votes?.[core.myId] ?? [];
@@ -728,7 +733,7 @@ function Poll({ m, mine, onVote, onView }: { m: Message; mine: boolean; onVote: 
   const voters = votes.filter((v) => v.length > 0).length;
   const most = Math.max(1, ...totals);
   return (
-    <View style={{ gap: 8, minWidth: 220 }}>
+    <View style={{ gap: 8, minWidth: fit }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Icon name="poll" size={16} color={theme.accInk} />
         <View style={{ flex: 1 }}>
@@ -803,7 +808,7 @@ export function DayLabel({ text }: { text: string }) {
   return (
     <View style={{ alignSelf: 'center', marginVertical: 8, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, backgroundColor: theme.glass }}>
       {/* Grey words, like WhatsApp's (and the floating date pill). */}
-      <Txt size={12} weight="600" color={theme.sectionText} align="center">
+      <Txt size={13} color={theme.sectionText} align="center">
         {text}
       </Txt>
     </View>

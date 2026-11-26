@@ -18,6 +18,7 @@ import { useLook } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../ui/icons';
 import { Avatar, Button, Divider, Field, Glass, Pressy, Screen, TopBar, Txt } from '../ui/kit';
 import { Sheet, toast } from '../ui/overlays';
+import { slid } from '../ui/ScreenSlide';
 
 const PAKCHAT_ONLY = 'pakchat';
 
@@ -39,7 +40,7 @@ export function typedPhone(text: string) {
 /** Only "+92" there: nothing typed yet. */
 const blank = (phone: string) => phone.trim() === COUNTRY.trim() || !phone.trim();
 
-export default function SaveContact() {
+function SaveContact() {
   const t = useT();
   const { theme } = useLook();
   const { id, phone: givenPhone, email: givenEmail, name: givenName } = useLocalSearchParams<{ id?: string; phone?: string; email?: string; name?: string }>();
@@ -237,3 +238,5 @@ export default function SaveContact() {
     </Screen>
   );
 }
+
+export default slid(SaveContact);

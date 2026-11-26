@@ -13,8 +13,9 @@ import { useLook } from '../../theme/ThemeProvider';
 import type { IconName } from '../../ui/icons';
 import { Avatar, Divider, Field, Glass, IconButton, Pressy, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { SettingsResults } from '../../ui/SettingsSearch';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function Settings() {
+function Settings() {
   const t = useT();
   const { theme } = useLook();
   const { me, myId } = useAuth();
@@ -66,10 +67,10 @@ export default function Settings() {
             <Glass style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, marginTop: 8, borderRadius: 24 }}>
               <Avatar id={myId} name={me?.name ?? ''} size={64} />
               <View style={{ flex: 1, gap: 2 }}>
-                <Txt size={19} weight="800" lines={1} testID="my-name">
+                <Txt size={21} weight="500" lines={1} testID="my-name">
                   {me?.name}
                 </Txt>
-                <Txt size={13.5} color={theme.muted} lines={1}>
+                <Txt size={14} color={theme.muted} lines={1}>
                   {me?.about || t.aboutHint}
                 </Txt>
               </View>
@@ -94,3 +95,5 @@ export default function Settings() {
     </Screen>
   );
 }
+
+export default slid(Settings);

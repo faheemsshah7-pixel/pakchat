@@ -12,8 +12,9 @@ import { fill, useT } from '../i18n';
 import { useLook } from '../theme/ThemeProvider';
 import { Icon } from '../ui/icons';
 import { Avatar, Divider, Glass, Screen, TopBar, Txt } from '../ui/kit';
+import { slid } from '../ui/ScreenSlide';
 
-export default function PollVotes() {
+function PollVotes() {
   const { chat: chatId, author, id } = useLocalSearchParams<{ chat: string; author: string; id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -86,3 +87,5 @@ export default function PollVotes() {
     </Screen>
   );
 }
+
+export default slid(PollVotes);

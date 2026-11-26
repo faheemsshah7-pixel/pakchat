@@ -19,8 +19,9 @@ import { useLook } from '../../theme/ThemeProvider';
 import { Icon } from '../../ui/icons';
 import { Button, Chip, Divider, Field, Glass, Screen, Section, SettingRow, Toggle, TopBar, Txt } from '../../ui/kit';
 import { Dialog, Sheet, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
-export default function LockSettings() {
+function LockSettings() {
   const t = useT();
   const { theme } = useLook();
   const settings = useSettings();
@@ -219,3 +220,5 @@ export default function LockSettings() {
     </Screen>
   );
 }
+
+export default slid(LockSettings);

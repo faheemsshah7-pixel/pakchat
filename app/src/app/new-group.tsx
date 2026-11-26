@@ -23,8 +23,9 @@ import { fadeIn, fadeOut, popIn, popOut } from '../ui/motion';
 import { MenuItem, Sheet, toast } from '../ui/overlays';
 import { CameraBadge } from '../ui/PhotoSheet';
 import { pickPhoto, uploadPhoto } from '../core/photos';
+import { slid } from '../ui/ScreenSlide';
 
-export default function NewGroup() {
+function NewGroup() {
   const { add } = useLocalSearchParams<{ add?: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -292,3 +293,5 @@ export default function NewGroup() {
     </Screen>
   );
 }
+
+export default slid(NewGroup);

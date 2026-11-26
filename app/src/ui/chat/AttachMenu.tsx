@@ -7,6 +7,7 @@
 //
 // The chat screen moves the bar up and down with `up` (see chat/[id].tsx); this only draws
 // the panel under it.
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,8 +35,18 @@ const TILES: { key: AttachKind; icon: IconName; tint: string; testID: string }[]
   { key: 'event', icon: 'calendar', tint: '#FF2E74', testID: 'attach-event' },
 ];
 
-/** `up`: how far the panel has risen, from 0 (hidden) to its full height (with the phone's bottom bar). */
-export function AttachMenu({ up, onPick }: { up: SharedValue<number>; onPick: (k: AttachKind) => void }) {
+/**
+ * `up`: how far the panel has risen, from 0 (hidden) to its full height (with the phone's bottom bar).
+ * `early`: made ahead, before it's opened: its second row comes a moment after the first, so making
+ * it is two small frames instead of one long one (the 38i recording, Nov). Opened at once, it's whole.
+ */
+export function AttachMenu({ up, onPick, early = false }: { up: SharedValue<number>; onPick: (k: AttachKind) => void; early?: boolean }) {
+  const [rows, setRows] = useState(early ? 1 : 2);
+  useEffect(() => {
+    if (rows === 2) return;
+    const id = setTimeout(() => setRows(2), 140);
+    return () => clearTimeout(id);
+  }, [rows]);
   const t = useT();
   const { theme } = useLook();
   const insets = useSafeAreaInsets();
@@ -75,7 +86,7 @@ export function AttachMenu({ up, onPick }: { up: SharedValue<number>; onPick: (k
       {/* The grab handle. */}
       <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginTop: 10, marginBottom: 16, backgroundColor: theme.dark ? 'rgba(255,255,255,0.28)' : 'rgba(11,27,54,0.2)' }} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 14, paddingHorizontal: 12 }}>
-        {TILES.map((x) => (
+        {TILES.slice(0, rows * 4).map((x) => (
           <View key={x.key} style={{ width: '25%', alignItems: 'center' }}>
             <Pressy
               onPress={() => {

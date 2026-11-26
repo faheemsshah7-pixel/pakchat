@@ -31,11 +31,12 @@ import { Dialog, MenuItem, Sheet, toast } from '../../ui/overlays';
 import { ReportSheet } from '../../ui/ReportSheet';
 import { CameraBadge, PhotoSheet } from '../../ui/PhotoSheet';
 import { openPhoto } from '../../ui/zoom';
+import { slid } from '../../ui/ScreenSlide';
 
 /** How many members show before "View all". */
 const SOME = 6;
 
-export default function Community() {
+function Community() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -334,9 +335,9 @@ export default function Community() {
                       </Txt>
                     </View>
                     {g.requested ? (
-                      <Button title={t.requestedWord} look="soft" busy={busy === `join-${g.id}`} onPress={() => void unrequest(g)} testID={`community-requested-${g.title}`} />
+                      <Button small title={t.requestedWord} look="soft" busy={busy === `join-${g.id}`} onPress={() => void unrequest(g)} testID={`community-requested-${g.title}`} />
                     ) : (
-                      <Button title={g.approval ? t.requestWord : t.joinWord} look="soft" busy={busy === `join-${g.id}`} onPress={() => void join(g)} testID={`community-join-${g.title}`} />
+                      <Button small title={g.approval ? t.requestWord : t.joinWord} look="soft" busy={busy === `join-${g.id}`} onPress={() => void join(g)} testID={`community-join-${g.title}`} />
                     )}
                   </View>
                 </View>
@@ -454,7 +455,7 @@ export default function Community() {
                   <IconButton icon="tick" label={t.approveWord} look="soft" size={38} onPress={() => void answer(s, true)} testID={`suggestion-yes-${s.title}`} />
                 </>
               ) : (
-                <Button title={t.cancel} look="soft" busy={busy === `s-${s.id}`} onPress={() => void answer(s, false)} testID={`suggestion-cancel-${s.title}`} />
+                <Button small title={t.cancel} look="soft" busy={busy === `s-${s.id}`} onPress={() => void answer(s, false)} testID={`suggestion-cancel-${s.title}`} />
               )}
             </View>
           ))}
@@ -576,3 +577,5 @@ function Action({ icon, label, onPress, testID }: { icon: IconName; label: strin
     </View>
   );
 }
+
+export default slid(Community);

@@ -6,20 +6,22 @@
 //
 // Like WhatsApp, swipe sideways anywhere on a tab to go to the next one: the
 // tabs sit side by side in a pager (react-native-tab-view) and move with your
-// finger. Tapping a tab slides across to it too (the owner, 31 Oct: "it should
-// slide, like WhatsApp"). All four are made ready just after the chat list first
+// finger. Tapping a tab changes the page at once, as WhatsApp's does, and only the
+// pill glides across (the owner, 26 Nov, after a recording of both). All four are made ready just after the chat list first
 // shows, so none has to load when you get to it, and starting up draws the chat
 // list first.
 import { core } from '../../core/core';
 import { TopTabs, type MaterialTopTabBarProps } from 'expo-router/js-top-tabs';
 import { useEffect, useState } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
+import Reanimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { markListShown, useChatList, useMissedCalls, useStatuses } from '../../core/hooks';
 import { startTimer, stopTimer } from '../../core/speed';
 import { useT } from '../../i18n';
 import { useLook } from '../../theme/ThemeProvider';
+import { useUnderChat } from '../../ui/ScreenSlide';
 import { Icon, type IconName } from '../../ui/icons';
 import { Pressy, Txt } from '../../ui/kit';
 
@@ -48,9 +50,19 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
     requestAnimationFrame(() => stopTimer('tab', 'tab'));
   }, [state.index]);
 
-  // The pill follows the pager itself, so it moves with a swipe and with a tap's slide.
+  // The pill follows the pager while a swipe moves it. A tap changes the page at once, like
+  // WhatsApp's (the owner, 26 Nov), and the pill glides across to the new tab on its own.
   const last = TABS.length - 1;
-  const pill = { transform: [{ translateX: position.interpolate({ inputRange: [0, last], outputRange: [0, (rtl ? -1 : 1) * last * tabW], extrapolate: 'clamp' }) }] };
+  const [glide] = useState(() => new Animated.Value(state.index));
+  const [gliding, setGliding] = useState(false);
+  const goTo = (i: number) => {
+    glide.stopAnimation();
+    glide.setValue(state.index);
+    setGliding(true);
+    Animated.timing(glide, { toValue: i, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => setGliding(false));
+  };
+  const across = { inputRange: [0, last], outputRange: [0, (rtl ? -1 : 1) * last * tabW], extrapolate: 'clamp' as const };
+  const pill = { transform: [{ translateX: gliding ? glide.interpolate(across) : position.interpolate(across) }] };
 
   return (
     <View
@@ -89,6 +101,7 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
                 // Tapping the tab you're on takes its list back to the top, like WhatsApp.
                 if (on) return core.emit(`tabAgain:${tab.name}`);
                 startTimer('tab');
+                goTo(i);
                 navigateToTab(state.routes[i].key);
               }}
             >
@@ -119,7 +132,8 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
                     </View>
                   )}
                 </View>
-                <Txt size={11} weight="600" color={color} align="center">
+                {/* Like WhatsApp's: the tab you're on in bold, the others regular. */}
+                <Txt size={14} weight={on ? '700' : '400'} color={color} align="center" lines={1}>
                   {t[tab.label]}
                 </Txt>
               </View>
@@ -133,20 +147,24 @@ function TabBar({ state, navigateToTab, position }: MaterialTopTabBarProps) {
 
 export default function TabsLayout() {
   const { theme } = useLook();
+  // Under an open chat: moved a little aside as it comes in, and not drawn once it's covered.
+  const under = useUnderChat();
   // The other tabs draw once the chat list has shown (useAfterStart); at the latest, after three seconds.
   useEffect(() => {
     const id = setTimeout(markListShown, 3_000);
     return () => clearTimeout(id);
   }, []);
   return (
-    <TopTabs
-      tabBarPosition="bottom"
-      tabBar={(props) => <TabBar {...props} />}
-      screenOptions={{ swipeEnabled: true, animationEnabled: true, lazy: true, lazyPreloadDistance: 3, sceneStyle: { backgroundColor: theme.bg } }}
-    >
-      {TABS.map((tab) => (
-        <TopTabs.Screen key={tab.name} name={tab.name} />
-      ))}
-    </TopTabs>
+    <Reanimated.View style={[{ flex: 1, backgroundColor: theme.bg }, under]}>
+      <TopTabs
+        tabBarPosition="bottom"
+        tabBar={(props) => <TabBar {...props} />}
+        screenOptions={{ swipeEnabled: true, animationEnabled: false, lazy: true, lazyPreloadDistance: 3, sceneStyle: { backgroundColor: theme.bg } }}
+      >
+        {TABS.map((tab) => (
+          <TopTabs.Screen key={tab.name} name={tab.name} />
+        ))}
+      </TopTabs>
+    </Reanimated.View>
   );
 }

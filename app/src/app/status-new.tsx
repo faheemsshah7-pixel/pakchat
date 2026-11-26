@@ -30,8 +30,9 @@ import { fontStyle, IconButton, Pressy, Txt } from '../ui/kit';
 import { tick } from '../ui/motion';
 import { toast } from '../ui/overlays';
 import { useLook } from '../theme/ThemeProvider';
+import { slid } from '../ui/ScreenSlide';
 
-export default function NewStatus() {
+function NewStatus() {
   const { kind } = useLocalSearchParams<{ kind?: string }>();
   return kind === 'media' ? <MediaStatus /> : <WordsStatus />;
 }
@@ -308,3 +309,5 @@ function WordsStatus() {
     </KeyboardAvoidingView>
   );
 }
+
+export default slid(NewStatus);

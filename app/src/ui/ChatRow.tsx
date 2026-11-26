@@ -69,21 +69,21 @@ function ChatRowView({
             ? fill(t.nameTyping, { name: core.name(typing[0]) || '…' })
             : t.typing,
         color: theme.acc,
-        weight: '600' as const,
+        weight: '400' as const,
       };
     }
     const unread = chat.unread > 0;
     // A chat locked in the list never shows its words: only whether something new came.
     // (Inside the unlocked Locked chats folder they show, like WhatsApp.)
-    if (prefs.lock === 'list') return { text: unread ? t.newMessage : t.lockedChat, color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
+    if (prefs.lock === 'list') return { text: unread ? t.newMessage : t.lockedChat, color: unread ? theme.text : theme.muted, weight: '400' as const };
     // "Draft:" in green, then the words, like WhatsApp.
     if (prefs.draft) return { label: t.draft, text: plainText(prefs.draft).replace(/\s+/g, ' '), color: theme.muted, weight: '400' as const };
     // A call: its icon before the words, red when I missed it, like WhatsApp's.
     if (last && isCallNote(last)) {
       const c = callInfo(last, t);
-      return { text: c.title, color: c.missed ? theme.danger : unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const), icon: c.icon };
+      return { text: c.title, color: c.missed ? theme.danger : unread ? theme.text : theme.muted, weight: '400' as const, icon: c.icon };
     }
-    return { text: preview(last, t, chat.kind === 'group'), color: unread ? theme.text : theme.muted, weight: unread ? ('600' as const) : ('400' as const) };
+    return { text: preview(last, t, chat.kind === 'group'), color: unread ? theme.text : theme.muted, weight: '400' as const };
   }, [typing, prefs.draft, prefs.lock, last, chat, t, theme]);
 
   const unread = chat.unread || (prefs.markedUnread ? 1 : 0);
@@ -91,16 +91,17 @@ function ChatRowView({
   const when = Math.max(chat.lastActivity, last?.sentAt ?? 0);
 
   return (
-    <View style={{ borderRadius: 18, overflow: 'hidden' }}>
-          <Pressy onPress={() => onPress(row)} onLongPress={() => onLongPress(row)} scale={0.985} label={title} testID={`chat-${title}`}>
+    // Edge to edge (out over the list's small side gap) and square, so a tap greys the whole row like
+    // WhatsApp's; the row's own padding keeps what's in it where it was.
+    <View style={{ marginHorizontal: -4 }}>
+          <Pressy onPress={() => onPress(row)} onLongPress={() => onLongPress(row)} ripple="row" label={title} testID={`chat-${title}`}>
             <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 13,
-                paddingHorizontal: 14,
+                paddingHorizontal: 18,
                 height: 72,
-                borderRadius: 18,
                 backgroundColor: theme.dark ? theme.bg : '#FFFFFF',
               }}
             >
@@ -108,7 +109,7 @@ function ChatRowView({
               {/* The list reuses a row that scrolled away for another chat: keyed by the chat, so a
                   reused row's tint and tick just show (or go), and only a tap fades or pops them. */}
               <LayoutAnimationConfig key={chat.id} skipEntering skipExiting>
-                {selected && <Animated.View entering={fadeIn} exiting={fadeOut} style={[StyleSheet.absoluteFill, { borderRadius: 18, backgroundColor: theme.selected }]} />}
+                {selected && <Animated.View entering={fadeIn} exiting={fadeOut} style={[StyleSheet.absoluteFill, { backgroundColor: theme.selected }]} />}
               </LayoutAnimationConfig>
               <View>
                 <Pressy onPress={onAvatar && (() => onAvatar(row))} disabled={!onAvatar || selecting} label={t.profilePhoto} scale={0.92} testID={`avatar-${title}`}>
@@ -141,12 +142,12 @@ function ChatRowView({
               <View style={{ flex: 1, gap: 3 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <View style={{ flex: 1 }}>
-                    <Txt size={16} weight="600" lines={1}>
+                    <Txt size={16.5} weight="500" lines={1}>
                       {title}
                     </Txt>
                   </View>
                   {!!when && (
-                    <Txt size={12} weight="600" color={unread ? theme.acc : theme.muted}>
+                    <Txt size={12.5} color={unread ? theme.acc : theme.muted}>
                       {listTime(when, t)}
                     </Txt>
                   )}
@@ -155,7 +156,7 @@ function ChatRowView({
                   {mine && <Ticks status={last.status} size={16} />}
                   {'icon' in line && line.icon && <Icon name={line.icon} size={16} color={line.color === theme.danger ? theme.danger : theme.muted} />}
                   <View style={{ flex: 1 }}>
-                    <Txt size={14} lines={1} color={line.color} weight={line.weight}>
+                    <Txt size={14.5} lines={1} color={line.color} weight={line.weight}>
                       {'label' in line && (
                         <Text style={{ color: theme.online, fontWeight: '600' }} testID="draft-label">
                           {`${line.label} `}
@@ -169,7 +170,7 @@ function ChatRowView({
                   {!!prefs.pinnedAt && <Icon name="pin" size={15} color={theme.muted} />}
                   {row.mentioned && unread > 0 && prefs.lock !== 'list' && (
                     <View style={{ width: 21, height: 21, borderRadius: 11, backgroundColor: theme.acc, alignItems: 'center', justifyContent: 'center' }} testID="row-mention">
-                      <Txt size={12} weight="800" color="#FFFFFF" align="center">
+                      <Txt size={12} weight="700" color="#FFFFFF" align="center">
                         @
                       </Txt>
                     </View>

@@ -20,11 +20,12 @@ import { thud } from '../../ui/motion';
 import { QrCode } from '../../ui/QrCode';
 import { QrScan } from '../../ui/QrScan';
 import { toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 /** What the QR code holds: the 60 digits, marked as PakChat's. */
 const QR_PREFIX = 'pakchat-verify:';
 
-export default function Verify() {
+function Verify() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useT();
   const { theme } = useLook();
@@ -115,3 +116,5 @@ export default function Verify() {
     </Screen>
   );
 }
+
+export default slid(Verify);

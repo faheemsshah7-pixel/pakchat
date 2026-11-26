@@ -135,7 +135,9 @@ export function Txt({
       numberOfLines={lines}
       // Android's biggest font sizes still fit the pills and rows (the settings' own sizes go on top).
       maxFontSizeMultiplier={1.3}
-      style={[font, { color: color ?? theme.text, textAlign }, style, nastaliq && urduRoom(size, style)]}
+      // flexShrink: in a row, words wrap (or end in "…" with `lines`) at the edge of the screen
+      // instead of running off it, whatever sits beside them (small phones, big font sizes).
+      style={[font, { color: color ?? theme.text, textAlign, flexShrink: 1 }, style, nastaliq && urduRoom(size, style)]}
     >
       {nastaliq && text !== null && latinCount(text) > 0 ? withLatinRuns(text, weight) : children}
     </Text>
@@ -239,6 +241,9 @@ const RADIUS_KEYS = [
 ] as const;
 /** A finger that rests this long shows the ripple; a scroll that starts sooner shows none (Android's tap wait). */
 const RIPPLE_WAIT = 90;
+/** WhatsApp's chat list highlight: a plain grey wash over the row. */
+const ROW_RIPPLE_DARK = { color: 'rgba(255,255,255,0.12)', foreground: true };
+const ROW_RIPPLE_LIGHT = { color: 'rgba(0,0,0,0.10)', foreground: true };
 
 /** The round corners of a style, if it has any. */
 function cornersOf(style: unknown): ViewStyle | null {
@@ -264,6 +269,7 @@ export function Pressy({
   ripple = 'auto',
   round,
   rippleIn,
+  flat,
 }: {
   children: ReactNode;
   onPress?: () => void;
@@ -275,12 +281,23 @@ export function Pressy({
   label?: string;
   testID?: string;
   hitSlop?: number;
-  /** auto: grey (light on dark mode). light: for buttons on black or on a photo. none: no ripple (a message bubble). */
-  ripple?: 'auto' | 'light' | 'none';
+  /**
+   * auto: grey (light on dark mode). light: for buttons on black or on a photo. none: no ripple (a
+   * message bubble). row: Android's own grey highlight over the whole row, square, at once as the
+   * finger lands, like WhatsApp's chat list (owner, 26 Nov: ours looked milky); the phone draws it
+   * itself, so it costs the app nothing while the chat that was tapped is being made.
+   */
+  ripple?: 'auto' | 'light' | 'none' | 'row';
   /** A round ripple (an icon button), like WhatsApp's. */
   round?: boolean;
   /** The ripple shows only in this pill, centred, `top` from the top (a bottom tab, like WhatsApp's). */
   rippleIn?: { width: number; height: number; top: number; radius: number };
+  /**
+   * The button is its own look (`style` with its colour and corners goes on the button itself,
+   * with nothing inside it of its own): one piece on the phone instead of two. For a message
+   * bubble, of which a chat makes a dozen as it opens (a lighter bubble).
+   */
+  flat?: boolean;
 }) {
   const theme = useTheme();
   // How big the button is in its row (flex: 1, a width, alignSelf) has to be set on
@@ -308,7 +325,7 @@ export function Pressy({
   const at = useRef<{ x: number; y: number } | null>(null);
   const wait = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shown = useRef(false);
-  const on = ripple !== 'none' && !disabled;
+  const on = ripple !== 'none' && ripple !== 'row' && !disabled;
   const start = (stay: boolean) => {
     const p = at.current;
     if (!p || !box.current) return;
@@ -339,7 +356,8 @@ export function Pressy({
 
   return (
     <Pressable
-      style={outer}
+      ref={flat ? box : undefined}
+      style={flat ? [outer, inner, disabled ? { opacity: 0.5 } : null] : outer}
       accessibilityRole="button"
       accessibilityLabel={label}
       testID={testID}
@@ -377,11 +395,22 @@ export function Pressy({
       }
       onLongPress={onLongPress}
       hitSlop={hitSlop}
+      android_ripple={ripple === 'row' && !disabled ? (theme.dark ? ROW_RIPPLE_DARK : ROW_RIPPLE_LIGHT) : undefined}
     >
-      <View ref={box} collapsable={false} style={[inner, disabled ? { opacity: 0.5 } : null]}>
-        {children}
-        {wave && <Ripple key={wave.key} wave={wave} held={held} color={color} shape={shape} onDone={() => setWave((w) => (w?.key === wave.key ? null : w))} />}
-      </View>
+      {/* No collapsable={false}: a button with nothing to show of its own (a message bubble's, a
+          chat row's) then needs no view on the phone of its own, and a screen of them opens quicker.
+          measure() still works on it (it reads the layout, not the view). */}
+      {flat ? (
+        <>
+          {children}
+          {wave && <Ripple key={wave.key} wave={wave} held={held} color={color} shape={shape} onDone={() => setWave((w) => (w?.key === wave.key ? null : w))} />}
+        </>
+      ) : (
+        <View ref={box} style={[inner, disabled ? { opacity: 0.5 } : null]}>
+          {children}
+          {wave && <Ripple key={wave.key} wave={wave} held={held} color={color} shape={shape} onDone={() => setWave((w) => (w?.key === wave.key ? null : w))} />}
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -472,6 +501,15 @@ export function IconButton({
   );
 }
 
+/**
+ * A message's least width (a poll, a document, a shared contact): `n` points, or a little less on
+ * a small phone, so it never pokes out of its bubble (a 320-wide phone has about 216 inside one).
+ */
+export function useFit(n: number) {
+  const { width } = useWindowDimensions();
+  return Math.min(n, Math.round(width * 0.62));
+}
+
 /** A wide button: the accent gradient (main), or soft. */
 export function Button({
   title,
@@ -482,10 +520,13 @@ export function Button({
   busy,
   testID,
   style,
+  small,
 }: {
   title: string;
   onPress?: () => void;
   look?: 'main' | 'soft' | 'danger' | 'glass';
+  /** A small one, sized to its words (in a row of Settings). */
+  small?: boolean;
   icon?: IconName;
   disabled?: boolean;
   busy?: boolean;
@@ -499,9 +540,10 @@ export function Button({
   if (off) look = 'glass';
   const fg = off ? theme.muted : look === 'main' ? theme.onAcc : look === 'danger' ? theme.danger : look === 'glass' ? theme.text : theme.accInk;
   const inner = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 54, paddingHorizontal: 20 }}>
-      {icon && <Icon name={icon} size={20} color={fg} />}
-      <Txt size={16} weight="700" color={fg} align="center">
+    // At least this tall, and taller if the words need two lines (a big font setting).
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: small ? 38 : 54, paddingHorizontal: small ? 16 : 20, paddingVertical: 6 }}>
+      {icon && <Icon name={icon} size={small ? 18 : 20} color={fg} />}
+      <Txt size={small ? 14.5 : 16} weight={small ? '500' : '700'} color={fg} align="center" style={{ flexShrink: 1 }}>
         {title}
       </Txt>
     </View>
@@ -613,7 +655,10 @@ export function Avatar({
 
 // ---- Filters and switches ----
 
-/** A filter chip. Picking it fills it with the accent gradient, smoothly. */
+/**
+ * A filter chip. Picking it tints it softly with the accent and its words take the accent's colour,
+ * like WhatsApp's (owner, 26 Nov: the flatter look; it was a solid gradient).
+ */
 export function Chip({
   label,
   on,
@@ -639,7 +684,7 @@ export function Chip({
     v.set(withTiming(on ? 1 : 0, { duration: 150, easing: Easing.out(Easing.cubic) }));
   }, [on, v]);
   const fill = useAnimatedStyle(() => ({ opacity: v.value }));
-  const words = useAnimatedStyle(() => ({ color: interpolateColor(v.value, [0, 1], [theme.text, theme.onAcc]) }));
+  const words = useAnimatedStyle(() => ({ color: interpolateColor(v.value, [0, 1], [theme.text, theme.accInk]) }));
   return (
     <Pressy onPress={onPress} onLongPress={onLongPress} label={label} testID={testID} scale={0.94}>
       <View
@@ -656,10 +701,8 @@ export function Chip({
           overflow: 'hidden',
         }}
       >
-        <Animated.View style={[StyleSheet.absoluteFill, fill]}>
-          <LinearGradient colors={theme.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
-        </Animated.View>
-        {icon ? <Icon name={icon} size={18} color={on ? theme.onAcc : theme.text} /> : <Animated.Text style={[fontStyle(label, lang, 13, '600'), words]}>{label}</Animated.Text>}
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: theme.accSoft }, fill]} />
+        {icon ? <Icon name={icon} size={18} color={on ? theme.accInk : theme.text} /> : <Animated.Text style={[fontStyle(label, lang, 14, '500'), words]}>{label}</Animated.Text>}
         {!!count && (
           <View
             style={{
@@ -667,7 +710,7 @@ export function Chip({
               height: 18,
               borderRadius: 9,
               paddingHorizontal: 5,
-              backgroundColor: on ? 'rgba(255,255,255,0.3)' : theme.acc,
+              backgroundColor: theme.acc,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -701,20 +744,15 @@ export function Toggle({ on, onChange, label, testID }: { on: boolean; onChange:
   );
 }
 
-/** The big round-cornered + button. */
+/** The big round-cornered + button: one flat colour, no glow under it (owner, 26 Nov: the flatter look). */
 export function Fab({ icon, onPress, label, testID, bottom = 22 }: { icon: IconName; onPress: () => void; label: string; testID?: string; bottom?: number }) {
   const theme = useTheme();
   return (
     <Animated.View style={{ position: 'absolute', end: 22, bottom }}>
       <Pressy onPress={onPress} label={label} testID={testID} scale={0.9}>
-        <LinearGradient
-          colors={theme.grad}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{ width: 58, height: 58, borderRadius: 19, alignItems: 'center', justifyContent: 'center', boxShadow: `0 16px 32px -10px ${theme.acc}` }}
-        >
+        <View style={{ width: 58, height: 58, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.acc }}>
           <Icon name={icon} size={25} color="#FFFFFF" stroke={2} />
-        </LinearGradient>
+        </View>
       </Pressy>
     </Animated.View>
   );
@@ -744,11 +782,11 @@ export function TopBar({
       {onBack && <IconButton icon="back" label={words.back} onPress={onBack} flip testID="back" size={42} iconSize={23} />}
       {children ?? (
         <View style={{ flex: 1, paddingHorizontal: onBack ? 4 : 12 }}>
-          <Txt size={18} weight="700" lines={1}>
+          <Txt size={20} weight="500" lines={1}>
             {title}
           </Txt>
           {!!subtitle && (
-            <Txt size={12} color={t.muted} lines={1}>
+            <Txt size={13} color={t.muted} lines={1}>
               {subtitle}
             </Txt>
           )}
@@ -759,7 +797,10 @@ export function TopBar({
   );
 }
 
-/** One row in Settings or an info screen: an icon on a tile, a title, maybe a line under it. */
+/**
+ * One row in Settings or an info screen: a plain grey icon, a title, maybe a line under it. Like
+ * WhatsApp's: no coloured tile, no arrow on the end (owner, 26 Nov: the flatter look).
+ */
 export function SettingRow({
   icon,
   title,
@@ -768,36 +809,42 @@ export function SettingRow({
   right,
   danger,
   testID,
-  chevron = true,
+  chevron = false,
+  action,
 }: {
   icon?: IconName;
   title: string;
   sub?: string;
   onPress?: () => void;
   right?: ReactNode;
+  /** A button under the words (Link, Unlink), so it never squeezes them on a narrow phone or a big font. */
+  action?: ReactNode;
   danger?: boolean;
   testID?: string;
   chevron?: boolean;
 }) {
   const t = useTheme();
   const body = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 12, minHeight: 60 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, paddingHorizontal: 18, paddingVertical: 14, minHeight: 60 }}>
       {icon && (
-        <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: danger ? t.dangerSoft : t.accSoft, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name={icon} size={20} color={danger ? t.danger : t.accInk} />
+        <View style={{ width: 26, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={icon} size={23} color={danger ? t.danger : t.muted} />
         </View>
       )}
-      <View style={{ flex: 1 }}>
-        <Txt size={15.5} weight="600" color={danger ? t.danger : t.text}>
+      {/* The words keep at least half the row, so whatever is on the end (a switch) can't
+          crush them into a thin column on a narrow phone or with a big font (owner, 26 Nov). */}
+      <View style={{ flex: 1, minWidth: '50%' }}>
+        <Txt size={16} color={danger ? t.danger : t.text}>
           {title}
         </Txt>
         {!!sub && (
-          <Txt size={13} color={t.muted}>
+          <Txt size={14} color={t.muted}>
             {sub}
           </Txt>
         )}
+        {!!action && <View style={{ flexDirection: 'row', marginTop: 10 }}>{action}</View>}
       </View>
-      {right ?? (onPress && chevron ? <Icon name="chevron" size={18} color={t.faint} flip /> : null)}
+      {right ? <View style={{ flexShrink: 1 }}>{right}</View> : onPress && chevron ? <Icon name="chevron" size={18} color={t.faint} flip /> : null}
     </View>
   );
   return onPress ? (
@@ -813,15 +860,15 @@ export function SettingRow({
 export function Section({ title }: { title: string }) {
   const t = useTheme();
   return (
-    <Txt size={13} weight="700" color={t.sectionText} style={{ marginTop: 18, marginBottom: 8, marginHorizontal: 22 }}>
+    <Txt size={14} weight="500" color={t.sectionText} style={{ marginTop: 18, marginBottom: 8, marginHorizontal: 22 }}>
       {title}
     </Txt>
   );
 }
 
+/** Was a thin line between rows. WhatsApp has none, so it draws nothing now (owner, 26 Nov: the flatter look). */
 export function Divider() {
-  const t = useTheme();
-  return <View style={{ height: 1, backgroundColor: t.divider, marginStart: 66 }} />;
+  return null;
 }
 
 /** A text box in our style. */

@@ -15,11 +15,12 @@ import { Icon } from '../../ui/icons';
 import { Button, Divider, Glass, Screen, SettingRow, TopBar, Txt } from '../../ui/kit';
 import { BigIcon, PinBoxes, ShowPin } from '../../ui/Pin';
 import { Dialog, toast } from '../../ui/overlays';
+import { slid } from '../../ui/ScreenSlide';
 
 // Change PIN and Turn off first ask for the PIN it has now ("current"); the server checks it too.
 type Step = { kind: 'current'; then: 'change' | 'off' } | { kind: 'make'; current?: string } | { kind: 'again'; first: string; current?: string };
 
-export default function TwoStep() {
+function TwoStep() {
   const t = useT();
   const { theme } = useLook();
   const { me } = useAuth();
@@ -202,3 +203,5 @@ export default function TwoStep() {
     </Screen>
   );
 }
+
+export default slid(TwoStep);
